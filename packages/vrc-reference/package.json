@@ -29,7 +29,7 @@
   "dependencies": {
     "@bifold/vrc-contexts": "workspace:*",
     "@bifold/vrc-shared": "workspace:*",
-    "@credo-ts/askar": "0.5.17",
+    "@credo-ts/askar": "0.5.19",
     "@credo-ts/core": "0.5.17",
     "@credo-ts/node": "0.5.17",
     "@hyperledger/aries-askar-nodejs": "^0.2.3",

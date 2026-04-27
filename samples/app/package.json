@@ -22,7 +22,7 @@
     "@bifold/core": "2.7.4",
     "@bifold/oca": "2.7.4",
     "@credo-ts/anoncreds": "0.5.17",
-    "@credo-ts/askar": "0.5.17",
+    "@credo-ts/askar": "0.5.19",
     "@credo-ts/core": "0.5.17",
     "@credo-ts/indy-sdk-to-askar-migration": "0.5.17",
     "@credo-ts/indy-vdr": "0.5.17",
