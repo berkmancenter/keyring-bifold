@@ -2191,7 +2191,7 @@ __metadata:
     "@credo-ts/core": "npm:0.5.17"
     "@credo-ts/indy-sdk-to-askar-migration": "npm:0.5.17"
     "@credo-ts/indy-vdr": "npm:0.5.17"
-    "@credo-ts/openid4vc": "npm:0.5.17"
+    "@credo-ts/openid4vc": "npm:0.5.19"
     "@credo-ts/push-notifications": "npm:0.7.0"
     "@credo-ts/question-answer": "npm:0.5.17"
     "@credo-ts/react-hooks": "npm:0.6.1"
@@ -2301,7 +2301,7 @@ __metadata:
     "@credo-ts/core": 0.5.17
     "@credo-ts/indy-sdk-to-askar-migration": 0.5.17
     "@credo-ts/indy-vdr": 0.5.17
-    "@credo-ts/openid4vc": 0.5.17
+    "@credo-ts/openid4vc": 0.5.19
     "@credo-ts/push-notifications": 0.7.0
     "@credo-ts/question-answer": 0.5.17
     "@credo-ts/react-hooks": 0.6.1
@@ -3288,6 +3288,55 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@credo-ts/core@npm:0.5.19":
+  version: 0.5.19
+  resolution: "@credo-ts/core@npm:0.5.19"
+  dependencies:
+    "@animo-id/mdoc": "npm:0.2.38"
+    "@animo-id/pex": "npm:4.1.1-alpha.0"
+    "@astronautlabs/jsonpath": "npm:^1.1.2"
+    "@digitalcredentials/jsonld": "npm:^6.0.0"
+    "@digitalcredentials/jsonld-signatures": "npm:^9.4.0"
+    "@digitalcredentials/vc": "npm:^6.0.1"
+    "@multiformats/base-x": "npm:^4.0.1"
+    "@noble/curves": "npm:^1.6.0"
+    "@noble/hashes": "npm:^1.5.0"
+    "@peculiar/asn1-ecc": "npm:^2.3.8"
+    "@peculiar/asn1-schema": "npm:^2.3.8"
+    "@peculiar/asn1-x509": "npm:^2.3.8"
+    "@peculiar/x509": "npm:^1.11.0"
+    "@sd-jwt/core": "npm:^0.7.0"
+    "@sd-jwt/decode": "npm:^0.7.0"
+    "@sd-jwt/jwt-status-list": "npm:^0.7.0"
+    "@sd-jwt/sd-jwt-vc": "npm:^0.7.0"
+    "@sd-jwt/types": "npm:^0.7.0"
+    "@sd-jwt/utils": "npm:^0.7.0"
+    "@sphereon/pex-models": "npm:^2.3.1"
+    "@sphereon/ssi-types": "npm:0.30.2-next.135"
+    "@stablelib/ed25519": "npm:^1.0.2"
+    "@types/ws": "npm:^8.5.4"
+    big-integer: "npm:^1.6.51"
+    borc: "npm:^3.0.0"
+    buffer: "npm:^6.0.3"
+    class-transformer: "npm:0.5.1"
+    class-validator: "npm:0.14.1"
+    did-resolver: "npm:^4.1.0"
+    lru_map: "npm:^0.4.1"
+    luxon: "npm:^3.5.0"
+    make-error: "npm:^1.3.6"
+    object-inspect: "npm:^1.10.3"
+    query-string: "npm:^7.0.1"
+    reflect-metadata: "npm:^0.1.13"
+    rxjs: "npm:^7.8.0"
+    tsyringe: "npm:^4.8.0"
+    uuid: "npm:^9.0.0"
+    varint: "npm:^6.0.0"
+    web-did-resolver: "npm:^2.0.21"
+    webcrypto-core: "npm:^1.8.0"
+  checksum: 10c0/50b545655786a967c9048326a9f881ee38c1823d31328ad9321db95c31a13aef5eccfac6c4cff812e264fc8160a36f9d24036ba2230f497cb7b942118cf6d318
+  languageName: node
+  linkType: hard
+
 "@credo-ts/core@patch:@credo-ts/core@npm%3A0.5.17#~/.yarn/patches/@credo-ts-core-npm-0.5.17-c528a69dd8.patch":
   version: 0.5.17
   resolution: "@credo-ts/core@patch:@credo-ts/core@npm%3A0.5.17#~/.yarn/patches/@credo-ts-core-npm-0.5.17-c528a69dd8.patch::version=0.5.17&hash=90e4d4"
@@ -3379,11 +3428,11 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@credo-ts/openid4vc@npm:0.5.17":
-  version: 0.5.17
-  resolution: "@credo-ts/openid4vc@npm:0.5.17"
+"@credo-ts/openid4vc@npm:0.5.19":
+  version: 0.5.19
+  resolution: "@credo-ts/openid4vc@npm:0.5.19"
   dependencies:
-    "@credo-ts/core": "npm:0.5.17"
+    "@credo-ts/core": "npm:0.5.19"
     "@sphereon/did-auth-siop": "npm:0.16.1-fix.173"
     "@sphereon/oid4vc-common": "npm:0.16.1-fix.173"
     "@sphereon/oid4vci-client": "npm:0.16.1-fix.173"
@@ -3392,7 +3441,7 @@ __metadata:
     "@sphereon/ssi-types": "npm:0.30.2-next.135"
     class-transformer: "npm:^0.5.1"
     rxjs: "npm:^7.8.0"
-  checksum: 10c0/e7324856e81f21cfe9840cbb983091e8ce84bc4eb1f57e95c11663ce64c45db6b136265c2576499b56000276b288709f30698fec97d11dd8926a92259eabc309
+  checksum: 10c0/68a85b3f8a38db3ac3ad87469d19aec34b5887107b9aaf749c983cf0d639e4893dcd3b4c5cf8249cb260771a01a34ed31ba4a56b55f4c910bc14ab050b2c9145
   languageName: node
   linkType: hard
 
@@ -9122,7 +9171,7 @@ __metadata:
     "@credo-ts/core": "npm:0.5.17"
     "@credo-ts/indy-sdk-to-askar-migration": "npm:0.5.17"
     "@credo-ts/indy-vdr": "npm:0.5.17"
-    "@credo-ts/openid4vc": "npm:0.5.17"
+    "@credo-ts/openid4vc": "npm:0.5.19"
     "@credo-ts/push-notifications": "npm:0.7.0"
     "@credo-ts/question-answer": "npm:0.5.17"
     "@credo-ts/react-hooks": "npm:0.6.1"
