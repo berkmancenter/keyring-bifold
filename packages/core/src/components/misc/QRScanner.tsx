@@ -141,7 +141,22 @@ const QRScanner: React.FC<Props> = ({
     if (!showTabs && defaultToConnect && showingQRCodeView) {
       navigation.setOptions({ title: t('Scan.ScanQRCode'), headerRight: () => undefined })
     } else if (!showTabs) {
-      navigation.setOptions({ title: t('Scan.ScanQRCode'), headerRight: () => undefined })
+      // Camera scan without tabs: still offer the paste-URL fallback (also used by E2E
+      // to feed an invitation link without scanning a QR code with the camera).
+      navigation.setOptions({
+        title: t('Scan.ScanQRCode'),
+        headerRight: () => (
+          <IconButton
+            buttonLocation={ButtonLocation.Right}
+            accessibilityLabel={t('Scan.PasteUrl')}
+            testID={testIdWithKey('PasteUrlButton')}
+            onPress={() => {
+              navigation.navigate(Screens.PasteUrl)
+            }}
+            icon="link"
+          />
+        ),
+      })
     } else if (showTabs) {
       let headerRight: React.ReactElement | undefined = undefined
       let title = t('Scan.MyQRCode')
@@ -309,6 +324,18 @@ const QRScanner: React.FC<Props> = ({
               {!invitation && <LoadingIndicator />}
               {invitation && <QRRenderer value={invitation} size={qrSize} />}
             </View>
+            {/* E2E-only: expose invitation URL to the accessibility tree so Appium can
+                read it and paste it into the peer wallet (avoids camera-based QR scan). */}
+            {__DEV__ && invitation && (
+              <ThemedText
+                testID={testIdWithKey('InvitationUrl')}
+                accessibilityLabel={invitation}
+                style={{ height: 1, opacity: 0.01 }}
+                numberOfLines={1}
+              >
+                {invitation}
+              </ThemedText>
+            )}
             <ThemedText style={styles.instruction}>
               {t('Scan.YourQRCodeInstruction')}
             </ThemedText>
