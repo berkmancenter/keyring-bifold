@@ -1288,6 +1288,7 @@ class AttestationModule : AttestationSpec {
       for (i in 0 until certificateChainPem.size()) {
         try {
           val pem = certificateChainPem.getString(i)
+            ?: throw IllegalArgumentException("null certificate entry")
           val cert = certFactory.generateCertificate(
             ByteArrayInputStream(pem.toByteArray(Charsets.UTF_8))
           ) as X509Certificate
