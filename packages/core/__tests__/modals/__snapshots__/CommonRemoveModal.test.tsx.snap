@@ -30,6 +30,7 @@ exports[`CommonRemoveModal Component Credential offer decline renders correctly 
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -114,7 +115,7 @@ exports[`CommonRemoveModal Component Credential offer decline renders correctly 
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -510,6 +511,7 @@ exports[`CommonRemoveModal Component Custom notification decline renders correct
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -594,7 +596,7 @@ exports[`CommonRemoveModal Component Custom notification decline renders correct
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -993,6 +995,7 @@ exports[`CommonRemoveModal Component Proof request decline renders correctly 1`]
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -1077,7 +1080,7 @@ exports[`CommonRemoveModal Component Proof request decline renders correctly 1`]
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -1486,6 +1489,7 @@ exports[`CommonRemoveModal Component Remove contact renders correctly 1`] = `
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -1570,7 +1574,7 @@ exports[`CommonRemoveModal Component Remove contact renders correctly 1`] = `
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -2242,6 +2246,7 @@ exports[`CommonRemoveModal Component Remove contact renders correctly2 1`] = `
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -2326,7 +2331,7 @@ exports[`CommonRemoveModal Component Remove contact renders correctly2 1`] = `
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -2708,6 +2713,7 @@ exports[`CommonRemoveModal Component Remove credential renders correctly 1`] = `
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -2792,7 +2798,7 @@ exports[`CommonRemoveModal Component Remove credential renders correctly 1`] = `
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }
@@ -3545,6 +3551,7 @@ exports[`CommonRemoveModal Component Rerenders correctly when not visible 1`] = 
           "backgroundColor": "#000000",
           "borderTopLeftRadius": 10,
           "borderTopRightRadius": 10,
+          "flex": 1,
         }
       }
     >
@@ -3629,7 +3636,7 @@ exports[`CommonRemoveModal Component Rerenders correctly when not visible 1`] = 
       <RCTScrollView
         style={
           Object {
-            "height": "100%",
+            "flex": 1,
             "paddingHorizontal": 20,
             "paddingTop": 10,
           }

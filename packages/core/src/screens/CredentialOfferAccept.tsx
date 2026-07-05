@@ -52,7 +52,9 @@ const CredentialOfferAccept: React.FC<CredentialOfferAcceptProps> = ({
   const styles = StyleSheet.create({
     container: {
       ...ListItems.credentialOfferBackground,
-      height: '100%',
+      // flex (not height:'100%') so the controls below the ScrollView keep their space
+      // (safe-area-context 5.x sizes SafeAreaView differently than 4.x did)
+      flex: 1,
       padding: 20,
     },
     image: {
@@ -160,7 +162,7 @@ const CredentialOfferAccept: React.FC<CredentialOfferAcceptProps> = ({
 
   return (
     <SafeAreaModal visible={visible} transparent={true} animationType={'none'}>
-      <SafeAreaView style={{ ...ListItems.credentialOfferBackground }}>
+      <SafeAreaView style={{ ...ListItems.credentialOfferBackground, flex: 1 }}>
         <ScrollView style={styles.container}>
           <View style={styles.messageContainer}>
             {credentialDeliveryStatus === DeliveryStatus.Pending && (
