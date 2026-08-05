@@ -2428,7 +2428,7 @@ __metadata:
     "@credo-ts/didcomm": "npm:0.6.3"
     "@credo-ts/node": "npm:0.6.3"
     "@langchain/anthropic": "npm:^1.3.25"
-    "@langchain/core": "npm:^1.1.36"
+    "@langchain/core": "npm:^1.2.4"
     "@openwallet-foundation/askar-nodejs": "npm:0.6.0"
     "@types/jest": "npm:^29.5.0"
     "@types/node": "npm:^20.0.0"
@@ -4634,9 +4634,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/core@npm:^1.1.36":
-  version: 1.2.1
-  resolution: "@langchain/core@npm:1.2.1"
+"@langchain/core@npm:^1.2.4":
+  version: 1.2.4
+  resolution: "@langchain/core@npm:1.2.4"
   dependencies:
     "@cfworker/json-schema": "npm:^4.0.2"
     "@standard-schema/spec": "npm:^1.1.0"
@@ -4645,7 +4645,7 @@ __metadata:
     mustache: "npm:^4.2.0"
     p-queue: "npm:^6.6.2"
     zod: "npm:^3.25.76 || ^4"
-  checksum: 10c0/29922144ac8e0afcc1bdaf7d2ca96937bd42b9f93fad1b69b8138ce91681dc6b3145bafffd793efecb36a003983302219b9ed16835d12963e6f051c81ae3f5c6
+  checksum: 10c0/71cef6572d969495beff90f5b2a7bd3a997cb46a3399f34346c95071774cfed63bb2befed5381e9009f7b04b7bdfaa2883a0b2cbb77eddf04d7966ea855782e3
   languageName: node
   linkType: hard
 
