@@ -2394,7 +2394,7 @@ __metadata:
     "@types/node": "npm:^20.0.0"
     clear: "npm:^0.1.0"
     dotenv: "npm:^17.2.3"
-    figlet: "npm:^1.5.2"
+    figlet: "npm:^1.11.4"
     inquirer: "npm:^8.2.7"
     jest: "npm:^29.5.0"
     ts-jest: "npm:^29.1.0"
@@ -10892,14 +10892,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"figlet@npm:^1.5.2":
-  version: 1.11.0
-  resolution: "figlet@npm:1.11.0"
+"figlet@npm:^1.11.4":
+  version: 1.11.4
+  resolution: "figlet@npm:1.11.4"
   dependencies:
     commander: "npm:^14.0.0"
   bin:
     figlet: bin/index.js
-  checksum: 10c0/8db7abf55e3e00073b42e71cdc8f75823d613dbf2924513df7de4b05a668f44ef69ebb6c98494dcbae01b9af0b84bc500611fe14d054c67dd070033ff0db58b8
+  checksum: 10c0/2eed162bff098ab827ec4f1006f1362cc874a74293383b0fe7c44a029cc46c8dffbdc0cd3ecb6a20ecf5f4d85b585cd7faed2dc98dfad9aac432682b83b193f5
   languageName: node
   linkType: hard
 
