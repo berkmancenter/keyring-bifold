@@ -35,7 +35,7 @@
     "@credo-ts/node": "0.6.3",
     "@openwallet-foundation/askar-nodejs": "0.6.0",
     "clear": "^0.1.0",
-    "figlet": "^1.5.2",
+    "figlet": "^1.11.4",
     "inquirer": "^8.2.7"
   },
   "devDependencies": {
