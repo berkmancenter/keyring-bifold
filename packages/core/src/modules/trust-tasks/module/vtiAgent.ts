@@ -1,0 +1,363 @@
+/**
+ * vtiAgent — the wallet's side of a VTI agent, held outside React.
+ *
+ * A VTA or a VTC is reached over one authenticated socket (see
+ * `VtiMediatorTransport`), and that socket has to outlive any one screen: the
+ * agent card, a community and an application all talk to the same session. So
+ * the session lives here, and screens subscribe.
+ *
+ * Deliberately small. Membership is the only ceremony wired up so far —
+ * manifest, apply, verdict — which is what `community_vetting_subtask.md` calls
+ * P4/P5. The vetting ceremony (ticket, session, card, statement) comes later
+ * and will hang off the same session.
+ *
+ * @module trust-tasks/module/vtiAgent
+ */
+
+import type { Agent } from '@credo-ts/core'
+import { utils } from '@credo-ts/core'
+import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
+
+import {
+  createVtiClientDid,
+  resolveVtiMediator,
+  resolveDidDocumentRetrying,
+  vtiClientIdentityFromDid,
+  VtiMediatorSession,
+  type VtiClientIdentity,
+  type VtiMediatorEndpoints,
+} from './VtiMediatorTransport'
+
+const MANIFEST = 'https://trusttasks.org/spec/vtc/join-requests/manifest/0.2'
+const SUBMIT = 'https://trusttasks.org/spec/vtc/join-requests/submit/0.2'
+const TASK_ERROR = 'https://trusttasks.org/spec/trust-task-error/'
+
+/**
+ * A community refusing, in its own terms. `code` is the framework's — e.g.
+ * `taskFailed` for a business-rule conflict such as an application that is
+ * already open — and belongs behind a Details control rather than in the
+ * sentence a person reads.
+ */
+export class VtiRefusal extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    /** The framework's `details`, when the refusal carries any (a consent challenge does). */
+    readonly details?: unknown
+  ) {
+    super(message)
+    this.name = 'VtiRefusal'
+  }
+}
+
+/** A refusal arrives as a document in its own right, not as a verdict. */
+const refusalOf = (plaintext: DidCommV2PlaintextMessage): VtiRefusal | undefined => {
+  if (!String(plaintext.type ?? '').startsWith(TASK_ERROR)) return undefined
+  const payload = (plaintext.body as { payload?: { code?: string; message?: string; details?: unknown } } | undefined)
+    ?.payload
+  return new VtiRefusal(payload?.code ?? 'unknown', payload?.message ?? 'The community refused the request.', payload?.details)
+}
+
+/** How far the connection has got, in the words the Connecting screen uses. */
+export type VtiAgentStatus = 'disconnected' | 'resolving' | 'authenticating' | 'connected' | 'failed'
+
+export interface VtiAgentState {
+  status: VtiAgentStatus
+  /** The DID this wallet presents to a community — its member identity. */
+  did?: string
+  /** The mediator's host, which is what a person can recognise. */
+  host?: string
+  error?: string
+}
+
+/** A community's published join criteria, as a manifest states them. */
+export interface VtiCriterion {
+  id?: string
+  description?: string
+  /** Per-criterion digest — what an applicant is held to (manifest/0.2). */
+  requirementsDigest?: string
+  /** The vetting requirement object, when the criterion needs peer vetting. */
+  vetting?: {
+    version?: string
+    statementType?: string
+    minStatements?: number
+    acceptedMethods?: string[]
+    requiredClaims?: string[]
+    maxStatementAge?: string
+    eligibleVetters?: Record<string, unknown>
+    independence?: Record<string, unknown>
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export interface VtiManifest {
+  communityDid?: string
+  criteria: VtiCriterion[]
+  requirementsDigest?: string
+}
+
+/** What a community decided, and what it is still waiting for. */
+export interface VtiVerdict {
+  requestId?: string
+  effect: string
+  needs: string[]
+  /** Everything the verdict carried — an `allow` brings the membership card here. */
+  with?: Record<string, unknown>
+}
+
+type Listener = () => void
+
+const hostOf = (endpoint?: string) => {
+  if (!endpoint) return undefined
+  const match = /^[a-z]+:\/\/([^/]+)/i.exec(endpoint)
+  return match?.[1]
+}
+
+class VtiAgentController {
+  private state: VtiAgentState = { status: 'disconnected' }
+  private listeners = new Set<Listener>()
+  private session?: VtiMediatorSession
+  private mediator?: VtiMediatorEndpoints
+  private agent?: Agent
+  /**
+   * One request in flight. Its answer is the message whose type is the
+   * request's `#response` (or a trust-task-error); measured on the
+   * Eucalyptus train, a community also sends unsolicited messages right after
+   * a verdict — the credentials, over `credential-exchange/issue` — so
+   * "first message after send" is no longer a reply. Those go to the inbox.
+   */
+  private pending?: { type: string; resolve: (plaintext: DidCommV2PlaintextMessage) => void; sentAt: number }
+  private inbox: ((plaintext: DidCommV2PlaintextMessage) => void)[] = []
+
+  /** Receive what the community sends that is not an answer (credentials, statements). */
+  onInbound(handler: (plaintext: DidCommV2PlaintextMessage) => void): () => void {
+    this.inbox.push(handler)
+    return () => {
+      this.inbox = this.inbox.filter((h) => h !== handler)
+    }
+  }
+
+  private deliver(plaintext: DidCommV2PlaintextMessage): void {
+    const pending = this.pending
+    const type = String(plaintext.type ?? '')
+    const answers = pending && Date.now() >= pending.sentAt && (type === `${pending.type}#response` || type.startsWith(TASK_ERROR))
+    if (pending && answers) {
+      this.pending = undefined
+      pending.resolve(plaintext)
+      return
+    }
+    for (const handler of this.inbox) {
+      try {
+        handler(plaintext)
+      } catch {
+        // one handler's failure must not lose the message for the others
+      }
+    }
+  }
+
+  getState = (): VtiAgentState => this.state
+
+  subscribe = (listener: Listener): (() => void) => {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  private set(next: Partial<VtiAgentState>) {
+    this.state = { ...this.state, ...next }
+    this.listeners.forEach((listener) => listener())
+  }
+
+  /**
+   * Resolve the mediator a VTI agent advertises, mint this wallet's member DID,
+   * log in and hold the socket. Idempotent while the socket is open.
+   */
+  async connect(agent: Agent, mediatorDid: string, options: { identity?: VtiClientIdentity } = {}): Promise<void> {
+    this.agent = agent
+    if (this.session?.isOpen && (!options.identity || options.identity.did === this.state.did)) return
+    if (this.session) await this.disconnect()
+    try {
+      this.set({ status: 'resolving', error: undefined })
+      const mediator = await resolveVtiMediator(agent, mediatorDid)
+      this.mediator = mediator
+      this.set({ status: 'authenticating', host: hostOf(mediator.wsEndpoint) })
+
+      // Under §2.4 B the identity a community sees is a persona the VTA minted
+      // and whose key the phone borrowed; the phone-minted did:peer is what the
+      // proof-of-transport used, and stays as the fallback when no persona is given.
+      const identity = options.identity ?? (await vtiClientIdentityFromDid(agent, await createVtiClientDid(agent, mediator)))
+      const did = identity.did
+      const session = new VtiMediatorSession(agent, identity, mediator, {
+        onError: (error) => this.set({ error: error.message }),
+        onMessage: (plaintext) => this.deliver(plaintext),
+      })
+      await session.start()
+      // Discard any stale backlog the mediator flushes on live delivery before
+      // a request could have a reply (see VtaClient.connect).
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      this.session = session
+      this.set({ status: 'connected', did })
+    } catch (error) {
+      this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    await this.session?.stop()
+    this.session = undefined
+    this.pending = undefined
+    this.set({ status: 'disconnected', did: undefined, error: undefined })
+  }
+
+  get isConnected(): boolean {
+    return this.session?.isOpen === true
+  }
+
+  /** The DID this session presents. */
+  get did(): string | undefined {
+    return this.state.did
+  }
+
+  /**
+   * Send one Trust Task document to a peer without waiting — the reply, if
+   * any, reaches the inbox threaded on the document's id. For the peer path
+   * (applicant ↔ vetter) where a human answers minutes later. The document is
+   * signed by the caller when the spec requires it (every vetting task does).
+   */
+  async send(
+    toDid: string,
+    type: string,
+    document: Record<string, unknown>,
+    options: { thid?: string; expiresInSec?: number } = {}
+  ): Promise<void> {
+    const session = this.session
+    const did = this.state.did
+    if (!session || !did) throw new Error('vtiAgent: not connected')
+    const now = Math.floor(Date.now() / 1000)
+    await session.sendTo(toDid, {
+      id: `urn:uuid:${utils.uuid()}`,
+      typ: 'application/didcomm-plain+json',
+      type,
+      from: did,
+      to: [toDid],
+      ...(options.thid ? { thid: options.thid } : {}),
+      created_time: now,
+      expires_time: now + (options.expiresInSec ?? 900),
+      body: document,
+    })
+  }
+
+  /**
+   * Send one Trust Task document and wait for the community's answer. The VTC
+   * reads the DIDComm body as a whole document where a VTA takes a bare
+   * payload — measured in `tsp-reference/ref-20`.
+   */
+  async ask(
+    communityDid: string,
+    type: string,
+    payload: Record<string, unknown>,
+    timeoutMs = 30000
+  ): Promise<DidCommV2PlaintextMessage | undefined> {
+    const session = this.session
+    const did = this.state.did
+    if (!session || !did) throw new Error('vtiAgent: not connected')
+
+    const threadId = `urn:uuid:${utils.uuid()}`
+    const sentAt = Date.now()
+    const answer = new Promise<DidCommV2PlaintextMessage>((resolve) => {
+      this.pending = { type, resolve, sentAt }
+    })
+    const now = Math.floor(Date.now() / 1000)
+    await session.sendTo(communityDid, {
+      id: `urn:uuid:${utils.uuid()}`,
+      typ: 'application/didcomm-plain+json',
+      type,
+      from: did,
+      to: [communityDid],
+      thid: threadId,
+      created_time: now,
+      expires_time: now + 300,
+      body: {
+        id: `urn:uuid:${utils.uuid()}`,
+        type,
+        threadId,
+        payload,
+        issuer: did,
+        recipient: communityDid,
+        issuedAt: new Date().toISOString(),
+      },
+    })
+    const result = await Promise.race([
+      answer,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), timeoutMs)),
+    ])
+    this.pending = undefined
+    return result
+  }
+
+  /** What a community asks of an applicant, in its own words. */
+  async fetchManifest(communityDid: string): Promise<VtiManifest> {
+    // Packing to the community resolves its document; warm that resolution
+    // patiently so a tunnel's rate limit does not surface as a failed send.
+    if (this.agent) await resolveDidDocumentRetrying(this.agent, communityDid)
+    const answer = await this.ask(communityDid, MANIFEST, {})
+    if (!answer) throw new Error('vtiAgent: the community did not answer')
+    const refusal = refusalOf(answer)
+    if (refusal) throw refusal
+    const payload = (answer.body as { payload?: VtiManifest } | undefined)?.payload
+    return {
+      communityDid: payload?.communityDid,
+      criteria: payload?.criteria ?? [],
+      requirementsDigest: payload?.requirementsDigest,
+    }
+  }
+
+  /**
+   * Apply. With no credentials in hand the honest presentation is an empty one:
+   * the community answers `requestMore` naming what it still needs, rather than
+   * the wallet guessing at requirements it cannot yet meet.
+   */
+  async apply(
+    communityDid: string,
+    manifest: VtiManifest,
+    options: { credentials?: unknown[] } = {}
+  ): Promise<VtiVerdict> {
+    // The presentation is unsigned: the community takes the holder from the
+    // sealed envelope's sender (VTI-9), so what matters is that the
+    // credentials inside name that same DID as their subject.
+    const answer = await this.ask(communityDid, SUBMIT, {
+      vp: {
+        '@context': ['https://www.w3.org/ns/credentials/v2'],
+        type: ['VerifiablePresentation'],
+        holder: this.state.did,
+        verifiableCredential: options.credentials ?? [],
+      },
+      registryConsent: false,
+      extensions: manifest.requirementsDigest ? { requirementsDigest: manifest.requirementsDigest } : {},
+    })
+    if (!answer) throw new Error('vtiAgent: the community did not answer')
+    const refusal = refusalOf(answer)
+    if (refusal) throw refusal
+    const payload = (
+      answer.body as
+        | {
+            payload?: {
+              requestId?: string
+              verdict?: { effect?: string; with?: { needs?: string[] } & Record<string, unknown> }
+            }
+          }
+        | undefined
+    )?.payload
+    return {
+      requestId: payload?.requestId,
+      effect: payload?.verdict?.effect ?? 'unstated',
+      needs: payload?.verdict?.with?.needs ?? [],
+      with: payload?.verdict?.with,
+    }
+  }
+}
+
+export const vtiAgent = new VtiAgentController()

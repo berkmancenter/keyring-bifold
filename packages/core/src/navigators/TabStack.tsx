@@ -19,12 +19,15 @@ import { BifoldError } from '../types/error'
 import { TabStackParams, TabStacks } from '../types/navigators'
 import { connectFromScanOrDeepLink } from '../utils/helpers'
 import { testIdWithKey } from '../utils/testable'
+import { GenericRecordsCommunityStore } from '../modules/trust-tasks/module/VtiCommunityStore'
+import { isVtiInvitationLink, parseVtiInvitationLink } from '../modules/trust-tasks/module/vtiInvitation'
 
 import { useUnreadMessages } from '../hooks/useUnreadMessages'
 import InAppMessageNotifier from '../components/InAppMessageNotifier'
 import ContactStack from './ContactStack'
 import CredentialStack from './CredentialStack'
 import MessageStack from './MessageStack'
+import MyAgentStack from './MyAgentStack'
 import SettingStack from './SettingStack'
 import { BaseTourID } from '../types/tour'
 import QRCodeExchangeSlider from '../modules/vrc/components/QRCodeExchangeSlider'
@@ -55,6 +58,23 @@ const TabStack: React.FC = () => {
   const handleDeepLink = useCallback(
     async (deepLink: string) => {
       logger.info(`Handling deeplink: ${deepLink}`)
+
+      // A community invitation (keyring://vti/invitation?c=…) is kept as a
+      // pending invitation and shown on My Agent; it is not a DIDComm OOB link.
+      if (isVtiInvitationLink(deepLink)) {
+        try {
+          if (agent) {
+            const invitation = parseVtiInvitationLink(deepLink)
+            await new GenericRecordsCommunityStore(agent).saveInvitation(invitation)
+            navigation.navigate(TabStacks.MyAgentStack as never)
+          }
+        } catch (err: unknown) {
+          logger.error(`invitation link rejected: ${(err as Error)?.message ?? err}`)
+        } finally {
+          dispatch({ type: DispatchAction.ACTIVE_DEEP_LINK, payload: [undefined] })
+        }
+        return
+      }
 
       // If it's just the general link with no params, set link inactive and do nothing
       if (deepLink.search(/oob=|c_i=|d_m=|url=/) < 0) {
@@ -271,6 +291,35 @@ const TabStack: React.FC = () => {
             tabBarShowLabel: false,
             tabBarAccessibilityLabel: t('TabStack.Wallet'),
             tabBarTestID: testIdWithKey(t('TabStack.Wallet')),
+          }}
+        />
+        <Tab.Screen
+          name={TabStacks.MyAgentStack}
+          component={MyAgentStack}
+          options={{
+            tabBarIconStyle: styles.tabBarIcon,
+            tabBarIcon: ({ color, focused }) => (
+              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                <Icon name={focused ? 'shield-account' : 'shield-account-outline'} size={24} color={color} />
+                {showLabels && (
+                  <Text
+                    style={{
+                      ...TabTheme.tabBarTextStyle,
+                      color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                      fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                    }}
+                  >
+                    {t('TabStack.MyAgent')}
+                  </Text>
+                )}
+              </View>
+            ),
+            tabBarShowLabel: false,
+            tabBarAccessibilityLabel: t('TabStack.MyAgent'),
+            // A literal key, not the translated label: the tabs that pass a
+            // translated string into testIdWithKey have locale-dependent
+            // testIDs, which the e2e harness already works around.
+            tabBarTestID: testIdWithKey('MyAgent'),
           }}
         />
         <Tab.Screen
