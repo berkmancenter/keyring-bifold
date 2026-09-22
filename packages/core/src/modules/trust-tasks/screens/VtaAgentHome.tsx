@@ -31,6 +31,7 @@ import { GenericRecordsCommunityStore, type VtiMembership } from '../module/VtiC
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 import { vtaAgent, type VtaActivity } from '../module/vtaAgent'
 import { ownVetterGrantState, type VetterGrantState } from '../module/vtiGrantState'
+import { useVtiPersonaDeliveries } from '../module/vtiPersonaInbox'
 
 import { didName, shareIdentity } from './identityShare'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
@@ -123,6 +124,9 @@ const VtaAgentHome: React.FC = () => {
   useEffect(() => {
     void load()
   }, [load])
+  // A grant, a card or an invitation that arrives while this screen is open
+  // shows without a visit to Vetting: the persona inbox says when it stored one.
+  useVtiPersonaDeliveries(() => void load())
 
   const onRefresh = useCallback(async () => {
     if (!agent) return

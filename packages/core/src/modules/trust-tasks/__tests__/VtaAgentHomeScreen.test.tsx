@@ -5,12 +5,14 @@
  */
 import { act, render } from '@testing-library/react-native'
 import React from 'react'
+import { DeviceEventEmitter } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import { vtaAgent } from '../module/vtaAgent'
+import { VTI_PERSONA_DELIVERIES_EVENT } from '../module/vtiPersonaInbox'
 import VtaAgentHome from '../screens/VtaAgentHome'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -110,5 +112,18 @@ describe('Your agent — after linking', () => {
     const tree = await renderHome([persona, grant])
     expect(tree.getByTestId(testIdWithKey('AgentVetterLapsed'))).toHaveTextContent('VtaLink.VetterRevoked')
     expect(tree.queryByTestId(testIdWithKey('AgentVetOthers'))).toBeNull()
+  })
+
+  it('a grant that arrives while the screen is open shows without leaving it', async () => {
+    const records = [persona]
+    const tree = await renderHome(records)
+    expect(tree.queryByTestId(testIdWithKey('AgentVetterCard'))).toBeNull()
+    records.push(grant)
+    mockGrantState.mockResolvedValue({ state: 'active', statusChecked: true })
+    await act(async () => {
+      DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, { communityDid, kinds: ['vetter-grant'] })
+      jest.advanceTimersByTime(10)
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentVetterCard'))).toBeTruthy()
   })
 })
