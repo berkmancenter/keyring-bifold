@@ -848,7 +848,8 @@
     "Vetting": "Verificação",
     "VtaLink": "Vincular seu agente",
     "VtaAgent": "Seu agente",
-    "Invited": "Entrar por convite"
+    "Invited": "Entrar por convite",
+    "Join": "Entrar em uma comunidade"
   },
   "Loading": {
     "TakingTooLong": "Isso esta demorando mais que o normal. Você pode voltar para a home ou continuar esperando.",
@@ -1145,6 +1146,30 @@
     "ArrivedBody": "{{community}} convidou você. Entre para receber seu cartão de membro.",
     "JoinedTitle": "Você é membro de {{community}}",
     "JoinedBody": "Seu cartão de membro está na sua carteira."
+  },
+  "Join": {
+    "WhichTitle": "Qual comunidade?",
+    "WhichBody": "Escaneie ou cole o link da comunidade — ou o ticket de um verificador, que também a nomeia.",
+    "Suggested": "Sugerida para este app",
+    "JoinThis": "Entrar em {{community}}",
+    "Different": "Outra comunidade",
+    "ScanLink": "Escanear ou colar um link",
+    "AsksTitle": "Antes que {{community}} admita você",
+    "AsksStatements_one": "Uma declaração de um de seus verificadores, que confere pessoalmente que é você",
+    "AsksStatements_other": "Declarações de {{count}} de seus verificadores, que conferem pessoalmente que é você",
+    "AsksLegalName": "Seu nome legal, conferido pelo verificador",
+    "AsksInvitationOnly": "Ela só admite por convite. Peça ao admin que convide você.",
+    "AsksNext": "Você vai encontrar um verificador, que lhe dará um link ou código de ticket.",
+    "Start": "Começar",
+    "AsTitle": "Com qual perfil você entra?",
+    "AsBody": "{{community}} recebe uma nova identidade feita só para ela. Seu perfil preenche o nome dela, uma vez — nada mais fica ligado.",
+    "AsNoProfile": "Você ainda não tem um perfil — vai digitar seu nome diante do verificador.",
+    "ProfileLabel": "Perfil {{label}}",
+    "ConfirmTitle": "Criar sua identidade",
+    "ConfirmBody": "Seu agente cria uma nova identidade para {{community}}.",
+    "NeedsAgent": "Vincule seu agente primeiro — ele guarda sua identidade para cada comunidade.",
+    "FromProfile": "Do seu perfil {{profile}} — corrija aqui se seu nome legal for diferente.",
+    "FromYourProfile": "Do seu perfil — corrija aqui se seu nome legal for diferente."
   },
   "MyAgent": {
     "Title": "Seu agente",

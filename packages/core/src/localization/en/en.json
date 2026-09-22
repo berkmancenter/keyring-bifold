@@ -999,7 +999,8 @@
     "Vetting": "Vetting",
     "VtaLink": "Link your agent",
     "VtaAgent": "Your agent",
-    "Invited": "Join by invitation"
+    "Invited": "Join by invitation",
+    "Join": "Join a community"
   },
   "Loading": {
     "TakingTooLong": "This is taking longer than usual. You can return to home or continue waiting.",
@@ -1300,6 +1301,30 @@
     "ArrivedBody": "{{community}} invited you. Join to get your membership card.",
     "JoinedTitle": "You're a member of {{community}}",
     "JoinedBody": "Your membership card is in your wallet."
+  },
+  "Join": {
+    "WhichTitle": "Which community?",
+    "WhichBody": "Scan or paste the community's link — or a vetter's ticket, which names the community too.",
+    "Suggested": "Suggested for this app",
+    "JoinThis": "Join {{community}}",
+    "Different": "A different community",
+    "ScanLink": "Scan or paste a link",
+    "AsksTitle": "Before {{community}} admits you",
+    "AsksStatements_one": "A statement from one of its vetters, who checks it is you in person",
+    "AsksStatements_other": "Statements from {{count}} of its vetters, who check it is you in person",
+    "AsksLegalName": "Your legal name, checked by the vetter",
+    "AsksInvitationOnly": "It admits people by invitation only. Ask its admin to invite you.",
+    "AsksNext": "You'll meet a vetter, who gives you a ticket link or code.",
+    "Start": "Start",
+    "AsTitle": "Who are you joining as?",
+    "AsBody": "{{community}} gets a new identity made just for it. Your profile fills in its name, once — nothing else is linked.",
+    "AsNoProfile": "You don't have a profile yet — you'll type your name when you meet the vetter.",
+    "ProfileLabel": "{{label}} profile",
+    "ConfirmTitle": "Make your identity",
+    "ConfirmBody": "Your agent makes a new identity for {{community}}.",
+    "NeedsAgent": "Link your agent first — it keeps your identity for each community.",
+    "FromProfile": "From your {{profile}} profile — correct it here if your legal name differs.",
+    "FromYourProfile": "From your profile — correct it here if your legal name differs."
   },
   "MyAgent": {
     "Title": "Your agent",

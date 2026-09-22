@@ -936,7 +936,8 @@
     "Vetting": "Vérification",
     "VtaLink": "Relier votre agent",
     "VtaAgent": "Votre agent",
-    "Invited": "Rejoindre sur invitation"
+    "Invited": "Rejoindre sur invitation",
+    "Join": "Rejoindre une communauté"
   },
   "Loading": {
     "TakingTooLong": "Cela prend plus de temps que d'habitude. Vous pouvez retourner à l'accueil ou continuer à attendre.",
@@ -1246,6 +1247,30 @@
     "ArrivedBody": "{{community}} vous a invité. Rejoignez-la pour obtenir votre carte de membre.",
     "JoinedTitle": "Vous êtes membre de {{community}}",
     "JoinedBody": "Votre carte de membre est dans votre portefeuille."
+  },
+  "Join": {
+    "WhichTitle": "Quelle communauté ?",
+    "WhichBody": "Scannez ou collez le lien de la communauté — ou le ticket d'un vérificateur, qui la nomme aussi.",
+    "Suggested": "Suggérée pour cette app",
+    "JoinThis": "Rejoindre {{community}}",
+    "Different": "Une autre communauté",
+    "ScanLink": "Scanner ou coller un lien",
+    "AsksTitle": "Avant que {{community}} vous admette",
+    "AsksStatements_one": "Une déclaration de l'un de ses vérificateurs, qui vérifie en personne que c'est vous",
+    "AsksStatements_other": "Des déclarations de {{count}} de ses vérificateurs, qui vérifient en personne que c'est vous",
+    "AsksLegalName": "Votre nom légal, vérifié par le vérificateur",
+    "AsksInvitationOnly": "Elle n'admet que sur invitation. Demandez à son admin de vous inviter.",
+    "AsksNext": "Vous rencontrerez un vérificateur, qui vous donnera un lien ou un code de ticket.",
+    "Start": "Commencer",
+    "AsTitle": "Sous quel profil rejoignez-vous ?",
+    "AsBody": "{{community}} reçoit une nouvelle identité créée pour elle seule. Votre profil en remplit le nom, une fois — rien d’autre n’est lié.",
+    "AsNoProfile": "Vous n'avez pas encore de profil — vous saisirez votre nom devant le vérificateur.",
+    "ProfileLabel": "Profil {{label}}",
+    "ConfirmTitle": "Créer votre identité",
+    "ConfirmBody": "Votre agent crée une nouvelle identité pour {{community}}.",
+    "NeedsAgent": "Liez d'abord votre agent — il garde votre identité pour chaque communauté.",
+    "FromProfile": "Depuis votre profil {{profile}} — corrigez ici si votre nom légal diffère.",
+    "FromYourProfile": "Depuis votre profil — corrigez ici si votre nom légal diffère."
   },
   "MyAgent": {
     "Title": "Votre agent",

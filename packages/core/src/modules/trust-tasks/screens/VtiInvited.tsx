@@ -33,9 +33,12 @@ import { requestBiometricConfirmationWithUI } from '../../vrc/vrc-biometric'
 import { GenericRecordsCommunityStore, type VtiInvitation } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 import { ensurePersonaFor, joinCommunity } from '../module/vtiJoin'
+import { joinSeed } from '../module/vtiJoinSeed'
 
 import { didName, identityShareText, shareIdentity } from './identityShare'
+import { JoinAs, useJoinAsOptions } from './JoinAs'
 import { openScanner } from './openScanner'
+import { useCommunityDid } from './useCommunity'
 import { useVtaDid } from './VtaStatus'
 
 type Step = 'intro' | 'share' | 'waiting' | 'joined'
@@ -50,7 +53,7 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
   const navigation = useNavigation()
   const { ColorPalette, TextTheme } = useTheme()
   const { width } = useWindowDimensions()
-  const communityDid = config?.communityDid
+  const communityDid = useCommunityDid(config?.communityDid)
   const mediatorDid = config?.mediatorDid
   const vtaDid = useVtaDid(config?.vtaDid)
 
@@ -63,6 +66,11 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
   const [copied, setCopied] = useState(false)
   const [showQr, setShowQr] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const joinAs = useJoinAsOptions()
+  const [selectedId, setSelectedId] = useState<string | undefined>(joinAs.defaultId)
+  useEffect(() => {
+    if (!selectedId && joinAs.defaultId) setSelectedId(joinAs.defaultId)
+  }, [joinAs.defaultId, selectedId])
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -121,6 +129,8 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
     setBusy(true)
     try {
       await ensurePersonaFor({ agent, identityStore: new GenericRecordsIdentityStore(agent), vtaDid, communityDid })
+      const option = joinAs.options.find((o) => o.id === selectedId)
+      if (option) joinSeed.set(communityDid, option.seed)
       await load()
       setStep('share')
     } catch (e) {
@@ -128,7 +138,7 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
     } finally {
       setBusy(false)
     }
-  }, [agent, vtaDid, communityDid, load, t])
+  }, [agent, vtaDid, communityDid, load, t, joinAs.options, selectedId])
 
   const onJoin = useCallback(async () => {
     if (!agent || !vtaDid || !mediatorDid || !invitation) return
@@ -205,6 +215,9 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
         <>
           {header(1, t('Invited.IntroTitle'))}
           <ThemedText>{t('Invited.IntroBody', { community, interpolation: { escapeValue: false } })}</ThemedText>
+          {/* Join as: which profile the new identity starts from (seed by copy). */}
+          <ThemedText variant="bold">{t('Join.AsTitle')}</ThemedText>
+          <JoinAs community={community} options={joinAs.options} selectedId={selectedId} onSelect={setSelectedId} />
           {errorLine}
         </>
       )
