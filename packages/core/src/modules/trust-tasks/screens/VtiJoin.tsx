@@ -44,18 +44,48 @@ type Step = 'which' | 'asks' | 'as'
 
 /** What a community asks for, in words, from its published criteria. */
 export interface Asks {
+  /**
+   * vetting: statements from its vetters. invitation: only an invitation
+   * admits. other: credentials the app cannot describe further (their
+   * descriptions are shown). open: nothing — a community cannot publish
+   * that yet (upstream KR-13), but the screen must not guess otherwise.
+   */
+  kind: 'vetting' | 'invitation' | 'other' | 'open'
   /** Statements from its vetters the person needs, when it vets. */
   statements?: number
   /** Claims a vetter checks ("name.legal"). */
   claims: string[]
+  /** The criteria's own descriptions, for `other`. */
+  descriptions: string[]
   /** It admits only by invitation. */
   invitationOnly: boolean
 }
 
+const INVITATION = /invit/i
+
 export function asksFrom(manifest: VtiManifest): Asks {
-  const vetting = manifest.criteria.map((c) => c.vetting).find(Boolean)
-  if (!vetting) return { claims: [], invitationOnly: manifest.criteria.length > 0 }
-  return { statements: vetting.minStatements ?? 1, claims: vetting.requiredClaims ?? [], invitationOnly: false }
+  const criteria = manifest.criteria
+  const vetting = criteria.map((c) => c.vetting).find(Boolean)
+  if (vetting) {
+    return {
+      kind: 'vetting',
+      statements: vetting.minStatements ?? 1,
+      claims: vetting.requiredClaims ?? [],
+      descriptions: [],
+      invitationOnly: false,
+    }
+  }
+  if (criteria.length === 0) return { kind: 'open', claims: [], descriptions: [], invitationOnly: false }
+  // Invitation-only only when every criterion is about an invitation; any
+  // other criterion is something the person may be able to present.
+  if (criteria.every((c) => INVITATION.test(`${c.id ?? ''} ${c.description ?? ''}`))) {
+    return { kind: 'invitation', claims: [], descriptions: [], invitationOnly: true }
+  }
+  const descriptions = criteria
+    .filter((c) => !INVITATION.test(`${c.id ?? ''} ${c.description ?? ''}`))
+    .map((c) => c.description ?? c.id ?? '')
+    .filter(Boolean)
+  return { kind: 'other', claims: [], descriptions, invitationOnly: false }
 }
 
 export interface VtiJoinProps {
@@ -205,6 +235,18 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
           <View style={styles.card} testID={testIdWithKey('JoinAsks')}>
             {asks?.invitationOnly ? (
               <ThemedText>{t('Join.AsksInvitationOnly')}</ThemedText>
+            ) : asks?.kind === 'open' ? (
+              <ThemedText>{t('Join.AsksNothing')}</ThemedText>
+            ) : asks?.kind === 'other' ? (
+              <>
+                <ThemedText>{t('Join.AsksOther')}</ThemedText>
+                {asks.descriptions.map((d) => (
+                  <ThemedText key={d}>
+                    {'• '}
+                    {d}
+                  </ThemedText>
+                ))}
+              </>
             ) : (
               <>
                 <ThemedText>
@@ -220,7 +262,7 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
               </>
             )}
           </View>
-          {asks?.invitationOnly ? null : <ThemedText style={styles.muted}>{t('Join.AsksNext')}</ThemedText>}
+          {!asks || asks.kind === 'vetting' ? <ThemedText style={styles.muted}>{t('Join.AsksNext')}</ThemedText> : null}
         </>
       )
       actions = asks?.invitationOnly ? (

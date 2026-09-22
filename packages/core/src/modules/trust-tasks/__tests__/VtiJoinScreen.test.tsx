@@ -34,10 +34,17 @@ describe('what a community asks for', () => {
   it('reads statements and claims from a vetting criterion', () => {
     expect(
       asksFrom({ criteria: [{ vetting: { minStatements: 2, requiredClaims: ['name.legal'] } }] } as never)
-    ).toEqual({ statements: 2, claims: ['name.legal'], invitationOnly: false })
+    ).toEqual({ kind: 'vetting', statements: 2, claims: ['name.legal'], descriptions: [], invitationOnly: false })
   })
-  it('a community with criteria but none that vets admits by invitation', () => {
+  it('only invitation criteria: admits by invitation', () => {
     expect(asksFrom({ criteria: [{ id: 'invited-member' }] } as never).invitationOnly).toBe(true)
+  })
+  it('another kind of criterion is described, not taken for invitation-only', () => {
+    const asks = asksFrom({ criteria: [{ id: 'invited-member' }, { id: 'staff', description: 'A staff credential' }] } as never)
+    expect(asks).toMatchObject({ kind: 'other', invitationOnly: false, descriptions: ['A staff credential'] })
+  })
+  it('no criteria: nothing to ask (upstream cannot publish this yet, KR-13)', () => {
+    expect(asksFrom({ criteria: [] } as never).kind).toBe('open')
   })
 })
 

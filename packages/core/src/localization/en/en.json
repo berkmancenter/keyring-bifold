@@ -1274,7 +1274,7 @@
     "VetterRevoked": "Your vetter role for {{community}} was withdrawn by its admin.",
     "VetterExpired": "Your vetter role for {{community}} ended on {{date}}.",
     "VetterNotYet": "Your vetter role for {{community}} starts on {{date}}.",
-    "GiveKeyHow": "Admins using the VTA browser extension: Manage this agent → Access → Grant access, and paste it there. From a terminal: pnm acl create.",
+    "GiveKeyHow": "Admins using the VTA browser extension: Manage this agent → Access → Grant access, paste it, and choose the admin role — the agent keeps this phone's identities, which needs admin today. From a terminal: pnm acl create --role admin.",
     "JourneyLinked": "Linked",
     "JourneyJoin": "Join",
     "JourneyMember": "Member",
@@ -1336,7 +1336,9 @@
     "ConfirmBody": "Your agent makes a new identity for {{community}}.",
     "NeedsAgent": "Link your agent first — it keeps your identity for each community.",
     "FromProfile": "From your {{profile}} profile — correct it here if your legal name differs.",
-    "FromYourProfile": "From your profile — correct it here if your legal name differs."
+    "FromYourProfile": "From your profile — correct it here if your legal name differs.",
+    "AsksOther": "It asks for credentials it describes as:",
+    "AsksNothing": "It doesn't ask for anything — you can apply straight away."
   },
   "MyAgent": {
     "Title": "Your agent",

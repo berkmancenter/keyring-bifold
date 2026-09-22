@@ -1220,7 +1220,7 @@
     "VetterRevoked": "Votre rôle de vérificateur pour {{community}} a été retiré par son admin.",
     "VetterExpired": "Votre rôle de vérificateur pour {{community}} a pris fin le {{date}}.",
     "VetterNotYet": "Votre rôle de vérificateur pour {{community}} commence le {{date}}.",
-    "GiveKeyHow": "Admins qui utilisent l'extension de navigateur VTA : « Manage this agent » → « Access » → « Grant access », et collez-le. Depuis un terminal : pnm acl create.",
+    "GiveKeyHow": "Admins qui utilisent l'extension de navigateur VTA : « Manage this agent » → « Access » → « Grant access », collez-le et choisissez le rôle admin — l'agent garde les identités de ce téléphone, ce qui demande admin aujourd'hui. Depuis un terminal : pnm acl create --role admin.",
     "JourneyLinked": "Lié",
     "JourneyJoin": "Rejoindre",
     "JourneyMember": "Membre",
@@ -1282,7 +1282,9 @@
     "ConfirmBody": "Votre agent crée une nouvelle identité pour {{community}}.",
     "NeedsAgent": "Liez d'abord votre agent — il garde votre identité pour chaque communauté.",
     "FromProfile": "Depuis votre profil {{profile}} — corrigez ici si votre nom légal diffère.",
-    "FromYourProfile": "Depuis votre profil — corrigez ici si votre nom légal diffère."
+    "FromYourProfile": "Depuis votre profil — corrigez ici si votre nom légal diffère.",
+    "AsksOther": "Elle demande des justificatifs qu’elle décrit ainsi :",
+    "AsksNothing": "Elle ne demande rien — vous pouvez postuler tout de suite."
   },
   "MyAgent": {
     "Title": "Votre agent",

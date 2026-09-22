@@ -1119,7 +1119,7 @@
     "VetterRevoked": "Seu papel de verificador em {{community}} foi retirado pelo admin.",
     "VetterExpired": "Seu papel de verificador em {{community}} terminou em {{date}}.",
     "VetterNotYet": "Seu papel de verificador em {{community}} começa em {{date}}.",
-    "GiveKeyHow": "Admins que usam a extensão de navegador VTA: “Manage this agent” → “Access” → “Grant access”, e cole ali. Pelo terminal: pnm acl create.",
+    "GiveKeyHow": "Admins que usam a extensão de navegador VTA: “Manage this agent” → “Access” → “Grant access”, cole e escolha o papel admin — o agente guarda as identidades deste telefone, o que hoje exige admin. Pelo terminal: pnm acl create --role admin.",
     "JourneyLinked": "Vinculado",
     "JourneyJoin": "Entrar",
     "JourneyMember": "Membro",
@@ -1181,7 +1181,9 @@
     "ConfirmBody": "Seu agente cria uma nova identidade para {{community}}.",
     "NeedsAgent": "Vincule seu agente primeiro — ele guarda sua identidade para cada comunidade.",
     "FromProfile": "Do seu perfil {{profile}} — corrija aqui se seu nome legal for diferente.",
-    "FromYourProfile": "Do seu perfil — corrija aqui se seu nome legal for diferente."
+    "FromYourProfile": "Do seu perfil — corrija aqui se seu nome legal for diferente.",
+    "AsksOther": "Ela pede credenciais que descreve assim:",
+    "AsksNothing": "Ela não pede nada — você pode se candidatar agora mesmo."
   },
   "MyAgent": {
     "Title": "Seu agente",
