@@ -63,6 +63,32 @@ describe('QRScanner Component', () => {
     expect(tree).toMatchSnapshot()
   })
 
+  test('My QR code says what the code is for (215 feedback)', async () => {
+    // @ts-expect-error useAgent will be replaced with a mock which will have this method
+    useAgent().agent?.modules.didcomm.oob.createInvitation.mockReturnValue({
+      outOfBandInvitation: { toUrl: () => 'https://example.com/invitation' },
+    })
+    const tree = render(
+      <BasicAppContext>
+        <QRScanner
+          showTabs={false}
+          defaultToConnect={true}
+          handleCodeScan={() => Promise.resolve()}
+          navigation={navigation as any}
+          route={{} as any}
+        />
+      </BasicAppContext>
+    )
+
+    await act(() => {
+      jest.runAllTimers()
+    })
+
+    // A contact card for another Keyring user, and not an agent or community code.
+    expect(tree.getByTestId(testIdWithKey('MyQRCodeTitle'))).toHaveTextContent('Scan.YourQRCodeTitle')
+    expect(tree.getByTestId(testIdWithKey('MyQRCodeInstruction'))).toHaveTextContent('Scan.YourQRCodeInstruction')
+  })
+
   test('Focus animation does not render before tapping', async () => {
     const tree = render(
       <BasicAppContext>
@@ -386,8 +412,9 @@ describe('QRScanner Component', () => {
       })
     })
 
-    test('shows each profile\'s photo in the picker, alongside its name, when it has one', async () => {
-      const photo = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkI'
+    test("shows each profile's photo in the picker, alongside its name, when it has one", async () => {
+      const photo =
+        'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkI'
       const profileWithPhoto = buildRCardTemplate(
         { firstName: 'Jane', lastName: 'Doe', email: '', organization: 'Personal', photo },
         { label: 'Personal' }

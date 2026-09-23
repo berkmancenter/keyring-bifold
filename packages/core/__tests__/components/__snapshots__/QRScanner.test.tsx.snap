@@ -799,6 +799,27 @@ exports[`QRScanner Component Renders QR code view when defaultToConnect is true 
             Object {
               "color": "#FFFFFF",
               "fontSize": 18,
+              "fontWeight": "bold",
+            },
+            Object {
+              "color": "#606060",
+              "fontSize": 14,
+              "marginTop": 16,
+              "textAlign": "center",
+            },
+          ]
+        }
+        testID="com.ariesbifold:id/MyQRCodeTitle"
+      >
+        Scan.YourQRCodeTitle
+      </Text>
+      <Text
+        maxFontSizeMultiplier={2}
+        style={
+          Array [
+            Object {
+              "color": "#FFFFFF",
+              "fontSize": 18,
               "fontWeight": "normal",
             },
             Object {
@@ -809,6 +830,7 @@ exports[`QRScanner Component Renders QR code view when defaultToConnect is true 
             },
           ]
         }
+        testID="com.ariesbifold:id/MyQRCodeInstruction"
       >
         Scan.YourQRCodeInstruction
       </Text>
@@ -913,6 +935,27 @@ exports[`QRScanner Component Renders correctly on first tab 1`] = `
             Object {
               "color": "#FFFFFF",
               "fontSize": 18,
+              "fontWeight": "bold",
+            },
+            Object {
+              "color": "#606060",
+              "fontSize": 14,
+              "marginTop": 16,
+              "textAlign": "center",
+            },
+          ]
+        }
+        testID="com.ariesbifold:id/MyQRCodeTitle"
+      >
+        Scan.YourQRCodeTitle
+      </Text>
+      <Text
+        maxFontSizeMultiplier={2}
+        style={
+          Array [
+            Object {
+              "color": "#FFFFFF",
+              "fontSize": 18,
               "fontWeight": "normal",
             },
             Object {
@@ -923,6 +966,7 @@ exports[`QRScanner Component Renders correctly on first tab 1`] = `
             },
           ]
         }
+        testID="com.ariesbifold:id/MyQRCodeInstruction"
       >
         Scan.YourQRCodeInstruction
       </Text>
@@ -1188,6 +1232,27 @@ exports[`QRScanner Component Renders correctly on second tab 1`] = `
             Object {
               "color": "#FFFFFF",
               "fontSize": 18,
+              "fontWeight": "bold",
+            },
+            Object {
+              "color": "#606060",
+              "fontSize": 14,
+              "marginTop": 16,
+              "textAlign": "center",
+            },
+          ]
+        }
+        testID="com.ariesbifold:id/MyQRCodeTitle"
+      >
+        Scan.YourQRCodeTitle
+      </Text>
+      <Text
+        maxFontSizeMultiplier={2}
+        style={
+          Array [
+            Object {
+              "color": "#FFFFFF",
+              "fontSize": 18,
               "fontWeight": "normal",
             },
             Object {
@@ -1198,6 +1263,7 @@ exports[`QRScanner Component Renders correctly on second tab 1`] = `
             },
           ]
         }
+        testID="com.ariesbifold:id/MyQRCodeInstruction"
       >
         Scan.YourQRCodeInstruction
       </Text>

@@ -216,7 +216,14 @@ const QRScanner: React.FC<Props> = ({
     }
     // store.rCard.activeProfileId: switching the active profile on this
     // screen regenerates the invitation under the newly active one.
-  }, [showTabs, firstTabActive, defaultToConnect, createInvitation, store.preferences.walletName, store.rCard.activeProfileId])
+  }, [
+    showTabs,
+    firstTabActive,
+    defaultToConnect,
+    createInvitation,
+    store.preferences.walletName,
+    store.rCard.activeProfileId,
+  ])
 
   useEffect(() => {
     // Effect not required if tabs are not enabled
@@ -399,7 +406,14 @@ const QRScanner: React.FC<Props> = ({
                 {invitation}
               </ThemedText>
             )}
-            <ThemedText style={styles.instruction}>
+            {/* What this code is, in words (215 feedback): a maintainer sent it
+                expecting it to link an agent or join a community, and nobody
+                could tell what it was. It is a contact card for one other
+                Keyring user, and says so. */}
+            <ThemedText variant="bold" style={styles.instruction} testID={testIdWithKey('MyQRCodeTitle')}>
+              {t('Scan.YourQRCodeTitle')}
+            </ThemedText>
+            <ThemedText style={styles.instruction} testID={testIdWithKey('MyQRCodeInstruction')}>
               {t('Scan.YourQRCodeInstruction')}
             </ThemedText>
           </View>
@@ -439,12 +453,7 @@ const QRScanner: React.FC<Props> = ({
                     {profile.label}
                   </ThemedText>
                   {profile.id === activeProfileId && (
-                    <Icon
-                      name="check"
-                      size={20}
-                      color={ColorPalette.brand.primary}
-                      style={{ marginLeft: 'auto' }}
-                    />
+                    <Icon name="check" size={20} color={ColorPalette.brand.primary} style={{ marginLeft: 'auto' }} />
                   )}
                 </TouchableOpacity>
               ))}
