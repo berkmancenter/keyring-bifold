@@ -299,6 +299,34 @@ describe('connecting with a swap pending (the app was killed mid-swap)', () => {
     expect(store.manager).toMatchObject({ did: NEXT, stage: 'permanent' })
   })
 
+  it('two connects racing on one client settle the swap once, over one session', async () => {
+    mockVta.acl = new Set([NEXT])
+    const store = memoryStore({ ...temporary, pendingNext: { did: NEXT, createdAt: '2026-09-25T00:01:00Z' } })
+    const vta = client(store)
+    const settles = () => logger.info.mock.calls.filter(([line]) => /pending on connect/.test(String(line))).length
+    const before = settles()
+
+    await Promise.all([vta.connect(), vta.connect()])
+
+    expect(settles() - before).toBe(1)
+    expect(openSession().map((s) => s.did)).toEqual([NEXT])
+    expect(mockVta.asked.filter((a) => a.type === WHOAMI)).toHaveLength(1)
+    expect(store.manager).toMatchObject({ did: NEXT, stage: 'permanent' })
+  })
+
+  it('two clients connecting to the same VTA at once settle the swap once, and both end on the adopted key', async () => {
+    mockVta.acl = new Set([NEXT])
+    const store = memoryStore({ ...temporary, pendingNext: { did: NEXT, createdAt: '2026-09-25T00:01:00Z' } })
+    const [a, b] = [client(store), client(store)]
+
+    await Promise.all([a.connect(), b.connect()])
+
+    // One settlement asks as NEXT once; the second client only opens its session.
+    expect(mockVta.asked.filter((q) => q.type === WHOAMI)).toHaveLength(1)
+    expect(store.setManager).toHaveBeenCalledTimes(1)
+    expect(openSession().map((s) => s.did)).toEqual([NEXT, NEXT])
+  })
+
   it('(d) fails the connect and keeps both keys when neither is accepted', async () => {
     mockVta.acl.clear()
     const pending = { ...temporary, pendingNext: { did: NEXT, createdAt: '2026-09-25T00:01:00Z' } }
