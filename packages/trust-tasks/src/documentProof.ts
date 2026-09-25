@@ -95,7 +95,8 @@ export function digestBytesEqual(a: string, b: string): boolean {
  *
  * Returns a NEW document object; the input is not mutated. Its whole-second
  * `issuedAt`/`expiresAt`/`validFrom`/`validUntil` come back as `wireTimestamp`
- * writes them — send and digest the returned document, not the input.
+ * writes them, and a `null` optional member is dropped — send and digest the
+ * returned document, not the input.
  */
 /**
  * The DID document's first signing-capable verification method. did:peer:0
@@ -177,14 +178,38 @@ export function wireTimestamp(date: Date = new Date()): string {
 /** The top-level members a verifier may parse as a date-time and write back. */
 const DATE_TIME_MEMBERS = ['issuedAt', 'expiresAt', 'validFrom', 'validUntil'] as const
 
-/** `.000Z` → `Z` on those members; the same instants, in the form verifiers rebuild. */
-function withWireTimestamps(document: Record<string, unknown>): Record<string, unknown> {
+/**
+ * The optional members of a Trust Task document that trust-tasks-rs reads
+ * with `default` and writes with `skip_serializing_if` (document.rs:38-101):
+ * a `null` there is dropped by vta-sdk's round trip, and a proof over it is
+ * refused (measured 2026-09-25, VTI-45).
+ */
+const DROPPED_WHEN_NULL = [
+  'threadId',
+  'parentThreadId',
+  'issuer',
+  'recipient',
+  'issuedAt',
+  'expiresAt',
+  'ceremony',
+  '@context',
+] as const
+
+/**
+ * The document as a re-serialising verifier rebuilds it (VTI-45): whole-second
+ * instants without the `.000`, and no `null` on a member it would drop. The
+ * same content; only the bytes a verifier would not reproduce change.
+ */
+function asVerifiersRebuildIt(document: Record<string, unknown>): Record<string, unknown> {
   const out = { ...document }
   for (const member of DATE_TIME_MEMBERS) {
     const value = out[member]
     if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.000Z$/.test(value)) {
       out[member] = value.replace(/\.000Z$/, 'Z')
     }
+  }
+  for (const member of DROPPED_WHEN_NULL) {
+    if (out[member] === null) delete out[member]
   }
   return out
 }
@@ -228,8 +253,8 @@ export async function signDocumentProof(
   }
 
   const configHash = sha256(new TextEncoder().encode(jcsCanonicalize(proofConfig)))
-  // Signed as sent: whole-second instants in the form a verifier rebuilds.
-  const unsigned = withWireTimestamps(document)
+  // Signed as sent, in the form a re-serialising verifier rebuilds.
+  const unsigned = asVerifiersRebuildIt(document)
   const documentHash = sha256(new TextEncoder().encode(jcsCanonicalize(unsigned)))
   const signedInput = new Uint8Array(configHash.length + documentHash.length)
   signedInput.set(configHash, 0)

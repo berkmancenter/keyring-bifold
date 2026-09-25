@@ -60,6 +60,35 @@ if (process.env.CONFORMANCE_WHOLE_SECOND) {
   } as DateConstructor
 }
 
+// CONFORMANCE_NULL_OPTIONALS=1: every Trust Task document reaches the signer
+// with `null` on the optional members it lacks. vta-sdk's round trip drops a
+// null there (trust-tasks-rs document.rs:38-101) before checking the proof, so
+// signDocumentProof must drop it first or the proof is refused (VTI-45).
+jest.mock('@bifold/trust-tasks', () => {
+  const actual = jest.requireActual('@bifold/trust-tasks')
+  if (!process.env.CONFORMANCE_NULL_OPTIONALS) return actual
+  const withNulls = (d: Record<string, unknown>) =>
+    typeof d.type === 'string' && 'payload' in d
+      ? { threadId: null, parentThreadId: null, expiresAt: null, '@context': null, ...d }
+      : d
+  return {
+    ...actual,
+    signDocumentProof: (agent: unknown, document: Record<string, unknown>, did: string, options?: unknown) =>
+      actual.signDocumentProof(agent, withNulls(document), did, options),
+  }
+})
+
+/** A proof as vta-sdk rebuilds it (affinidi DataIntegrityProof): any other member is dropped, and refused. */
+const PROOF_MEMBERS = ['created', 'cryptosuite', 'proofPurpose', 'proofValue', 'type', 'verificationMethod']
+
+/** What a re-serialising verifier would not reproduce: extra proof members, and `null` members. */
+function rebuildHazards(document: Record<string, unknown>) {
+  return {
+    proof: Object.keys((document.proof ?? {}) as object).sort(),
+    nulls: Object.keys(document).filter((k) => document[k] === null),
+  }
+}
+
 const mockSend = jest.fn(async () => undefined)
 const mockAsk = jest.fn()
 jest.mock('../module/vtiAgent', () => ({
@@ -304,6 +333,14 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       })
     ).resolves.toMatchObject({ ok: true })
 
+    for (const [name, document] of Object.entries({ card, statement, eligibility, sessionResponse, response })) {
+      expect({ name, ...rebuildHazards(document as Record<string, unknown>) }).toEqual({
+        name,
+        proof: PROOF_MEMBERS,
+        nulls: [],
+      })
+    }
+
     const out = process.env.CARD_OUT
     if (out) {
       mkdirSync(out, { recursive: true })
@@ -455,6 +492,25 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
       },
     })
     lastSent('trust-task-error', vetter.did)
+    // A request whose body names neither `threadId` nor `id`: the refusal
+    // names no thread at all, neither null nor "" (a verifier drops a null).
+    await take({
+      id: 'urn:uuid:didcomm-unthreaded',
+      type: VETTING.request,
+      from: applicant.did,
+      body: {
+        ...requestDocument,
+        id: undefined,
+        threadId: undefined,
+        payload: {
+          community: community.did,
+          joinDid: applicant.did,
+          ticket: { ticketId: 'vt-tasks', secret: 'wrong' },
+        },
+      },
+    })
+    lastSent('trust-task-error-unthreaded', vetter.did)
+    expect(produced.at(-1)!.document).not.toHaveProperty('threadId')
     await take({ id: 'urn:uuid:didcomm-request', type: VETTING.request, from: applicant.did, body: requestDocument })
     lastSent('vetting-request-response', vetter.did)
     const opened = await vetterDesk.openSession(desk[0].requestId, ['name.legal'])
@@ -606,8 +662,14 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
     // was sent as. And Keyring's own verifier, which mirrors vta-sdk's, agrees.
     const names = produced.map((p) => p.name)
     expect(new Set(names).size).toBe(names.length)
-    expect(names).toHaveLength(22)
+    expect(names).toHaveLength(23)
+    // Members a round trip must carry, in every run, so losing one shows.
+    const sent = (name: string) => produced.find((p) => p.name === name)!.document
+    expect(sent('vetting-session')).toMatchObject({ parentThreadId: expect.any(String) })
+    expect(sent('vetting-session-response')).toMatchObject({ parentThreadId: expect.any(String) })
+    expect(sent('vta-dids-create')).toMatchObject({ idempotencyKey: expect.any(String) })
     for (const { name, sentAs, document, signer } of produced) {
+      expect({ name, ...rebuildHazards(document) }).toEqual({ name, proof: PROOF_MEMBERS, nulls: [] })
       expect({ name, issuer: document.issuer }).toEqual({ name, issuer: signer })
       expect({ name, type: document.type }).toEqual({ name, type: sentAs })
       const verdict = await verifyTrustTaskProof(
