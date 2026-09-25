@@ -79,10 +79,17 @@ jobs:
         working-directory: packages/core
         run: CONFORMANCE_WHOLE_SECOND=1 CARD_OUT="$RUNNER_TEMP/conformance-whole-second" TZ=GMT yarn jest src/modules/trust-tasks/__tests__/cardConformance.test.ts
 
+      # And with `null` on every optional member a document lacks, which
+      # vta-sdk's round trip drops before checking a proof (VTI-45):
+      # signDocumentProof must drop it first, every time.
+      - name: Keyring makes them again with null optional members
+        working-directory: packages/core
+        run: CONFORMANCE_NULL_OPTIONALS=1 CARD_OUT="$RUNNER_TEMP/conformance-null-optionals" TZ=GMT yarn jest src/modules/trust-tasks/__tests__/cardConformance.test.ts
+
       - name: VTI SDK judges them
         run: |
           bin="$RUNNER_TEMP/wallet/scripts/openvtc/card-verify/target/release/card-verify"
-          for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second"; do
+          for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second" "$RUNNER_TEMP/conformance-null-optionals"; do
             echo "== $out"
             "$bin" "$out/card.json" "$out/expect.json"
             "$bin" verify-statement "$out/statement.json" "$out/card.json" "$out/expect.json"
@@ -100,7 +107,7 @@ jobs:
       - name: VTI SDK judges every Trust Task Keyring signs
         run: |
           bin="$RUNNER_TEMP/wallet/scripts/openvtc/card-verify/target/release/card-verify"
-          for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second"; do
+          for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second" "$RUNNER_TEMP/conformance-null-optionals"; do
             node -e "for (const t of require('$out/tasks.json')) console.log(t.file + '\t' + t.signer)" > "$RUNNER_TEMP/tasks.tsv"
             count=0
             while IFS=$'\t' read -r file signer; do
@@ -122,4 +129,5 @@ jobs:
           path: |
             ${{ runner.temp }}/conformance
             ${{ runner.temp }}/conformance-whole-second
+            ${{ runner.temp }}/conformance-null-optionals
           retention-days: 14
