@@ -309,6 +309,9 @@ export function activeSwapTestHook(): VtaSwapTestHook {
 
 type Probe = { kind: 'live' } | { kind: 'refused'; detail: string } | { kind: 'unknown'; detail: string }
 
+/** The swap settlement in flight for each VTA (see {@link VtaClient.resolvePendingSwap}). */
+const settlingSwaps = new Map<string, Promise<string>>()
+
 export class VtaClient {
   private session?: VtiMediatorSession
   private mediator?: VtiMediatorEndpoints
@@ -404,7 +407,22 @@ export class VtaClient {
     return did
   }
 
-  async connect(): Promise<void> {
+  /**
+   * Concurrent callers share one connect: two racing ones would each open a
+   * session (one of them orphaned) and each settle a pending swap from the
+   * same record.
+   */
+  connect(): Promise<void> {
+    if (this.session?.isOpen) return Promise.resolve()
+    this.connecting ??= this.connectOnce().finally(() => {
+      this.connecting = undefined
+    })
+    return this.connecting
+  }
+
+  private connecting?: Promise<void>
+
+  private async connectOnce(): Promise<void> {
     if (this.session?.isOpen) return
     this.mediator ??= await resolveVtaMediator(this.agent, this.vtaDid)
     const did = await this.ensureManagerIdentity()
@@ -785,6 +803,24 @@ export class VtaClient {
    * {@link ManagerKeyUnresolved}.
    */
   async resolvePendingSwap(record?: VtiManagerIdentity): Promise<string> {
+    // One settlement per VTA at a time, across clients: a second one would
+    // probe again and write from a record the first has already replaced.
+    const running = settlingSwaps.get(this.vtaDid)
+    if (running) {
+      const did = await running
+      if (!this.session?.isOpen) await this.openAs(did)
+      return did
+    }
+    const settling = this.settlePendingSwap(record)
+    settlingSwaps.set(this.vtaDid, settling)
+    try {
+      return await settling
+    } finally {
+      if (settlingSwaps.get(this.vtaDid) === settling) settlingSwaps.delete(this.vtaDid)
+    }
+  }
+
+  private async settlePendingSwap(record?: VtiManagerIdentity): Promise<string> {
     const manager = record ?? (await this.store.getManager(this.vtaDid))
     if (!manager?.pendingNext) {
       if (!manager) throw new Error(`${LOG_PREFIX} no manager identity for ${this.vtaDid}`)
