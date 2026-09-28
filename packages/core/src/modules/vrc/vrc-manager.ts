@@ -2096,8 +2096,11 @@ export function setupVrcConnectionHandler(agent: Agent) {
           if (credential?.type) {
             const types = Array.isArray(credential.type) ? credential.type : [credential.type]
 
-            // Auto-accept WitnessCredentials
-            if (isWitnessCredential(types)) {
+            // Auto-accept WitnessCredentials. Pass the full credential (not
+            // just its type array) so isWitnessCredential can also check
+            // credentialSubject.predicate for the new VSC shape — AL's
+            // review, finding A14.
+            if (isWitnessCredential(credential)) {
               vwcAutoLogger.info(`✓ Auto-accepting WitnessCredential offer: ${record.id}`)
 
               await release()
@@ -2173,11 +2176,13 @@ export function setupVrcConnectionHandler(agent: Agent) {
         }
 
         const credential = w3cRecord.encoded as any
-        const types = credential.type || []
-        vwcLogger.debug(`Credential types: ${types.join(', ')}`)
+        vwcLogger.debug(`Credential types: ${(credential.type || []).join(', ')}`)
 
-        // Check if this is a WitnessCredential
-        if (isWitnessCredential(types)) {
+        // Check if this is a WitnessCredential — pass the full credential
+        // (not just its type array) so isWitnessCredential can also check
+        // credentialSubject.predicate for the new VSC shape (AL's review,
+        // finding A14).
+        if (isWitnessCredential(credential)) {
           vwcLogger.info(`✓ Detected WitnessCredential received: ${w3cRecord.id}`)
 
           // Extract counterparty's relationship DID from credentialSubject.id

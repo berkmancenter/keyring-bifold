@@ -11,7 +11,27 @@
  * type string (some AnonCreds call sites only hold a serialized type value).
  * Matching is substring-based per element, mirroring the long-standing
  * behavior of the display registry's original helpers.
+ *
+ * VSC migration (docs/plans/vsc-migration-plan.md §1, §6 V3): WD 0.4.0
+ * collapses `WitnessCredential`/`EndorsementCredential` into one
+ * `StatementCredential` type whose meaning lives in `credentialSubject.predicate`,
+ * not the type array. "Is this a witness credential?" therefore stops being
+ * answerable from a type array alone — it needs the full credential JSON, so
+ * `credentialSubject.predicate` can be checked against `@bifold/dtg-vocab`'s
+ * accept-list. `isWitnessCredential`/`isPeerVrcCredential` below read both
+ * shapes (dual-read, plan §7 — deleted one release after V4 ships to the
+ * last channel; TODO once that date is known).
+ *
+ * Known limitation: a predicate is only checked when the input is a full
+ * credential-shaped object. Two call sites in `vrc-manager.ts` used to pass a
+ * bare `type` array where a full credential was already in scope — fixed to
+ * pass the credential object instead (AL's review, finding A14), so as of
+ * this migration there are no known call sites still passing a bare type
+ * array where predicate-aware detection would matter. If one is added later,
+ * it silently falls back to type-string-only detection — document it here.
  */
+
+import { DTG_PREDICATE_WITNESSED, PredicateHandlingConfig, configure, loadAcceptList } from '@bifold/dtg-vocab'
 
 export const VERIFIABLE_CREDENTIAL_TYPE = 'VerifiableCredential'
 export const DTG_CREDENTIAL_TYPE = 'DTGCredential'
@@ -19,6 +39,7 @@ export const RELATIONSHIP_CREDENTIAL_TYPE = 'RelationshipCredential'
 export const RELATIONSHIP_CARD_TYPE = 'RelationshipCard'
 export const RCARD_TEMPLATE_TYPE = 'RCardTemplate'
 export const WITNESS_CREDENTIAL_TYPE = 'WitnessCredential'
+export const STATEMENT_CREDENTIAL_TYPE = 'StatementCredential'
 
 /** A credential JSON, a `type` array, or a single type string. */
 export type CredentialTypeInput = unknown
@@ -68,9 +89,61 @@ export function isRCardTemplate(input: CredentialTypeInput): boolean {
   return hasCredentialTypeName(input, RCARD_TEMPLATE_TYPE)
 }
 
-/** WitnessCredential — a VWC issued by a witness for a witnessed exchange. */
+/**
+ * Lazily configured accept-list from `@bifold/dtg-vocab` — loaded once, not
+ * per call. `configure()`/`loadAcceptList()` do file I/O; caching keeps this
+ * module's predicates cheap to call from render paths.
+ */
+let acceptListConfig: PredicateHandlingConfig | undefined
+function getAcceptListConfig(): PredicateHandlingConfig {
+  if (!acceptListConfig) acceptListConfig = configure(loadAcceptList())
+  return acceptListConfig
+}
+
+/** Reads `credentialSubject.predicate` off a credential-shaped input, or undefined for anything else (a bare type array/string cannot carry a predicate). */
+function readPredicate(input: CredentialTypeInput): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const cs = (input as { credentialSubject?: unknown }).credentialSubject
+  const subject = Array.isArray(cs) ? cs[0] : cs
+  const predicate = (subject as { predicate?: unknown } | undefined)?.predicate
+  return typeof predicate === 'string' ? predicate : undefined
+}
+
+/**
+/**
+ * True if `input` is a `StatementCredential` whose `credentialSubject.predicate`
+ * is `dtg:witnessed` in `@bifold/dtg-vocab`'s configured accept-list — the new
+ * VSC shape of a VWC (plan §1, §3 D1/D2). Requires a full credential object;
+ * see the file header's "known limitation" note.
+ */
+export function isWitnessStatement(input: CredentialTypeInput): boolean {
+  if (!hasCredentialTypeName(input, STATEMENT_CREDENTIAL_TYPE)) return false
+  const predicate = readPredicate(input)
+  if (!predicate) return false
+  return predicate === DTG_PREDICATE_WITNESSED && predicate in getAcceptListConfig().profiles
+}
+
+/**
+ * True if `input` is a `StatementCredential` whose `credentialSubject.predicate`
+ * matches ANY profile in `@bifold/dtg-vocab`'s configured accept-list —
+ * `dtg:witnessed`, `dtg:endorses`, or any predicate a future accept-list
+ * update adds. Exported as a general-purpose positive check; `isPeerVrcCredential`
+ * below does not need it directly (see its own comment) but other call sites
+ * may want to recognize a VSC statement without caring which profile matched.
+ */
+export function isStatementCredential(input: CredentialTypeInput): boolean {
+  if (!hasCredentialTypeName(input, STATEMENT_CREDENTIAL_TYPE)) return false
+  const predicate = readPredicate(input)
+  return predicate !== undefined && predicate in getAcceptListConfig().profiles
+}
+
+/**
+ * WitnessCredential — a VWC issued by a witness for a witnessed exchange.
+ * Dual-read (plan §7): the legacy WD02 type-string form, OR the new VSC
+ * `dtg:witnessed` predicate form. See `isWitnessStatement` for the latter.
+ */
 export function isWitnessCredential(input: CredentialTypeInput): boolean {
-  return hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE)
+  return hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE) || isWitnessStatement(input)
 }
 
 /**
@@ -81,6 +154,18 @@ export function isWitnessCredential(input: CredentialTypeInput): boolean {
  * a role ["VerifiableCredential","DTGCredential","EndorsementCredential"] — and
  * keyed on DTGCredential each would list its community in Contacts as an
  * unnamed contact (measured on a simulator with the real shapes, 2026-09-26).
+ *
+ * This also already excludes every StatementCredential (witness, endorsement,
+ * or any future predicate) without a separate check: D1 forbids a
+ * StatementCredential from carrying any other concrete DTGCredential subtype
+ * in its type array, so `isRelationshipCredential` alone is false for one —
+ * `isStatementCredential` above was AL's review finding A11's original fix
+ * (an explicit `!isStatementCredential` exclusion on an `isDTGCredential`
+ * base); reconciled here against an independent, broader upstream fix for
+ * the same over-matching class of bug (community cards, 2026-09-26) that
+ * subsumes it structurally. See this file's test suite for a case asserting
+ * the invariant holds, so a future change to either function is caught if
+ * it stops holding.
  */
 export function isPeerVrcCredential(input: CredentialTypeInput): boolean {
   return isRelationshipCredential(input) && !isWitnessCredential(input)
