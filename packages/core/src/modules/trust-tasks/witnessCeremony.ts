@@ -374,7 +374,7 @@ export async function runWitnessSession(agent: Agent, options: RunWitnessSession
   // (vsc shape, and the WD02-conformant placement this codebase owed
   // regardless — Alberto's finding A5), falling back to the legacy
   // credentialSubject placement this codebase itself has been emitting.
-  const vwcTop = vwc as { taskContext?: string }
+  const vwcTop = vwc as { taskContext?: string; taskDigestMultibase?: string }
   const taskContext =
     typeof vwcTop.taskContext === 'string' && vwcTop.taskContext
       ? vwcTop.taskContext
@@ -382,7 +382,15 @@ export async function runWitnessSession(agent: Agent, options: RunWitnessSession
   if (taskContext !== sessionId) {
     throw new Error(`VWC taskContext ${taskContext ?? 'absent'} does not name this session (${sessionId})`)
   }
-  const taskDigest = (subject as { taskDigestMultibase?: string } | undefined)?.taskDigestMultibase
+  // Same dual-read as taskContext just above, same reason: cred-spec (pin
+  // 94af2d8, §Base Structure) places taskDigestMultibase at the top level,
+  // sibling of credentialSubject, wherever taskContext is REQUIRED — vsc
+  // shape now emits it there (WitnessTaskSessions.placeTaskDigestMultibase);
+  // wd02 keeps the legacy nested placement this codebase has always emitted.
+  const taskDigest =
+    typeof vwcTop.taskDigestMultibase === 'string' && vwcTop.taskDigestMultibase
+      ? vwcTop.taskDigestMultibase
+      : (subject as { taskDigestMultibase?: string } | undefined)?.taskDigestMultibase
   // §4.9.3: the task digest excludes the document's top-level proof, and
   // digests compare as decoded multihash bytes, never encoded strings.
   if (!taskDigest || !digestBytesEqual(taskDigest, taskDigestMultibase(sessionDoc))) {
