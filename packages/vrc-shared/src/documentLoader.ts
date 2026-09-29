@@ -25,6 +25,8 @@ import {
   CREDENTIALS_V2_CONTEXT_URL,
   CREDENTIALS_V2_CONTEXT_DOCUMENT,
   CACHED_STANDARD_CONTEXTS,
+  REGISTRY_DTG_CONTEXT_URL,
+  REGISTRY_DTG_CONTEXT_DOCUMENT,
 } from '@bifold/vrc-contexts'
 
 /**
@@ -253,6 +255,16 @@ export const demoDocumentLoader = (_agentContext: AgentContext): DocumentLoader 
         contextUrl: null,
         documentUrl: url,
         document: DTG_CONTEXT_DOCUMENT,
+      }
+    }
+
+    // Real DTG registry context (new-issuance VRCs) — dual-read alongside
+    // DTG_CONTEXT_URL/RELATIONSHIP_CONTEXT_URL above, not a replacement
+    if (normalizedUrl === REGISTRY_DTG_CONTEXT_URL) {
+      return {
+        contextUrl: null,
+        documentUrl: url,
+        document: REGISTRY_DTG_CONTEXT_DOCUMENT,
       }
     }
 
