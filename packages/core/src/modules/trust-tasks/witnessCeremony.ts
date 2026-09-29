@@ -330,7 +330,15 @@ export async function runWitnessSession(agent: Agent, options: RunWitnessSession
     throw new Error('vwcDigestMultibase does not match the delivered VWC')
   }
   const subject = Array.isArray(vwc.credentialSubject) ? vwc.credentialSubject[0] : vwc.credentialSubject
-  const taskContext = (subject as { taskContext?: string } | undefined)?.taskContext
+  // VSC migration (plan §6 V4, D4): taskContext dual-read, top level first
+  // (vsc shape, and the WD02-conformant placement this codebase owed
+  // regardless — Alberto's finding A5), falling back to the legacy
+  // credentialSubject placement this codebase itself has been emitting.
+  const vwcTop = vwc as { taskContext?: string }
+  const taskContext =
+    typeof vwcTop.taskContext === 'string' && vwcTop.taskContext
+      ? vwcTop.taskContext
+      : (subject as { taskContext?: string } | undefined)?.taskContext
   if (taskContext !== sessionId) {
     throw new Error(`VWC taskContext ${taskContext ?? 'absent'} does not name this session (${sessionId})`)
   }

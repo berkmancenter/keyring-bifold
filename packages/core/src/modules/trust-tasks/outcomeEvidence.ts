@@ -36,6 +36,27 @@ import { digestBytesEqual, taskDigestMultibase, verifyDocumentProof } from './do
 const LOG_PREFIX = '[TrustTasks:Evidence]'
 const ERROR_TYPE_MARKER = '/trust-task-error/'
 
+/**
+ * `taskContext` dual-read (docs/plans/vsc-migration-plan.md §6 V4, D4):
+ * WD02 already REQUIRES `taskContext` at the credential's top level, sibling
+ * of `credentialSubject` — this codebase has been reading it out of
+ * `credentialSubject` instead, a standing conformance bug independent of the
+ * VSC migration (Alberto's 2026-09-17 review, finding A5). VSC shape emits
+ * it at the top level too (D4), so both shapes now read the same way: top
+ * level first, falling back to the legacy `credentialSubject.taskContext`
+ * placement this codebase itself has been emitting under wd02 shape.
+ */
+function readTaskContext(credential: Record<string, unknown> | undefined): string {
+  if (!credential) return ''
+  if (typeof credential.taskContext === 'string' && credential.taskContext) {
+    return credential.taskContext
+  }
+  const subject = Array.isArray(credential.credentialSubject)
+    ? (credential.credentialSubject[0] as Record<string, unknown>)
+    : (credential.credentialSubject as Record<string, unknown> | undefined)
+  return typeof subject?.taskContext === 'string' ? subject.taskContext : ''
+}
+
 /** A `taskContext`-bearing credential with its matching outcome evidence. */
 export interface VwcPresentationBundle {
   /** The signed Verifiable Presentation wrapping the VWC. */
@@ -65,10 +86,7 @@ export interface AssembleOptions {
  * matching evidence, and shipping a hollow bundle would misrepresent one.
  */
 export async function assembleVwcPresentation(agent: Agent, options: AssembleOptions): Promise<VwcPresentationBundle> {
-  const subject = Array.isArray(options.vwc.credentialSubject)
-    ? (options.vwc.credentialSubject[0] as Record<string, unknown>)
-    : (options.vwc.credentialSubject as Record<string, unknown> | undefined)
-  const taskContext = String(subject?.taskContext ?? '')
+  const taskContext = readTaskContext(options.vwc)
   if (!taskContext) throw new Error('credential carries no taskContext')
 
   const service = getTrustTasksService(agent)
@@ -228,7 +246,7 @@ export async function verifyVwcPresentationBundle(agent: Agent, options: VerifyB
       ? (vwc.credentialSubject[0] as Record<string, unknown>)
       : (vwc.credentialSubject as Record<string, unknown> | undefined)
     : undefined
-  const taskContext = String(subject?.taskContext ?? '')
+  const taskContext = readTaskContext(vwc)
   const taskDigest = String(subject?.taskDigestMultibase ?? '')
   const { initiating, terminal } = bundle.outcomeEvidence
 
