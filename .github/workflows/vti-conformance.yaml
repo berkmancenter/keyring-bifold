@@ -47,7 +47,7 @@ jobs:
 
       - name: Fetch the wallet's checker and the VTI pin
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/berkmancenter/keyring-wallet.git "$RUNNER_TEMP/wallet"
+          git clone --depth 1 --filter=blob:none --sparse --branch chore/pins-trust-tasks-023 https://github.com/berkmancenter/keyring-wallet.git "$RUNNER_TEMP/wallet"
           git -C "$RUNNER_TEMP/wallet" sparse-checkout set scripts/openvtc
           vti="$(node -e "process.stdout.write(require('$RUNNER_TEMP/wallet/scripts/openvtc/PINS.json').repos['verifiable-trust-infrastructure'].sha)")"
           echo "VTI pin: $vti"
