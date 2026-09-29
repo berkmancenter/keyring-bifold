@@ -5130,12 +5130,12 @@ __metadata:
 
 "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks":
   version: 0.3.0
-  resolution: "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz#./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::hash=84521e&locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks"
+  resolution: "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz#./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::hash=203df9&locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks"
   dependencies:
     "@noble/ciphers": "npm:^2.0.0"
     "@noble/curves": "npm:^2.2.0"
     "@noble/hashes": "npm:^2.0.0"
-  checksum: 10c0/f1b91b6f93c1d38bbe61c06aca1419d13f323f04ee8acd27bc5e0058c22c572e552093a9ffe1bef125ee02974ffa35ef7e0b0816aaf3bef2741e32a12ff55f41
+  checksum: 10c0/21b40e5ae17b59187d1054cd69c2b6bc29b28d1bf645912fb24623399482b460aad55835f5e70dff040eb4adf682fedcaca6cf87016a54e10ff0e2f7ed00f690
   languageName: node
   linkType: hard
 

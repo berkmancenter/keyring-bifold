@@ -7,7 +7,11 @@
 // Reads `packages/tsp-js` at the given commit (default: the pin in README.md)
 // out of the clone with `git archive`, applies `vti-tsp-js-hermes-textdecoder.patch`,
 // installs the package's own dependencies, builds it with `tsc`, runs its own
-// test suite, and packs it. The result lands beside this script as
+// test suite, patches `package.json#exports` to add a `"require"` condition
+// beside each existing `"import"` one (see README.md's "The `exports` patch"
+// — upstream ships ESM-only `exports`, which breaks any CJS/`ts-node`
+// consumer; Node 20.19+/22+ can `require()` the same file natively once the
+// condition exists), and packs it. The result lands beside this script as
 // `openvtc-vti-tsp-js-<version>-<shortsha>.tgz`, and its SHA-256 is printed so
 // the README can be updated. Nothing here touches the clone.
 //
@@ -16,7 +20,7 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, copyFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync, copyFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -62,8 +66,23 @@ try {
     pkg
   )
 
+  console.log('patching package.json#exports to add a "require" condition beside each "import"')
+  const manifestPath = join(pkg, 'package.json')
+  const toPatch = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  for (const key of Object.keys(toPatch.exports ?? {})) {
+    const condition = toPatch.exports[key]
+    if (condition && typeof condition === 'object' && condition.import && !condition.require) {
+      condition.require = condition.import
+    }
+  }
+  writeFileSync(manifestPath, JSON.stringify(toPatch, null, 2) + '\n')
+
   console.log('packing')
-  run('npm', ['pack', '--silent'], pkg)
+  // --ignore-scripts: the package's own "prepack" runs "clean" (rm -rf dist)
+  // then "build" (tsc) — both redundant here (already built above) and
+  // destructive if it ran alone, since this checkout has no devDependencies
+  // installed to satisfy a second build.
+  run('npm', ['pack', '--silent', '--ignore-scripts'], pkg)
   const produced = readdirSync(pkg).find((f) => f.endsWith('.tgz'))
   const out = join(here, `openvtc-vti-tsp-js-${manifest.version}-${sha.slice(0, 7)}.tgz`)
   copyFileSync(join(pkg, produced), out)
