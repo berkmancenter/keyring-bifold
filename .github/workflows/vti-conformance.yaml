@@ -47,7 +47,7 @@ jobs:
 
       - name: Fetch the wallet's checker and the VTI pin
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/berkmancenter/keyring-wallet.git "$RUNNER_TEMP/wallet"
+          git clone --depth 1 --filter=blob:none --sparse --branch feat/card-verify-purpose-check https://github.com/berkmancenter/keyring-wallet.git "$RUNNER_TEMP/wallet"
           git -C "$RUNNER_TEMP/wallet" sparse-checkout set scripts/openvtc
           vti="$(node -e "process.stdout.write(require('$RUNNER_TEMP/wallet/scripts/openvtc/PINS.json').repos['verifiable-trust-infrastructure'].sha)")"
           echo "VTI pin: $vti"
@@ -80,6 +80,8 @@ jobs:
         run: CONFORMANCE_WHOLE_SECOND=1 CARD_OUT="$RUNNER_TEMP/conformance-whole-second" TZ=GMT yarn jest src/modules/trust-tasks/__tests__/cardConformance.test.ts
 
       - name: VTI SDK judges them
+        env:
+          CARD_VERIFY_EXPECT_PURPOSE: "1"
         run: |
           bin="$RUNNER_TEMP/wallet/scripts/openvtc/card-verify/target/release/card-verify"
           for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second"; do
@@ -98,6 +100,8 @@ jobs:
       # VTC runs on each task it receives. The test itself holds issuer ==
       # signer and the type until card-verify checks them.
       - name: VTI SDK judges every Trust Task Keyring signs
+        env:
+          CARD_VERIFY_EXPECT_PURPOSE: "1"
         run: |
           bin="$RUNNER_TEMP/wallet/scripts/openvtc/card-verify/target/release/card-verify"
           for out in "$RUNNER_TEMP/conformance" "$RUNNER_TEMP/conformance-whole-second"; do
