@@ -29,7 +29,7 @@ import { chooseAgentLabel, verifiedAgentName, vtaNameFrom, type AgentLabel, type
 import { utils } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 
-import { TRUST_TASK_V2_ENVELOPE_TYPE, purposeForDocumentType, signCompactJws, signDocumentProof, tsp } from '@bifold/trust-tasks'
+import { TRUST_TASK_V2_ENVELOPE_TYPE, signCompactJws, signDocumentProof, tsp } from '@bifold/trust-tasks'
 
 import { EPHEMERAL_KMS_BACKEND, importVtaKey, inMemoryKeyId, isInMemoryKeyId, type VtaExportedKey } from './vtaKeys'
 import {
@@ -46,6 +46,7 @@ import { VtiRefusal } from './vtiAgent'
 import { isDigestMultibase } from './vettingShape'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import { packTrustTaskForPeer, tspSessionForManager, unpackTrustTaskFromPeer, type TspSessionIdentity } from './vtiTsp'
+import { purposeForDocumentType } from './proofPurpose'
 
 const LOG_PREFIX = '[TrustTasks:VtaClient]'
 const TASK_ERROR = 'https://trusttasks.org/spec/trust-task-error/'
