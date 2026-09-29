@@ -57,6 +57,28 @@ function readTaskContext(credential: Record<string, unknown> | undefined): strin
   return typeof subject?.taskContext === 'string' ? subject.taskContext : ''
 }
 
+/**
+ * Same dual-read as `readTaskContext`, for `taskDigestMultibase`: the spec's
+ * Base Structure requires it as a top-level sibling of `credentialSubject`
+ * for `vsc` shape (fixed in the issuance/read paths, `be8dd6044`,
+ * 2026-09-29), but this self-check still only looked in the old nested
+ * `credentialSubject.taskDigestMultibase` location — so it unconditionally
+ * failed ("credential carries no taskDigestMultibase") for every `vsc`-shape
+ * VWC, on the one path that had actually been fixed. Found the same day the
+ * placement fix landed, on the first real end-to-end witnessed exchange to
+ * reach this check.
+ */
+function readTaskDigestMultibase(credential: Record<string, unknown> | undefined): string {
+  if (!credential) return ''
+  if (typeof credential.taskDigestMultibase === 'string' && credential.taskDigestMultibase) {
+    return credential.taskDigestMultibase
+  }
+  const subject = Array.isArray(credential.credentialSubject)
+    ? (credential.credentialSubject[0] as Record<string, unknown>)
+    : (credential.credentialSubject as Record<string, unknown> | undefined)
+  return typeof subject?.taskDigestMultibase === 'string' ? subject.taskDigestMultibase : ''
+}
+
 /** A `taskContext`-bearing credential with its matching outcome evidence. */
 export interface VwcPresentationBundle {
   /** The signed Verifiable Presentation wrapping the VWC. */
@@ -241,13 +263,8 @@ export async function verifyVwcPresentationBundle(agent: Agent, options: VerifyB
   }
 
   // 3–7. The pairing checklist.
-  const subject = vwc
-    ? Array.isArray(vwc.credentialSubject)
-      ? (vwc.credentialSubject[0] as Record<string, unknown>)
-      : (vwc.credentialSubject as Record<string, unknown> | undefined)
-    : undefined
   const taskContext = readTaskContext(vwc)
-  const taskDigest = String(subject?.taskDigestMultibase ?? '')
+  const taskDigest = readTaskDigestMultibase(vwc)
   const { initiating, terminal } = bundle.outcomeEvidence
 
   if (!taskContext) failures.push('credential carries no taskContext')
