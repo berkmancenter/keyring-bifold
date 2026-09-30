@@ -16,13 +16,13 @@ export {
   RCARD_CONTEXT_DOCUMENT,
   REGISTRY_DTG_CONTEXT_URL,
   REGISTRY_DTG_CONTEXT_DOCUMENT,
+  REGISTRY_DTG_CONTEXT_SOURCE,
+  REGISTRY_DTG_CONTEXT_SHA256_HEX,
+  REGISTRY_DTG_CONTEXT_DIGEST_MULTIBASE,
 } from './relationshipContext'
 
 // Witnessed Exchange context (for VWCs)
-export {
-  WITNESSED_EXCHANGE_CONTEXT_URL,
-  WITNESSED_EXCHANGE_CONTEXT_DOCUMENT,
-} from './witnessedExchangeContext'
+export { WITNESSED_EXCHANGE_CONTEXT_URL, WITNESSED_EXCHANGE_CONTEXT_DOCUMENT } from './witnessedExchangeContext'
 
 // W3C VCDM 2.0 base context (bundled for offline resolution — credo's cache
 // only ships the v1.1 credentials context)
