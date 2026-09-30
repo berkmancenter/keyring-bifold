@@ -32,6 +32,7 @@ import {
   Share,
   StyleSheet,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
@@ -46,8 +47,10 @@ import QRRenderer from '../../../components/misc/QRRenderer'
 import { confirmOwner, ownerLockKind, type OwnerConfirmFailure, type OwnerLockKind } from '../module/ownerConfirm'
 import type { AgentLabel } from '../module/agentLabel'
 import { vtaAgent } from '../module/vtaAgent'
-import { DeviceCannotOwn, deviceRefusalOf, type DeviceRefusalReason } from '../module/vtaOwner'
+import { deviceCodeScan } from '../module/deviceCodeScan'
+import { DeviceCannotOwn, deviceCodeIn, deviceRefusalOf, type DeviceRefusalReason } from '../module/vtaOwner'
 
+import { openScanner } from './openScanner'
 import { useSafeHeaderHeight } from './VtaLink'
 import { useMeasuredKeyboardOffset } from './keyboardOffset'
 
@@ -63,6 +66,15 @@ export const AGENT_HOST_WEBSITE: string | undefined = undefined
  * host may only apply a new admin after a refresh, so the person needn't
  * guess when to tap.
  */
+const SCREEN_PADDING = 20
+const CARD_PADDING = 16
+const CARD_GAP = 8
+/** White margin a camera needs around a code; QRRenderer's own vertical margin is 20 each side. */
+const QR_QUIET_ZONE = 16
+const QR_RENDERER_MARGIN = 20
+/** A floor: in a space smaller than this the code keeps this size and the page scrolls. */
+const QR_MIN_SIZE = 160
+
 export const GRANT_POLL_EVERY_MS = 6000
 export const GRANT_POLL_WINDOW_MS = 10 * 60 * 1000
 
@@ -131,11 +143,37 @@ const VtaCreateAgent: React.FC = () => {
   const [busy, setBusy] = useState(false)
   const [backupCode, setBackupCode] = useState('')
   const [backupAdded, setBackupAdded] = useState<string | undefined>()
+  const [addressShown, setAddressShown] = useState(false)
+  // A scan asked for from here and never answered is dropped with the screen.
+  useEffect(() => () => deviceCodeScan.cancel(), [])
+  // The add-device code is sized to the space the screen has left, not only
+  // its width (IN-50): on a tall phone with large text a width-sized code ran
+  // under the Next bar, and a code with hidden rows cannot be read.
+  const [viewportHeight, setViewportHeight] = useState<number | undefined>()
+  const [headingHeight, setHeadingHeight] = useState(0)
+  const { width: windowWidth } = useWindowDimensions()
+  const backupQrSize = Math.max(
+    QR_MIN_SIZE,
+    Math.min(
+      windowWidth - 2 * (SCREEN_PADDING + CARD_PADDING + QR_QUIET_ZONE),
+      viewportHeight === undefined
+        ? Number.POSITIVE_INFINITY
+        : viewportHeight -
+            2 * (SCREEN_PADDING + CARD_PADDING + QR_QUIET_ZONE + QR_RENDERER_MARGIN) -
+            headingHeight -
+            CARD_GAP
+    )
+  )
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
-    content: { flexGrow: 1, padding: 20, gap: 16 },
-    card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 8 },
+    content: { flexGrow: 1, padding: SCREEN_PADDING, gap: 16 },
+    card: {
+      backgroundColor: ColorPalette.brand.secondaryBackground,
+      borderRadius: 8,
+      padding: CARD_PADDING,
+      gap: CARD_GAP,
+    },
     actions: { padding: 20, gap: 12 },
     error: { color: ColorPalette.semantic.error },
     muted: { color: ColorPalette.grayscale.mediumGrey },
@@ -166,7 +204,8 @@ const VtaCreateAgent: React.FC = () => {
     setError(undefined)
     setBusy(true)
     try {
-      const device = await vtaAgent.addBackupDevice(agent, backupCode.trim(), t('CreateAgent.BackupLabel'))
+      const code = deviceCodeIn(backupCode) ?? backupCode.trim()
+      const device = await vtaAgent.addBackupDevice(agent, code, t('CreateAgent.BackupLabel'))
       setBackupAdded(device.label ?? t('CreateAgent.BackupLabel'))
       // Back to My devices, which reads the list again on focus.
       if (addDevice) navigation.goBack()
@@ -475,9 +514,39 @@ const VtaCreateAgent: React.FC = () => {
     const agentDid = vtaAgent.agentAddress()
     body = (
       <View style={styles.card} testID={testIdWithKey('AgentBackupAddressQr')}>
-        <ThemedText variant="headingThree">{t('CreateAgent.BackupScanThis')}</ThemedText>
+        <ThemedText
+          variant="headingThree"
+          onLayout={(e) => setHeadingHeight(e.nativeEvent.layout.height)}
+          testID={testIdWithKey('AgentBackupScanThisHeading')}
+        >
+          {t('CreateAgent.BackupScanThis')}
+        </ThemedText>
+        {agentDid ? (
+          <QRRenderer
+            value={agentDid}
+            size={backupQrSize}
+            quietZone={QR_QUIET_ZONE}
+            testID={testIdWithKey('AgentBackupAddressQrCode')}
+          />
+        ) : null}
         <ThemedText>{t('CreateAgent.BackupScanThisBody')}</ThemedText>
-        {agentDid ? <QRRenderer value={agentDid} testID={testIdWithKey('AgentBackupAddressQrCode')} /> : null}
+        {agentDid ? (
+          <Pressable
+            onPress={() => setAddressShown(!addressShown)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: addressShown }}
+            testID={testIdWithKey('AgentBackupShowAsText')}
+          >
+            <ThemedText style={styles.muted}>
+              {addressShown ? t('VtaLink.HideText') : t('VtaLink.ShowAsText')}
+            </ThemedText>
+          </Pressable>
+        ) : null}
+        {agentDid && addressShown ? (
+          <ThemedText selectable testID={testIdWithKey('AgentBackupAddressText')}>
+            {agentDid}
+          </ThemedText>
+        ) : null}
       </View>
     )
     actions = (
@@ -511,21 +580,38 @@ const VtaCreateAgent: React.FC = () => {
     actions = (
       <>
         {errorLine('AgentCreateError')}
+        {/* One filled button: Scan until there is a code, then adding it (#30). */}
+        <Button
+          title={t('CreateAgent.ScanItsCode')}
+          buttonType={backupCode.trim() ? ButtonType.Secondary : ButtonType.Primary}
+          onPress={() => {
+            setError(undefined)
+            deviceCodeScan.request((code) => setBackupCode(code))
+            openScanner(navigation)
+          }}
+          disabled={busy}
+          testID={testIdWithKey('AgentBackupScanButton')}
+        />
         <Button
           title={t('CreateAgent.Paste')}
           buttonType={ButtonType.Secondary}
-          onPress={async () => setBackupCode((await Clipboard.getString()).trim())}
+          onPress={async () => {
+            const pasted = await Clipboard.getString()
+            setBackupCode(deviceCodeIn(pasted) ?? pasted.trim())
+          }}
           testID={testIdWithKey('AgentBackupPasteCode')}
         />
-        <Button
-          title={t('CreateAgent.AddBackup')}
-          buttonType={ButtonType.Primary}
-          onPress={onAddBackup}
-          disabled={busy || !backupCode.trim()}
-          testID={testIdWithKey('AgentBackupAdd')}
-        >
-          {busy ? <ActivityIndicator color={ColorPalette.grayscale.white} /> : null}
-        </Button>
+        {backupCode.trim() ? (
+          <Button
+            title={t('CreateAgent.AddThisPhone')}
+            buttonType={ButtonType.Primary}
+            onPress={onAddBackup}
+            disabled={busy}
+            testID={testIdWithKey('AgentBackupAdd')}
+          >
+            {busy ? <ActivityIndicator color={ColorPalette.grayscale.white} /> : null}
+          </Button>
+        ) : null}
       </>
     )
   } else {
@@ -572,7 +658,12 @@ const VtaCreateAgent: React.FC = () => {
         behavior="padding"
         keyboardVerticalOffset={keyboard.offset}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          onLayout={(e) => setViewportHeight(e.nativeEvent.layout.height)}
+          testID={testIdWithKey('AgentCreateScroll')}
+        >
           {body}
         </ScrollView>
         <View style={styles.actions}>{actions}</View>

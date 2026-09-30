@@ -11,17 +11,21 @@ import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
 import { Share } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
+import QRCode from 'react-native-qrcode-svg'
 
 import { useAgent } from '@bifold/react-hooks'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import { confirmOwner } from '../module/ownerConfirm'
+import { deviceCodeScan } from '../module/deviceCodeScan'
 import { vtaAgent } from '../module/vtaAgent'
 import { DeviceActionRefused, DeviceCannotOwn } from '../module/vtaOwner'
 import VtaCreateAgent, { GRANT_POLL_EVERY_MS, GRANT_POLL_WINDOW_MS, readyNameOf } from '../screens/VtaCreateAgent'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
+const mockOpenScanner = jest.fn()
+jest.mock('../screens/openScanner', () => ({ openScanner: (...a: unknown[]) => mockOpenScanner(...a) }))
 jest.mock('../module/ownerConfirm', () => ({
   confirmOwner: jest.fn(),
   deviceCanOwn: jest.fn(async () => true),
@@ -186,6 +190,28 @@ describe('setup ends at Ready; another device is added from My devices', () => {
   const asAddDevice = () => (useRoute as jest.Mock).mockReturnValue({ params: { addDevice: true } })
   afterEach(() => (useRoute as jest.Mock).mockReturnValue({ params: {} }))
 
+  // IN-50 (226, Galaxy S25+): on a tall phone with large text, heading + words
+  // + a code as wide as the screen ran under the Next bar. The code's bottom
+  // rows and one finder square were hidden, so no camera could read it.
+  test('Add another device: the whole code fits in the space on screen, with a quiet zone around it', () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const tree = show()
+    const layout = (height: number) => ({ nativeEvent: { layout: { x: 0, y: 0, width: 400, height } } })
+    act(() => {
+      fireEvent(tree.getByTestId(id('AgentCreateScroll')), 'layout', layout(420))
+      fireEvent(tree.getByTestId(id('AgentBackupScanThisHeading')), 'layout', layout(70))
+    })
+    const code = tree.UNSAFE_getByType(QRCode).props as { size: number; quietZone?: number }
+    const quiet = code.quietZone ?? 0
+    expect(quiet).toBeGreaterThanOrEqual(16)
+    // Screen padding 20 + card padding 16 on each side, the heading and the gap under it.
+    expect(code.size + 2 * quiet).toBeLessThanOrEqual(420 - 2 * 20 - 2 * 16 - 70 - 8)
+    // The words say the path that works, and nothing that contradicts it.
+    expect(tree.getByTestId(id('AgentBackupAddressQr'))).toHaveTextContent(/CreateAgent\.BackupScanThisBody/)
+  })
+
   test('once linked, setup goes straight to Ready: no backup step', () => {
     linked()
     const tree = show()
@@ -202,6 +228,34 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     return tree
   }
 
+  // #30: the other phone now shows its code as a QR; this phone scans it.
+  test('Scan its code: the scanned code fills the field, and adding it becomes the main button', () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    mockOpenScanner.mockClear()
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentBackupNext')))
+    fireEvent.press(tree.getByTestId(id('AgentBackupScanButton')))
+    expect(mockOpenScanner).toHaveBeenCalled()
+    act(() => {
+      deviceCodeScan.claim('did:key:z6MkNewPhone')
+    })
+    expect(tree.getByTestId(id('AgentBackupCodeInput')).props.value).toBe('did:key:z6MkNewPhone')
+    expect(tree.getByTestId(id('AgentBackupAdd'))).toHaveTextContent('CreateAgent.AddThisPhone')
+    deviceCodeScan.cancel()
+  })
+
+  test("the agent's code can be shown as text, for an app with no camera", () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const tree = show()
+    expect(tree.queryByTestId(id('AgentBackupAddressText'))).toBeNull()
+    fireEvent.press(tree.getByTestId(id('AgentBackupShowAsText')))
+    expect(tree.getByTestId(id('AgentBackupAddressText'))).toHaveTextContent(VTA)
+  })
+
   test("Add another device: the other phone's code is added, and it returns to My devices", async () => {
     linked()
     asAddDevice()
@@ -217,6 +271,27 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     })
     expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'CreateAgent.BackupLabel')
     expect(navigation.goBack).toHaveBeenCalled()
+  })
+
+  // IN-52: the other phone's Share sends a sentence with the code on its own
+  // line; pasted whole, it was refused as "That isn't a device code".
+  test('a pasted message with the code in it adds the code, not the message', async () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const add = jest
+      .spyOn(vtaAgent, 'addBackupDevice')
+      .mockResolvedValue({ did: 'did:peer:2.Vz6MkOther', role: 'admin', label: 'Backup phone', thisPhone: false })
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentBackupNext')))
+    fireEvent.changeText(
+      tree.getByTestId(id('AgentBackupCodeInput')),
+      'Add this code to agents.example so my phone can use it:\n\ndid:peer:2.Vz6MkOther\n'
+    )
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentBackupAdd')))
+    })
+    expect(add).toHaveBeenCalledWith({}, 'did:peer:2.Vz6MkOther', 'CreateAgent.BackupLabel')
   })
 
   test('return on the code field adds the device: the button may be under the keyboard', async () => {

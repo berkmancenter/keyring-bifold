@@ -19,6 +19,7 @@ import type { EnrolmentOffer } from '@bifold/trust-tasks'
 import type { AgentLabel } from './agentLabel'
 import {
   ManagerKeyUnresolved,
+  SwapDoneSignInFailed,
   VTA_TASK,
   VtaClient,
   resolveVtaMediator,
@@ -30,11 +31,16 @@ import { GenericRecordsIdentityStore, type VtiIdentityStore } from './VtiIdentit
 import { GenericRecordsVtaLinkStore, type VtaLinkStore } from './VtaLinkStore'
 import { createVtiTemporaryDidKey } from './VtiMediatorTransport'
 import {
+  clearThisDeviceWake,
   listAgentDevices,
   registerThisDevice,
   removeAgentDevice,
   renameThisDevice,
+  setThisDeviceWake,
   type AgentDevice,
+  type PushPlatform,
+  type WakeChannel,
+  type WakeHandle,
 } from './vtaDevices'
 import {
   agentVersion,
@@ -83,6 +89,12 @@ export interface VtaAgentState {
   link: VtaLinkState
   /** Whether the first-link introduction has been seen (plan §4.1). */
   introSeen: boolean
+  /**
+   * Reconnecting stopped after {@link MAX_RECONNECT_TRIES} tries in a row: the
+   * agent screen says the agent didn't answer, with Try again (`tryAgainNow`),
+   * instead of a loop out of sight. Cleared by any sign-in that works.
+   */
+  reconnectGaveUp?: boolean
   /** What the agent did, newest first, in this session — the agent screen's "What your agent did". */
   activity: VtaActivity[]
   /**
@@ -144,6 +156,12 @@ export interface VtaAgentDeps {
    */
   confirmOwner?: ConfirmOwner
   /**
+   * How long an owner act (adding a device) may take once the owner has
+   * confirmed: signing in plus the agent's answer. Past it the act gives up
+   * as `noAnswer` instead of leaving the screen waiting (IN-53). Tests shorten it.
+   */
+  ownerActDeadlineMs?: number
+  /**
    * Whether this phone has a screen lock or biometrics, so an owner key made
    * on it is protected (plan §3). Unset, "Create my agent" refuses with
    * {@link OwnerCheckNotConfigured}.
@@ -200,6 +218,15 @@ export const GRANT_CHECK_DEADLINE_MS = 10000
  * time was thrown away (Android, 2026-09-24: connect ≈5.5 s, answer ≈4.3 s).
  */
 export const GRANT_CONNECT_DEADLINE_MS = 30000
+/** How long a background sign-in may take before it counts as a drop and is retried (IN-53). */
+export const SESSION_CONNECT_DEADLINE_MS = 30000
+/**
+ * Signing in and the agent's answer to an owner act (adding a device): the
+ * grant's own reply wait is 30 s once sent, and signing in comes before it.
+ */
+export const OWNER_ACT_DEADLINE_MS = 45000
+/** Reconnect tries in a row (1 s, 2 s, 4 s, 8 s, 16 s apart) before the agent screen says it didn't answer. */
+export const MAX_RECONNECT_TRIES = 5
 
 /** Matches VtaClient's own "no answer in time" — a silence, not a refusal. */
 const NO_ANSWER = /the VTA did not answer/
@@ -697,7 +724,9 @@ export class VtaAgentController {
       try {
         await client.rotateManagerKey()
       } catch (error) {
-        if (!(await this.swapStillOpen(error, identities, vtaDid))) {
+        // Swapped, but the new key's sign-in failed: linked, and it reconnects (below).
+        const swapDone = error instanceof SwapDoneSignInFailed
+        if (!swapDone && !(await this.swapStillOpen(error, identities, vtaDid))) {
           // Settled on the VTA's word that the swap never happened (or it was
           // refused outright): the attempt failed, as before, and is forgotten.
           await links.clear().catch(() => undefined)
@@ -771,8 +800,8 @@ export class VtaAgentController {
    * into their own console — upstream's Grant access form, or the Farm's
    * admin-DID step. Nothing is submitted anywhere by the phone.
    */
-  async startManualLink(agent: Agent, vtaDid: string, label: string): Promise<void> {
-    return this.beginManualLink(agent, vtaDid, label, false)
+  async startManualLink(agent: Agent, vtaDid: string, label: string, opts: { via?: 'scan' } = {}): Promise<void> {
+    return this.beginManualLink(agent, vtaDid, label, false, opts.via)
   }
 
   /**
@@ -792,7 +821,13 @@ export class VtaAgentController {
     return this.beginManualLink(agent, vtaDid, label, true)
   }
 
-  private async beginManualLink(agent: Agent, vtaDid: string, label: string, owner: boolean): Promise<void> {
+  private async beginManualLink(
+    agent: Agent,
+    vtaDid: string,
+    label: string,
+    owner: boolean,
+    via?: 'scan'
+  ): Promise<void> {
     if (this.state.link.kind !== 'notLinked') return
     this.ownerFor = owner ? vtaDid : undefined
     const token = ++this.attemptToken
@@ -811,7 +846,7 @@ export class VtaAgentController {
         stage: 'temporary',
       })
       if (token !== this.attemptToken) return
-      this.dispatch({ type: 'keyShown', vtaDid, label, did })
+      this.dispatch({ type: 'keyShown', vtaDid, label, did, ...(via ? { via } : {}) })
     } catch (error) {
       if (token !== this.attemptToken) return
       const detail = error instanceof Error ? error.message : String(error)
@@ -927,13 +962,35 @@ export class VtaAgentController {
     let mine = await this.phoneKeys(agent, vtaDid)
     if (mine.includes(did)) throw new DeviceActionRefused('thisPhone')
     await this.confirmOwner('Add a backup device to your agent')
-    const client = await this.signedIn(agent, vtaDid)
-    mine = await this.phoneKeys(agent, vtaDid)
-    if (mine.includes(did)) throw new DeviceActionRefused('thisPhone')
-    const entry = await client.grantAdmin(did, { label }).catch((error: unknown) => {
-      throw this.refused(error)
+    return this.withinOwnerDeadline(async () => {
+      const client = await this.signedIn(agent, vtaDid)
+      mine = await this.phoneKeys(agent, vtaDid)
+      if (mine.includes(did)) throw new DeviceActionRefused('thisPhone')
+      const entry = await client.grantAdmin(did, { label }).catch((error: unknown) => {
+        throw this.refused(error)
+      })
+      return deviceFrom(entry, mine)
     })
-    return deviceFrom(entry, mine)
+  }
+
+  /**
+   * An owner act, bounded: signing in has no deadline of its own (resolving the
+   * agent's mediator and opening the session), so an agent that cannot be
+   * reached kept "Add as backup" spinning for minutes (IN-53, a Farm-hosted
+   * agent on 226). Past the deadline it is `noAnswer` — "Your agent didn't
+   * answer. Check the list before trying again." — since the act may still land.
+   */
+  private async withinOwnerDeadline<T>(act: () => Promise<T>): Promise<T> {
+    const ms = this.deps.ownerActDeadlineMs ?? OWNER_ACT_DEADLINE_MS
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new DeviceActionRefused('noAnswer')), ms)
+    })
+    try {
+      return await Promise.race([act(), late])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   /**
@@ -1013,6 +1070,30 @@ export class VtaAgentController {
     const vtaDid = this.agentAddress()
     if (!vtaDid) return undefined
     return this.signedIn(agent, vtaDid)
+  }
+
+  /**
+   * Tell this phone's agent how to wake it: the handle a push gateway gave for
+   * its push token (push notifications plan §4.4). The agent provisions the
+   * gateway itself; the phone signs nothing there.
+   */
+  async setThisDeviceWake(
+    agent: Agent,
+    wake: WakeHandle,
+    opts: { pushPlatform?: PushPlatform; suggestedTriggers?: string[] } = {}
+  ): Promise<WakeChannel> {
+    const client = await this.signedIn(agent, this.linkedAgent())
+    return setThisDeviceWake(client, wake, opts).catch((error: unknown) => {
+      throw this.refused(error)
+    })
+  }
+
+  /** Stop this phone's agent waking it: sent before the phone unlinks (plan §8). */
+  async clearThisDeviceWake(agent: Agent): Promise<WakeChannel> {
+    const client = await this.signedIn(agent, this.linkedAgent())
+    return clearThisDeviceWake(client).catch((error: unknown) => {
+      throw this.refused(error)
+    })
   }
 
   /** Rename this phone on its agent (#10): a heartbeat carrying the new name. */
@@ -1193,8 +1274,9 @@ export class VtaAgentController {
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.retryTimer = undefined
     try {
-      await this.connect(agent, link.vtaDid)
+      await this.signInWithin(agent, link.vtaDid)
       this.reconnectAttempt = 0
+      if (this.state.reconnectGaveUp) this.set({ reconnectGaveUp: false })
       this.dispatch({ type: 'sessionOpened' })
       void this.holdPersonaKeys(agent, link.vtaDid)
     } catch (error) {
@@ -1225,9 +1307,52 @@ export class VtaAgentController {
     }
   }
 
+  /**
+   * Sign in, bounded. Signing in has no deadline of its own (resolving the
+   * agent's mediator, opening the session), and while one is in flight every
+   * other attempt returns at once (`reconnecting`): one that never settled
+   * kept the phone from its agent for good, through foregrounds, unlocks and
+   * retries, with nothing in the log (IN-53, 226). Past the deadline the
+   * half-open client is let go and it counts as a drop, so the usual retry
+   * follows.
+   */
+  private async signInWithin(agent: Agent, vtaDid: string): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        // The sign-in in flight is shared by every caller (`opening`): let it
+        // go, or the next attempt would wait on the same one.
+        const stuck = this.opening
+        if (stuck) {
+          this.opening = undefined
+          void stuck.client.disconnect().catch(() => undefined)
+        }
+        reject(new Error(`the VTA did not answer: signing in took over ${SESSION_CONNECT_DEADLINE_MS / 1000} s`))
+      }, SESSION_CONNECT_DEADLINE_MS)
+    })
+    try {
+      await Promise.race([this.connect(agent, vtaDid), late])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** "Try again" after reconnecting stopped: a fresh set of tries, starting now. */
+  async tryAgainNow(agent: Agent): Promise<void> {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = undefined
+    this.reconnectAttempt = 0
+    this.set({ reconnectGaveUp: false })
+    await this.ensureOnline(agent)
+  }
+
   private scheduleReconnect(agent: Agent) {
     if (this.retryTimer || this.state.link.kind !== 'linked') return
     const attempt = ++this.reconnectAttempt
+    if (attempt > MAX_RECONNECT_TRIES) {
+      this.set({ reconnectGaveUp: true })
+      return
+    }
     const delay = reconnectDelayMs(attempt - 1)
     this.dispatch({ type: 'retryScheduled', attempt, nextRetryAt: this.now() + delay })
     this.retryTimer = setTimeout(() => {
