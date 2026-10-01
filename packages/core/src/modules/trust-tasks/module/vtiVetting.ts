@@ -50,13 +50,15 @@ import {
   verifyEligibilityPresentation,
   type EligibilityRefusal,
 } from './vtiEligibility'
+import { VETTING_SCHEMAS } from './vettingSchemas'
 import { againstSchema, checkVetterProfile, checkVettingRequirements } from './vettingShape'
+import { purposeForDocumentType } from './proofPurpose'
 
 export const VETTING = {
   request: 'https://trusttasks.org/spec/vetting/request/0.1',
   session: 'https://trusttasks.org/spec/vetting/session/0.1',
   decline: 'https://trusttasks.org/spec/vetting/decline/0.1',
-  revokeStatement: 'https://trusttasks.org/spec/vetting/revoke-statement/0.1',
+  revokeStatement: 'https://trusttasks.org/spec/vtc/vetting/revoke-statement/0.1',
   vettersList: 'https://trusttasks.org/spec/vtc/vetting/vetters/list/0.1',
   vettersProfile: 'https://trusttasks.org/spec/vtc/vetting/vetters/profile/0.1',
 } as const
@@ -534,6 +536,7 @@ async function signedDocument(
   return signDocumentProof(agent, doc, persona.did, {
     kmsKeyId: persona.kmsKeyIds?.signing,
     verificationMethodId: persona.vtaKeyIds.signing,
+    proofPurpose: purposeForDocumentType(String(doc.type)),
   })
 }
 
@@ -688,6 +691,38 @@ export interface VettingCardExpectations {
 }
 
 /**
+ * A card with only the members the published schema names, at the top and in
+ * each claim, for the shape check alone.
+ *
+ * The schema forbids any other member (`additionalProperties: false`,
+ * vetting-card.schema.json). Salted credentials are coming (maintainer sync,
+ * 2026-09-25): optional salt members that must be honoured when present, not
+ * yet in the spec. A card carrying one, or any member a later version adds,
+ * was refused as malformed. It is now read for the members Keyring knows,
+ * while the proof is still checked over the whole card as it arrived, so what
+ * is not read is still the applicant's. Nothing Keyring builds, hashes, signs
+ * or keeps changes: the projection is used for the shape check only.
+ */
+function knownCardMembers(card: unknown): unknown {
+  if (!card || typeof card !== 'object' || Array.isArray(card)) return card
+  const schema = VETTING_SCHEMAS.vettingCard as {
+    properties: Record<string, unknown>
+    $defs: { VettingCardClaim: { properties: Record<string, unknown> } }
+  }
+  const pick = (from: Record<string, unknown>, names: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(from).filter(([name]) => name in names))
+  const known = pick(card as Record<string, unknown>, schema.properties)
+  if (Array.isArray(known.claims)) {
+    known.claims = known.claims.map((claim) =>
+      claim && typeof claim === 'object' && !Array.isArray(claim)
+        ? pick(claim as Record<string, unknown>, schema.$defs.VettingCardClaim.properties)
+        : claim
+    )
+  }
+  return known
+}
+
+/**
  * Verify a Vetting Card as vta-sdk `verify_card` does (card.rs:270-327), plus
  * the spec's session-expiry bound: the published shape, the five bindings, the
  * validity window with `CLOCK_SKEW`, the publisher's `assertionMethod` proof,
@@ -703,7 +738,9 @@ export async function verifyVettingCard(
   expect: VettingCardExpectations
 ): Promise<{ ok: true } | { ok: false; code: VettingCardRefusal; detail: string }> {
   const refuse = (code: VettingCardRefusal, detail: string) => ({ ok: false as const, code, detail })
-  const shape = againstSchema('vettingCard', card)
+  // The shape is checked on the members the published schema names; the
+  // proof, below, over the card exactly as it arrived (`knownCardMembers`).
+  const shape = againstSchema('vettingCard', knownCardMembers(card))
   if (!shape.ok) return refuse('malformed', shape.detail)
   const c = card as Record<string, unknown> & { claims: { type: string; value: unknown }[] }
   for (const member of ['audience', 'publisher', 'community', 'challenge', 'domain'] as const) {
@@ -822,7 +859,8 @@ export class VtiVetterDesk {
     // for the profile payload, protocols/vetting.rs:570-597, which the
     // community applies): the schema, and the event rule the schema states in
     // prose only — an https `url`, and `endDate` on or after `startDate` and
-    // at most 31 days after it. Signed by `vtiAgent.ask` (its SIGNED_TASKS).
+    // at most 31 days after it. Signed by `vtiAgent.ask`, which signs
+    // everything it sends.
     const shape = checkVetterProfile(payload)
     if (!shape.ok) throw new VetterProfileError(shape.detail)
     // The community's document may not be in the resolver's cache on this

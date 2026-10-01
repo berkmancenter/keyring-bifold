@@ -12,11 +12,16 @@
 
 import type { Agent } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
-import { Platform } from 'react-native'
+import { DeviceEventEmitter, Platform } from 'react-native'
 
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
+import { agentGoneVerdict, type AgentGoneWhy } from './agentGone'
 import type { AgentLabel } from './agentLabel'
+import { classifyDid, type DidResolverAgent } from './classifyDid'
+import { VTI_PERSONA_KEYS_HELD_EVENT } from './communityChanged'
+import { checkConsentRequest, consentMatchCode, consentOutcome, type ConsentOutcome } from './consentCheck'
+import type { StepUpRequest } from './stepUp'
 import {
   ManagerKeyUnresolved,
   SwapDoneSignInFailed,
@@ -71,6 +76,15 @@ export interface VtiApproval extends VtaConsentRequest {
   receivedAt: string
   status: 'pending' | 'approved' | 'denied' | 'expired' | 'failed'
   error?: string
+  /** The code to compare with the screen that asked (vta-sdk `match_code`); none for a digest that is not one. */
+  matchCode?: string
+  /** What approving would do: the dry-run effects, else the task's consequences, else unknown. */
+  outcome?: ConsentOutcome
+  /**
+   * How the request fared against `ConsentRequest::verify`: `verified`, or why
+   * not. Log-only for now — a request that fails is still listed.
+   */
+  requestCheck?: 'verified' | string
 }
 
 export interface VtaAgentState {
@@ -80,6 +94,12 @@ export interface VtaAgentState {
   approvals: VtiApproval[]
   /** A task of ours the VTA is holding for someone else's consent. */
   awaitingConsentFor?: string
+  /**
+   * The agent asks this phone to confirm it is the person before it does a
+   * task (a step-up): its own reason, shown as sent, and the task. Answered
+   * with `answerStepUp`; the owner check follows a confirmation.
+   */
+  stepUpAsk?: { id: string; reason: string; taskType?: string }
   error?: string
   /**
    * Whether this phone is linked to an agent, and how that link is doing
@@ -138,6 +158,8 @@ const ACTIVITY_LIMIT = 20
 export interface VtaAgentDeps {
   fetch?: typeof fetch
   linkStore?: (agent: Agent) => VtaLinkStore
+  /** Whether the agent's address exists: its DID host says `notFound`, it resolves (`found`), or no one could tell. */
+  agentAddress?: (agent: Agent, vtaDid: string) => Promise<'notFound' | 'found' | 'unknown'>
   identityStore?: (agent: Agent) => VtiIdentityStore
   communityStore?: (agent: Agent) => Pick<VtiCommunityStore, 'forgetCommunity'>
   enrol?: {
@@ -220,6 +242,8 @@ export const GRANT_CHECK_DEADLINE_MS = 10000
 export const GRANT_CONNECT_DEADLINE_MS = 30000
 /** How long a background sign-in may take before it counts as a drop and is retried (IN-53). */
 export const SESSION_CONNECT_DEADLINE_MS = 30000
+/** How long Unlink waits on the agent to hear it (wake cleared, sessions ended) before it unlinks anyway. */
+export const UNLINK_TELL_DEADLINE_MS = 5000
 /**
  * Signing in and the agent's answer to an owner act (adding a device): the
  * grant's own reply wait is 30 s once sent, and signing in comes before it.
@@ -227,6 +251,9 @@ export const SESSION_CONNECT_DEADLINE_MS = 30000
 export const OWNER_ACT_DEADLINE_MS = 45000
 /** Reconnect tries in a row (1 s, 2 s, 4 s, 8 s, 16 s apart) before the agent screen says it didn't answer. */
 export const MAX_RECONNECT_TRIES = 5
+
+/** How long the step-up card waits for the person; unanswered, nothing is sent. */
+export const STEP_UP_ASK_TIMEOUT_MS = 120_000
 
 /** Matches VtaClient's own "no answer in time" — a silence, not a refusal. */
 const NO_ANSWER = /the VTA did not answer/
@@ -395,6 +422,7 @@ export class VtaAgentController {
       },
       onInbound: (plaintext) => this.inbound(plaintext),
       onConsentPending: ({ taskType }) => this.set({ awaitingConsentFor: taskType }),
+      onStepUp: (request, context) => this.askStepUp(request, context),
     })
     // The client replaced for the agent an unlock handed over keeps what the
     // screen shows: the new session opens quietly behind it.
@@ -545,6 +573,7 @@ export class VtaAgentController {
    */
   async unlink(agent: Agent): Promise<void> {
     const vtaDid = this.state.link.kind === 'notLinked' ? undefined : this.state.link.vtaDid
+    await this.tellAgentBeforeUnlink()
     this.attemptToken++
     this.offer = undefined
     this.ownerFor = undefined
@@ -570,6 +599,26 @@ export class VtaAgentController {
     })
     this.dispatch({ type: 'unlinked' })
     this.note('unlinked')
+  }
+
+  /**
+   * Before the local unlink, tell a reachable agent (A6, upstream alignment):
+   * stop waking this phone (`device/set-wake`, empty), then end this phone's
+   * sessions (`auth/revoke-session/0.2`, `all`). Best-effort and bounded by
+   * {@link UNLINK_TELL_DEADLINE_MS}: offline, nothing is sent; a refusal or a
+   * silence changes nothing, and the phone unlinks either way.
+   */
+  private async tellAgentBeforeUnlink(): Promise<void> {
+    const link = this.state.link
+    const client = this.current?.client
+    if (link.kind !== 'linked' || link.connection.kind !== 'online' || !client) return
+    const tell = (async () => {
+      await clearThisDeviceWake(client).catch(() => undefined)
+      await client.task(VTA_TASK.revokeSession, { all: true, reason: 'Unlinked on this phone' }).catch(() => undefined)
+    })()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([tell, new Promise<void>((resolve) => (timer = setTimeout(resolve, UNLINK_TELL_DEADLINE_MS)))])
+    clearTimeout(timer)
   }
 
   /**
@@ -1073,6 +1122,16 @@ export class VtaAgentController {
   }
 
   /**
+   * A presence tick that failed. The agent answers a phone another device
+   * removed with "DID not in ACL" (a signed permissionDenied, vta-service
+   * messaging/auth.rs), which moves the link to removed, as a refused owner
+   * act does; anything else — no answer, the network — is tried next tick.
+   */
+  presenceFailed(error: unknown): void {
+    this.refused(error)
+  }
+
+  /**
    * Tell this phone's agent how to wake it: the handle a push gateway gave for
    * its push token (push notifications plan §4.4). The agent provisions the
    * gateway itself; the phone signs nothing there.
@@ -1196,7 +1255,9 @@ export class VtaAgentController {
         )
       }
     } catch (e) {
-      agent.config?.logger?.warn?.(`[VTA] moving identities' keys into memory: ${e instanceof Error ? e.message : String(e)}`)
+      agent.config?.logger?.warn?.(
+        `[VTA] moving identities' keys into memory: ${e instanceof Error ? e.message : String(e)}`
+      )
     }
     const personas = await Promise.resolve(this.identityStore(agent).listPersonas?.())
       .then((all) => (all ?? []).filter((p) => p.vtaDid === vtaDid))
@@ -1204,6 +1265,7 @@ export class VtaAgentController {
     for (const persona of personas) {
       try {
         await this.client(agent, vtaDid).holdPersonaKeys(persona)
+        DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: persona.did })
       } catch (e) {
         agent.config?.logger?.warn?.(
           `[VTA] fetching ${persona.did}'s keys into memory: ${e instanceof Error ? e.message : String(e)}`
@@ -1235,6 +1297,55 @@ export class VtaAgentController {
     const record = await Promise.resolve(this.identityStore(agent).getManager?.(vtaDid)).catch(() => undefined)
     const signedInAs = this.current?.vtaDid === vtaDid ? this.current.client.managerDid : undefined
     return [record?.did, record?.pendingNext?.did, signedInAs].filter((d): d is string => Boolean(d))
+  }
+
+  /** The answer to the step-up card on screen now, if it is still there. */
+  private stepUpAnswer?: { id: string; answer: (choice: 'approve' | 'deny') => void }
+
+  /**
+   * The agent asks for a step-up. The person first sees its reason, as sent,
+   * on a card in the app (the 228 lab check: on Android the owner check right
+   * after an act's own check passed without a prompt, so a reason that lived
+   * only in that prompt was never seen). Confirmed, the owner check runs;
+   * cancelled there, or "Don't allow" on the card, is a signed no. Nothing is
+   * sent for a check that failed or a card left unanswered.
+   */
+  private async askStepUp(request: StepUpRequest, context: { taskType?: string } = {}): Promise<'approve' | 'deny'> {
+    const confirm = this.deps.confirmOwner
+    if (!confirm) throw new OwnerCheckNotConfigured('confirmOwner')
+    const id = `step-up-${request.challenge.slice(0, 12)}-${this.now()}`
+    const choice = await new Promise<'approve' | 'deny' | undefined>((resolve) => {
+      const timer = setTimeout(() => resolve(undefined), STEP_UP_ASK_TIMEOUT_MS)
+      this.stepUpAnswer = {
+        id,
+        answer: (c) => {
+          clearTimeout(timer)
+          resolve(c)
+        },
+      }
+      this.set({
+        stepUpAsk: { id, reason: request.reason, ...(context.taskType ? { taskType: context.taskType } : {}) },
+      })
+    })
+    if (this.stepUpAnswer?.id === id) this.stepUpAnswer = undefined
+    if (this.state.stepUpAsk?.id === id) this.set({ stepUpAsk: undefined })
+    if (choice === undefined) throw new OwnerNotConfirmed('cancelled', 'the extra check was not answered')
+    if (choice === 'deny') return 'deny'
+    let answer: Awaited<ReturnType<ConfirmOwner>> | undefined
+    try {
+      answer = await confirm(request.reason)
+    } catch (error) {
+      throw new OwnerNotConfirmed('failed', error instanceof Error ? error.message : String(error))
+    }
+    if (answer?.ok === true) return 'approve'
+    if (answer?.reason === 'cancelled') return 'deny'
+    throw new OwnerNotConfirmed(answer?.reason ?? 'failed')
+  }
+
+  /** The person answered the step-up card `id`; an answer for a card no longer shown is ignored. */
+  answerStepUp(id: string, choice: 'approve' | 'deny'): void {
+    if (this.stepUpAnswer?.id !== id) return
+    this.stepUpAnswer.answer(choice)
   }
 
   /** The owner check, first thing in every owner act. Throws unless the person confirmed. */
@@ -1278,6 +1389,7 @@ export class VtaAgentController {
       this.reconnectAttempt = 0
       if (this.state.reconnectGaveUp) this.set({ reconnectGaveUp: false })
       this.dispatch({ type: 'sessionOpened' })
+      void this.noteReached(agent, link.vtaDid)
       void this.holdPersonaKeys(agent, link.vtaDid)
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
@@ -1302,9 +1414,61 @@ export class VtaAgentController {
       }
       this.dispatch({ type: 'sessionDropped', reason, now: this.now() })
       this.scheduleReconnect(agent)
+      // Beside the retry, never in front of it: the lookup can take seconds.
+      void this.markIfGone(agent, link.vtaDid)
     } finally {
       this.reconnecting = false
     }
+  }
+
+  /** The agent answered: keep when, and forget any "not found" seen before (agentGone.ts). */
+  private async noteReached(agent: Agent, vtaDid: string): Promise<void> {
+    const store = this.linkStore(agent)
+    const link = await store.get().catch(() => undefined)
+    if (!link || link.vtaDid !== vtaDid) return
+    const now = this.now()
+    // One write an hour is plenty for a threshold counted in days.
+    const fresh = link.lastOnlineAt !== undefined && now - link.lastOnlineAt < 60 * 60 * 1000
+    if (fresh && link.notFoundAt === undefined) return
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { notFoundAt: _forgotten, ...rest } = link
+    await store.set({ ...rest, lastOnlineAt: now }).catch(() => undefined)
+  }
+
+  /** A gone agent is said once, with a way on (a new agent), and retrying stops. */
+  private async markIfGone(agent: Agent, vtaDid: string): Promise<void> {
+    const why = await this.goneFor(agent, vtaDid)
+    const link = this.state.link
+    if (!why || link.kind !== 'linked' || link.vtaDid !== vtaDid) return
+    this.dispatch({ type: 'agentGone', why, now: this.now() })
+    if (this.state.link.kind === 'linked' && this.state.link.connection.kind === 'gone' && this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = undefined
+    }
+  }
+
+  /**
+   * After a failed sign-in: is the agent gone for good? Its address is looked
+   * up, what that says is kept with the link, and the thresholds decide.
+   */
+  private async goneFor(agent: Agent, vtaDid: string): Promise<AgentGoneWhy | undefined> {
+    const store = this.linkStore(agent)
+    const link = await store.get().catch(() => undefined)
+    if (!link || link.vtaDid !== vtaDid) return undefined
+    const lookUp = this.deps.agentAddress ?? agentAddressOf
+    const address = await lookUp(agent, vtaDid).catch(() => 'unknown' as const)
+    const verdict = agentGoneVerdict(link, {
+      notFound: address === 'unknown' ? undefined : address === 'notFound',
+      now: this.now(),
+    })
+    if (verdict.notFoundAt !== link.notFoundAt) {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { notFoundAt: _previous, ...rest } = link
+      await store
+        .set(verdict.notFoundAt !== undefined ? { ...rest, notFoundAt: verdict.notFoundAt } : rest)
+        .catch(() => undefined)
+    }
+    return verdict.gone
   }
 
   /**
@@ -1382,13 +1546,40 @@ export class VtaAgentController {
     if (body?.type === VTA_TASK.consentRequest && body.payload?.challenge) {
       const id = String(body.id ?? body.payload.challenge)
       if (this.state.approvals.some((a) => a.id === id)) return
-      const approval: VtiApproval = { ...body.payload, id, receivedAt: new Date().toISOString(), status: 'pending' }
+      const approval: VtiApproval = {
+        ...body.payload,
+        id,
+        receivedAt: new Date().toISOString(),
+        status: 'pending',
+        matchCode: consentMatchCode(body.payload.payloadDigest),
+        outcome: consentOutcome(body.payload),
+      }
       this.set({ approvals: [approval, ...this.state.approvals] })
+      void this.checkRequest(id, body as unknown as Record<string, unknown>)
       return
     }
     if (body?.type === VTA_TASK.consentGranted) {
       this.set({ awaitingConsentFor: undefined })
     }
+  }
+
+  /** Check a consent request against the linked agent and this phone, and log the verdict (log-only). */
+  private async checkRequest(id: string, doc: Record<string, unknown>) {
+    const current = this.current
+    const approver = current?.client.managerDid
+    if (!current || !approver) return
+    const log = current.agent.config?.logger
+    const verdict = await checkConsentRequest(current.agent, doc, { vtaDid: current.vtaDid, approver }).catch(() => ({
+      ok: false as const,
+      reason: 'proof' as const,
+    }))
+    const requestCheck = verdict.ok ? 'verified' : verdict.reason
+    if (verdict.ok) log?.info?.(`[TrustTasks:VtaAgent] consent request ${id} verified`)
+    else
+      log?.warn?.(
+        `[TrustTasks:VtaAgent] consent request ${id} did not pass the check (${verdict.reason}); listed anyway`
+      )
+    this.update(id, { requestCheck })
   }
 
   /** Answer a consent request; the decision is signed by this phone's manager identity. */
@@ -1424,6 +1615,13 @@ function deviceFrom(entry: VtaAclEntry, mine: string[]): VtaDevice {
 }
 
 export const vtaAgent = new VtaAgentController()
+
+/** The agent's address, looked up once more: bounded, so a failed sign-in is not held up by it. */
+async function agentAddressOf(agent: Agent, vtaDid: string): Promise<'notFound' | 'found' | 'unknown'> {
+  const kind = await classifyDid(agent as unknown as DidResolverAgent, vtaDid, { timeoutMs: 10_000 })
+  if (kind.kind !== 'unresolvable') return 'found'
+  return kind.reason === 'notFound' ? 'notFound' : 'unknown'
+}
 
 /**
  * Whether `did` resolves, fresh from its host, with every key in `keys` — asked

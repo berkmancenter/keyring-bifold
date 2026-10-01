@@ -24,6 +24,7 @@ import { testIdWithKey } from '../utils/testable'
 import { vtaAgent } from '../modules/trust-tasks/module/vtaAgent'
 import { isLinkOnline, useAgentPresence } from '../modules/trust-tasks/module/vtaPresence'
 import { SiblingNoticeHost } from '../modules/trust-tasks/screens/SiblingNoticeHost'
+import { StepUpAskHost } from '../modules/trust-tasks/screens/StepUpAskHost'
 import { VtaOfflineBanner } from '../modules/trust-tasks/screens/VtaStatus'
 import { MY_AGENT_SCREEN, keyringAgentLinkKind } from '../modules/trust-tasks/module/vtiLinks'
 import { linkNoticeToast, openKeyringLink, type KeyringLinkNotice } from '../modules/trust-tasks/module/keyringLinkOpen'
@@ -33,6 +34,7 @@ import { useVtiWalletCards } from '../modules/trust-tasks/module/vtiWalletCards'
 import '../modules/trust-tasks/screens/communityCardDisplay'
 import { useVtiPersonaInbox } from '../modules/trust-tasks/module/vtiPersonaInbox'
 import { useVtiRefusedCardNotice } from '../modules/trust-tasks/screens/refusedCardNotice'
+import { useVtiRemovedNotice } from '../modules/trust-tasks/screens/removedNotice'
 import { communityTarget } from '../modules/trust-tasks/module/vtiCommunityLink'
 import { useChosenCommunityDid } from '../modules/trust-tasks/screens/useCommunity'
 
@@ -87,7 +89,12 @@ const TabStack: React.FC = () => {
     () => (agent && linkOnline ? () => vtaAgent.presencePort(agent) : undefined),
     [agent, linkOnline]
   )
-  useAgentPresence(presencePort)
+  // A removed phone learns it from its next refused heartbeat, not only at its next sign-in.
+  const presenceFailed = useCallback((error: unknown) => vtaAgent.presenceFailed(error), [])
+  const presenceLog = useCallback((message: string) => agent?.config.logger.warn(message), [agent])
+  useAgentPresence(presencePort, presenceFailed, presenceLog)
+  // A community's removal notice is said in plain words when it arrives.
+  useVtiRemovedNotice()
   const navigation = useNavigation<StackNavigationProp<TabStackParams>>()
   const { fontScale } = useWindowDimensions()
   const showLabels = fontScale * TabTheme.tabBarTextStyle.fontSize < 18
@@ -217,6 +224,8 @@ const TabStack: React.FC = () => {
       <VtaOfflineBanner />
       {/* "Also open as you": the presence loop above emits it (#10, part F). */}
       <SiblingNoticeHost />
+      {/* The agent asks to be sure it is the person before a task (a step-up, #200). */}
+      <StepUpAskHost />
       <Tab.Navigator
         initialRouteName={TabStacks.ContactStack}
         screenOptions={{

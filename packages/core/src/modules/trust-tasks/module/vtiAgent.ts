@@ -24,6 +24,7 @@ import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { tsp, TRUST_TASK_V2_ENVELOPE_TYPE } from '@bifold/trust-tasks'
 
 import { signDocumentProof } from '../documentProof'
+import { purposeForDocumentType } from './proofPurpose'
 import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import type { VtiPersona } from './VtiIdentityStore'
 import {
@@ -54,6 +55,8 @@ import {
 import { communityTarget } from './vtiCommunityLink'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import { fetchWaitingIfBusy } from './vtcBusy'
+import { didPrefix } from './didPrefix'
+import { releaseWarn } from './releaseLog'
 
 const MANIFEST = 'https://trusttasks.org/spec/vtc/join-requests/manifest/0.2'
 const SUBMIT = 'https://trusttasks.org/spec/vtc/join-requests/submit/0.2'
@@ -62,25 +65,25 @@ const WITHDRAW = 'https://trusttasks.org/spec/vtc/join-requests/withdraw/0.1'
 const SUPPLEMENT = 'https://trusttasks.org/spec/vtc/join-requests/supplement/0.1'
 const STATUS = 'https://trusttasks.org/spec/vtc/join-requests/status/0.1'
 const SELF_REMOVE = 'https://trusttasks.org/spec/vtc/members/self-remove/0.1'
-const VETTERS_PROFILE = 'https://trusttasks.org/spec/vtc/vetting/vetters/profile/0.1'
 const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
-/**
- * The community tasks this controller signs. Those whose specifications
- * declare the document `proof` REQUIRED — a VTC refuses them unsigned
- * (`proofRequired`) since vti #1672, over every carriage — and the vetter
- * profile, whose proof is RECOMMENDED so a published profile stays
- * attributable to its vetter after the transport has closed
- * (vtc/vetting/vetters/profile/0.1 spec.md:26-28), and which openvtc signs
- * (`publish_profile` → `sign_and_send`, openvtc vetting_actions.rs:1731-1760,
- * :1097-1110).
+/*
+ * Every document `ask` sends is signed. `ask` carries only DIDComm and TSP,
+ * and over those a VTC takes a document only when its proof is by its
+ * `issuer` and the issuer is the transport's sender (vti #1739; the spine's
+ * step 3a, vtc-service trust_tasks/mod.rs:401-414), whatever the task's own
+ * spec says about the proof. Before that, only the tasks whose specs declare
+ * the proof REQUIRED (vti #1672) and the vetter profile were signed, and the
+ * join manifest went out unsigned.
  *
- * The manifest stays unsigned. Its proof is RECOMMENDED too, but the spec's
- * own privacy analysis is why not: an unproofed read discloses no applicant
- * identifier, and a proof "converts an anonymous read into an attributable
- * one" of someone merely considering applying (vtc/join-requests/manifest/0.2
- * spec.md:26-28, :326-329). openvtc signs it; Keyring does not, on purpose.
+ * The manifest's proof is only RECOMMENDED, and the spec's privacy analysis is
+ * why Keyring left it off: an unproofed read discloses no applicant
+ * identifier, where a proof "converts an anonymous read into an attributable
+ * one" (vtc/join-requests/manifest/0.2 spec.md:26-28, :326-329). That still
+ * holds for the read that is anonymous, the REST one (`manifestOverRest`),
+ * which stays unsigned. Over DIDComm or TSP the transport has already named
+ * the persona to the community, so the proof discloses nothing more. openvtc
+ * signs every request, the manifest included.
  */
-const SIGNED_TASKS = new Set([SUBMIT, STATUS, WITHDRAW, SUPPLEMENT, SELF_REMOVE, VETTERS_PROFILE])
 
 /**
  * The community tasks `ask` may send twice: reads, which change nothing, so a
@@ -505,6 +508,11 @@ class VtiAgentController {
 
   private async deliver(received: DidCommV2PlaintextMessage): Promise<void> {
     const plaintext = unwrapBindingEnvelope(received)
+    // The type and DID prefixes only: this line reaches testers' problem
+    // reports, so never a body, a card or a whole identifier.
+    this.agent?.config?.logger?.info?.(
+      `vtiAgent: inbound ${String(plaintext.type ?? '')} from ${didPrefix(plaintext.from)} (session ${didPrefix(this.state.did)})`
+    )
     this.dropExpiredHolds()
     const entry = this.askAnswered(plaintext)
     if (entry) {
@@ -727,6 +735,7 @@ class VtiAgentController {
       peerRevisionStore?: TspPeerRevisionStore
     } = {}
   ): Promise<void> {
+    if (this.connecting) releaseWarn('vtiAgent: connect waits for an earlier sign-in to settle')
     while (this.connecting) await this.connecting.catch(() => undefined)
     const attempt = this.connectNow(agent, mediatorDid, options)
     this.connecting = attempt
@@ -746,12 +755,27 @@ class VtiAgentController {
     const wantedDid = options.persona?.did ?? options.identity?.did
     if (this.session?.isOpen && (!wantedDid || wantedDid === this.state.did)) return
     if (this.session) await this.disconnect()
+    // Each step of a sign-in, timed, in the Release log: the 227 gate's Farm run
+    // stopped between the persona's document and its mediator's, and nothing
+    // said so (releaseLog).
+    const t0 = Date.now()
+    const step = (what: string) =>
+      releaseWarn(
+        `vtiAgent: connect ${wantedDid ? didPrefix(wantedDid) : '(new identity)'} +${Date.now() - t0} ms: ${what}`
+      )
     try {
       this.set({ status: 'resolving', error: undefined })
+      step('resolving')
       const own = options.persona
-        ? await advertisedMediatorDid(agent, options.persona.did).catch(() => undefined)
+        ? await advertisedMediatorDid(agent, options.persona.did).catch((error) => {
+            step(
+              `the persona's document gave no mediator (${error instanceof Error ? error.message : String(error)}); using the configured one`
+            )
+            return undefined
+          })
         : undefined
       const mediatorDid = own ?? configuredMediatorDid
+      step(`mediator ${mediatorDid ? didPrefix(mediatorDid) : 'none'} (${own ? "the persona's own" : 'configured'})`)
       if (!mediatorDid) throw new Error('vtiAgent: no mediator — the persona names none and none is configured')
       if (own && configuredMediatorDid && own !== configuredMediatorDid) {
         agent.config.logger.info(
@@ -759,6 +783,7 @@ class VtiAgentController {
         )
       }
       const mediator = await resolveVtiMediator(agent, mediatorDid)
+      step(`mediator resolved: ws ${mediator.wsEndpoint}, auth ${mediator.authEndpoint}`)
       this.mediator = mediator
       this.mediatorDid = mediatorDid
       this.set({ status: 'authenticating', host: hostOf(mediator.wsEndpoint) })
@@ -783,15 +808,30 @@ class VtiAgentController {
       this.tsp = tspSession
       this.persona = options.persona
       this.peerRevisionStore = options.peerRevisionStore ?? this.peerRevisionStore
+      let first = true
+      const firstMessage = () => {
+        if (first) step('first message on the session')
+        first = false
+      }
       const session = new VtiMediatorSession(agent, identity, mediator, {
         onError: (error) => this.set({ error: error.message }),
         onMessage: (plaintext) => {
+          firstMessage()
           this.noteInbound(plaintext, 'didcomm')
           return this.deliver(plaintext)
         },
-        ...(tspSession ? { onTspFrame: (bytes: Uint8Array) => this.receiveTspFrame(bytes, did) } : {}),
+        ...(tspSession
+          ? {
+              onTspFrame: (bytes: Uint8Array) => {
+                firstMessage()
+                return this.receiveTspFrame(bytes, did)
+              },
+            }
+          : {}),
       })
+      step(`signing in as ${didPrefix(did)} (challenge, then the socket)`)
       await session.start()
+      step('socket open')
       // Discard any stale backlog the mediator flushes on live delivery before
       // a request could have a reply (see VtaClient.connect).
       await new Promise((resolve) => setTimeout(resolve, 2000))
@@ -809,7 +849,9 @@ class VtiAgentController {
         tspReady: Boolean(tspSession),
         peerRevisions: (await this.peerRevisionStore?.list().catch(() => undefined)) ?? this.state.peerRevisions ?? [],
       })
+      step('connected')
     } catch (error) {
+      step(`failed: ${error instanceof Error ? error.message : String(error)}`)
       this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
       throw error
     }
@@ -836,9 +878,25 @@ class VtiAgentController {
     const tspSession = this.tsp
     const agent = this.agent
     if (!tspSession || !agent) throw new Error(`${TSP_LOG_PREFIX} no TSP identity on this session`)
-    const result = await unpackTrustTaskFromPeer(tspSession, bytes, myDid)
+    let result: Awaited<ReturnType<typeof unpackTrustTaskFromPeer>>
+    try {
+      result = await unpackTrustTaskFromPeer(tspSession, bytes, myDid)
+    } catch (e) {
+      // Release-visible: a frame this persona cannot open is withheld from the
+      // mediator (the rethrow below) and nothing else says so. The sender is
+      // inside the frame, so only the error can name it.
+      const error = e as Error
+      releaseWarn(
+        `${TSP_LOG_PREFIX} TSP frame to ${didPrefix(myDid)} not opened (${error?.name ?? 'Error'}: ${String(error?.message ?? e).slice(0, 160)}); ${frameForm(bytes)} frame, ${bytes.length} bytes, left on the mediator`
+      )
+      throw e
+    }
     if (!result) {
-      agent.config.logger.info(`${TSP_LOG_PREFIX} TSP frame opened but carried no Trust Task envelope; ignored`)
+      // Acknowledged and dropped: the sender counts it delivered and does not
+      // fall back to DIDComm, so a Release build has to show it.
+      releaseWarn(
+        `${TSP_LOG_PREFIX} TSP frame to ${didPrefix(myDid)} opened but carried no Trust Task envelope; ignored (${frameForm(bytes)} frame, ${bytes.length} bytes)`
+      )
       return
     }
     const { plaintext, unpacked } = result
@@ -1077,18 +1135,20 @@ class VtiAgentController {
 
   /**
    * The Trust Task document `ask` sends: from this session's DID to the
-   * community, dated, and — for a task whose specification declares the proof
-   * REQUIRED — signed with the persona's borrowed key under the verification
-   * method its DID document names, exactly as a vetting task is signed. A VTC
+   * community, dated, and signed with the persona's borrowed key under the
+   * verification method its DID document names, exactly as a vetting task is
+   * signed (see the note after the task URIs at the top of this file for why
+   * every one is). A VTC
    * checks that the proof's key belongs to the document's `issuer`, so the
    * issuer is the persona and nothing else.
    *
    * A session that is not a persona (a phone-minted did:peer) has no key a
    * community could resolve, and a persona without a borrowed signing key
-   * cannot sign: either sends the document unsigned and says so, because a
-   * community before vti #1672 still accepts it and one after refuses it with
+   * cannot sign: either sends the document unsigned and says so, because an
+   * older community still accepts it and a current one refuses it with
    * `proofRequired` — an answer the caller already surfaces — rather than
-   * the wallet failing silently before asking.
+   * the wallet failing silently before asking. The manifest a fresh phone
+   * reads before it has a persona goes over REST first (`fetchManifest`).
    */
   private async taskDocument(
     communityDid: string,
@@ -1105,7 +1165,6 @@ class VtiAgentController {
       issuedAt: new Date().toISOString(),
       payload,
     }
-    if (!SIGNED_TASKS.has(type)) return document
     const persona = this.persona
     const agent = this.agent
     if (!agent || !persona || persona.did !== this.state.did || !persona.kmsKeyIds?.signing) {
@@ -1115,6 +1174,7 @@ class VtiAgentController {
     return signDocumentProof(agent, document, persona.did, {
       kmsKeyId: persona.kmsKeyIds.signing,
       verificationMethodId: persona.vtaKeyIds.signing,
+      proofPurpose: purposeForDocumentType(type),
     })
   }
 

@@ -43,17 +43,34 @@ import {
 } from './VtiMediatorTransport'
 import type { VtiIdentityStore, VtiManagerIdentity, VtiMintRequest, VtiPersona } from './VtiIdentityStore'
 import { VtiRefusal } from './vtiAgent'
+import { STEP_UP_TASK, StepUpDeclined, approveResponsePayload, stepUpRequestOf, type StepUpRequest } from './stepUp'
 import { isDigestMultibase } from './vettingShape'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import { packTrustTaskForPeer, tspSessionForManager, unpackTrustTaskFromPeer, type TspSessionIdentity } from './vtiTsp'
+import { purposeForDocumentType } from './proofPurpose'
+import { checkVtaReply } from './vtaReplyProof'
 
 const LOG_PREFIX = '[TrustTasks:VtaClient]'
+
+/**
+ * How long a persona mint may take. A first mint against a DID host includes
+ * the VTA opening a TSP relationship with that host: on the VTA Farm (227
+ * gate, 09-30) the answer left the VTA 31.2 s after the request, just after a
+ * 30 s wait had given up, and the persona was minted with nobody to take it.
+ * A warm mint took 6 s. Two minutes leaves room for a slow host.
+ */
+export const MINT_TIMEOUT_MS = 120_000
+
+/** How many keyed requests `VtaClient` remembers the attempts of. */
+const MAX_KEYED_REQUESTS_REMEMBERED = 32
 const TASK_ERROR = 'https://trusttasks.org/spec/trust-task-error/'
 const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
 
 /** The tasks this client speaks, by the URIs `vta-sdk` registers. */
 export const VTA_TASK = {
   whoAmI: 'https://trusttasks.org/spec/auth/whoami/0.1',
+  /** End sessions: `{ all: true }` ends every session of the caller (vta-sdk RevokeSessions::AllMine; 0.1 is no longer served). */
+  revokeSession: 'https://trusttasks.org/spec/auth/revoke-session/0.2',
   configShow: 'https://trusttasks.org/spec/config/show/0.1',
   contextsList: 'https://trusttasks.org/spec/vta/contexts/list/1.0',
   contextsCreate: 'https://trusttasks.org/spec/vta/contexts/create/1.0',
@@ -327,6 +344,14 @@ export function activeSwapTestHook(): VtaSwapTestHook {
 
 type Probe = { kind: 'live' } | { kind: 'refused'; detail: string } | { kind: 'unknown'; detail: string }
 
+/** Documents the agent sends of its own accord: never the answer to a task this client asked. */
+const UNSOLICITED = new Set<string>([
+  VTA_TASK.consentRequest,
+  VTA_TASK.consentGranted,
+  STEP_UP_TASK.approveRequest01,
+  STEP_UP_TASK.approveRequest02,
+])
+
 /** Persona mints running now, by VTA and community (see `ensurePersona`). */
 const personasInFlight = new Map<string, Promise<VtiPersona>>()
 
@@ -340,10 +365,30 @@ export class VtaClient {
    * redelivers at connect time — measured: a queued refusal of an earlier
    * unsigned `whoami` "answered" a later signed one. A message that arrived
    * before the current request was sent cannot be its reply, so it is dropped.
-   * This does not depend on how the VTA threads a reply, which the framework
-   * derives from its own result document rather than echoing our thread id.
+   * A reply is matched by its thread (see `deliver`); only a reply that names
+   * no thread falls back to arriving next, with a warning.
    */
-  private pending?: { resolve: (plaintext: DidCommV2PlaintextMessage) => void; sentAt: number }
+  /**
+   * The ids each keyed request was sent with, by its idempotency key, so a
+   * retry with the same key also takes an answer threaded to an earlier
+   * attempt. The VTA answers a keyed retry by replaying the first attempt's
+   * recorded reply as it was (vta-service trust_tasks/idempotency.rs:249-253),
+   * whose document is threaded to that first attempt; and the first attempt's
+   * own answer may arrive after it gave up. Either is this request's answer.
+   * In memory, and only for keyed requests: no other task's threading loosens.
+   */
+  private attemptsByKey = new Map<string, string[]>()
+
+  private pending?: {
+    resolve: (plaintext: DidCommV2PlaintextMessage) => void
+    sentAt: number
+    /** What the reply may name as its thread: our DIDComm message, our document, our thread. */
+    ids: Set<string>
+    /** Of `ids`, those an earlier attempt of the same keyed request was sent with. */
+    earlier?: Set<string>
+  }
+  /** The task on the wire now: what a task queued behind it logs that it waits on. */
+  private inFlight?: { type: string; since: number; id: string }
   /** The manager's TSP identity, when this build and this wallet can supply one. */
   private tsp?: TspSessionIdentity
   /** §4.2's per-peer decision, taken once per session. */
@@ -351,6 +396,18 @@ export class VtaClient {
   /** Whether the VTA has been greeted (§7.2.2) this session. */
   private greeted = false
   private queue: Promise<unknown> = Promise.resolve()
+
+  /** Keep a keyed attempt's ids; the oldest keys go first, past a few dozen. */
+  private rememberAttempt(key: string, ids: string[]): void {
+    const all = [...(this.attemptsByKey.get(key) ?? []), ...ids]
+    this.attemptsByKey.delete(key)
+    this.attemptsByKey.set(key, all)
+    while (this.attemptsByKey.size > MAX_KEYED_REQUESTS_REMEMBERED) {
+      const oldest = this.attemptsByKey.keys().next().value
+      if (oldest === undefined) break
+      this.attemptsByKey.delete(oldest)
+    }
+  }
 
   private deliver(plaintext: DidCommV2PlaintextMessage): void {
     // A granted notice answers a wait, never a task.
@@ -365,15 +422,51 @@ export class VtaClient {
       this.options.onInbound?.(plaintext)
       return
     }
-    const pending = this.pending
-    // A reply older than the request is a re-delivery of a stale message (a
-    // poll draining the queue), never the answer — created_time is seconds.
-    const stale =
-      typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < (pending?.sentAt ?? 0) - 5000
-    if (!pending || stale) {
+    // What the agent sends of its own accord is never a task's answer: a
+    // consent request taken as the reply to a heartbeat sent just before it
+    // arrived never reached the approvals (push finding F3, 09-29).
+    if (body?.type && UNSOLICITED.has(body.type)) {
       this.options.onInbound?.(plaintext)
       return
     }
+    const pending = this.pending
+    if (!pending) {
+      this.options.onInbound?.(plaintext)
+      return
+    }
+    // Upstream threads every reply to its request: the DIDComm reply's `thid`
+    // names our message (vta-service messaging/service.rs:673-677), the reply
+    // document's `threadId` names our request (vta-mobile-core reply.rs); a
+    // TSP reply carries the document's in `thid` (vtiTsp.ts).
+    const threadRefs = [
+      plaintext.thid,
+      (plaintext as { pthid?: string }).pthid,
+      (body as { threadId?: unknown } | undefined)?.threadId,
+    ].filter((ref): ref is string => typeof ref === 'string' && ref.length > 0)
+    if (threadRefs.length > 0) {
+      if (!threadRefs.some((ref) => pending.ids.has(ref))) {
+        // Threaded to another request: a late answer to an earlier task.
+        this.options.onInbound?.(plaintext)
+        return
+      }
+      if (pending.earlier && threadRefs.some((ref) => pending.earlier?.has(ref)))
+        this.agent.config.logger.info(
+          `${LOG_PREFIX} took the answer to an earlier attempt of the same keyed request (${body?.type ?? 'no type'})`
+        )
+      this.pending = undefined
+      pending.resolve(plaintext)
+      return
+    }
+    // No thread at all: the old rule, the next message after the request — but
+    // never one older than it (a poll draining the queue) — and say so.
+    const stale = typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < pending.sentAt - 5000
+    if (stale) {
+      this.options.onInbound?.(plaintext)
+      return
+    }
+    this.agent.config.logger.warn(
+      `${LOG_PREFIX} a reply with no thread was taken as the answer to the task in flight (${body?.type ?? 'no type'})`
+    )
     this.pending = undefined
     pending.resolve(plaintext)
   }
@@ -393,6 +486,13 @@ export class VtaClient {
       onConsentPending?: (info: { taskType: string; payloadDigest?: string }) => void
       /** How long to wait for approvers before giving up on a held task. */
       consentWaitMs?: number
+      /**
+       * The agent asks for a step-up on a task: ask the person, showing the
+       * agent's `reason` as it is. Answer `approve` or `deny`; throw when the
+       * person could not be asked (nothing is sent then). Without it, the
+       * refusal stands.
+       */
+      onStepUp?: (request: StepUpRequest, context: { taskType: string }) => Promise<'approve' | 'deny'>
       /** How long a fresh session drains the mediator's backlog before the first send. */
       connectDrainMs?: number
       /** How long to wait for the answer to `acl/swap-key`. */
@@ -486,6 +586,7 @@ export class VtaClient {
     await this.session?.stop()
     this.session = undefined
     this.pending = undefined
+    this.inFlight = undefined
   }
 
   /**
@@ -503,11 +604,27 @@ export class VtaClient {
     /** Called once the task has left the phone — the moment `timeoutMs` starts. */
     onSent?: () => void
   ): Promise<T> {
-    const run = (): Promise<T> => this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent)
+    const run = (): Promise<T> =>
+      this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
+        this.inFlight = undefined
+      })
+    // One task at a time: one queued behind another says what it waits on, so a
+    // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
+    const ahead = this.inFlight
+    if (ahead) {
+      this.agent.config.logger.info(
+        `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
+      )
+    }
     // Chain behind whatever is in flight, but do not let one failure poison the next.
     const next = this.queue.then(run, run)
     this.queue = next.catch(() => undefined)
     return next.catch(async (error: unknown) => {
+      const stepUp = this.managerDid ? stepUpRequestOf(error, { vtaDid: this.vtaDid, me: this.managerDid }) : undefined
+      if (stepUp)
+        return this.answerStepUp<T>(stepUp, error, type, () =>
+          this.sendTask<T>(type, payload, timeoutMs, documentExtras)
+        )
       // A task the policy holds for consent is refused with
       // `details.reason = "auth:consent_required"` and the signed requests the
       // approvers were sent (policy_gate.rs). The grant that consent produces
@@ -549,6 +666,30 @@ export class VtaClient {
     })
   }
 
+  /**
+   * Answer the agent's step-up for a task, then re-submit it once approved.
+   * The answer goes on this session, signed by this client's identity — the
+   * session the agent elevates. A request this phone cannot answer leaves the
+   * refusal as it came.
+   */
+  private async answerStepUp<T>(
+    stepUp: NonNullable<ReturnType<typeof stepUpRequestOf>>,
+    refusal: unknown,
+    taskType: string,
+    resubmit: () => Promise<T>
+  ): Promise<T> {
+    const ask = this.options.onStepUp
+    if (!stepUp.ok || !ask) {
+      if (!stepUp.ok) this.agent.config.logger.warn(`${LOG_PREFIX} not answering the agent's step-up: ${stepUp.why}`)
+      throw refusal
+    }
+    const answer = await ask(stepUp.request, { taskType })
+    const decision = answer === 'approve' ? 'approved' : 'denied'
+    await this.sendTask(STEP_UP_TASK.approveResponse, approveResponsePayload(stepUp.request, decision), 30000)
+    if (decision === 'denied') throw new StepUpDeclined()
+    return resubmit()
+  }
+
   /** One send and its matched answer — no queue, no consent handling. */
   private async sendTask<T>(
     type: string,
@@ -569,10 +710,12 @@ export class VtaClient {
       // and it is the same DID the envelope is sealed from, which the VTA
       // checks (VTI-10).
       const threadId = `urn:uuid:${utils.uuid()}`
+      const documentId = `urn:uuid:${utils.uuid()}`
+      const envelopeId = `urn:uuid:${utils.uuid()}`
       const document = await signDocumentProof(
         this.agent,
         {
-          id: `urn:uuid:${utils.uuid()}`,
+          id: documentId,
           type,
           threadId,
           payload,
@@ -582,11 +725,16 @@ export class VtaClient {
           // Covered by the proof like everything else on the document.
           ...documentExtras,
         },
-        did
+        did,
+        { proofPurpose: purposeForDocumentType(type) }
       )
       const sentAt = Date.now()
+      const key = typeof documentExtras.idempotencyKey === 'string' ? documentExtras.idempotencyKey : undefined
+      const earlier = new Set(key ? (this.attemptsByKey.get(key) ?? []) : [])
+      if (key) this.rememberAttempt(key, [envelopeId, documentId, threadId])
       const reply = new Promise<DidCommV2PlaintextMessage>((resolve) => {
-        this.pending = { resolve, sentAt }
+        this.pending = { resolve, sentAt, ids: new Set([envelopeId, documentId, threadId, ...earlier]), earlier }
+        this.inFlight = { type, since: sentAt, id: documentId }
       })
       // §4.2 on the VTA leg: read what the VTA advertises and speak TSP when it
       // offers it and this wallet can introduce itself. A VTA built without the
@@ -611,7 +759,7 @@ export class VtaClient {
         this.agent.config.logger.info(`${LOG_PREFIX} asked ${this.vtaDid} ${type} over ${packed.revision}`)
       } else
         await session.sendTo(this.vtaDid, {
-          id: `urn:uuid:${utils.uuid()}`,
+          id: envelopeId,
           typ: 'application/didcomm-plain+json',
           type: TRUST_TASK_V2_ENVELOPE_TYPE,
           from: did,
@@ -636,6 +784,19 @@ export class VtaClient {
         const p = answer.body as { code?: string; comment?: string } | undefined
         throw new VtiRefusal(p?.code ?? 'problem-report', p?.comment ?? `the VTA refused ${type}`)
       }
+      // vta-sdk's client refuses a reply that is unsigned, does not verify, or
+      // was signed by a key other than this VTA's (verify_reply). Keyring logs
+      // the verdict first, off the answer's path, and refuses nothing yet.
+      void checkVtaReply(this.agent, (answer.body ?? {}) as Record<string, unknown>, this.vtaDid).then((verdict) => {
+        const logger = this.agent.config?.logger
+        if (!logger) return
+        if (verdict.kind === 'verified') logger.info(`${LOG_PREFIX} reply verified: ${type}`)
+        else if (verdict.kind === 'wrongSigner')
+          logger.warn(`${LOG_PREFIX} reply signed by ${verdict.signer}, not ${this.vtaDid}: ${type}`)
+        else if (verdict.kind === 'unsigned') logger.warn(`${LOG_PREFIX} reply unsigned: ${type}`)
+        else if (verdict.kind === 'invalid')
+          logger.warn(`${LOG_PREFIX} reply proof does not verify (${verdict.detail}): ${type}`)
+      })
       const body = answer.body as { type?: string; payload?: unknown } | undefined
       if (String(body?.type ?? '').startsWith(TASK_ERROR)) {
         const p = body?.payload as { code?: string; message?: string; details?: unknown } | undefined
@@ -1000,9 +1161,16 @@ export class VtaClient {
         ...(options.didUrl ? { url: options.didUrl } : {}),
         label: options.label,
         addMediatorService: true,
+        // DIDComm only. A VTA adds `#tsp` by default when it and its mediator
+        // speak TSP (VTI vta-service did_webvh/document.rs:47-67), and a
+        // community then pushes to the persona over TSP first. Across two
+        // mediators that push never reached the phone (227 gate, VTA Farm),
+        // and the community falls back to DIDComm only after an hour. Over
+        // DIDComm the same pushes arrive.
+        addTspService: false,
         setPrimary: false,
       },
-      30000,
+      MINT_TIMEOUT_MS,
       // A mint whose answer is lost still succeeds at the VTA; retried with the
       // same key within 24 h the VTA returns that first mint instead of minting
       // an orphan (VTI-Q17, answered by the maintainers 2026-09-23).
@@ -1126,7 +1294,9 @@ export class VtaClient {
   }
 
   /** Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. */
-  async borrowKey(vtaKeyId: string): Promise<{ keyId: string; curve: 'Ed25519' | 'X25519'; publicKeyMultibase: string }> {
+  async borrowKey(
+    vtaKeyId: string
+  ): Promise<{ keyId: string; curve: 'Ed25519' | 'X25519'; publicKeyMultibase: string }> {
     const exported = await this.task<VtaExportedKey>(VTA_TASK.keysExportSecret, { keyId: vtaKeyId })
     // Held in memory only (#10, plan part C), under an id that is the same every
     // session, so a persona's record keeps naming it across restarts.
