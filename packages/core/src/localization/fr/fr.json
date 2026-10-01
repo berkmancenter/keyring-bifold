@@ -1146,6 +1146,7 @@
   "Community": {
     "CardMemberOf": "Membre de {{community}}",
     "CardVetterFor": "Vérificateur pour {{community}}",
+    "CardIdentityCheckedBy": "Identité vérifiée par {{community}}",
     "CardRoleIn": "{{role}} dans {{community}}",
     "RoleAdmin": "Administrateur",
     "RoleMember": "Membre",
@@ -1153,6 +1154,7 @@
     "CardCommunity": "Communauté",
     "CardRole": "Rôle",
     "CardSince": "Depuis",
+    "CardCheckedOn": "Vérifiée le",
     "CardUntil": "Valable jusqu’au",
     "CardFromCommunity": "Cette carte vient de {{community}}. Pour y renoncer, quittez la communauté.",
     "CardOpenCommunity": "Ouvrir {{community}}",
@@ -1197,9 +1199,9 @@
     "CheckCodeBody": "La page de l'agent affiche aussi un code. L'administrateur n'accorde l'accès que s'il correspond à celui-ci.",
     "WaitingForGrant": "En attente de l'accord de l'administrateur…",
     "StopLinking": "Arrêter la liaison",
-    "ShowToOtherPhone": "Montrez ceci à votre autre téléphone",
-    "ShowToOtherPhoneBody": "Sur votre autre téléphone, touchez Scanner son code et visez ce code. Ce téléphone termine la liaison tout seul une fois ajouté.",
-    "WaitingForPhone": "En attente de votre autre téléphone…",
+    "AddThisPhone": "Ajoutez ce téléphone à votre agent",
+    "AddThisPhoneBody": "Copiez le code de ce téléphone dans le champ Admin DID de votre agent, ou scannez le code ci-dessous depuis votre autre téléphone. Ce téléphone termine la liaison tout seul une fois ajouté.",
+    "WaitingToBeAdded": "En attente de l'ajout de ce téléphone…",
     "ShowAsText": "Afficher en texte",
     "HideText": "Masquer le texte",
     "CheckAgain": "Vérifier à nouveau",
@@ -1350,6 +1352,7 @@
     "SeatApplicant": "Vous avez une identité ici et n'êtes pas encore membre",
     "ContinueVetting": "Poursuivre votre vérification",
     "SeatNone": "Vous n'avez pas encore rejoint de communauté",
+    "SeatRemoved": "{{community}} vous a retiré",
     "WhatBringsYou": "Que voulez-vous faire ?",
     "WantToJoin": "Je veux rejoindre une communauté",
     "WantToJoinHint": "Vous rencontrerez l'un de ses vérificateurs, qui vérifie que c'est vous.",
@@ -1543,7 +1546,8 @@
       "grantMalformed": "Son rôle de vérificateur est illisible.",
       "grantExpired": "Son rôle de vérificateur a expiré.",
       "grantProof": "La signature de la communauté sur son rôle n'est pas valide.",
-      "legacyExpired": "Il a utilisé la preuve d'une ancienne version de Keyring, qui n'est plus acceptée."
+      "legacyExpired": "Le vérificateur a utilisé la preuve d'une ancienne version de Keyring, qui n'est plus acceptée.",
+      "grantLegacyShape": "Son rôle de vérificateur est dans un ancien format qui n'est plus accepté."
     },
     "NeedsMethod": "encore {{n}} {{method}}",
     "IndependenceCapped": "Plus d'attestations de personnes ayant déclaré un lien {{relationships}} avec vous que cette communauté n'en compte. Votre candidature reste valable — quelqu'un va l'examiner.",
@@ -1627,7 +1631,8 @@
       "cardDigest": "Détails : la déclaration porte sur une autre carte que celle envoyée.",
       "expired": "Détails : la déclaration a déjà expiré.",
       "proof": "Détails : la signature de la déclaration n'a pas pu être vérifiée.",
-      "noCard": "Détails : la déclaration est arrivée avant que ce téléphone envoie votre carte pendant cette session."
+      "noCard": "Détails : la déclaration est arrivée avant que ce téléphone envoie votre carte pendant cette session.",
+      "legacyShape": "Détails : la déclaration est dans un ancien format que ce téléphone n'accepte plus. Demandez à votre vérificateur de mettre à jour son application et de vous vérifier à nouveau."
     },
     "CardRefused": "La carte du demandeur est arrivée, mais ce téléphone n'a pas pu l'accepter. La session est toujours ouverte ; il peut la renvoyer.",
     "CardRefusedReason": {

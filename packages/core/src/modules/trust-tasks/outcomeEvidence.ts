@@ -32,52 +32,10 @@ import {
 
 import { getTrustTasksService } from './ceremony'
 import { digestBytesEqual, taskDigestMultibase, verifyDocumentProof } from './documentProof'
+import { taskCitationOf } from './taskCitation'
 
 const LOG_PREFIX = '[TrustTasks:Evidence]'
 const ERROR_TYPE_MARKER = '/trust-task-error/'
-
-/**
- * `taskContext` dual-read (docs/plans/vsc-migration-plan.md §6 V4, D4):
- * WD02 already REQUIRES `taskContext` at the credential's top level, sibling
- * of `credentialSubject` — this codebase has been reading it out of
- * `credentialSubject` instead, a standing conformance bug independent of the
- * VSC migration (Alberto's 2026-09-17 review, finding A5). VSC shape emits
- * it at the top level too (D4), so both shapes now read the same way: top
- * level first, falling back to the legacy `credentialSubject.taskContext`
- * placement this codebase itself has been emitting under wd02 shape.
- */
-function readTaskContext(credential: Record<string, unknown> | undefined): string {
-  if (!credential) return ''
-  if (typeof credential.taskContext === 'string' && credential.taskContext) {
-    return credential.taskContext
-  }
-  const subject = Array.isArray(credential.credentialSubject)
-    ? (credential.credentialSubject[0] as Record<string, unknown>)
-    : (credential.credentialSubject as Record<string, unknown> | undefined)
-  return typeof subject?.taskContext === 'string' ? subject.taskContext : ''
-}
-
-/**
- * Same dual-read as `readTaskContext`, for `taskDigestMultibase`: the spec's
- * Base Structure requires it as a top-level sibling of `credentialSubject`
- * for `vsc` shape (fixed in the issuance/read paths, `be8dd6044`,
- * 2026-09-29), but this self-check still only looked in the old nested
- * `credentialSubject.taskDigestMultibase` location — so it unconditionally
- * failed ("credential carries no taskDigestMultibase") for every `vsc`-shape
- * VWC, on the one path that had actually been fixed. Found the same day the
- * placement fix landed, on the first real end-to-end witnessed exchange to
- * reach this check.
- */
-function readTaskDigestMultibase(credential: Record<string, unknown> | undefined): string {
-  if (!credential) return ''
-  if (typeof credential.taskDigestMultibase === 'string' && credential.taskDigestMultibase) {
-    return credential.taskDigestMultibase
-  }
-  const subject = Array.isArray(credential.credentialSubject)
-    ? (credential.credentialSubject[0] as Record<string, unknown>)
-    : (credential.credentialSubject as Record<string, unknown> | undefined)
-  return typeof subject?.taskDigestMultibase === 'string' ? subject.taskDigestMultibase : ''
-}
 
 /** A `taskContext`-bearing credential with its matching outcome evidence. */
 export interface VwcPresentationBundle {
@@ -108,7 +66,8 @@ export interface AssembleOptions {
  * matching evidence, and shipping a hollow bundle would misrepresent one.
  */
 export async function assembleVwcPresentation(agent: Agent, options: AssembleOptions): Promise<VwcPresentationBundle> {
-  const taskContext = readTaskContext(options.vwc)
+  // Top level (DTG Credentials v1's witnessed/1) or in the subject (before it).
+  const taskContext = taskCitationOf(options.vwc).taskContext ?? ''
   if (!taskContext) throw new Error('credential carries no taskContext')
 
   const service = getTrustTasksService(agent)
@@ -173,7 +132,10 @@ export interface VerifyBundleOptions {
 }
 
 /** Run the Outcome-Interpretability pairing algorithm over a bundle. */
-export async function verifyVwcPresentationBundle(agent: Agent, options: VerifyBundleOptions): Promise<EvidenceVerdict> {
+export async function verifyVwcPresentationBundle(
+  agent: Agent,
+  options: VerifyBundleOptions
+): Promise<EvidenceVerdict> {
   const failures: string[] = []
   const { bundle } = options
 
@@ -263,8 +225,10 @@ export async function verifyVwcPresentationBundle(agent: Agent, options: VerifyB
   }
 
   // 3–7. The pairing checklist.
-  const taskContext = readTaskContext(vwc)
-  const taskDigest = readTaskDigestMultibase(vwc)
+  // Top level (DTG Credentials v1's witnessed/1) or in the subject (before it).
+  const citation = taskCitationOf(vwc)
+  const taskContext = citation.taskContext ?? ''
+  const taskDigest = citation.taskDigestMultibase ?? ''
   const { initiating, terminal } = bundle.outcomeEvidence
 
   if (!taskContext) failures.push('credential carries no taskContext')
@@ -302,9 +266,6 @@ export async function verifyVwcPresentationBundle(agent: Agent, options: VerifyB
     failures,
     // What this verification deliberately does not settle — named, per the
     // spec's verdict style, so no caller mistakes silence for coverage.
-    residuals: [
-      'witness identity legibility (issuer-to-witness mapping is registry/naming work)',
-      'revocation status',
-    ],
+    residuals: ['witness identity legibility (issuer-to-witness mapping is registry/naming work)', 'revocation status'],
   }
 }

@@ -28,6 +28,15 @@ export { WITNESSED_EXCHANGE_CONTEXT_URL, WITNESSED_EXCHANGE_CONTEXT_DOCUMENT } f
 // only ships the v1.1 credentials context)
 export { CREDENTIALS_V2_CONTEXT_URL, CREDENTIALS_V2_CONTEXT_DOCUMENT } from './credentialsV2Context'
 
+// DTG Credentials v1, the registry's frozen context (community cards from VTI
+// 0.47.0 on), bundled byte for byte with its sha256
+export {
+  DTG_REGISTRY_CONTEXT_V1_URL,
+  DTG_REGISTRY_CONTEXT_V1_SHA256,
+  DTG_REGISTRY_CONTEXT_V1_TEXT,
+  DTG_REGISTRY_CONTEXT_V1_DOCUMENT,
+} from './dtgRegistryContextV1'
+
 /**
  * Ed25519Signature2018 suite context URL.
  *

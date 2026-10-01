@@ -9,6 +9,8 @@
  * JSON-LD canonicalization produces identical results during signing and verification.
  */
 
+import { DTG_REGISTRY_CONTEXT_V1_DOCUMENT, DTG_REGISTRY_CONTEXT_V1_TEXT } from './dtgRegistryContextV1'
+
 // DTGCredential base context
 export const DTG_CONTEXT_URL = 'https://www.firstperson.network/dtg/v1'
 
@@ -71,109 +73,20 @@ export const REGISTRY_DTG_CONTEXT_URL = 'https://registry.trustoverip.org/dtg/co
 // what is bundled: `REGISTRY_DTG_CONTEXT_SHA256_HEX` / `_DIGEST_MULTIBASE` are
 // asserted against these bytes in core's registryContextPin.test.ts. Source:
 // dtgwg-vsc-registry `contexts/v1.jsonld` (pinned under external/).
-export const REGISTRY_DTG_CONTEXT_SOURCE = String.raw`{
-  "@context": {
-    "@version": 1.1,
-    "@protected": true,
-
-    "id": "@id",
-    "type": "@type",
-
-    "DTGCredential": "https://registry.trustoverip.org/dtg/credentials#DTGCredential",
-    "MembershipCredential": "https://registry.trustoverip.org/dtg/credentials#MembershipCredential",
-    "RelationshipCredential": "https://registry.trustoverip.org/dtg/credentials#RelationshipCredential",
-    "DelegationCredential": "https://registry.trustoverip.org/dtg/credentials#DelegationCredential",
-    "InvitationCredential": "https://registry.trustoverip.org/dtg/credentials#InvitationCredential",
-    "PersonaCredential": "https://registry.trustoverip.org/dtg/credentials#PersonaCredential",
-    "StatementCredential": "https://registry.trustoverip.org/dtg/credentials#StatementCredential",
-    "AuthorityCredential": "https://registry.trustoverip.org/dtg/credentials#AuthorityCredential",
-
-    "issuerScope": "https://registry.trustoverip.org/dtg/credentials#issuerScope",
-    "taskContext": "https://registry.trustoverip.org/dtg/credentials#taskContext",
-    "taskDigestMultibase": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#taskDigestMultibase",
-      "@type": "https://w3id.org/security#multibase"
-    },
-
-    "predicate": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#predicate",
-      "@type": "@id"
-    },
-    "object": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#object",
-      "@context": {
-        "@protected": true,
-        "value": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#value",
-          "@type": "@json"
-        }
-      }
-    },
-    "witnessContext": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#witnessContext",
-      "@context": {
-        "@protected": true,
-        "event": "https://registry.trustoverip.org/dtg/credentials#event",
-        "sessionId": "https://registry.trustoverip.org/dtg/credentials#sessionId",
-        "method": "https://registry.trustoverip.org/dtg/credentials#method"
-      }
-    },
-
-    "delegation": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#delegation",
-      "@context": {
-        "@protected": true,
-        "scope": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#delegationScope",
-          "@container": "@set"
-        },
-        "parent": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#parent",
-          "@type": "https://w3id.org/security#multibase"
-        },
-        "maxDepth": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#maxDepth",
-          "@type": "http://www.w3.org/2001/XMLSchema#integer"
-        },
-        "accepts": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#accepts",
-          "@type": "https://w3id.org/security#multibase"
-        }
-      }
-    },
-
-    "authority": {
-      "@id": "https://registry.trustoverip.org/dtg/credentials#authority",
-      "@context": {
-        "@protected": true,
-        "scope": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#authorityScope",
-          "@type": "@id"
-        },
-        "actions": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#actions",
-          "@container": "@set"
-        },
-        "parent": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#parent",
-          "@type": "https://w3id.org/security#multibase"
-        },
-        "maxAttenuation": {
-          "@id": "https://registry.trustoverip.org/dtg/credentials#maxAttenuation",
-          "@type": "http://www.w3.org/2001/XMLSchema#integer"
-        }
-      }
-    }
-  }
-}
-`
+// The same bytes, and the same frozen document object, as
+// `DTG_REGISTRY_CONTEXT_V1_TEXT` / `_DOCUMENT` (./dtgRegistryContextV1, added on
+// main): both describe `registry.trustoverip.org/dtg/context/v1`, which has
+// one set of bytes (sha256 above). These names stay exported for the
+// consumers that predate it; every loader therefore serves one object for the
+// IRI, whichever name it imports.
+export const REGISTRY_DTG_CONTEXT_SOURCE = DTG_REGISTRY_CONTEXT_V1_TEXT
 
 // SHA-256 of REGISTRY_DTG_CONTEXT_SOURCE as the spec states it: lowercase hex,
 // and the same digest as a Multihash in Multibase base58btc.
 export const REGISTRY_DTG_CONTEXT_SHA256_HEX = '3e1376acf401016a0162c1cdb31e44a85a7dd56749caed94a1dc0a0be6cbb448'
 export const REGISTRY_DTG_CONTEXT_DIGEST_MULTIBASE = 'zQmSWyCagdx8oPfXn3piSUx6yqVy5MZ7ZG7nW1TC64QvKZh'
 
-export const REGISTRY_DTG_CONTEXT_DOCUMENT = JSON.parse(REGISTRY_DTG_CONTEXT_SOURCE) as {
+export const REGISTRY_DTG_CONTEXT_DOCUMENT = DTG_REGISTRY_CONTEXT_V1_DOCUMENT as {
   '@context': Record<string, unknown>
 }
 
