@@ -13,7 +13,8 @@ name: VTI conformance
 
 on:
   pull_request:
-    branches: [main]
+    # release/** too: a hotfix PR into a release branch (227.1) is checked like one into main.
+    branches: [main, 'release/**']
     paths:
       - 'packages/core/src/modules/trust-tasks/**'
       - 'packages/trust-tasks/**'
