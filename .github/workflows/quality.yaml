@@ -2,7 +2,8 @@ name: Code Quality
 
 on:
   pull_request:
-    branches: [main]
+    # release/** too: a hotfix PR into a release branch (227.1) is checked like one into main.
+    branches: [main, 'release/**']
     types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
