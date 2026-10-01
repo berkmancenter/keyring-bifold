@@ -176,6 +176,37 @@ describe('the community leg', () => {
     )
   })
 
+  // 227 gate, Farm: a sign-in stopped between the persona's document and its
+  // mediator's, and nothing in the Release log said so. Each step is said.
+  it('says each step of a sign-in in the Release log, and why it fell back to the configured mediator', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { advertisedMediatorDid } = jest.requireMock('../module/VtiMediatorTransport')
+    ;(advertisedMediatorDid as jest.Mock).mockRejectedValueOnce(new Error('resolving did:webvh:p:farm took over 15 s'))
+    try {
+      await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:farm') })
+      expect(mockSessions.at(-1)?.mediator).toBe('did:peer:lab')
+      const lines = warn.mock.calls.map((c) => String(c[0]))
+      const order = [
+        'resolving',
+        'gave no mediator (resolving did:webvh:p:farm took over 15 s)',
+        'mediator did:peer:lab',
+        'mediator resolved',
+        'signing in as',
+        'socket open',
+        'connected',
+      ]
+      let at = -1
+      for (const want of order) {
+        const i = lines.findIndex((l, j) => j > at && l.startsWith('vtiAgent: connect') && l.includes(want))
+        expect({ want, found: i > at }).toEqual({ want, found: true })
+        at = i
+      }
+      expect(lines.some((l) => /\+\d+ ms: /.test(l))).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   // A read: only a read is sent again over DIDComm (a write is not — see 'a write is sent once').
   it('asks over DIDComm when a community does not answer TSP, and stays on DIDComm', async () => {
     const COMMUNITY = 'did:webvh:c:silent-on-tsp'
@@ -295,9 +326,20 @@ describe('what a community is asked, and how', () => {
     }
   })
 
-  it('leaves a task unsigned when its spec declares no proof', async () => {
-    const { sent } = await askOverDidcomm(MANIFEST, () => ({ type: `${MANIFEST}#response`, body: {} }))
-    expect((sent.body as Record<string, unknown>).proof).toBeUndefined()
+  // vti #1739 and the VTC's spine (step 3a): over DIDComm and TSP a document
+  // must carry a proof by its issuer, who must be the sender, whatever its
+  // spec says about the proof. The manifest's proof is only RECOMMENDED, but
+  // here the transport already names the persona, so a proof discloses
+  // nothing more; the anonymous read is the REST one (vtiManifestRest).
+  it('signs the manifest too when it rides DIDComm, as the persona the transport already names', async () => {
+    const who = 'did:webvh:p:manifest'
+    const { sent } = await askOverDidcomm(MANIFEST, () => ({ type: `${MANIFEST}#response`, body: {} }), who)
+    expect((sent.body as Record<string, unknown>).type).toBe(MANIFEST)
+    expect((sent.body as Record<string, unknown>).proof).toEqual({
+      signer: who,
+      kmsKeyId: 'sig',
+      verificationMethod: `${who}#key-0`,
+    })
   })
 
   it('reads a reply typed as the document, as a VTC sends today', async () => {

@@ -19,7 +19,7 @@
  * @module trust-tasks/screens/MyAgent
  */
 
-import { useNavigation } from '@react-navigation/native'
+import { useFocusEffect, useNavigation } from '@react-navigation/native'
 import type { StackNavigationProp } from '@react-navigation/stack'
 import { useAgent } from '@bifold/react-hooks'
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
@@ -32,8 +32,14 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { useTheme } from '../../../contexts/theme'
 import { Screens, type MyAgentStackParams } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
-import { GenericRecordsCommunityStore, type VtiInvitation, type VtiMembership } from '../module/VtiCommunityStore'
+import {
+  GenericRecordsCommunityStore,
+  isCurrentMembership,
+  type VtiInvitation,
+  type VtiMembership,
+} from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
+import { ApprovalDetails } from './ApprovalDetails'
 import { DevicesCard } from './DevicesCard'
 import { ErasedNotice, RemovedPhoneCard } from './RemovedPhoneCard'
 import { vtaAgent } from '../module/vtaAgent'
@@ -48,6 +54,7 @@ import { useChosenCommunityDid } from './useCommunity'
 import { useVtaDid } from './VtaStatus'
 import { sayFailure, type Said } from './plainError'
 import SaidFailure from './SaidFailure'
+import { localDate, localDateTime } from './localTime'
 
 /** Which seat this phone would take at a vetting: decided by what it holds. */
 type VettingSeat = 'vetter' | 'applicant'
@@ -67,6 +74,16 @@ const MyAgent: React.FC<MyAgentProps> = ({ config }) => {
   const navigation = useNavigation<StackNavigationProp<MyAgentStackParams>>()
   const state = useSyncExternalStore(vtiAgent.subscribe, vtiAgent.getState)
   const vta = useSyncExternalStore(vtaAgent.subscribe, vtaAgent.getState)
+  // Every way to link starts here and ends by going back here, and the tab
+  // chose this screen as its first while the phone was not linked. Once it is
+  // linked, the agent home is the screen (#11); hand over to it rather than
+  // leave the phone on this older panel (two-phone gate trial, 09-29).
+  const linked = vta.link.kind === 'linked'
+  useFocusEffect(
+    useCallback(() => {
+      if (linked) navigation.replace(Screens.VtaAgent)
+    }, [linked, navigation])
+  )
 
   const mediatorDid = config?.mediatorDid
   // The phone's community — not one a link is only showing.
@@ -104,7 +121,8 @@ const MyAgent: React.FC<MyAgentProps> = ({ config }) => {
     ])
     setPersona(p)
     setInvitations(i.filter((x) => x.status === 'pending'))
-    setMemberships(m)
+    // One the community removed is not a membership here (#166).
+    setMemberships(m.filter(isCurrentMembership))
     // A vetter grant that still stands makes this phone the desk — a revoked or
     // expired one does not. The status list is a network read, so it is asked
     // again only when the grants change or once a minute, not on every refresh.
@@ -431,8 +449,9 @@ const MyAgent: React.FC<MyAgentProps> = ({ config }) => {
                   })}
                 </Text>
                 <Text style={styles.label}>
-                  {t('MyAgent.ApprovalExpires', { when: approval.expiresAt.replace('T', ' ').slice(0, 16) })}
+                  {t('MyAgent.ApprovalExpires', { when: localDateTime(approval.expiresAt) })}
                 </Text>
+                <ApprovalDetails approval={approval} />
                 {approval.status === 'pending' ? (
                   <View style={styles.row}>
                     <Pressable
@@ -517,7 +536,7 @@ const MyAgent: React.FC<MyAgentProps> = ({ config }) => {
           <Text style={styles.label} testID={testIdWithKey('MyAgentMembershipRole')}>
             {m.role} · {viaText(m.via)}
           </Text>
-          <Text style={styles.label}>{t('MyAgent.MemberSince', { date: m.grantedAt.slice(0, 10) })}</Text>
+          <Text style={styles.label}>{t('MyAgent.MemberSince', { date: localDate(m.grantedAt) })}</Text>
         </Pressable>
       ))}
       {communityDid && !memberships.some((m) => m.communityDid === communityDid) ? (

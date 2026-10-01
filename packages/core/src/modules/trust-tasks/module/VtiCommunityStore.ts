@@ -51,6 +51,34 @@ export interface VtiMembership {
   validUntil?: string
   /** How the membership was earned — what the card says under the name. */
   via: 'invitation' | 'vetting' | 'approval' | 'unknown'
+  /**
+   * The community removed this member, as its signed removal notice says
+   * (vtc/members/removal-notice/0.1, `vtiCommunityNotices`). Kept with the
+   * membership, as openvtc keeps it, so the phone can say who decided, when
+   * and why.
+   */
+  removal?: VtiRemoval
+}
+
+/** What a community's removal notice said (vtc/members/removal-notice/0.1 payload). */
+export interface VtiRemoval {
+  code: 'adminRemoved' | 'purged'
+  reason?: string
+  decidedBy: string
+  decidedAt: string
+  disposition: 'purge' | 'tombstone' | 'historical'
+  /** The notice's document id. */
+  noticeId: string
+}
+
+/**
+ * Whether a membership stands: not one the community removed (its signed
+ * removal notice is kept on the record, #166). A removed membership stays in
+ * the store, so the phone can say who ended it, when and why, but nothing
+ * that asks "is this person a member?" counts it.
+ */
+export function isCurrentMembership(membership: Pick<VtiMembership, 'removal'>): boolean {
+  return !membership.removal
 }
 
 /**

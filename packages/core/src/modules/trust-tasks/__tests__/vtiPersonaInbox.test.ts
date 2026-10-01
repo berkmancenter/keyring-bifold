@@ -8,8 +8,14 @@ import { DeviceEventEmitter } from 'react-native'
 const mockHandlers: Array<(m: unknown) => void> = []
 const mockOrder: string[] = []
 const mockAgentState = { isConnected: false, status: 'disconnected' as string }
+const mockAgentListeners = new Set<() => void>()
+const mockAgentChanged = () => mockAgentListeners.forEach((l) => l())
 jest.mock('../module/vtiAgent', () => ({
   vtiAgent: {
+    subscribe: (l: () => void) => {
+      mockAgentListeners.add(l)
+      return () => mockAgentListeners.delete(l)
+    },
     onInbound: (h: (m: unknown) => void) => {
       mockOrder.push('listen')
       mockHandlers.push(h)
@@ -56,6 +62,7 @@ jest.mock('../module/vtiVetting', () => ({
 }))
 
 import { startPersonaInbox as start, VTI_PERSONA_DELIVERIES_EVENT } from '../module/vtiPersonaInbox'
+import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 import { vtiAgent } from '../module/vtiAgent'
 
 const agent = {} as never
@@ -70,6 +77,97 @@ const startPersonaInbox = (...a: Parameters<typeof start>) => {
 afterEach(() => running.splice(0).forEach((stop) => stop()))
 
 describe('startPersonaInbox', () => {
+  // 227 gate, Android lock probe: after an unlock the inbox asked the mediator
+  // to sign in before the persona's keys were back in memory, could not sign,
+  // and waited for its next look — ~30 s of community messages not arriving
+  // while the agent itself was back in 2 s. The keys coming back is the cue.
+  describe('after an unlock', () => {
+    const connect = vtiAgent.connect as jest.Mock
+    beforeEach(() => {
+      mockOrder.length = 0
+      mockAgentState.isConnected = false
+      mockAgentState.status = 'disconnected'
+      connect.mockClear()
+      mockAgentListeners.clear()
+    })
+
+    it("signs in again the moment the persona's keys are back, not at its next look", async () => {
+      connect.mockRejectedValueOnce(new Error('key not found: sig')).mockImplementationOnce(async () => {
+        mockAgentState.isConnected = true
+      })
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      expect(vtiAgent.connect).toHaveBeenCalledTimes(1)
+
+      DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: mockPersona.did })
+      await flush()
+      expect(vtiAgent.connect).toHaveBeenCalledTimes(2)
+      expect(mockAgentState.isConnected).toBe(true)
+    })
+
+    it("does not stir for another identity's keys", async () => {
+      connect.mockRejectedValueOnce(new Error('key not found: sig'))
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: 'did:webvh:p:host:someone-else' })
+      await flush()
+      expect(vtiAgent.connect).toHaveBeenCalledTimes(1)
+    })
+
+    // 228 lab check (09-29, bob): the unlock restarted the inbox, so the cue
+    // and the new inbox's first look both met the OLD inbox's sign-in still in
+    // flight (vtiAgent busy) and were dropped; the identity signed in only at
+    // the next look, 29.4 s after the agent. A look that meets someone else's
+    // sign-in waits for it to settle, then looks again.
+    it('a look that meets another sign-in in flight looks again once it settles', async () => {
+      mockAgentState.status = 'authenticating' // another inbox's attempt, still running
+      connect.mockImplementationOnce(async () => {
+        mockAgentState.isConnected = true
+      })
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: mockPersona.did })
+      await flush()
+      expect(connect).not.toHaveBeenCalled()
+
+      mockAgentState.status = 'failed' // that attempt gave up
+      mockAgentChanged()
+      await flush()
+      expect(connect).toHaveBeenCalledTimes(1)
+      expect(mockAgentState.isConnected).toBe(true)
+    })
+
+    it('does not stir when the agent changes while nothing waits on it', async () => {
+      connect.mockImplementationOnce(async () => {
+        mockAgentState.isConnected = true
+      })
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      expect(connect).toHaveBeenCalledTimes(1)
+      mockAgentChanged()
+      mockAgentChanged()
+      await flush()
+      expect(connect).toHaveBeenCalledTimes(1)
+    })
+
+    it('keys that come back while a sign-in is still failing are not missed', async () => {
+      let fail: (e: Error) => void = () => undefined
+      connect
+        .mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+        .mockImplementationOnce(async () => {
+          mockAgentState.isConnected = true
+        })
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: mockPersona.did })
+      fail(new Error('key not found: sig'))
+      await flush()
+      await flush()
+      expect(vtiAgent.connect).toHaveBeenCalledTimes(2)
+      expect(mockAgentState.isConnected).toBe(true)
+    })
+  })
+
   beforeEach(() => {
     mockHandlers.length = 0
     mockOrder.length = 0
@@ -240,5 +338,106 @@ describe("a community admin console's Send: a pushed invitation offer", () => {
     await mockHandlers[0](spoofed)
     await mockHandlers[0](offerFrom('did:webvh:QmOtherCommunity:x'))
     expect(mockRedeem).not.toHaveBeenCalled()
+  })
+
+  // A notice the inbox would apply, skipped without a word, looks exactly like
+  // one that never arrived (lab, 2026-09-29: a removal delivered, nothing applied,
+  // nothing logged). The skip says which message and why.
+  it('says so when it skips a message it owns because the session is another identity', async () => {
+    const warn = jest.fn()
+    const logged = { config: { logger: { warn, info: jest.fn(), debug: jest.fn() } } } as never
+    startPersonaInbox(logged, { communityDid: mockPersona.communityDid })
+    await flush()
+    mockAgentState.isConnected = false
+    mockHandlers.forEach((h) =>
+      h({
+        type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1',
+        from: mockPersona.communityDid,
+        body: {},
+      })
+    )
+    await flush()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/persona inbox skipped .*removal-notice.*session/))
+  })
+
+  it('says so when it has no persona for the chosen community', async () => {
+    const warn = jest.fn()
+    const logged = { config: { logger: { warn, info: jest.fn(), debug: jest.fn() } } } as never
+    startPersonaInbox(logged, { communityDid: 'did:webvh:other:host' })
+    await flush()
+    mockHandlers.forEach((h) =>
+      h({
+        type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1',
+        from: mockPersona.communityDid,
+        body: {},
+      })
+    )
+    await flush()
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/persona inbox skipped .*removal-notice.*no persona/))
+  })
+})
+
+// 227 gate, Farm: the invitation push never reached the phone, and the persona
+// inbox left no line in the Release log. It now says why it did not open the
+// session, once per change, and says so when a look has hung.
+describe('what the inbox says in the Release log', () => {
+  const connect = vtiAgent.connect as jest.Mock
+  let warn: jest.SpyInstance
+  const lines = () => warn.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith('[VTI] persona inbox'))
+  beforeEach(() => {
+    mockAgentState.isConnected = false
+    mockAgentState.status = 'disconnected'
+    connect.mockReset()
+    mockAgentListeners.clear()
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+  })
+  afterEach(() => {
+    warn.mockRestore()
+    jest.useRealTimers()
+  })
+
+  it('says there is no persona for the community once, not at every look', async () => {
+    startPersonaInbox(agent, { communityDid: 'did:webvh:c:elsewhere', intervalMs: 60_000 })
+    await flush()
+    DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: 'did:webvh:p:any' })
+    await flush()
+    expect(lines()).toEqual([
+      expect.stringMatching(/\(did:webvh:c:elsew.*\): no persona for this community yet; persona none/),
+    ])
+    expect(connect).not.toHaveBeenCalled()
+  })
+
+  it('says it signs in, with the session and status it found, and that it signed in', async () => {
+    connect.mockImplementation(async () => {
+      mockAgentState.isConnected = true
+    })
+    startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+    await flush()
+    expect(lines()).toEqual([
+      expect.stringMatching(
+        /signing in as the persona; persona did:webvh:p:host.*keyAgreement yes, session closed, status disconnected/
+      ),
+      expect.stringMatching(/signed in/),
+    ])
+  })
+
+  it('says why a sign-in failed', async () => {
+    connect.mockRejectedValue(new Error('resolving did:webvh:m took over 15 s'))
+    startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+    await flush()
+    expect(lines().at(-1)).toMatch(/sign-in failed: resolving did:webvh:m took over 15 s/)
+  })
+
+  it('says so once when a look has been running over a minute', async () => {
+    jest.useFakeTimers()
+    connect.mockImplementation(() => new Promise(() => undefined))
+    startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 30_000 })
+    await jest.advanceTimersByTimeAsync(30_000)
+    expect(lines().filter((l) => /has been running/.test(l))).toEqual([])
+    await jest.advanceTimersByTimeAsync(60_000)
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(lines().filter((l) => /has been running/.test(l))).toEqual([
+      expect.stringMatching(/a look has been running (6|9)\d s \(status disconnected\); later looks wait for it/),
+    ])
   })
 })

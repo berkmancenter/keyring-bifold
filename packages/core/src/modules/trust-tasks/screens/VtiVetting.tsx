@@ -38,7 +38,7 @@ import QRRenderer from '../../../components/misc/QRRenderer'
 import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
-import { GenericRecordsCommunityStore, type VtiHeldCredential } from '../module/VtiCommunityStore'
+import { GenericRecordsCommunityStore, isCurrentMembership, type VtiHeldCredential } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 import { openJoinRequestOf, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { GenericRecordsTspPeerRevisionStore } from '../module/vtiTsp'
@@ -81,6 +81,7 @@ import { ticketRefusalWords } from './ticketWords'
 import { vetterStandingLine } from './vetterStanding'
 import { useVtaDid } from './VtaStatus'
 import { applicantPrimary, deskPrimary, type ApplicantStep, type VetterStep } from './vettingPrimary'
+import { localDate } from './localTime'
 
 /**
  * A short, stable name for one vetting request: the tail of its request
@@ -471,7 +472,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       setStanding(picked.state)
       const m = await stores.community.getMembership(persona.communityDid)
       if (cancelled) return
-      setMembershipRole(m?.role)
+      // A membership the community removed gives no role here (#166).
+      setMembershipRole(m && isCurrentMembership(m) ? m.role : undefined)
       // Seated at the desk for any grant it holds, live or not — a vetter
       // whose grant was revoked should find the desk and be told why it will
       // not work, rather than be quietly returned to the applicant's chair as
@@ -809,7 +811,7 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
                           </Text>
                         ) : null}
                         <Text style={styles.label}>
-                          {tp('Vetting.TicketValid', { uses: x.usesLeft, until: x.expiresAt.slice(0, 10) })}
+                          {tp('Vetting.TicketValid', { uses: x.usesLeft, until: localDate(x.expiresAt) })}
                         </Text>
                       </View>
                     ))
@@ -1529,7 +1531,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
                             )
                           for (let i = 0; i < 20; i++) {
                             const mem = await stores!.community.getMembership(communityDid)
-                            if (mem) {
+                            // An ended membership from before is not the one this is waiting for.
+                            if (mem && isCurrentMembership(mem)) {
                               if (mem.via === 'unknown')
                                 await stores!.community.saveMembership({ ...mem, via: 'vetting' })
                               break

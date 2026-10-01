@@ -1,7 +1,15 @@
+import { DeviceEventEmitter } from 'react-native'
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
-import { GRANT_HOLD_MS, MAX_RECONNECT_TRIES, SESSION_CONNECT_DEADLINE_MS, VtaAgentController } from '../module/vtaAgent'
+import {
+  GRANT_HOLD_MS,
+  MAX_RECONNECT_TRIES,
+  SESSION_CONNECT_DEADLINE_MS,
+  UNLINK_TELL_DEADLINE_MS,
+  VtaAgentController,
+} from '../module/vtaAgent'
 import { EnrolmentError } from '../module/vtaEnrolment'
+import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 
 // The controller runs the whole link — submit, wait for the admin, sign in as
 // the temporary key, rotate onto a long-lived one, remember the agent — and
@@ -17,6 +25,8 @@ const mockClient = {
   isConnected: false,
   holdPersonaKeys: jest.fn(async () => false),
   borrowKey: jest.fn(async () => ({ keyId: 'k', curve: 'Ed25519' as const, publicKeyMultibase: 'z' })),
+  /** Trust tasks sent through the client; unlink uses it to tell the agent. */
+  task: jest.fn(async (_type: string, _payload: Record<string, unknown>): Promise<unknown> => ({})),
 }
 
 jest.mock('../module/VtaClient', () => ({
@@ -540,6 +550,39 @@ describe('when the app replaces its agent (an unlock after a lock builds a new o
     expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
   })
 
+  it("says when an identity's keys are back, so its inbox can sign in then", async () => {
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => 1_000,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    const held: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_KEYS_HELD_EVENT, (e) => held.push(e))
+    await vta.restore({ tag: 'unlocked' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    sub.remove()
+    expect(held).toEqual([{ did: persona.did }])
+  })
+
+  it('says nothing for an identity whose keys could not be fetched', async () => {
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => 1_000,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    mockClient.holdPersonaKeys.mockRejectedValueOnce(new Error('the VTA did not answer'))
+    const held: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_KEYS_HELD_EVENT, (e) => held.push(e))
+    await vta.restore({ tag: 'unlocked' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    sub.remove()
+    expect(held).toEqual([])
+  })
+
   /** Unlocking is the commonest thing a person does: it must not flash "Signing in" or "offline". */
   it('keeps the link shown online and connected while the new session opens, and opens only one', async () => {
     const vta = new VtaAgentController()
@@ -676,6 +719,78 @@ describe('unlinking this phone from its agent', () => {
     })
     return { vta, clear, forgetManager, stored: () => stored }
   }
+
+  // A6 (228, upstream alignment): Unlink also tells the agent — stop waking this
+  // phone, and end its sessions (auth/revoke-session/0.2, all) — best-effort,
+  // bounded, and never in the way of the local unlink.
+  const SET_WAKE = 'https://trusttasks.org/spec/device/set-wake/0.2'
+  const REVOKE = 'https://trusttasks.org/spec/auth/revoke-session/0.2'
+  const told = () => mockClient.task.mock.calls.map(([type, payload]) => ({ type, payload }))
+
+  it('tells a reachable agent first: stop waking this phone, then end its sessions', async () => {
+    mockClient.task.mockClear()
+    const { vta, stored } = unlinkable()
+    await vta.restore({} as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await vta.unlink({} as never)
+    expect(told()).toEqual([
+      { type: SET_WAKE, payload: {} },
+      { type: REVOKE, payload: { all: true, reason: 'Unlinked on this phone' } },
+    ])
+    expect(stored()).toBeUndefined()
+    expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+  })
+
+  it('still unlinks when the agent refuses either step', async () => {
+    mockClient.task.mockClear()
+    mockClient.task.mockImplementation(async () => {
+      throw new Error('forbidden')
+    })
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await new Promise((resolve) => setImmediate(resolve))
+      await vta.unlink({} as never)
+      expect(told().map((t) => t.type)).toEqual([SET_WAKE, REVOKE])
+      expect(stored()).toBeUndefined()
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+    } finally {
+      mockClient.task.mockImplementation(async () => ({}))
+    }
+  })
+
+  it('does not wait on a silent agent past its deadline', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    mockClient.task.mockImplementation(() => new Promise(() => undefined))
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      const done = vta.unlink({} as never)
+      await jest.advanceTimersByTimeAsync(UNLINK_TELL_DEADLINE_MS + 100)
+      await done
+      expect(stored()).toBeUndefined()
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+    } finally {
+      mockClient.task.mockImplementation(async () => ({}))
+      jest.useRealTimers()
+    }
+  })
+
+  it('offline, sends nothing and unlinks at once', async () => {
+    mockClient.task.mockClear()
+    mockClient.connect.mockImplementationOnce(async () => {
+      throw new Error('socket closed')
+    })
+    const { vta, stored } = unlinkable()
+    await vta.restore({} as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(vta.getState().link).not.toMatchObject({ connection: { kind: 'online' } })
+    await vta.unlink({} as never)
+    expect(told()).toEqual([])
+    expect(stored()).toBeUndefined()
+  })
 
   it('closes the session, forgets the link and the manager key, and lands on no agent', async () => {
     const { vta, clear, forgetManager, stored } = unlinkable()

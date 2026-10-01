@@ -17,6 +17,8 @@ import { testIdWithKey } from '../../../utils/testable'
 import { cardStandingOf, subscribeCardStanding, type CardStanding } from '../module/vtiCardStanding'
 import { cardVaultStateOf, subscribeCardVault } from '../module/vtiCardVault'
 
+import { localDate } from './localTime'
+
 /** A card's vault state as one string: what the row's words and icon key on. */
 export type CardKeptKey = 'kept' | 'pending' | 'notYetKept' | 'cannotKeep:proofSet' | 'cannotKeep:refusedByAgent'
 
@@ -59,14 +61,17 @@ export interface CardKeptRowProps {
   handle: string
   /** The community's name, for "<community> withdrew this card". */
   community?: string
+  /** The membership was ended by the community at this time (#166): the card is history, whatever it says. */
+  endedAt?: string
 }
 
-export const CardKeptRow: React.FC<CardKeptRowProps> = ({ card, kind, handle, community }) => {
+export const CardKeptRow: React.FC<CardKeptRowProps> = ({ card, kind, handle, community, endedAt }) => {
   const { t } = useTranslation()
   const { ColorPalette, TextTheme } = useTheme()
   const id = typeof card.id === 'string' ? card.id : ''
   const kept = useCardKept(id)
-  const standing = useCardStanding(card)
+  const read = useCardStanding(card)
+  const standing = endedAt ? { state: 'expired' as const, at: endedAt } : read
   const styles = StyleSheet.create({
     row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
@@ -89,7 +94,7 @@ export const CardKeptRow: React.FC<CardKeptRowProps> = ({ card, kind, handle, co
           <ThemedText testID={testIdWithKey(`AgentCardHistory_${kind}_${handle}`)}>
             {standing.state === 'expired'
               ? t(kind === 'membership' ? 'VtaLink.CardMembershipEnded' : 'VtaLink.CardRoleEnded', {
-                  date: standing.at.slice(0, 10),
+                  date: localDate(standing.at),
                 })
               : t('VtaLink.CardWithdrawn', {
                   community: community ?? t('Community.Unnamed'),
