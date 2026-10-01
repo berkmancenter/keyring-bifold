@@ -24,6 +24,8 @@ import {
   WITNESSED_EXCHANGE_CONTEXT_DOCUMENT,
   CREDENTIALS_V2_CONTEXT_URL,
   CREDENTIALS_V2_CONTEXT_DOCUMENT,
+  DTG_REGISTRY_CONTEXT_V1_URL,
+  DTG_REGISTRY_CONTEXT_V1_DOCUMENT,
   CACHED_STANDARD_CONTEXTS,
   REGISTRY_DTG_CONTEXT_URL,
   REGISTRY_DTG_CONTEXT_DOCUMENT,
@@ -287,6 +289,17 @@ export const demoDocumentLoader = (_agentContext: AgentContext): DocumentLoader 
         contextUrl: null,
         documentUrl: url,
         document: CREDENTIALS_V2_CONTEXT_DOCUMENT,
+      }
+    }
+
+    // DTG Credentials v1 (community cards and witness statements from VTI
+    // 0.47.0 on): the registry's frozen bytes, never fetched. The spec compares
+    // this IRI byte-exact, so only the exact URL is served from here.
+    if (url === DTG_REGISTRY_CONTEXT_V1_URL) {
+      return {
+        contextUrl: null,
+        documentUrl: url,
+        document: DTG_REGISTRY_CONTEXT_V1_DOCUMENT,
       }
     }
 

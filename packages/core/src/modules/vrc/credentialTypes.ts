@@ -40,6 +40,13 @@ export const RELATIONSHIP_CARD_TYPE = 'RelationshipCard'
 export const RCARD_TEMPLATE_TYPE = 'RCardTemplate'
 export const WITNESS_CREDENTIAL_TYPE = 'WitnessCredential'
 export const STATEMENT_CREDENTIAL_TYPE = 'StatementCredential'
+/**
+ * The registry predicate a DTG Credentials v1 witness credential states
+ * (VTI 0.47.0 / #1859, tf witness/session/submit as recast by #691): the VWC
+ * is a `StatementCredential` under it, and no longer carries the
+ * `WitnessCredential` type.
+ */
+export const WITNESSED_V1_PREDICATE = 'https://registry.trustoverip.org/dtg/vsc/witnessed/1'
 
 /** A credential JSON, a `type` array, or a single type string. */
 export type CredentialTypeInput = unknown
@@ -90,6 +97,7 @@ export function isRCardTemplate(input: CredentialTypeInput): boolean {
 }
 
 /**
+/**
  * Lazily configured accept-list from `@bifold/dtg-vocab` — loaded once, not
  * per call. `configure()`/`loadAcceptList()` do file I/O; caching keeps this
  * module's predicates cheap to call from render paths.
@@ -103,25 +111,31 @@ function getAcceptListConfig(): PredicateHandlingConfig {
   return acceptListConfig
 }
 
-/** Reads `credentialSubject.predicate` off a credential-shaped input, or undefined for anything else (a bare type array/string cannot carry a predicate). */
-function readPredicate(input: CredentialTypeInput): string | undefined {
+/**
+ * The `predicate` of a credential's (first) subject, from its JSON or from a
+ * Credo credential instance (whose subject keeps members other than `id` in
+ * `claims`). Undefined when the input is not a credential object (a bare type
+ * array/string cannot carry a predicate).
+ */
+function subjectPredicateOf(input: CredentialTypeInput): string | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
-  const cs = (input as { credentialSubject?: unknown }).credentialSubject
-  const subject = Array.isArray(cs) ? cs[0] : cs
-  const predicate = (subject as { predicate?: unknown } | undefined)?.predicate
+  const subjects = (input as { credentialSubject?: unknown }).credentialSubject
+  const subject = (Array.isArray(subjects) ? subjects[0] : subjects) as
+    | { predicate?: unknown; claims?: { predicate?: unknown } }
+    | undefined
+  const predicate = subject?.predicate ?? subject?.claims?.predicate
   return typeof predicate === 'string' ? predicate : undefined
 }
 
 /**
-/**
  * True if `input` is a `StatementCredential` whose `credentialSubject.predicate`
- * is `dtg:witnessed` in `@bifold/dtg-vocab`'s configured accept-list — the new
- * VSC shape of a VWC (plan §1, §3 D1/D2). Requires a full credential object;
+ * is `dtg:witnessed` in `@bifold/dtg-vocab`'s configured accept-list — the VSC
+ * shape of a VWC (plan §1, §3 D1/D2). Requires a full credential object;
  * see the file header's "known limitation" note.
  */
 export function isWitnessStatement(input: CredentialTypeInput): boolean {
   if (!hasCredentialTypeName(input, STATEMENT_CREDENTIAL_TYPE)) return false
-  const predicate = readPredicate(input)
+  const predicate = subjectPredicateOf(input)
   if (!predicate) return false
   return predicate === DTG_PREDICATE_WITNESSED && predicate in getAcceptListConfig().profiles
 }
@@ -136,17 +150,31 @@ export function isWitnessStatement(input: CredentialTypeInput): boolean {
  */
 export function isStatementCredential(input: CredentialTypeInput): boolean {
   if (!hasCredentialTypeName(input, STATEMENT_CREDENTIAL_TYPE)) return false
-  const predicate = readPredicate(input)
+  const predicate = subjectPredicateOf(input)
   return predicate !== undefined && predicate in getAcceptListConfig().profiles
 }
 
 /**
- * WitnessCredential — a VWC issued by a witness for a witnessed exchange.
- * Dual-read (plan §7): the legacy WD02 type-string form, OR the new VSC
- * `dtg:witnessed` predicate form. See `isWitnessStatement` for the latter.
+ * A DTG Credentials v1 witness credential: a `StatementCredential` (matched
+ * exactly — a vetting statement is one too) stating the witnessed/1
+ * predicate. Needs the credential itself: a bare type list cannot say.
+ */
+export function isWitnessedStatement(input: CredentialTypeInput): boolean {
+  return (
+    getCredentialTypeList(input).includes(STATEMENT_CREDENTIAL_TYPE) &&
+    subjectPredicateOf(input) === WITNESSED_V1_PREDICATE
+  )
+}
+
+/**
+ * A VWC issued by a witness for a witnessed exchange, in any shape: the legacy
+ * WD02 `WitnessCredential` type, the VSC `dtg:witnessed` statement
+ * (`isWitnessStatement`, plan §7 dual-read), or a DTG Credentials v1
+ * witnessed/1 statement (`isWitnessedStatement`). The statement forms need the
+ * credential, not just its types.
  */
 export function isWitnessCredential(input: CredentialTypeInput): boolean {
-  return hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE) || isWitnessStatement(input)
+  return hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE) || isWitnessStatement(input) || isWitnessedStatement(input)
 }
 
 /**
