@@ -23,6 +23,7 @@ import {
 
 import { Screens } from '../../../types/navigators'
 
+import { AgentHostConnectionError, looksLikeAgentHostQr, parseAgentHostQr } from './agentHostConnection'
 import { bareDid, classifyDid } from './classifyDid'
 import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore } from './VtiIdentityStore'
@@ -51,7 +52,16 @@ export class KeyringLinkError extends Error {
   }
 }
 
+/**
+ * The app's own link to the waiting approvals (the agent home). A push notification
+ * opens it: the notification carries no content, so a tap can only say "go to
+ * where approvals wait", and the approval itself is fetched after unlocking.
+ */
+export const APPROVALS_LINK = 'keyring://vta/approvals'
+
 export type KeyringAgentLinkKind =
+  | 'agentHost'
+  | 'approvals'
   | 'enrolment'
   | 'invitation'
   | 'invitationOffer'
@@ -63,6 +73,10 @@ export type KeyringAgentLinkKind =
 /** Which of our links this is, if any — cheap, no parsing beyond the prefix. */
 export function keyringAgentLinkKind(text: string): KeyringAgentLinkKind | undefined {
   const trimmed = text.trim()
+  // An agent host's automatic connection: JSON with a callback. Claimed even
+  // when it fails its checks, so the scanner says why rather than "invalid".
+  if (looksLikeAgentHostQr(trimmed)) return 'agentHost'
+  if (trimmed === APPROVALS_LINK) return 'approvals'
   if (isEnrolmentLink(trimmed)) return 'enrolment'
   if (isVtiInvitationLink(trimmed)) return 'invitation'
   // A community admin console's invitation QR: an OID4VCI offer whose issuer
@@ -145,7 +159,9 @@ async function routeBareDid(
       if (vtaAgent.getState().link.kind === 'linked') {
         throw new KeyringLinkError('This phone is already linked to an agent.')
       }
-      await vtaAgent.startManualLink(agent, did, didHost(did))
+      // Scanned or pasted: usually another phone's "Add another phone" code, so
+      // this phone shows its own code for that phone to scan (#30).
+      await vtaAgent.startManualLink(agent, did, didHost(did), { via: 'scan' })
       navigate('VtaLink')
       return
     case 'ambiguous':
@@ -171,11 +187,13 @@ async function routeBareDid(
 }
 
 /** Where a link lands, inside the My Agent stack. */
-export type MyAgentDestination = 'VtaLink' | 'MyAgent' | 'VtiVetting' | 'VtiJoin' | 'VtiInvited'
+export type MyAgentDestination = 'VtaLink' | 'MyAgent' | 'VtaAgent' | 'VtiVetting' | 'VtiJoin' | 'VtiInvited'
 
 export const MY_AGENT_SCREEN: Record<MyAgentDestination, Screens> = {
   VtaLink: Screens.VtaLink,
   MyAgent: Screens.MyAgent,
+  // The agent home, where waiting approvals are listed (VtaAgentHome).
+  VtaAgent: Screens.VtaAgent,
   VtiVetting: Screens.VtiVetting,
   VtiJoin: Screens.VtiJoin,
   VtiInvited: Screens.VtiInvited,
@@ -234,6 +252,30 @@ export async function routeKeyringAgentLink(
 ): Promise<void> {
   const trimmed = text.trim()
   switch (keyringAgentLinkKind(trimmed)) {
+    case 'agentHost': {
+      if (vtaAgent.getState().link.kind === 'linked') {
+        throw new KeyringLinkError('This phone is already linked to an agent.')
+      }
+      let offer
+      try {
+        offer = parseAgentHostQr(trimmed)
+      } catch (error) {
+        if (error instanceof AgentHostConnectionError && error.reason === 'hostNotAllowed') {
+          throw new KeyringLinkError(
+            "This code is from a site Keyring doesn't connect to, so nothing was sent. Use the Admin DID option on your agent host's page instead."
+          )
+        }
+        throw error
+      }
+      if (!offer)
+        throw new KeyringLinkError("This agent host's code couldn't be read. Make a new one and scan it again.")
+      vtaAgent.scanHostOffer(offer)
+      navigate('VtaLink')
+      return
+    }
+    case 'approvals':
+      navigate('VtaAgent')
+      return
     case 'enrolment': {
       let offer
       try {

@@ -28,7 +28,7 @@ import { GenericRecordsIdentityStore, type VtiIdentityStore, type VtiPersona } f
 import { selfRemoveRefusal, vtiAgent, type JoinRequestStatus, type VtiVerdict } from './vtiAgent'
 import { recordCardRevocation } from './vtiCardStanding'
 import { checkDeliveredCard, deliveredCardCheck, VtiCardStatusUnreadable } from './vtiDeliveredCheck'
-import { receiveIssue, VTI_CARD_REFUSED_EVENT } from './vtiInbox'
+import { receiveIssue, roleNameOf, VTI_CARD_REFUSED_EVENT } from './vtiInbox'
 import { checkCredentialStatus } from './vtiStatusList'
 import { GenericRecordsTspPeerRevisionStore } from './vtiTsp'
 
@@ -183,22 +183,31 @@ export async function joinCommunity(
   return { persona, verdict, membership }
 }
 
-/** The card an `allow` carries inline: `with.vmc` and, when granted, `with.roleVec`. */
+/**
+ * The card an `allow` carries inline: `with.vmc` and, when granted, the role
+ * card — `with.roleVec` (an endorsement), or `with.roleVac` (a DTG Credentials
+ * v1 VAC: vtc/join-requests/decide/0.1 as recast by tf #691 renames the field).
+ * Either is kept as the membership's role card.
+ */
 export function membershipFromVerdict(
   communityDid: string,
   personaDid: string,
   verdict: VtiVerdict,
   via: VtiMembership['via']
 ): VtiMembership | undefined {
-  const w = (verdict.with ?? {}) as { vmc?: Record<string, unknown>; roleVec?: Record<string, unknown> }
+  const w = (verdict.with ?? {}) as {
+    vmc?: Record<string, unknown>
+    roleVec?: Record<string, unknown>
+    roleVac?: Record<string, unknown>
+  }
   if (!w.vmc) return undefined
-  const roleSubject = (w.roleVec?.credentialSubject as { endorsement?: { role?: string } } | undefined)?.endorsement
+  const roleCard = w.roleVec ?? w.roleVac
   return {
     communityDid,
     personaDid,
-    role: roleSubject?.role ?? 'member',
+    role: (roleCard && roleNameOf(roleCard)) ?? 'member',
     vmc: w.vmc,
-    roleVec: w.roleVec,
+    roleVec: roleCard,
     grantedAt: typeof w.vmc.validFrom === 'string' ? w.vmc.validFrom : new Date().toISOString(),
     validUntil: typeof w.vmc.validUntil === 'string' ? w.vmc.validUntil : undefined,
     via,
@@ -255,6 +264,8 @@ export async function readJoinState(
   const store = options.communityStore ?? new GenericRecordsCommunityStore(agent)
 
   const membership = await store.getMembership(communityDid).catch(() => undefined)
+  // The community said so in a signed notice: removed, whatever the card says.
+  if (membership?.removal) return { kind: 'removed', membership, at: membership.removal.decidedAt }
   if (membership) {
     const cardStatus =
       options.cardStatus ??

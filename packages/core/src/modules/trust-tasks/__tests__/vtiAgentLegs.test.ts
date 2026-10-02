@@ -19,6 +19,8 @@ const mockGreetings: Array<{ from: string; to: string }> = []
 const mockAdvertised: Record<string, string | undefined> = {}
 const mockTspVia: Record<string, string | undefined> = {}
 const mockPacked: Record<string, unknown>[] = []
+/** Called as a mock session's socket opens, to read the agent's state then. */
+let mockOnStart: (() => void) | undefined
 
 jest.mock('@bifold/trust-tasks', () => ({
   tsp: { CODEC_FORMS_RELATIONSHIPS: true, peekRevision: () => ({ minor: 0 }) },
@@ -69,6 +71,7 @@ jest.mock('../module/VtiMediatorTransport', () => ({
       return this.open
     }
     async start() {
+      mockOnStart?.()
       this.open = true
     }
     async stop() {
@@ -163,6 +166,24 @@ describe('the community leg', () => {
     expect(mockSessions.filter((s) => s.did === 'did:webvh:p:one')).toHaveLength(1)
   })
 
+  // 227.1: what waited at the mediator drains as the socket opens, before the
+  // agent says it is connected; an inbox reads whom it is signing in as.
+  it('says whom it is signing in as while the socket opens, and stops once connected', async () => {
+    const seen: Array<{ did?: string; signingInAs?: string; status: string }> = []
+    mockOnStart = () => {
+      const { did, signingInAs, status } = vtiAgent.getState()
+      seen.push({ did, signingInAs, status })
+    }
+    try {
+      await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:drain') })
+      expect(seen).toEqual([{ did: undefined, signingInAs: 'did:webvh:p:drain', status: 'authenticating' }])
+      expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: 'did:webvh:p:drain' })
+      expect(vtiAgent.getState().signingInAs).toBeUndefined()
+    } finally {
+      mockOnStart = undefined
+    }
+  })
+
   it("rides the persona's own mediator, and the configured one only as a fallback", async () => {
     mockAdvertised['did:webvh:p:farm'] = 'did:webvh:farm-mediator'
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:farm') })
@@ -174,6 +195,37 @@ describe('the community leg', () => {
     await expect(vtiAgent.connect(agent, undefined, { persona: persona('did:webvh:p:nowhere') })).rejects.toThrow(
       /no mediator/
     )
+  })
+
+  // 227 gate, Farm: a sign-in stopped between the persona's document and its
+  // mediator's, and nothing in the Release log said so. Each step is said.
+  it('says each step of a sign-in in the Release log, and why it fell back to the configured mediator', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { advertisedMediatorDid } = jest.requireMock('../module/VtiMediatorTransport')
+    ;(advertisedMediatorDid as jest.Mock).mockRejectedValueOnce(new Error('resolving did:webvh:p:farm took over 15 s'))
+    try {
+      await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:farm') })
+      expect(mockSessions.at(-1)?.mediator).toBe('did:peer:lab')
+      const lines = warn.mock.calls.map((c) => String(c[0]))
+      const order = [
+        'resolving',
+        'gave no mediator (resolving did:webvh:p:farm took over 15 s)',
+        'mediator did:peer:lab',
+        'mediator resolved',
+        'signing in as',
+        'socket open',
+        'connected',
+      ]
+      let at = -1
+      for (const want of order) {
+        const i = lines.findIndex((l, j) => j > at && l.startsWith('vtiAgent: connect') && l.includes(want))
+        expect({ want, found: i > at }).toEqual({ want, found: true })
+        at = i
+      }
+      expect(lines.some((l) => /\+\d+ ms: /.test(l))).toBe(true)
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   // A read: only a read is sent again over DIDComm (a write is not — see 'a write is sent once').
@@ -198,7 +250,7 @@ describe('the community leg', () => {
     // The next ask goes straight to DIDComm.
     const tspBefore = session.tsp.length
     await vtiAgent.ask(COMMUNITY, 'https://t/submit/0.2', {}, 20)
-    expect(session.tsp.length).toBe(tspBefore)
+    expect(session.tsp).toHaveLength(tspBefore)
     expect(session.didcomm).toHaveLength(2)
   })
 
@@ -295,9 +347,20 @@ describe('what a community is asked, and how', () => {
     }
   })
 
-  it('leaves a task unsigned when its spec declares no proof', async () => {
-    const { sent } = await askOverDidcomm(MANIFEST, () => ({ type: `${MANIFEST}#response`, body: {} }))
-    expect((sent.body as Record<string, unknown>).proof).toBeUndefined()
+  // vti #1739 and the VTC's spine (step 3a): over DIDComm and TSP a document
+  // must carry a proof by its issuer, who must be the sender, whatever its
+  // spec says about the proof. The manifest's proof is only RECOMMENDED, but
+  // here the transport already names the persona, so a proof discloses
+  // nothing more; the anonymous read is the REST one (vtiManifestRest).
+  it('signs the manifest too when it rides DIDComm, as the persona the transport already names', async () => {
+    const who = 'did:webvh:p:manifest'
+    const { sent } = await askOverDidcomm(MANIFEST, () => ({ type: `${MANIFEST}#response`, body: {} }), who)
+    expect((sent.body as Record<string, unknown>).type).toBe(MANIFEST)
+    expect((sent.body as Record<string, unknown>).proof).toEqual({
+      signer: who,
+      kmsKeyId: 'sig',
+      verificationMethod: `${who}#key-0`,
+    })
   })
 
   it('reads a reply typed as the document, as a VTC sends today', async () => {

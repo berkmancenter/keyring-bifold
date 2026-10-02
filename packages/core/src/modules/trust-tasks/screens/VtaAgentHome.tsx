@@ -35,7 +35,7 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
-import { GenericRecordsCommunityStore, type VtiMembership } from '../module/VtiCommunityStore'
+import { GenericRecordsCommunityStore, isCurrentMembership, type VtiMembership } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 import { vtaAgent, type VtaActivity } from '../module/vtaAgent'
 import { ownVetterGrantState, type VetterGrantState } from '../module/vtiGrantState'
@@ -45,12 +45,14 @@ import { communityTarget } from '../module/vtiCommunityLink'
 import { DevicesCard } from './DevicesCard'
 import { ErasedNotice, RemovedPhoneCard } from './RemovedPhoneCard'
 import { agentDisplayName, withAgentName } from './agentName'
+import { ApprovalDetails } from './ApprovalDetails'
 import { CommunityCard } from './CommunityCard'
 import { communityHeadingOf, communityLabelOf, partyLabelStartOf } from './communityName'
 import { DidDetails } from './DidDetails'
 import { GetCardsFromAgent } from './GetCardsFromAgent'
 import { SEGMENT_MIN_SCALE, segmentLayout } from './segmentLayout'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
+import { localDateTime } from './localTime'
 
 interface Holdings {
   personas: VtiPersona[]
@@ -108,7 +110,7 @@ const VtaAgentHome: React.FC = () => {
   const { agent } = useAgent()
   const navigation = useNavigation()
   const { ColorPalette, TextTheme } = useTheme()
-  const { state } = useVtaLinkWithClock()
+  const { state, now } = useVtaLinkWithClock()
   const { link } = state
   const agentKey = link.kind === 'linked' ? link.vtaDid : undefined
   const [holdings, setHoldings] = useState<Holdings | undefined>(() =>
@@ -153,7 +155,8 @@ const VtaAgentHome: React.FC = () => {
     sessionSegment = next
     setSegment(next)
   }, [])
-  const pendingApprovals = state.approvals.length
+  // Only what still waits: a decided request stays on its card, not in the count.
+  const pendingApprovals = state.approvals.filter((a) => a.status === 'pending').length
   // One line per label, always: side by side while that stays readable,
   // stacked when the phone is narrow or the text is large (IN-37).
   const { width, fontScale } = useWindowDimensions()
@@ -396,9 +399,24 @@ const VtaAgentHome: React.FC = () => {
 
   const activityText = (a: VtaActivity) => t(`VtaLink.Activity.${a.kind}`)
   const isVetter = (holdings?.vetterFor.length ?? 0) > 0
-  const isMember = (holdings?.memberships.length ?? 0) > 0
-  // Holds an identity for a community, and neither belongs nor vets there yet.
-  const isApplicant = !isMember && !isVetter && (holdings?.personas.length ?? 0) > 0
+  // A membership the community removed stays on its card ("… removed you"),
+  // but it is not membership (#166).
+  const currentMemberships = (holdings?.memberships ?? []).filter(isCurrentMembership)
+  const isMember = currentMemberships.length > 0
+  // Holds an identity for a community it has never been a member of, and
+  // neither belongs nor vets anywhere yet.
+  const everMemberOf = new Set((holdings?.memberships ?? []).map((m) => m.communityDid))
+  const isApplicant =
+    !isMember && !isVetter && (holdings?.personas ?? []).some((p) => !everMemberOf.has(p.communityDid))
+  // Removed, and nothing since: the seat names who removed them (the latest
+  // removal), where it used to read "not a member yet" and offer vetting to
+  // continue (227 gate U11). The community's card says what to do next.
+  const removedBy =
+    !isMember && !isVetter && !isApplicant
+      ? (holdings?.memberships ?? [])
+          .filter((m) => !isCurrentMembership(m))
+          .sort((a, b) => String(b.removal?.decidedAt ?? '').localeCompare(String(a.removal?.decidedAt ?? '')))[0]
+      : undefined
   const lapsed = holdings?.lapsed ?? []
   const day = (iso: string) => new Date(iso).toLocaleDateString()
   const lapsedText = (communityDid: string, grant: Holdings['lapsed'][number]['grant']) => {
@@ -431,7 +449,49 @@ const VtaAgentHome: React.FC = () => {
           <ThemedText variant="bold" testID={testIdWithKey('AgentHomeName')}>
             {agentDisplayName(withAgentName(link, state.agentNames), t)}
           </ThemedText>
-          <VtaStatusLine connection={link.connection} />
+          <VtaStatusLine connection={link.connection} now={now} />
+          {link.connection.kind === 'gone' ? (
+            // Gone for good (agentGone.ts): said plainly, with the way on — a new agent.
+            // Unlinking is still confirmed, in Manage, with words for an agent that is gone.
+            <View style={{ gap: 8 }} testID={testIdWithKey('AgentGone')}>
+              <ThemedText variant="bold" style={{ color: ColorPalette.semantic.error }}>
+                {t('VtaLink.AgentGoneTitle')}
+              </ThemedText>
+              <ThemedText testID={testIdWithKey('AgentGoneWhy')}>
+                {t(link.connection.why === 'notFound' ? 'VtaLink.AgentGoneNotFound' : 'VtaLink.AgentGoneUnreachable')}
+              </ThemedText>
+              <Button
+                title={t('VtaLink.AgentGoneLinkNew')}
+                buttonType={ButtonType.Primary}
+                onPress={() => {
+                  chooseSegment('manage')
+                  setUnlinkOpen(true)
+                }}
+                testID={testIdWithKey('AgentGoneLinkNew')}
+              />
+              <Button
+                title={t('VtaLink.TryAgainNow')}
+                buttonType={ButtonType.Secondary}
+                onPress={() => {
+                  if (agent) void vtaAgent.tryAgainNow(agent)
+                }}
+                testID={testIdWithKey('AgentGoneTryAgain')}
+              />
+            </View>
+          ) : state.reconnectGaveUp ? (
+            // Reconnecting stopped after its tries: said, with the way on, never a silent loop.
+            <View style={{ gap: 8 }} testID={testIdWithKey('AgentGaveUp')}>
+              <ThemedText style={{ color: ColorPalette.semantic.error }}>{t('VtaLink.AgentDidNotAnswer')}</ThemedText>
+              <Button
+                title={t('VtaLink.TryAgainNow')}
+                buttonType={ButtonType.Primary}
+                onPress={() => {
+                  if (agent) void vtaAgent.tryAgainNow(agent)
+                }}
+                testID={testIdWithKey('AgentTryAgain')}
+              />
+            </View>
+          ) : null}
           {/* What this phone is here, in one line and one place.
               A reader used to infer the seat from which cards were on screen,
               which is how `run-vetter-grant-lifecycle` ended up waiting for an
@@ -442,15 +502,20 @@ const VtaAgentHome: React.FC = () => {
               this line can trust the cards below it have settled too. */}
           {holdings ? (
             <ThemedText style={styles.muted} testID={testIdWithKey('AgentSeat')}>
-              {t(
-                holdings.vetterFor.length
-                  ? 'VtaLink.SeatVetter'
-                  : isMember
-                    ? 'VtaLink.SeatMember'
-                    : isApplicant
-                      ? 'VtaLink.SeatApplicant'
-                      : 'VtaLink.SeatNone'
-              )}
+              {removedBy
+                ? t('VtaLink.SeatRemoved', {
+                    community: communityLabelOf(removedBy.communityDid, t),
+                    interpolation: { escapeValue: false },
+                  })
+                : t(
+                    holdings.vetterFor.length
+                      ? 'VtaLink.SeatVetter'
+                      : isMember
+                        ? 'VtaLink.SeatMember'
+                        : isApplicant
+                          ? 'VtaLink.SeatApplicant'
+                          : 'VtaLink.SeatNone'
+                  )}
             </ThemedText>
           ) : null}
           {/* An applicant's way back to vetting. It used to be the operator
@@ -470,45 +535,48 @@ const VtaAgentHome: React.FC = () => {
           {/* Where the phone is, per community it belongs to: a finished step
               says so ("Joined", not "Join") and names the community. */}
           <View testID={testIdWithKey('AgentJourney')} accessibilityRole="summary">
-            {(isMember
-              ? Array.from(new Set((holdings?.memberships ?? []).map((m) => m.communityDid)))
-              : [undefined]
-            ).map((communityDid) => (
-              <View key={communityDid ?? 'none'} style={styles.strip} testID={testIdWithKey('AgentJourneyRow')}>
-                {[
-                  { key: 'Linked', label: t('VtaLink.JourneyLinked'), done: true, now: false },
-                  communityDid
-                    ? {
-                        key: 'Joined',
-                        // The membership is the community's own answer: a name
-                        // that only a link gave is not qualified here, where
-                        // "(not confirmed …)" read as if the joining were.
-                        label: t('VtaLink.JourneyJoined', {
-                          community: communityHeadingOf(communityDid, t, { claim: 'plain' }),
-                          interpolation: { escapeValue: false },
-                        }),
-                        done: true,
-                        now: false,
-                      }
-                    : { key: 'Join', label: t('VtaLink.JourneyJoin'), done: false, now: true },
-                  { key: 'Member', label: t('VtaLink.JourneyMember'), done: !!communityDid, now: false },
-                ].map((stop, i) => (
-                  <View key={stop.key} style={styles.stopGroup} testID={testIdWithKey(`AgentJourneyStop_${stop.key}`)}>
-                    {i > 0 ? <Icon name="chevron-right" size={16} color={ColorPalette.grayscale.mediumGrey} /> : null}
+            {(isMember ? Array.from(new Set(currentMemberships.map((m) => m.communityDid))) : [undefined]).map(
+              (communityDid) => (
+                <View key={communityDid ?? 'none'} style={styles.strip} testID={testIdWithKey('AgentJourneyRow')}>
+                  {[
+                    { key: 'Linked', label: t('VtaLink.JourneyLinked'), done: true, now: false },
+                    communityDid
+                      ? {
+                          key: 'Joined',
+                          // The membership is the community's own answer: a name
+                          // that only a link gave is not qualified here, where
+                          // "(not confirmed …)" read as if the joining were.
+                          label: t('VtaLink.JourneyJoined', {
+                            community: communityHeadingOf(communityDid, t, { claim: 'plain' }),
+                            interpolation: { escapeValue: false },
+                          }),
+                          done: true,
+                          now: false,
+                        }
+                      : { key: 'Join', label: t('VtaLink.JourneyJoin'), done: false, now: true },
+                    { key: 'Member', label: t('VtaLink.JourneyMember'), done: !!communityDid, now: false },
+                  ].map((stop, i) => (
                     <View
-                      style={[styles.stop, stop.now ? styles.stopNow : undefined]}
-                      accessibilityState={{ selected: stop.now }}
-                      testID={testIdWithKey(`AgentJourney${stop.key}`)}
+                      key={stop.key}
+                      style={styles.stopGroup}
+                      testID={testIdWithKey(`AgentJourneyStop_${stop.key}`)}
                     >
-                      <ThemedText style={stop.done ? styles.stopDone : stop.now ? styles.stopNowText : styles.muted}>
-                        {stop.done ? '✓ ' : ''}
-                        {stop.label}
-                      </ThemedText>
+                      {i > 0 ? <Icon name="chevron-right" size={16} color={ColorPalette.grayscale.mediumGrey} /> : null}
+                      <View
+                        style={[styles.stop, stop.now ? styles.stopNow : undefined]}
+                        accessibilityState={{ selected: stop.now }}
+                        testID={testIdWithKey(`AgentJourney${stop.key}`)}
+                      >
+                        <ThemedText style={stop.done ? styles.stopDone : stop.now ? styles.stopNowText : styles.muted}>
+                          {stop.done ? '✓ ' : ''}
+                          {stop.label}
+                        </ThemedText>
+                      </View>
                     </View>
-                  </View>
-                ))}
-              </View>
-            ))}
+                  ))}
+                </View>
+              )
+            )}
           </View>
           <Pressable
             onPress={() => vtaAgent.showIntro()}
@@ -711,8 +779,9 @@ const VtaAgentHome: React.FC = () => {
                       })}
                     </ThemedText>
                     <ThemedText style={styles.muted}>
-                      {t('MyAgent.ApprovalExpires', { when: approval.expiresAt.replace('T', ' ').slice(0, 16) })}
+                      {t('MyAgent.ApprovalExpires', { when: localDateTime(approval.expiresAt) })}
                     </ThemedText>
+                    <ApprovalDetails approval={approval} />
                     <DidDetails did={approval.requester} testIdStem="AgentApprovalRequester" />
                     {approval.status === 'pending' ? (
                       <View style={styles.row}>
@@ -762,7 +831,9 @@ const VtaAgentHome: React.FC = () => {
                     interpolation: { escapeValue: false },
                   })}
                 </ThemedText>
-                <ThemedText testID={testIdWithKey('AgentUnlinkBody')}>{t('VtaLink.UnlinkBody')}</ThemedText>
+                <ThemedText testID={testIdWithKey('AgentUnlinkBody')}>
+                  {t(link.connection.kind === 'gone' ? 'VtaLink.UnlinkBodyGone' : 'VtaLink.UnlinkBody')}
+                </ThemedText>
                 <Button
                   title={t('VtaLink.UnlinkConfirm')}
                   buttonType={ButtonType.Critical}

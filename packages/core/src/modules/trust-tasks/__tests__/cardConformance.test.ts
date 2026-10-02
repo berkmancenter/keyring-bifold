@@ -85,12 +85,16 @@ import {
   type VtiVettingStore,
 } from '../module/vtiVetting'
 // eslint-disable-next-line import/order
+import { setDtgV1WritingEnabled } from '../module/dtgV1Writing'
+// eslint-disable-next-line import/order
 import { verifyEligibilityPresentation } from '../module/vtiEligibility'
+import { purposeForDocumentType } from '../module/proofPurpose'
 // eslint-disable-next-line import/order
 import {
   digestMultibase,
   signCompactJws,
   signDocumentProof,
+  taskDigestMultibase,
   verifyDocumentProof,
   verifyTrustTaskProof,
 } from '@bifold/trust-tasks'
@@ -199,10 +203,11 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       desk.requestId,
       { documentClasses: ['passport'], claimsVerified: ['name.legal'], livenessConfirmed: true }
     )
-    // Delivered as the VTC delivers a credential: the body IS the delivery,
-    // `credential_response.credential` at its top level (vtc-service
-    // credentials/delivery.rs:128-141), which is where openvtc reads it
-    // (inbound.rs:791). Not a Trust Task document, so not listed below.
+    // Delivered as openvtc delivers and opens one (openvtc b52dc28
+    // vetting/wire.rs:188-205 `credential_delivery`, :218-240 `open`): a signed
+    // Trust Task document, its type the message's, issued by the vetter,
+    // threaded on the session, the statement under `payload`. A bare body has
+    // no `id` and is refused as a malformed vetting document. Listed below too.
     const [, sentType, issue, sentOptions] = mockSend.mock.calls.at(-1) as unknown as [
       string,
       string,
@@ -210,13 +215,82 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       { thid?: string },
     ]
     expect(sentType).toBe('https://trusttasks.org/spec/credential-exchange/issue/0.1')
-    expect(Object.keys(issue)).toEqual(['credential_response'])
+    expect(issue).toMatchObject({ type: sentType, issuer: vetter.did, threadId: desk.session!.documentId })
+    expect(String(issue.id)).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    // The wrapper is an operational Trust Task document, signed for
+    // authentication as vta-sdk signs one; a receiver checks it as a Trust Task
+    // (inboundProofs: verifyTrustTaskProof), whatever purpose it declares.
+    expect((issue.proof as { proofPurpose?: string }).proofPurpose).toBe('authentication')
+    await expect(verifyTrustTaskProof(vetter.agent as never, issue)).resolves.toEqual({ ok: true, signer: vetter.did })
     expect(sentOptions).toMatchObject({ thid: desk.session!.documentId })
-    const statement = (issue.credential_response as { credential: Record<string, unknown> }).credential
+    const statement = (
+      (issue.payload as Record<string, unknown>).credential_response as {
+        credential: Record<string, unknown>
+      }
+    ).credential
+    // Two ids: the document's, and the statement's own, which a vetter names to
+    // withdraw it (vetting/session/0.1 spec.md "The session's name").
+    expect(String(statement.id)).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    expect(statement.id).not.toBe(issue.id)
     const endorsement = (statement.credentialSubject as { endorsement: Record<string, unknown> }).endorsement
     expect(endorsement.cardDigestMultibase).toBe(cardDigestMultibase(card))
     expect(endorsement.identityCommitment).toBe(card.identityCommitment)
     await expect(verifyDocumentProof(vetter.agent as never, statement, vetter.did)).resolves.toBe(true)
+
+    // 228 writer, flag on: the same attestation as DTG Credentials v1's vetted/1
+    // statement, over a session document the vetter opened. Written out as
+    // statement-v1.json + session.json for the 0.47 checker (card-verify-v047),
+    // which runs vta-sdk 0.58 verify_statement, check_against_card and
+    // check_against_session on it.
+    const sessionDocument = await signDocumentProof(
+      vetter.agent as never,
+      {
+        id: session.documentId,
+        type: VETTING.session,
+        threadId: session.documentId,
+        issuer: vetter.did,
+        recipient: applicant.did,
+        issuedAt: new Date().toISOString(),
+        payload: {
+          requestId: 'request-conformance',
+          challenge: session.challenge,
+          domain: session.domain,
+          method: 'inPerson',
+          requiredClaims: session.requiredClaims,
+          expiresAt: session.expiresAt,
+        },
+      },
+      vetter.did,
+      { kmsKeyId: 'vetter-key', verificationMethodId: vetter.verificationMethodId, proofPurpose: 'authentication' }
+    )
+    const deskV1: VettingDeskRequest = {
+      ...desk,
+      status: 'cardReceived',
+      session: { ...desk.session!, taskDigestMultibase: taskDigestMultibase(sessionDocument) },
+    }
+    mockSend.mockClear()
+    setDtgV1WritingEnabled(true)
+    try {
+      await new VtiVetterDesk(
+        vetter.agent as never,
+        vetterPersona as never,
+        { listDesk: async () => [deskV1], saveDesk: jest.fn(async () => undefined) } as unknown as VtiVettingStore,
+        {} as never
+      ).attest(desk.requestId, {
+        documentClasses: ['passport'],
+        claimsVerified: ['name.legal'],
+        livenessConfirmed: true,
+      })
+    } finally {
+      setDtgV1WritingEnabled(false)
+    }
+    const issueV1 = (mockSend.mock.calls.at(-1) as unknown as [string, string, Record<string, unknown>])[2]
+    const statementV1 = (
+      (issueV1.payload as Record<string, unknown>).credential_response as { credential: Record<string, unknown> }
+    ).credential
+    expect(statementV1.type).toEqual(['VerifiableCredential', 'DTGCredential', 'StatementCredential'])
+    expect(statementV1.taskDigestMultibase).toBe(taskDigestMultibase(sessionDocument))
+    await expect(verifyDocumentProof(vetter.agent as never, statementV1, vetter.did)).resolves.toBe(true)
 
     // The vetter accepts a request, presenting its grant. The community here is
     // a did:key so an upstream checker can verify the grant offline.
@@ -309,6 +383,8 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       mkdirSync(out, { recursive: true })
       writeFileSync(join(out, 'card.json'), JSON.stringify(card, null, 2))
       writeFileSync(join(out, 'statement.json'), JSON.stringify(statement, null, 2))
+      writeFileSync(join(out, 'statement-v1.json'), JSON.stringify(statementV1, null, 2))
+      writeFileSync(join(out, 'session.json'), JSON.stringify(sessionDocument, null, 2))
       // Two signed Trust Task documents, for vta-sdk's verify_trust_task_proof_with.
       // The vetter's is its request response: the statement travels in a bare
       // credential-exchange/issue body, which is not a signed document (the
@@ -475,10 +551,20 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
       claimsVerified: ['name.legal'],
       livenessConfirmed: true,
     })
-    // The statement's delivery is a bare body, not a signed Trust Task (above).
-    expect(Object.keys((mockSend.mock.calls.at(-1) as unknown as [string, string, object])[2])).toEqual([
-      'credential_response',
-    ])
+    lastSent('credential-exchange-issue', vetter.did)
+    // The statement names the session it was issued in, and binds the name to
+    // that document with its task digest (vetting/session/0.1 spec.md "The
+    // session's name": taskContext MUST, taskDigestMultibase SHOULD).
+    const sessionDocument = produced.find((p) => p.name === 'vetting-session')!.document
+    const issued = (
+      (produced.at(-1)!.document.payload as Record<string, unknown>).credential_response as {
+        credential: Record<string, unknown>
+      }
+    ).credential
+    expect(issued).toMatchObject({
+      taskContext: sessionDocument.id,
+      taskDigestMultibase: taskDigestMultibase(sessionDocument),
+    })
     await vetterDesk.decline(opened.requestId, 'the session ended')
     lastSent('vetting-decline', vetter.did)
 
@@ -606,7 +692,7 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
     // was sent as. And Keyring's own verifier, which mirrors vta-sdk's, agrees.
     const names = produced.map((p) => p.name)
     expect(new Set(names).size).toBe(names.length)
-    expect(names).toHaveLength(22)
+    expect(names).toHaveLength(23)
     for (const { name, sentAs, document, signer } of produced) {
       expect({ name, issuer: document.issuer }).toEqual({ name, issuer: signer })
       expect({ name, type: document.type }).toEqual({ name, type: sentAs })
@@ -615,6 +701,11 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
         document
       )
       expect({ name, verdict }).toEqual({ name, verdict: { ok: true, signer } })
+      // Signed for the purpose upstream signs this type for (vta-sdk
+      // purpose_for_document_type): authentication, save an approver's
+      // attestation. card-verify checks it against vta-sdk itself.
+      const purpose = (document.proof as { proofPurpose?: string } | undefined)?.proofPurpose
+      expect({ name, purpose }).toEqual({ name, purpose: purposeForDocumentType(String(document.type)) })
     }
 
     const out = process.env.CARD_OUT
@@ -627,5 +718,21 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
       })
       writeFileSync(join(out, 'tasks.json'), JSON.stringify(listed, null, 2))
     }
+  })
+})
+
+// Each address as the published specification names it (the `$id` of each
+// schema in trust-tasks-rs 0.24.6, the version VTI main pins). A wrong one is
+// a task no community serves, whatever the payload says.
+describe('the vetting task addresses Keyring uses', () => {
+  it('are the published ones', () => {
+    expect(VETTING).toEqual({
+      request: 'https://trusttasks.org/spec/vetting/request/0.1',
+      session: 'https://trusttasks.org/spec/vetting/session/0.1',
+      decline: 'https://trusttasks.org/spec/vetting/decline/0.1',
+      revokeStatement: 'https://trusttasks.org/spec/vtc/vetting/revoke-statement/0.1',
+      vettersList: 'https://trusttasks.org/spec/vtc/vetting/vetters/list/0.1',
+      vettersProfile: 'https://trusttasks.org/spec/vtc/vetting/vetters/profile/0.1',
+    })
   })
 })

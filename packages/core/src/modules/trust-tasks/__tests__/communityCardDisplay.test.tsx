@@ -25,6 +25,7 @@ import { recordCardRevocation, resetCardStanding } from '../module/vtiCardStandi
 import { resetCardVaultCache } from '../module/vtiCardVault'
 import { communityTarget } from '../module/vtiCommunityLink'
 import { CommunityCard, communityCardKey } from '../screens/CommunityCard'
+import { localDate } from '../screens/localTime'
 import { CommunityCardDetails, communityCardOf } from '../screens/CommunityCardDetails'
 import {
   communityCardDisplay,
@@ -100,15 +101,31 @@ describe('a community card as the Wallet reads it', () => {
     expect(JSON.stringify(d)).not.toMatch(/vtc\.example|did:webvh/)
     expect(d.attributes).toEqual({
       'Community.CardCommunity': 'keyring-test-vtc',
-      'Community.CardSince': '2026-09-26',
-      'Community.CardUntil': '2026-10-26',
+      // In the phone's time zone, month named (IN-58).
+      'Community.CardSince': localDate('2026-09-26T09:00:00Z'),
+      'Community.CardUntil': localDate('2026-10-26T09:00:00Z'),
     })
   })
 
-  it('a role card and a vetter grant say which role', () => {
-    expect(communityCardDisplay(roleCard, t)!.name).toBe('Community.CardRoleIn(community=keyring-test-vtc,role=member)')
+  it('a role card and a vetter grant say which role, in words rather than the raw role', () => {
+    expect(communityCardDisplay(roleCard, t)!.name).toBe(
+      'Community.CardRoleIn(community=keyring-test-vtc,role=Community.RoleMember)'
+    )
     expect(communityCardDisplay(vetterGrant, t)!.name).toBe('Community.CardVetterFor(community=keyring-test-vtc)')
-    expect(communityCardDisplay(vetterGrant, t)!.attributes?.['Community.CardRole']).toBe('vetter')
+    expect(communityCardDisplay(vetterGrant, t)!.attributes?.['Community.CardRole']).toBe('Community.RoleVetter')
+  })
+
+  it('reads a community\'s own role as words: "custom:senior-vetter" is "Senior vetter"', () => {
+    const custom = {
+      ...roleCard,
+      credentialSubject: {
+        ...(roleCard.credentialSubject as Record<string, unknown>),
+        endorsement: { type: 'CommunityRole', role: 'custom:senior-vetter', communityDid: COMMUNITY },
+      },
+    }
+    const d = communityCardDisplay(custom, t)!
+    expect(d.name).toBe('Community.CardRoleIn(community=keyring-test-vtc,role=Senior vetter)')
+    expect(d.attributes?.['Community.CardRole']).toBe('Senior vetter')
   })
 
   it('is shown in the Wallet at all, and is not a contact (#169 in this tree)', () => {

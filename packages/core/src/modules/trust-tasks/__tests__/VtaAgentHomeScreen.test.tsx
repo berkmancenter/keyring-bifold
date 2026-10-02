@@ -117,6 +117,57 @@ describe('Your agent — after linking', () => {
    * to sit there permanently saying "none" are simply absent until they have
    * something in them — half of why the panel read as a developer's screen.
    */
+  // A reconnect that stopped after its tries is said on the agent screen, with
+  // Try again — never a silent loop (227: a new key's sign-in stalled on iOS).
+  it('says the agent did not answer after reconnecting stopped, and Try again starts afresh', async () => {
+    controller.set({ reconnectGaveUp: true })
+    const again = jest.spyOn(vtaAgent, 'tryAgainNow').mockResolvedValue(undefined)
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentGaveUp'))).toHaveTextContent(/VtaLink\.AgentDidNotAnswer/)
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentTryAgain')))
+    expect(again).toHaveBeenCalled()
+    controller.set({ reconnectGaveUp: false })
+    again.mockRestore()
+  })
+
+  // 228 agent-gone: an agent that no longer exists is said so, with a new one as the way on.
+  it('says the agent cannot be found and why, and Link a new agent confirms unlinking in words for a gone agent', async () => {
+    const { link } = controller.getState()
+    controller.set({ link: { ...(link as object), connection: { kind: 'gone', why: 'notFound', since: 0 } } as never })
+    const unlink = jest.spyOn(vtaAgent, 'unlink').mockResolvedValue(undefined)
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentGone'))).toHaveTextContent(/VtaLink\.AgentGoneTitle/)
+    expect(tree.getByTestId(testIdWithKey('AgentGoneWhy'))).toHaveTextContent(/VtaLink\.AgentGoneNotFound/)
+    expect(tree.getByTestId(testIdWithKey('VtaStatusText'))).toHaveTextContent(/VtaLink\.StatusGone/)
+    expect(tree.queryByTestId(testIdWithKey('AgentGaveUp'))).toBeNull()
+
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentGoneLinkNew')))
+    expect(tree.getByTestId(testIdWithKey('AgentUnlinkBody'))).toHaveTextContent(/VtaLink\.UnlinkBodyGone/)
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('AgentUnlinkConfirm'))))
+    expect(unlink).toHaveBeenCalled()
+    unlink.mockRestore()
+  })
+
+  it('says it has not reached the agent for days when that is why', async () => {
+    const { link } = controller.getState()
+    controller.set({
+      link: { ...(link as object), connection: { kind: 'gone', why: 'unreachable', since: 0 } } as never,
+    })
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentGoneWhy'))).toHaveTextContent(/VtaLink\.AgentGoneUnreachable/)
+  })
+
+  it('an agent that is only offline keeps the usual Unlink words', async () => {
+    const tree = await renderHome([])
+    expect(tree.queryByTestId(testIdWithKey('AgentGone'))).toBeNull()
+  })
+
+  it('says nothing of the kind while reconnecting still has tries left', async () => {
+    controller.set({ reconnectGaveUp: false })
+    const tree = await renderHome([])
+    expect(tree.queryByTestId(testIdWithKey('AgentGaveUp'))).toBeNull()
+  })
+
   it('shows nothing about approvals when there is nothing to approve', async () => {
     const tree = await renderHome([])
     expect(tree.queryByTestId(testIdWithKey('AgentApprovals'))).toBeNull()
@@ -147,6 +198,64 @@ describe('Your agent — after linking', () => {
     expect(card).not.toHaveTextContent(/trusttasks\.org/)
     expect(tree.getByTestId(testIdWithKey('ApproveConsentButton'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('DenyConsentButton'))).toBeTruthy()
+    // Nothing said what it would do: the card says it could not tell, never "no effects".
+    expect(tree.getByTestId(testIdWithKey('ApprovalOutcomeUnknown'))).toHaveTextContent(
+      /MyAgent\.ApprovalOutcomeUnknown/
+    )
+    expect(tree.queryByTestId(testIdWithKey('ApprovalMatchCode'))).toBeNull()
+    controller.set({ approvals: [] })
+  })
+
+  it('shows what approving would do and the code to compare', async () => {
+    controller.set({
+      approvals: [
+        {
+          id: 'a2',
+          requester: 'did:peer:2.Vz6MkrequesterXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+          taskType: 'https://trusttasks.org/spec/keys/export-secret/0.1',
+          expiresAt: '2026-09-23T04:30:00Z',
+          status: 'pending',
+          matchCode: 'abcdef',
+          outcome: { from: 'effects', lines: ['Hands a copy of the signing key to the requester'] },
+        },
+      ],
+    })
+    const tree = await renderHome([])
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentApprovalBanner')))
+    const outcome = tree.getByTestId(testIdWithKey('ApprovalOutcome'))
+    expect(outcome).toHaveTextContent(/MyAgent\.ApprovalWouldDo/)
+    expect(outcome).toHaveTextContent(/Hands a copy of the signing key to the requester/)
+    expect(tree.queryByTestId(testIdWithKey('ApprovalOutcomeUnknown'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('ApprovalMatchCode'))).toHaveTextContent('abcdef')
+    controller.set({ approvals: [] })
+  })
+
+  // 228 lab check of #199: after Approve the card said "Approved" under a banner
+  // still saying a request waited. Only undecided requests wait.
+  it('says nothing is waiting once every request is decided', async () => {
+    const approval = {
+      requester: 'did:peer:2.Vz6MkrequesterXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      taskType: 'https://trusttasks.org/spec/vta/contexts/list/1.0',
+      expiresAt: '2026-09-23T04:30:00Z',
+    }
+    controller.set({
+      approvals: [
+        { ...approval, id: 'done', status: 'approved' },
+        { ...approval, id: 'no', status: 'denied' },
+      ],
+    } as never)
+    const decided = await renderHome([])
+    expect(decided.queryByTestId(testIdWithKey('AgentApprovalBanner'))).toBeNull()
+    decided.unmount()
+
+    controller.set({
+      approvals: [
+        { ...approval, id: 'done', status: 'approved' },
+        { ...approval, id: 'open', status: 'pending' },
+      ],
+    } as never)
+    const one = await renderHome([])
+    expect(one.getByTestId(testIdWithKey('AgentApprovalBanner'))).toBeTruthy()
     controller.set({ approvals: [] })
   })
 
@@ -183,6 +292,102 @@ describe('Your agent — after linking', () => {
       jest.advanceTimersByTime(10)
     })
     expect(tree.getByTestId(testIdWithKey('AgentSeat'))).toHaveTextContent('VtaLink.SeatMember')
+  })
+
+  // #166's lab run (09-29): the community's removal notice was stored on the
+  // membership, and My Agent still said "You are a member".
+  // 227 gate U11 (09-30, lab): after the community removed the member, the
+  // agent home read "You have an identity here, and are not a member yet" and
+  // offered "Continue your vetting" — as if the person had never joined. The
+  // seat says who removed them; the card below says what to do.
+  it('after a removal the seat says the community removed you, and offers no vetting to continue', async () => {
+    const removed: Rec = {
+      tags: membership.tags,
+      content: {
+        ...membership.content,
+        removal: {
+          code: 'adminRemoved',
+          decidedBy: 'did:webvh:QmAdmin:vtc.example:admin',
+          decidedAt: '2026-09-30T13:28:08Z',
+          disposition: 'tombstone',
+          noticeId: 'urn:uuid:removal-notice-2',
+        },
+      },
+    }
+    const tree = await renderHome([persona, removed])
+    await act(async () => {
+      jest.advanceTimersByTime(10)
+    })
+    const seat = tree.getByTestId(testIdWithKey('AgentSeat'))
+    expect(seat).toHaveTextContent('VtaLink.SeatRemoved')
+    expect(seat).not.toHaveTextContent('VtaLink.SeatApplicant')
+    expect(tree.queryByTestId(testIdWithKey('AgentContinueVetting'))).toBeNull()
+  })
+
+  it('removed by one community and applying to another: the seat is the application, with vetting to continue', async () => {
+    const otherCommunity = 'did:webvh:QmOther:vtc.example.org:other'
+    const applying: Rec = {
+      tags: { ...persona.tags, key: otherCommunity },
+      content: { ...persona.content, communityDid: otherCommunity, did: 'did:webvh:QmPersona2:vta.example.org:p2' },
+    }
+    const removed: Rec = {
+      tags: membership.tags,
+      content: {
+        ...membership.content,
+        removal: {
+          code: 'adminRemoved',
+          decidedBy: 'did:webvh:QmAdmin:vtc.example:admin',
+          decidedAt: '2026-09-30T13:28:08Z',
+          disposition: 'tombstone',
+          noticeId: 'urn:uuid:removal-notice-3',
+        },
+      },
+    }
+    const tree = await renderHome([persona, removed, applying])
+    await act(async () => {
+      jest.advanceTimersByTime(10)
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentSeat'))).toHaveTextContent('VtaLink.SeatApplicant')
+    expect(tree.getByTestId(testIdWithKey('AgentContinueVetting'))).toBeTruthy()
+  })
+
+  it('a membership the community removed is not membership: the seat, the steps and the card say it ended', async () => {
+    const removed: Rec = {
+      tags: membership.tags,
+      content: {
+        ...membership.content,
+        vmc: {
+          id: 'urn:uuid:removed-vmc',
+          type: ['VerifiableCredential', 'MembershipCredential'],
+          issuer: communityDid,
+        },
+        removal: {
+          code: 'adminRemoved',
+          reason: 'Left the project',
+          decidedBy: 'did:webvh:QmAdmin:vtc.example:admin',
+          decidedAt: '2026-09-29T18:20:00Z',
+          disposition: 'tombstone',
+          noticeId: 'urn:uuid:removal-notice-1',
+        },
+      },
+    }
+    const tree = await renderHome([persona, removed])
+    await act(async () => {
+      jest.advanceTimersByTime(10)
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentSeat'))).not.toHaveTextContent('VtaLink.SeatMember')
+    const key = communityCardKey(communityDid)
+    // The community stays on screen, saying what happened.
+    expect(tree.getByTestId(testIdWithKey(`AgentCommunityStatus_${key}`))).toHaveTextContent(/Join\.StandingRemoved/)
+    expect(tree.queryByTestId(testIdWithKey(`AgentMemberSince_${key}`))).toBeNull()
+    const ended = tree.getByTestId(testIdWithKey(`AgentMembershipEnded_${key}`))
+    expect(ended).toHaveTextContent(/VtaLink\.CardMembershipEnded/)
+    expect(ended).toHaveTextContent(/Community\.RemovedReason/)
+    // Its card is history, not "kept by your agent".
+    expect(tree.getByTestId(testIdWithKey(`AgentCard_membership_${key}`))).toHaveTextContent(
+      /VtaLink\.CardMembershipEnded/
+    )
+    expect(tree.queryByTestId(testIdWithKey(`AgentCardKept_membership_${key}`))).toBeNull()
   })
 
   // 219: every tab unmounts when it loses focus, so a return to My Agent
@@ -286,9 +491,9 @@ describe('Your agent — after linking', () => {
     const tree = await renderHome([persona, grant])
     expect(tree.getByTestId(testIdWithKey('AgentVetterCard'))).toHaveTextContent(/VtaLink.YouCanVet/)
     // The desk is the community card's one button; the vetter card no longer repeats it.
-    expect(tree.getByTestId(testIdWithKey(`AgentCommunityPrimary_${communityCardKey(communityDid)}`))).toHaveTextContent(
-      'VtaLink.OpenDesk'
-    )
+    expect(
+      tree.getByTestId(testIdWithKey(`AgentCommunityPrimary_${communityCardKey(communityDid)}`))
+    ).toHaveTextContent('VtaLink.OpenDesk')
     expect(tree.queryByTestId(testIdWithKey('AgentVetOthers'))).toBeNull()
   })
 

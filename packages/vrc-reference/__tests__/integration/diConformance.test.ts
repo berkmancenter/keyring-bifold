@@ -45,7 +45,6 @@ import { CREDENTIALS_V2_CONTEXT_URL, ED25519_2018_SUITE_CONTEXT_URL } from '@bif
 import { DTG_CONTEXT_URL, RELATIONSHIP_CONTEXT_URL } from '../../src/relationshipContext'
 import { WITNESSED_EXCHANGE_CONTEXT_URL } from '../../src/witnessedExchangeContext'
 
-const CREDENTIALS_V1_CONTEXT_URL = 'https://www.w3.org/2018/credentials/v1'
 const WALLET_ID = `di-conformance-${process.env.JEST_WORKER_ID ?? '0'}`
 
 function buildAgent() {
@@ -202,6 +201,13 @@ describe('Data Integrity conformance (DataIntegrityProof/eddsa-rdfc-2022)', () =
       presentation: signedVp,
       challenge,
       domain,
+      // VRCs are issuer->subject directional credentials: the presenting
+      // party here is the VRC's issuer, not its credentialSubject, so
+      // credo's default holder-binding check (the VP's authentication key
+      // must match a credentialSubject id) does not apply — same opt-out
+      // already used at every real call site (witness-server's
+      // WitnessTaskSessions/WitnessService, core's outcomeEvidence.ts).
+      verifyCredentialSubjectAuthentication: false,
     })
     expect(verifyResult.isValid).toBe(true)
   }, 30000)
@@ -250,6 +256,8 @@ describe('Data Integrity conformance (DataIntegrityProof/eddsa-rdfc-2022)', () =
       presentation: signedVp,
       challenge,
       domain,
+      // Same holder-binding opt-out as the mixed-case test above.
+      verifyCredentialSubjectAuthentication: false,
     })
     expect(verifyResult.isValid).toBe(true)
   }, 30000)

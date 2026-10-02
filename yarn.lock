@@ -89,7 +89,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@animo-id/pex@npm:^6.1.1":
+"@animo-id/pex@npm:6.1.1":
   version: 6.1.1
   resolution: "@animo-id/pex@npm:6.1.1"
   dependencies:
@@ -106,6 +106,26 @@ __metadata:
     nanoid: "npm:^3.3.7"
     uint8arrays: "npm:^3.1.1"
   checksum: 10c0/db61fb680b59d75dce387374fd07dabd40d63ec76b3ced702a65f9c01a72e744a24a60648cc482a5f80251eb697c99adef0d384c656cb00998f77b2e7130d7b5
+  languageName: node
+  linkType: hard
+
+"@animo-id/pex@patch:@animo-id/pex@npm%3A6.1.1#~/.yarn/patches/@animo-id-pex-npm-6.1.1-976fb8ed6b.patch":
+  version: 6.1.1
+  resolution: "@animo-id/pex@patch:@animo-id/pex@npm%3A6.1.1#~/.yarn/patches/@animo-id-pex-npm-6.1.1-976fb8ed6b.patch::version=6.1.1&hash=13317b"
+  dependencies:
+    "@animo-id/mdoc": "npm:^0.5.2"
+    "@astronautlabs/jsonpath": "npm:^1.1.2"
+    "@sd-jwt/decode": "npm:^0.7.2"
+    "@sd-jwt/present": "npm:^0.7.2"
+    "@sd-jwt/types": "npm:^0.7.2"
+    "@sphereon/pex-models": "npm:^2.3.2"
+    "@sphereon/ssi-types": "npm:0.33.0"
+    ajv: "npm:^8.12.0"
+    ajv-formats: "npm:^2.1.1"
+    jwt-decode: "npm:^3.1.2"
+    nanoid: "npm:^3.3.7"
+    uint8arrays: "npm:^3.1.1"
+  checksum: 10c0/c05c9b28e4ab58506f10a9746264e875cefae578dc552f81b0d6b227a85bed85f5e144593826f38e9996fce36c52b1042d84fe8cdb0c82fa50d0cfec3e31cae2
   languageName: node
   linkType: hard
 
@@ -2518,8 +2538,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@bifold/vrc-reference@workspace:packages/vrc-reference"
   dependencies:
+    "@bifold/dtg-vocab": "workspace:*"
+    "@bifold/trust-tasks": "workspace:*"
     "@bifold/vrc-contexts": "workspace:*"
     "@bifold/vrc-shared": "workspace:*"
+    "@bifold/witness-server": "workspace:*"
     "@credo-ts/askar": "npm:0.7.1-pr-2704-20260909134930"
     "@credo-ts/core": "patch:@credo-ts/core@npm%3A0.7.1-pr-2704-20260909134930#~/.yarn/patches/@credo-ts-core-npm-0.7.1-pr-2704-20260909134930-b95d84ab27.patch"
     "@credo-ts/didcomm": "patch:@credo-ts/didcomm@npm%3A0.7.1-pr-2704-20260909134930#~/.yarn/patches/@credo-ts-didcomm-npm-0.7.1-pr-2704-20260909134930-b4e8afd4d1.patch"
@@ -2554,7 +2577,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@bifold/witness-server@workspace:packages/witness-server":
+"@bifold/witness-server@workspace:*, @bifold/witness-server@workspace:packages/witness-server":
   version: 0.0.0-use.local
   resolution: "@bifold/witness-server@workspace:packages/witness-server"
   dependencies:
@@ -3174,7 +3197,7 @@ __metadata:
 
 "@credo-ts/core@patch:@credo-ts/core@npm%3A0.7.1-pr-2704-20260909134930#~/.yarn/patches/@credo-ts-core-npm-0.7.1-pr-2704-20260909134930-b95d84ab27.patch":
   version: 0.7.1-pr-2704-20260909134930
-  resolution: "@credo-ts/core@patch:@credo-ts/core@npm%3A0.7.1-pr-2704-20260909134930#~/.yarn/patches/@credo-ts-core-npm-0.7.1-pr-2704-20260909134930-b95d84ab27.patch::version=0.7.1-pr-2704-20260909134930&hash=a788b7"
+  resolution: "@credo-ts/core@patch:@credo-ts/core@npm%3A0.7.1-pr-2704-20260909134930#~/.yarn/patches/@credo-ts-core-npm-0.7.1-pr-2704-20260909134930-b95d84ab27.patch::version=0.7.1-pr-2704-20260909134930&hash=ea0426"
   dependencies:
     "@animo-id/pex": "npm:^6.1.1"
     "@astronautlabs/jsonpath": "npm:^1.1.2"
@@ -3217,7 +3240,7 @@ __metadata:
     web-did-resolver: "npm:^2.0.32"
     webcrypto-core: "npm:^1.8.1"
     zod: "npm:^4.3.6"
-  checksum: 10c0/b1d8f386950876566556e97e9a2a0fe637951ed5e325e6fc1772056c299fb14cd591d84f2c70a3adb0d6a79d498d098f8069de607af184f857aec43ed3bc4c5c
+  checksum: 10c0/8b436eae96bc5c1fe14d48787f0ae491579203550dd258ad27fd3780dd43dd20ece651e9a462035e14cae93f09fcf8e76d4783cfa80df72ea5e7ff31de61ee8b
   languageName: node
   linkType: hard
 
@@ -5130,12 +5153,12 @@ __metadata:
 
 "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks":
   version: 0.3.0
-  resolution: "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz#./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::hash=84521e&locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks"
+  resolution: "@openvtc/vti-tsp-js@file:./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz#./vendor/openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz::hash=203df9&locator=%40bifold%2Ftrust-tasks%40workspace%3Apackages%2Ftrust-tasks"
   dependencies:
     "@noble/ciphers": "npm:^2.0.0"
     "@noble/curves": "npm:^2.2.0"
     "@noble/hashes": "npm:^2.0.0"
-  checksum: 10c0/f1b91b6f93c1d38bbe61c06aca1419d13f323f04ee8acd27bc5e0058c22c572e552093a9ffe1bef125ee02974ffa35ef7e0b0816aaf3bef2741e32a12ff55f41
+  checksum: 10c0/21b40e5ae17b59187d1054cd69c2b6bc29b28d1bf645912fb24623399482b460aad55835f5e70dff040eb4adf682fedcaca6cf87016a54e10ff0e2f7ed00f690
   languageName: node
   linkType: hard
 

@@ -13,15 +13,27 @@
 import { useAgent } from '@bifold/react-hooks'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useHeaderHeight } from '@react-navigation/elements'
-import { useNavigation, useRoute } from '@react-navigation/native'
-import React, { useCallback, useState, useSyncExternalStore } from 'react'
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, Platform, Pressable, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native'
+import {
+  ActivityIndicator,
+  AppState,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
+import QRRenderer from '../../../components/misc/QRRenderer'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
@@ -54,6 +66,11 @@ export const useSafeHeaderHeight = (): number => {
   }
 }
 
+/** How often a phone showing its code to another phone asks whether it has been added (#30). */
+export const PHONE_GRANT_POLL_EVERY_MS = 5000
+/** How long it keeps asking by itself; after that, "Check again". */
+export const PHONE_GRANT_POLL_WINDOW_MS = 10 * 60 * 1000
+
 const VtaLink: React.FC = () => {
   const headerHeight = useSafeHeaderHeight()
   const keyboard = useMeasuredKeyboardOffset(headerHeight)
@@ -72,6 +89,38 @@ const VtaLink: React.FC = () => {
   const [agentAddress, setAgentAddress] = useState('')
   const [copied, setCopied] = useState(false)
   const [keyShown, setKeyShown] = useState(false)
+  // #30: a phone showing its code to another phone checks by itself whether it
+  // has been added — in view, in the foreground, inside the window.
+  const focused = useIsFocused()
+  const [appActive, setAppActive] = useState(AppState.currentState !== 'background')
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => setAppActive(next === 'active'))
+    return () => subscription.remove()
+  }, [])
+  const forOtherPhone = link.kind === 'showingKey' && link.via === 'scan'
+  const [phonePollUntil, setPhonePollUntil] = useState<number | undefined>()
+  const [phonePollExpired, setPhonePollExpired] = useState(false)
+  useEffect(() => {
+    if (!forOtherPhone) {
+      setPhonePollUntil(undefined)
+      setPhonePollExpired(false)
+    } else if (phonePollUntil === undefined && !phonePollExpired) {
+      setPhonePollUntil(Date.now() + PHONE_GRANT_POLL_WINDOW_MS)
+    }
+  }, [forOtherPhone, phonePollUntil, phonePollExpired])
+  useEffect(() => {
+    if (!forOtherPhone || !focused || !appActive || !agent || phonePollUntil === undefined) return
+    const timer = setInterval(() => {
+      if (Date.now() >= phonePollUntil) {
+        setPhonePollExpired(true)
+        setPhonePollUntil(undefined)
+        return
+      }
+      void vtaAgent.checkManualGrant(agent)
+    }, PHONE_GRANT_POLL_EVERY_MS)
+    return () => clearInterval(timer)
+  }, [forOtherPhone, focused, appActive, agent, phonePollUntil])
+  const { width: windowWidth } = useWindowDimensions()
   const [errorOpen, setErrorOpen] = useState(false)
 
   const styles = StyleSheet.create({
@@ -159,6 +208,8 @@ const VtaLink: React.FC = () => {
   }, [agent, deviceName, defaultName, navigation])
 
   const failureText = (failure?: VtaLinkFailure) => {
+    // An agent host's automatic connection says why in its own terms.
+    if (failure?.hostReason) return t(`VtaLink.Host.Failed.${failure.hostReason}`)
     switch (failure?.reason) {
       case 'expired':
         return t('VtaLink.FailedExpired')
@@ -182,6 +233,49 @@ const VtaLink: React.FC = () => {
   switch (link.kind) {
     case 'confirming':
     case 'submitting':
+      if (link.via === 'host') {
+        // An agent host's QR: which agent, and the site the code came from,
+        // before this phone sends anything — accepting makes it an admin.
+        body = (
+          <View style={styles.card} testID={testIdWithKey('VtaLinkConfirm')}>
+            <ThemedText variant="headingThree" accessibilityRole="header">
+              {t('VtaLink.Host.ConfirmTitle', {
+                label: agentDisplayName(link, t),
+                interpolation: { escapeValue: false },
+              })}
+            </ThemedText>
+            <ThemedText>{t('VtaLink.Host.ConfirmBody')}</ThemedText>
+            <ThemedText testID={testIdWithKey('VtaLinkHostSite')}>
+              {t('VtaLink.Host.CodeFrom', { site: link.offerUrl, interpolation: { escapeValue: false } })}
+            </ThemedText>
+            <ThemedText variant="labelTitle">{t('VtaLink.Host.AgentAddress')}</ThemedText>
+            <ThemedText style={styles.key} testID={testIdWithKey('VtaLinkAgentAddress')} selectable>
+              {link.vtaDid}
+            </ThemedText>
+          </View>
+        )
+        actions = (
+          <>
+            <Button
+              title={link.kind === 'submitting' ? t('VtaLink.Host.Connecting') : t('VtaLink.Host.Connect')}
+              buttonType={ButtonType.Primary}
+              onPress={onConfirm}
+              disabled={link.kind === 'submitting'}
+              testID={testIdWithKey('VtaLinkButton')}
+              accessibilityLabel={t('VtaLink.Host.Connect')}
+            >
+              {link.kind === 'submitting' ? <ActivityIndicator color={ColorPalette.grayscale.white} /> : null}
+            </Button>
+            <Button
+              title={t('VtaLink.Host.NotNow')}
+              buttonType={ButtonType.Secondary}
+              onPress={onCancel}
+              testID={testIdWithKey('VtaLinkCancel')}
+            />
+          </>
+        )
+        break
+      }
       body = (
         <View style={styles.card} testID={testIdWithKey('VtaLinkConfirm')}>
           <ThemedText variant="headingThree" accessibilityRole="header">
@@ -214,6 +308,32 @@ const VtaLink: React.FC = () => {
       break
 
     case 'awaitingGrant':
+      if (link.via === 'host') {
+        // The host is setting the agent up; there is no code to compare.
+        body = (
+          <View style={styles.card} testID={testIdWithKey('VtaLinkHostSettingUp')}>
+            <ThemedText variant="headingThree" accessibilityRole="header">
+              {t('VtaLink.Host.SettingUpTitle')}
+            </ThemedText>
+            <ThemedText>{t('VtaLink.Host.SettingUpBody')}</ThemedText>
+            <View style={styles.row}>
+              <ActivityIndicator color={ColorPalette.brand.primary} />
+              <ThemedText style={{ flex: 1 }} testID={testIdWithKey('VtaLinkState')}>
+                {t('VtaLink.Host.SettingUpWaiting')}
+              </ThemedText>
+            </View>
+          </View>
+        )
+        actions = (
+          <Button
+            title={t('VtaLink.StopLinking')}
+            buttonType={ButtonType.Secondary}
+            onPress={onCancel}
+            testID={testIdWithKey('VtaLinkCancel')}
+          />
+        )
+        break
+      }
       body = (
         <View style={styles.card}>
           <ThemedText variant="headingThree" accessibilityRole="header">
@@ -245,6 +365,105 @@ const VtaLink: React.FC = () => {
       break
 
     case 'showingKey':
+      if (link.via === 'scan') {
+        // A bare agent DID was scanned: another phone's "Add another phone"
+        // code (#30), or an agent host's page that shows the agent's address
+        // beside an "Admin DID" box. The phone cannot tell which, so the words
+        // cover both: copy this phone's code into that box, or scan it from the
+        // other phone. No Share; this phone notices by itself once it's added.
+        body = (
+          <View style={styles.card} testID={testIdWithKey('VtaLinkForOtherPhone')}>
+            <ThemedText variant="headingThree" accessibilityRole="header">
+              {t('VtaLink.AddThisPhone')}
+            </ThemedText>
+            <ThemedText>{t('VtaLink.AddThisPhoneBody')}</ThemedText>
+            <QRRenderer
+              value={link.did}
+              size={Math.min(windowWidth - 2 * (20 + 16 + 16), 260)}
+              quietZone={16}
+              testID={testIdWithKey('VtaLinkKeyQr')}
+            />
+            <Pressable
+              onPress={() => setKeyShown(!keyShown)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: keyShown }}
+              testID={testIdWithKey('VtaLinkShowAsText')}
+            >
+              <ThemedText style={styles.muted}>{keyShown ? t('VtaLink.HideText') : t('VtaLink.ShowAsText')}</ThemedText>
+            </Pressable>
+            {keyShown ? (
+              <ThemedText style={styles.key} testID={testIdWithKey('VtaLinkManualDid')} selectable>
+                {link.did}
+              </ThemedText>
+            ) : null}
+          </View>
+        )
+        actions = (
+          <>
+            {/* A check the agent did not answer yet is not news while the phone
+                is still checking on its own (the agent may still be being made):
+                in red it came and went between checks and read as a failure
+                (iPhone 11, 2026-10-01). Said once the wait has run out. */}
+            {link.noAnswer && phonePollExpired ? (
+              <ThemedText style={styles.error} testID={testIdWithKey('VtaLinkNoAnswer')}>
+                {t('VtaLink.NoAnswer', {
+                  label: agentDisplayNameStart(link, t),
+                  interpolation: { escapeValue: false },
+                })}
+              </ThemedText>
+            ) : null}
+            {/* The screen's status, with the buttons: under the QR it was cut
+                off at the bottom of the scroll (228). */}
+            {phonePollUntil !== undefined ? (
+              <View style={styles.row} testID={testIdWithKey('VtaLinkWaitingForPhone')}>
+                <ActivityIndicator color={ColorPalette.brand.primary} />
+                <ThemedText style={{ flex: 1 }}>{t('VtaLink.WaitingToBeAdded')}</ThemedText>
+              </View>
+            ) : null}
+            {phonePollExpired ? (
+              <Button
+                title={t('VtaLink.CheckAgain')}
+                buttonType={ButtonType.Primary}
+                onPress={() => {
+                  setPhonePollExpired(false)
+                  onCheckGrant()
+                }}
+                testID={testIdWithKey('VtaLinkCheckAgain')}
+              />
+            ) : null}
+            {/* In the bar, never under the QR: there it fell below the fold on a
+                Pixel 6 at default text, half hidden behind Stop linking. */}
+            {/* Copy, and Share for a browser on another device (an agent host's
+                Admin DID box): a sentence with the code on its own line. */}
+            <View style={styles.row}>
+              <Button
+                title={copied ? t('VtaLink.KeyCopied') : t('VtaLink.CopyKey')}
+                buttonType={phonePollExpired ? ButtonType.Secondary : ButtonType.Primary}
+                onPress={() => {
+                  Clipboard.setString(link.did)
+                  setCopied(true)
+                }}
+                testID={testIdWithKey('VtaLinkCopyKey')}
+              />
+              <Button
+                title={t('VtaLink.ShareKey')}
+                buttonType={ButtonType.Secondary}
+                onPress={() =>
+                  void Share.share(shareableKey(t, agentDisplayName(link, t), link.did)).catch(() => undefined)
+                }
+                testID={testIdWithKey('VtaLinkShareKey')}
+              />
+            </View>
+            <Button
+              title={t('VtaLink.StopLinking')}
+              buttonType={ButtonType.Secondary}
+              onPress={onCancel}
+              testID={testIdWithKey('VtaLinkCancel')}
+            />
+          </>
+        )
+        break
+      }
       body = (
         <View style={styles.card} testID={testIdWithKey('VtaLinkShowingKey')}>
           <ThemedText variant="headingThree" accessibilityRole="header">

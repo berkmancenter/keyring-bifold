@@ -48,12 +48,18 @@ import { DidKey, TypedArrayEncoder } from '@credo-ts/core'
 // eslint-disable-next-line import/order
 import { ed25519 } from '@noble/curves/ed25519.js'
 // eslint-disable-next-line import/order
-import { digestMultibase, signDocumentProof } from '@bifold/trust-tasks'
+import {
+  digestMultibase,
+  LEGACY_DTG_SHAPE_UNTIL,
+  signDocumentProof,
+  taskDigestMultibase,
+  verifyDocumentProof,
+  verifyTrustTaskProof,
+} from '@bifold/trust-tasks'
 
 // eslint-disable-next-line import/order
 import {
   LEGACY_ERROR_03_UNTIL,
-  LEGACY_STATEMENT_DOCUMENT_UNTIL,
   MAX_CARD_VALIDITY_MS,
   VETTING,
   VETTING_SESSION_MS,
@@ -199,9 +205,25 @@ describe("the vetter's card check, as vta-sdk verify_card", () => {
 
   it('refuses a card that is not the published shape', async () => {
     await expect(check(await card({ cardVersion: 0 }))).resolves.toMatchObject({ ok: false, code: 'malformed' })
-    await expect(check(await card({ extra: 1 }))).resolves.toMatchObject({ ok: false, code: 'malformed' })
+    await expect(check(await card({ claims: 'Ada' }))).resolves.toMatchObject({ ok: false, code: 'malformed' })
     const { proof: _proof, ...unsigned } = await card()
     await expect(check(unsigned)).resolves.toMatchObject({ ok: false, code: 'malformed' })
+  })
+
+  // Salted credentials are coming (maintainer sync, 2026-09-25): optional salt
+  // members that must be honoured when present. Until the spec defines them,
+  // a card that carries a member Keyring does not know, a salt among them, is
+  // read for the members it does know, and its proof is checked over the card
+  // exactly as it arrived, so the extra member is still covered by the
+  // applicant's signature.
+  it('accepts a card that carries members it does not know, a salt among them', async () => {
+    const salted = await card(
+      { salt: 'u6nH2Qp1xY9sQ0f3mJz7bA', ext: { note: 'from a later version' } },
+      { claims: [{ type: 'name.legal', value: 'Ada Lovelace', provenance: 'selfAsserted', salt: 'k3V9dPq0' } as never] }
+    )
+    await expect(check(salted)).resolves.toEqual({ ok: true })
+    // Still the applicant's: an unknown member changed after signing breaks the proof.
+    await expect(check({ ...salted, salt: 'changed' })).resolves.toMatchObject({ ok: false, code: 'proof' })
   })
 
   it('refuses a window longer than 15 minutes, inverted, ahead by more than 60 s, or over by more than 60 s', async () => {
@@ -299,7 +321,12 @@ describe("the vetter's desk records why a card was refused", () => {
         },
       ],
     })
-    const desk = new VtiVetterDesk(vetter.agent as never, vetter.persona(community.did) as never, wrap(store), {} as never)
+    const desk = new VtiVetterDesk(
+      vetter.agent as never,
+      vetter.persona(community.did) as never,
+      wrap(store),
+      {} as never
+    )
     const inbound = (m: unknown) => (desk as unknown as { inbound(m: unknown): Promise<void> }).inbound(m)
     return { inbound, state, desk }
   }
@@ -491,6 +518,17 @@ describe("the applicant takes a session as openvtc's on_session does", () => {
     const r = await run(sessionPayload())
     expect(r).toMatchObject({ status: 'session' })
     expect(r.sessionRefusal).toBeUndefined()
+  })
+
+  // tf vetting/session/0.1 spec.md:339: the document is durable, and the
+  // applicant keeps it, with its task digest, for the statement to bind to.
+  it('keeps the session document as received, and its task digest', async () => {
+    const r = await run(sessionPayload())
+    const document = r.session?.document as Record<string, unknown>
+    expect(document?.id).toBe(r.session?.documentId)
+    expect((document?.payload as { requestId?: string })?.requestId).toBe('r')
+    expect(document?.proof).toBeDefined()
+    expect(r.session?.taskDigestMultibase).toBe(taskDigestMultibase(document))
   })
 
   // Built inside the test: the suite's clock is fixed only while a test runs.
@@ -844,11 +882,17 @@ describe("an approver's consent decision", () => {
 })
 
 // ---------------------------------------------------------------------------
-// 11. The statement's delivery: a bare body, as the VTC and openvtc send one
+// 11. The statement's delivery: a signed Trust Task document, as openvtc sends one
 // ---------------------------------------------------------------------------
 
 describe("the vetter's statement delivery", () => {
-  it('puts credential_response.credential at the top of the DIDComm body (vtc-service delivery.rs:128-141)', async () => {
+  /**
+   * openvtc b52dc28 (#392) opens a statement delivery as a Trust Task document
+   * (vetting/wire.rs:218-240 `open`) and refused Keyring's bare body as
+   * "malformed vetting document: missing field `id`" (226 gate, TUI P2,
+   * 17:41:17Z). Its own sender is wire.rs:188-205 `credential_delivery`.
+   */
+  it("sends a signed Trust Task document that openvtc's open accepts, the statement under payload", async () => {
     sent.length = 0
     const c = await card()
     const { store } = memoryStore({
@@ -869,6 +913,7 @@ describe("the vetter's statement delivery", () => {
             method: 'inPerson',
             expiresAt: new Date(Date.now() + VETTING_SESSION_MS).toISOString(),
             matchCode: 'ABCD-1234',
+            taskDigestMultibase: 'zQmSessionDocumentDigest',
           },
         },
       ],
@@ -877,15 +922,64 @@ describe("the vetter's statement delivery", () => {
     await desk.attest('r', { documentClasses: ['passport'], claimsVerified: ['name.legal'], livenessConfirmed: true })
     const delivery = sent.at(-1)!
     expect(delivery.type).toBe(CREDENTIAL_EXCHANGE_ISSUE)
-    expect(Object.keys(delivery.body)).toEqual(['credential_response'])
-    const credential = (delivery.body.credential_response as { credential: Record<string, unknown> }).credential
-    expect(credential).toMatchObject({ issuer: vetter.did, taskContext: SESSION_ID })
+    const doc = delivery.body
+    // What `open` requires: a Trust Task (an `id` first of all), its type the
+    // message's, its issuer the sender, a proof by that issuer.
+    expect(String(doc.id)).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    expect(doc).toMatchObject({
+      type: CREDENTIAL_EXCHANGE_ISSUE,
+      issuer: vetter.did,
+      recipient: applicantKey.did,
+      threadId: SESSION_ID,
+    })
+    // An operational Trust Task document, signed for authentication as vta-sdk
+    // signs one, and checked as a Trust Task, as a receiver checks it.
+    expect((doc.proof as { proofPurpose?: string }).proofPurpose).toBe('authentication')
+    await expect(verifyTrustTaskProof(vetter.agent as never, doc)).resolves.toEqual({ ok: true, signer: vetter.did })
+    // `statement_in`: the statement under payload.credential_response.credential,
+    // with its own id, the session it names and that session's task digest.
+    const credential = (
+      (doc.payload as Record<string, unknown>).credential_response as {
+        credential: Record<string, unknown>
+      }
+    ).credential
+    expect(String(credential.id)).toMatch(/^urn:uuid:[0-9a-f-]{36}$/)
+    expect(credential.id).not.toBe(doc.id)
+    expect(credential).toMatchObject({
+      issuer: vetter.did,
+      taskContext: SESSION_ID,
+      taskDigestMultibase: 'zQmSessionDocumentDigest',
+    })
+    await expect(verifyDocumentProof(vetter.agent as never, credential, vetter.did)).resolves.toBe(true)
     expect(delivery.options).toMatchObject({ thid: SESSION_ID })
   })
 
-  it('a statement in the old document shape is read until its removal date, and not after', async () => {
-    const cutoff = Date.parse(`${LEGACY_STATEMENT_DOCUMENT_UNTIL}T00:00:00Z`)
-    const read = async (at: number) => {
+  // The delivery is read in either envelope at any date. The statement inside
+  // is read in the shape that date reads: after LEGACY_DTG_SHAPE_UNTIL only
+  // DTG Credentials v1's vetted/1 (228), before it the endorsement shape too.
+  it('a statement is read in the signed document openvtc sends, at any date, and in the bare body older vetters sent', async () => {
+    const later = Date.parse('2027-06-01T00:00:00Z')
+    expect(later).toBeGreaterThan(Date.parse(`${LEGACY_DTG_SHAPE_UNTIL}T00:00:00Z`))
+    expect(await readStatement(later, 'document', 'vetted/1')).toMatchObject({ status: 'attested' })
+    expect(await readStatement(later, 'bare', 'vetted/1')).toMatchObject({ status: 'attested' })
+    const before = Date.parse('2026-10-01T00:00:00Z')
+    expect(await readStatement(before, 'document', 'endorsement')).toMatchObject({ status: 'attested' })
+    expect(await readStatement(before, 'bare', 'endorsement')).toMatchObject({ status: 'attested' })
+  })
+
+  it('an endorsement-shape statement is refused after LEGACY_DTG_SHAPE_UNTIL, in either envelope, as legacyShape', async () => {
+    const later = Date.parse('2027-06-01T00:00:00Z')
+    for (const envelope of ['document', 'bare'] as const) {
+      expect(await readStatement(later, envelope, 'endorsement')).toMatchObject({
+        status: 'statementRefused',
+        statementRefusal: 'legacyShape',
+      })
+    }
+  })
+
+  /** Deliver a statement signed by the vetter, dated `at`, in an envelope and a shape; the request after. */
+  async function readStatement(at: number, envelope: 'document' | 'bare', statementShape: 'endorsement' | 'vetted/1') {
+    const read = async (at: number, shape: 'document' | 'bare') => {
       const c = await card()
       const { store, state } = memoryStore({
         application: applicationWith({
@@ -906,39 +1000,61 @@ describe("the vetter's statement delivery", () => {
       const vti = new VtiApplicant(applicantKey.agent as never, applicantKey.persona(community.did) as never, store, {
         saveHeldCredential: async () => undefined,
       } as never)
-      const statement = await signAs(vetter, {
-        '@context': ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1'],
-        type: ['VerifiableCredential', 'DTGCredential', 'EndorsementCredential'],
-        id: uuid(),
-        issuer: vetter.did,
-        validFrom: new Date(at).toISOString(),
-        validUntil: new Date(at + 86400000).toISOString(),
-        taskContext: SESSION_ID,
-        credentialSubject: {
-          id: applicantKey.did,
-          endorsement: {
-            type: 'https://firstperson.network/endorsements/identity-vetting/0.1',
-            community: community.did,
-            method: 'inPerson',
-            identityCommitment: c.identityCommitment,
-            cardDigestMultibase: 'zPlaceholderDigest',
-          },
-        },
-      })
+      const attestation = {
+        community: community.did,
+        method: 'inPerson',
+        identityCommitment: c.identityCommitment,
+        cardDigestMultibase: 'zPlaceholderDigest',
+      }
+      const statement = await signAs(
+        vetter,
+        statementShape === 'endorsement'
+          ? {
+              '@context': ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1'],
+              type: ['VerifiableCredential', 'DTGCredential', 'EndorsementCredential'],
+              id: uuid(),
+              issuer: vetter.did,
+              validFrom: new Date(at).toISOString(),
+              validUntil: new Date(at + 86400000).toISOString(),
+              taskContext: SESSION_ID,
+              credentialSubject: {
+                id: applicantKey.did,
+                endorsement: { type: 'https://firstperson.network/endorsements/identity-vetting/0.1', ...attestation },
+              },
+            }
+          : {
+              '@context': ['https://www.w3.org/ns/credentials/v2', 'https://registry.trustoverip.org/dtg/context/v1'],
+              type: ['VerifiableCredential', 'DTGCredential', 'StatementCredential'],
+              id: uuid(),
+              issuer: vetter.did,
+              issuerScope: 'directed',
+              validFrom: new Date(at).toISOString(),
+              validUntil: new Date(at + 86400000).toISOString(),
+              taskContext: SESSION_ID,
+              taskDigestMultibase: 'zQmPlaceholderTaskDigest',
+              credentialSubject: {
+                id: applicantKey.did,
+                predicate: 'https://registry.trustoverip.org/dtg/vsc/vetted/1',
+                object: { value: attestation },
+              },
+            }
+      )
       const spy = jest.spyOn(Date, 'now').mockReturnValue(at)
       try {
         await vti.receiveStatement({
           id: uuid(),
           type: CREDENTIAL_EXCHANGE_ISSUE,
           from: vetter.did,
-          body: { payload: { credential_response: { credential: statement } } },
+          body:
+            shape === 'document'
+              ? { payload: { credential_response: { credential: statement } } }
+              : { credential_response: { credential: statement } },
         } as never)
       } finally {
         spy.mockRestore()
       }
       return state.application!.requests[0]
     }
-    expect(await read(cutoff - 86400000)).toMatchObject({ status: 'attested' })
-    expect(await read(cutoff + 1000)).toMatchObject({ status: 'cardSent' })
-  })
+    return read(at, envelope)
+  }
 })

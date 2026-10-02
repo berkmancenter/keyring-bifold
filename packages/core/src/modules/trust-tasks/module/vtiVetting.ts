@@ -22,21 +22,34 @@ import { TypedArrayEncoder, utils } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import {
   CROCKFORD,
+  communityRoleCard,
+  digestBytesEqual,
   digestMultibase,
   evaluateStatements,
   statementFacts,
   encodeTicketUri,
+  isCommunityIdentityCheck,
   parseTicketUri,
   signDocumentProof,
+  taskDigestMultibase,
   verifyDocumentProof,
   verifyTrustTaskProof,
   vettingMatchCode,
+  vettingStatementBody,
+  vettingStatementShapeProblem,
   type TicketPresentation,
 } from '@bifold/trust-tasks'
 
 import type { VtiCommunityStore, VtiHeldCredential } from './VtiCommunityStore'
 import type { VtiPersona } from './VtiIdentityStore'
 import { IDENTITY_VETTING_ENDORSEMENT_TYPE, CREDENTIAL_EXCHANGE_ISSUE } from './vtiInbox'
+import {
+  chooseStatementShape,
+  getDtgV1WritingMode,
+  publishedStatementType,
+  vettedV1Statement,
+  type StatementShapeChoice,
+} from './dtgV1Writing'
 import { resolveDidDocumentRetrying } from './VtiMediatorTransport'
 import { recordAnswer, recordSent, recordStatus } from './joinSubmission'
 import { joinRequestRefusal, openJoinRequestOf, vtiAgent, type VtiManifest, type VtiVerdict } from './vtiAgent'
@@ -49,13 +62,16 @@ import {
   verifyEligibilityPresentation,
   type EligibilityRefusal,
 } from './vtiEligibility'
+import { VETTING_SCHEMAS } from './vettingSchemas'
 import { againstSchema, checkVetterProfile, checkVettingRequirements } from './vettingShape'
+import { purposeForDocumentType } from './proofPurpose'
+import { releaseWarn } from './releaseLog'
 
 export const VETTING = {
   request: 'https://trusttasks.org/spec/vetting/request/0.1',
   session: 'https://trusttasks.org/spec/vetting/session/0.1',
   decline: 'https://trusttasks.org/spec/vetting/decline/0.1',
-  revokeStatement: 'https://trusttasks.org/spec/vetting/revoke-statement/0.1',
+  revokeStatement: 'https://trusttasks.org/spec/vtc/vetting/revoke-statement/0.1',
   vettersList: 'https://trusttasks.org/spec/vtc/vetting/vetters/list/0.1',
   vettersProfile: 'https://trusttasks.org/spec/vtc/vetting/vetters/profile/0.1',
 } as const
@@ -74,12 +90,6 @@ export const TASK_ERROR_TYPE = `${TASK_ERROR}0.5`
  * other version Keyring does not emit.
  */
 export const LEGACY_ERROR_03_UNTIL = '2026-11-01'
-/**
- * Until when a statement delivered inside a signed Trust Task document (its
- * `credential_response` under `payload`) — what Keyring vetters sent before
- * PR E — is still read, logged as legacy.
- */
-export const LEGACY_STATEMENT_DOCUMENT_UNTIL = '2026-11-01'
 const DTG_CONTEXT = ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1']
 
 export type VettingMethod = 'inPerson' | 'video' | 'priorAcquaintance'
@@ -125,6 +135,12 @@ export interface VettingDeskRequest {
     method: VettingMethod
     expiresAt: string
     matchCode: string
+    /**
+     * The session document's task digest (SPEC §4.9.3), which the statement
+     * carries as `taskDigestMultibase`. Absent on sessions opened before it
+     * was kept; the statement then goes without it (a SHOULD).
+     */
+    taskDigestMultibase?: string
   }
   card?: Record<string, unknown>
   statementId?: string
@@ -191,6 +207,19 @@ export interface VettingApplicationRequest {
     method: VettingMethod
     expiresAt: string
     matchCode: string
+    /**
+     * The task digest of the session document as received (SPEC §4.9.3):
+     * what a statement's `taskDigestMultibase` must reproduce. Absent on a
+     * session opened before it was kept (228).
+     */
+    taskDigestMultibase?: string
+    /**
+     * The session document itself, kept for as long as a statement citing it
+     * is held (tf vetting/session/0.1 spec.md:339: "This document is
+     * durable… The applicant SHOULD retain it… and SHOULD submit it with the
+     * statement if the community asks").
+     */
+    document?: Record<string, unknown>
   }
   cardDigest?: string
   /** The same card hashed with its proof, which Keyring vetters up to 223 put in their statements. */
@@ -212,6 +241,11 @@ export interface VettingApplicationRequest {
     | 'commitment'
     /** No card was sent on the session it names: openvtc `on_statement` (applicant.rs:1104-1106). */
     | 'noCard'
+    /**
+     * In the shape from before DTG Credentials v1, received after
+     * LEGACY_DTG_SHAPE_UNTIL: no longer read (228).
+     */
+    | 'legacyShape'
   /**
    * Why the last `vetting/session` from this vetter was not taken
    * (openvtc `on_session`, applicant.rs:774-791). The request stays where it
@@ -533,6 +567,7 @@ async function signedDocument(
   return signDocumentProof(agent, doc, persona.did, {
     kmsKeyId: persona.kmsKeyIds?.signing,
     verificationMethodId: persona.vtaKeyIds.signing,
+    proofPurpose: purposeForDocumentType(String(doc.type)),
   })
 }
 
@@ -606,9 +641,6 @@ function logRefusedDocument(agent: Agent, m: DidCommV2PlaintextMessage, code: Pe
     from: String(m.from ?? ''),
   })
 }
-
-/** The context a statement must carry: vta-sdk `vetting/statement.rs:30` `DTG_CONTEXT`. */
-const DTG_CREDENTIALS_CONTEXT = 'https://firstperson.network/credentials/dtg/v1'
 
 /** How far ahead a statement's validFrom may be: vta-sdk `vetting::card::CLOCK_SKEW` (card.rs:45). */
 export const STATEMENT_CLOCK_SKEW_MS = 60 * 1000
@@ -687,6 +719,38 @@ export interface VettingCardExpectations {
 }
 
 /**
+ * A card with only the members the published schema names, at the top and in
+ * each claim, for the shape check alone.
+ *
+ * The schema forbids any other member (`additionalProperties: false`,
+ * vetting-card.schema.json). Salted credentials are coming (maintainer sync,
+ * 2026-09-25): optional salt members that must be honoured when present, not
+ * yet in the spec. A card carrying one, or any member a later version adds,
+ * was refused as malformed. It is now read for the members Keyring knows,
+ * while the proof is still checked over the whole card as it arrived, so what
+ * is not read is still the applicant's. Nothing Keyring builds, hashes, signs
+ * or keeps changes: the projection is used for the shape check only.
+ */
+function knownCardMembers(card: unknown): unknown {
+  if (!card || typeof card !== 'object' || Array.isArray(card)) return card
+  const schema = VETTING_SCHEMAS.vettingCard as {
+    properties: Record<string, unknown>
+    $defs: { VettingCardClaim: { properties: Record<string, unknown> } }
+  }
+  const pick = (from: Record<string, unknown>, names: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(from).filter(([name]) => name in names))
+  const known = pick(card as Record<string, unknown>, schema.properties)
+  if (Array.isArray(known.claims)) {
+    known.claims = known.claims.map((claim) =>
+      claim && typeof claim === 'object' && !Array.isArray(claim)
+        ? pick(claim as Record<string, unknown>, schema.$defs.VettingCardClaim.properties)
+        : claim
+    )
+  }
+  return known
+}
+
+/**
  * Verify a Vetting Card as vta-sdk `verify_card` does (card.rs:270-327), plus
  * the spec's session-expiry bound: the published shape, the five bindings, the
  * validity window with `CLOCK_SKEW`, the publisher's `assertionMethod` proof,
@@ -702,7 +766,9 @@ export async function verifyVettingCard(
   expect: VettingCardExpectations
 ): Promise<{ ok: true } | { ok: false; code: VettingCardRefusal; detail: string }> {
   const refuse = (code: VettingCardRefusal, detail: string) => ({ ok: false as const, code, detail })
-  const shape = againstSchema('vettingCard', card)
+  // The shape is checked on the members the published schema names; the
+  // proof, below, over the card exactly as it arrived (`knownCardMembers`).
+  const shape = againstSchema('vettingCard', knownCardMembers(card))
   if (!shape.ok) return refuse('malformed', shape.detail)
   const c = card as Record<string, unknown> & { claims: { type: string; value: unknown }[] }
   for (const member of ['audience', 'publisher', 'community', 'challenge', 'domain'] as const) {
@@ -821,7 +887,8 @@ export class VtiVetterDesk {
     // for the profile payload, protocols/vetting.rs:570-597, which the
     // community applies): the schema, and the event rule the schema states in
     // prose only — an https `url`, and `endDate` on or after `startDate` and
-    // at most 31 days after it. Signed by `vtiAgent.ask` (its SIGNED_TASKS).
+    // at most 31 days after it. Signed by `vtiAgent.ask`, which signs
+    // everything it sends.
     const shape = checkVetterProfile(payload)
     if (!shape.ok) throw new VetterProfileError(shape.detail)
     // The community's document may not be in the resolver's cache on this
@@ -1171,6 +1238,7 @@ export class VtiVetterDesk {
       method,
       expiresAt,
       matchCode: vettingMatchCode(String(doc.id)),
+      taskDigestMultibase: taskDigestMultibase(doc),
     }
     await this.store.saveDesk(desk)
     this.onChange?.()
@@ -1233,6 +1301,33 @@ export class VtiVetterDesk {
   }
 
   /** The human check, then the statement — never automatic, signed as the member persona. */
+  /**
+   * The statement shape to write for `communityDid` (228; `chooseStatementShape`).
+   * In `auto` it reads the community's published requirements (A) and this
+   * vetter's own grant from it (B); a manifest that cannot be read now leaves
+   * the grant to decide. `off` and `force` read nothing.
+   */
+  private async statementShapeFor(communityDid: string): Promise<StatementShapeChoice> {
+    const mode = getDtgV1WritingMode()
+    if (mode !== 'auto') return chooseStatementShape({ mode })
+    let statementType: string | undefined
+    try {
+      statementType = publishedStatementType(await vtiAgent.fetchManifest(communityDid, this.agent))
+    } catch (e) {
+      this.agent.config?.logger?.info?.(
+        `[VTI] statement shape: the community's requirements could not be read (${(e as Error)?.message ?? e}); deciding by this vetter's grant`,
+        { communityDid }
+      )
+    }
+    const grants =
+      (await this.communityStore?.listHeldCredentials?.('vetter-grant', communityDid).catch(() => [])) ?? []
+    const own = grants
+      .filter((g) => g.subjectDid === this.persona.did)
+      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+    const grantShape = communityRoleCard(own[0]?.credential)?.shape
+    return chooseStatementShape({ mode, statementType, grantShape })
+  }
+
   async attest(
     requestId: string,
     decision: {
@@ -1256,43 +1351,81 @@ export class VtiVetterDesk {
 
     const validFrom = new Date()
     const validUntil = new Date(validFrom.getTime() + (decision.validDays ?? 120) * 86400000)
-    const statement: Record<string, unknown> = {
-      '@context': DTG_CONTEXT,
-      type: ['VerifiableCredential', 'DTGCredential', 'EndorsementCredential'],
-      id: `urn:uuid:${utils.uuid()}`,
-      issuer: this.persona.did,
-      validFrom: validFrom.toISOString(),
-      validUntil: validUntil.toISOString(),
-      taskContext: desk.session.documentId,
-      credentialSubject: {
-        id: desk.applicantDid,
-        endorsement: {
-          type: IDENTITY_VETTING_ENDORSEMENT_TYPE,
-          community: desk.communityDid,
-          method: desk.session.method,
-          documentClasses: decision.documentClasses,
-          claimsVerified: decision.claimsVerified,
-          livenessConfirmed: true,
-          identityCommitment: desk.card.identityCommitment,
-          cardDigestMultibase: cardDigestMultibase(desk.card),
-          declaredRelationship: decision.declaredRelationship ?? 'none',
+    const attestation = {
+      community: desk.communityDid,
+      method: desk.session.method,
+      documentClasses: decision.documentClasses,
+      claimsVerified: decision.claimsVerified,
+      livenessConfirmed: true,
+      identityCommitment: String(desk.card.identityCommitment ?? ''),
+      cardDigestMultibase: cardDigestMultibase(desk.card),
+      declaredRelationship: decision.declaredRelationship ?? 'none',
+    }
+    let statement: Record<string, unknown>
+    const shape = await this.statementShapeFor(desk.communityDid)
+    // Which shape went out, and what decided it: a device run cannot see it
+    // otherwise (the Farm 0.47 gate reads it from a Release build's log).
+    releaseWarn(`[VTI] statement shape: writing ${shape.shape} (by ${shape.by})`)
+    if (shape.disagreement) {
+      this.agent.config?.logger?.warn?.(
+        `[VTI] statement shape: the community's requirements name ${shape.disagreement.requirements}, this vetter's grant ${shape.disagreement.grant}; following the requirements`,
+        { communityDid: desk.communityDid }
+      )
+    }
+    if (shape.shape === 'vetted/1') {
+      // DTG Credentials v1 (228, behind its flag): a vetted/1 statement, which
+      // MUST carry the session's task digest. A session opened before the
+      // digest was kept cannot be answered in this shape: say so rather than
+      // write one an applicant refuses.
+      if (!desk.session.taskDigestMultibase)
+        throw new Error('vtiVetting: this session kept no task digest, so a vetted/1 statement cannot be written')
+      statement = vettedV1Statement({
+        id: `urn:uuid:${utils.uuid()}`,
+        issuer: this.persona.did,
+        subject: desk.applicantDid,
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+        taskContext: desk.session.documentId,
+        taskDigestMultibase: desk.session.taskDigestMultibase,
+        attestation,
+      })
+    } else {
+      statement = {
+        '@context': DTG_CONTEXT,
+        type: ['VerifiableCredential', 'DTGCredential', 'EndorsementCredential'],
+        id: `urn:uuid:${utils.uuid()}`,
+        issuer: this.persona.did,
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+        // Names the session it was issued in (MUST), and binds the name to that
+        // document (SHOULD): vetting/session/0.1 "The session's name".
+        taskContext: desk.session.documentId,
+        ...(desk.session.taskDigestMultibase ? { taskDigestMultibase: desk.session.taskDigestMultibase } : {}),
+        credentialSubject: {
+          id: desk.applicantDid,
+          endorsement: { type: IDENTITY_VETTING_ENDORSEMENT_TYPE, ...attestation },
         },
-      },
+      }
     }
     const signed = await signDocumentProof(this.agent, statement, this.persona.did, {
       kmsKeyId: this.persona.kmsKeyIds?.signing,
       verificationMethodId: this.persona.vtaKeyIds.signing,
     })
-    // Delivered as the VTC and openvtc deliver a credential: the DIDComm body
-    // IS `{ credential_response: { credential } }` — vtc-service
-    // `issue_message_body` (credentials/delivery.rs:128-141), built into a
-    // plain message by `push_to_holder` (:170-173); openvtc
-    // `wire::credential_delivery` (vetting/wire.rs:177-185), threaded on the
-    // session. The statement carries its own proof. An openvtc applicant reads
-    // `/credential_response/credential` off the body (inbound.rs:791) and
-    // ignored Keyring's signed Trust Task wrapper, where it sat under
-    // `payload` (Phase 2, 2026-09-25 11:27:23Z).
-    const delivery = { credential_response: { credential: signed } }
+    // Delivered as openvtc delivers one peer to peer: a signed Trust Task
+    // document from the vetter to the applicant, threaded on the session, the
+    // statement under `payload` (openvtc b52dc28 `wire::credential_delivery`,
+    // vetting/wire.rs:188-205). Its applicant opens the delivery as a document
+    // (`wire::open`, :218-240) and refuses a bare `{ credential_response }`
+    // body as "malformed vetting document: missing field `id`" — what Keyring
+    // sent from 09-25, when openvtc still read the bare body (226 gate, TUI P2).
+    const delivery = await signedDocument(
+      this.agent,
+      this.persona,
+      desk.applicantDid,
+      CREDENTIAL_EXCHANGE_ISSUE,
+      { credential_response: { credential: signed } },
+      desk.session.documentId
+    )
     await vtiAgent.send(desk.applicantDid, CREDENTIAL_EXCHANGE_ISSUE, delivery, { thid: desk.session.documentId })
     desk.status = 'attested'
     desk.statementId = String(signed.id)
@@ -1306,7 +1439,9 @@ export class VtiVetterDesk {
    * place across a relaunch.
    */
   async confirmMatch(requestId: string): Promise<void> {
-    await this.patchDesk(requestId, (desk) => (desk.matchConfirmedAt ? undefined : { matchConfirmedAt: new Date().toISOString() }))
+    await this.patchDesk(requestId, (desk) =>
+      desk.matchConfirmedAt ? undefined : { matchConfirmedAt: new Date().toISOString() }
+    )
   }
 
   /**
@@ -1718,6 +1853,8 @@ export class VtiApplicant {
         method: (p.method as VettingMethod) ?? 'inPerson',
         expiresAt: String(p.expiresAt ?? ''),
         matchCode: vettingMatchCode(documentId),
+        taskDigestMultibase: taskDigestMultibase(body),
+        document: body,
       },
     })
   }
@@ -1798,28 +1935,25 @@ export class VtiApplicant {
    */
   async receiveStatement(m: DidCommV2PlaintextMessage): Promise<void> {
     const body = bodyOf(m)
-    // The bare body is the delivery (vtc-service delivery.rs:128-141, openvtc
-    // wire.rs:177-185). Keyring vetters before PR E wrapped it in a signed
-    // Trust Task document: read until LEGACY_STATEMENT_DOCUMENT_UNTIL, and said so.
-    if (body.credential_response === undefined && body.payload !== undefined) {
-      if (Date.now() >= Date.parse(`${LEGACY_STATEMENT_DOCUMENT_UNTIL}T00:00:00Z`)) {
-        this.agent.config?.logger?.warn?.('[VTI] statement in the retired Trust Task document shape not read', {
-          from: String(m.from ?? ''),
-        })
-        return
-      }
-      this.agent.config?.logger?.info?.('[VTI] statement read in the legacy Trust Task document shape', {
-        from: String(m.from ?? ''),
-      })
-    }
+    // The delivery is a signed Trust Task document with the statement under
+    // `payload` (openvtc b52dc28 wire.rs:188-205, and Keyring vetters). A bare
+    // `{ credential_response }` body is what openvtc before #392 and Keyring
+    // vetters from 09-25 sent; still read. The statement is checked on its own
+    // proof below either way.
     const p = (body.credential_response !== undefined ? body : (body.payload ?? body)) as Record<string, unknown>
     const credential = ((p.credential_response as Record<string, unknown>)?.credential ?? undefined) as
       | Record<string, unknown>
       | undefined
     if (!credential) return
-    const subject = credential.credentialSubject as { id?: string; endorsement?: Record<string, unknown> } | undefined
-    const endorsement = subject?.endorsement
-    if (endorsement?.type !== IDENTITY_VETTING_ENDORSEMENT_TYPE) return
+    const subject = credential.credentialSubject as { id?: string } | undefined
+    // Either shape: the endorsement, or vetted/1's object.value (DTG
+    // Credentials v1). Both name the members checked below.
+    const statement = vettingStatementBody(credential)
+    if (!statement) return
+    // A community's own identity check is not a vetter's statement, even from a
+    // community asked to vet: the inbox keeps it as evidence (receiveIssue).
+    if (isCommunityIdentityCheck(credential)) return
+    const endorsement = statement.body
     const application = await this.store.getApplication(this.persona.communityDid)
     if (!application) return
     const issuer =
@@ -1834,21 +1968,14 @@ export class VtiApplicant {
       // One already kept is never replaced by a refusal of a copy.
       if (request.status !== 'attested') await this.update(sender, { status: 'statementRefused', statementRefusal })
     }
-    // vta-sdk verify_statement: shape.
-    const types = ([] as unknown[]).concat(credential.type ?? [])
-    const contexts = ([] as unknown[]).concat(credential['@context'] ?? [])
+    // vta-sdk verify_statement: shape, per shape (vettingStatementShapeProblem).
+    // An old-shape statement after LEGACY_DTG_SHAPE_UNTIL is refused as malformed.
+    const now = Date.now()
+    const shapeProblem = vettingStatementShapeProblem(credential, now)
+    if (shapeProblem) return refuse(shapeProblem === 'legacyShapeRetired' ? 'legacyShape' : 'malformed')
     const validUntil = Date.parse(String(credential.validUntil ?? ''))
     const validFrom = Date.parse(String(credential.validFrom ?? ''))
-    if (
-      !['VerifiableCredential', 'DTGCredential', 'EndorsementCredential'].every((t) => types.includes(t)) ||
-      !contexts.includes(DTG_CREDENTIALS_CONTEXT) ||
-      !credential.id ||
-      !credential.taskContext ||
-      !Number.isFinite(validUntil)
-    )
-      return refuse('malformed')
     // vta-sdk verify_statement: the validity window, with the SDK's clock skew (card.rs CLOCK_SKEW).
-    const now = Date.now()
     if ((Number.isFinite(validFrom) && validFrom > now + STATEMENT_CLOCK_SKEW_MS) || now > validUntil)
       return refuse('expired')
     // vta-sdk verify_statement: the proof, by the issuer.
@@ -1859,6 +1986,21 @@ export class VtiApplicant {
     if (endorsement.community !== application.communityDid) return refuse('community')
     if (request.status === 'attested' && request.statementId === String(credential.id)) return
     if (!request.session || credential.taskContext !== request.session.documentId) return refuse('session')
+    // The name binds to the very document: the statement's task digest must
+    // reproduce over the session document as received (vta-sdk
+    // check_against_session; openvtc on_statement). A vetted/1 statement always
+    // cites one (its shape check); the endorsement shape may not, and is read
+    // on its taskContext alone as before. A session opened before the digest
+    // was kept cannot be checked: kept, and said.
+    const cited = typeof credential.taskDigestMultibase === 'string' ? credential.taskDigestMultibase : undefined
+    if (cited && request.session.taskDigestMultibase) {
+      if (!digestBytesEqual(cited, request.session.taskDigestMultibase)) return refuse('session')
+    } else if (cited) {
+      this.agent.config?.logger?.warn?.(
+        '[VTI] statement taskDigestMultibase not checked: the session document was not kept (opened before 228)',
+        { vetterDid: sender }
+      )
+    }
     // openvtc on_statement: a statement answers a card we sent on that session
     // (applicant.rs:1104-1106, "take a statement before a card").
     if (!request.cardDigest) return refuse('noCard')

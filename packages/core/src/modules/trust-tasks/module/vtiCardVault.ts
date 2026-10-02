@@ -15,8 +15,10 @@
  * have.
  *
  * What the agent could not keep stays on the phone, marked: a card from a
- * community that signs with two keys carries a proof set, which the vault
- * refuses today (VTI-44 (e)).
+ * community that signs with two keys carries a proof set, which a vault before
+ * VTI #1868 refuses (VTI-44 (e)). Such a card is offered again once per
+ * connect, so it moves to the agent on its own once the agent is upgraded; a
+ * card refused for any other reason is not offered again.
  *
  * Each card's state is persisted, keyed by the credential's own `id` (the same
  * on every phone, so recovery can match), and read synchronously from a cache
@@ -31,10 +33,10 @@ import { DeviceEventEmitter } from 'react-native'
 import { VTI_PERSONA_DELIVERIES_EVENT } from './communityChanged'
 import { listKeyed, putKeyed } from './keyedRecords'
 import { vtaAgent } from './vtaAgent'
-import { GenericRecordsCommunityStore, type VtiCommunityStore } from './VtiCommunityStore'
+import { GenericRecordsCommunityStore, isCurrentMembership, type VtiCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import { checkDeliveredCard, VtiCardStatusUnreadable } from './vtiDeliveredCheck'
-import { classifyCredential } from './vtiInbox'
+import { classifyCredential, roleNameOf } from './vtiInbox'
 
 export const VAULT_RECEIVE = 'https://trusttasks.org/spec/vault/credentials/receive/0.1'
 export const VAULT_QUERY = 'https://trusttasks.org/spec/vault/credentials/query/0.1'
@@ -134,6 +136,8 @@ async function cardsOf(store: VtiCommunityStore, persona: VtiPersona): Promise<C
   }
   for (const m of await store.listMemberships()) {
     if (m.personaDid !== persona.did) continue
+    // Ended by the community: not a card to keep, nor one a new phone gets back.
+    if (!isCurrentMembership(m)) continue
     add(m.vmc, 'membership', m.communityDid)
     add(m.roleVec, 'role', m.communityDid)
   }
@@ -152,17 +156,24 @@ const answered = (e: unknown) => typeof (e as { code?: unknown })?.code === 'str
  * not sent again, and a card the agent refused is not retried (it would refuse
  * it again). A card whose send got no answer stays `pending` and goes on the
  * next call. Returns what happened this time.
+ *
+ * `offerProofSetsAgain` (the caller sets it once per connect) also sends the
+ * cards refused for their proof set: an agent upgraded since (VTI #1868) keeps
+ * them. An agent that still refuses costs one send per card per connect, and
+ * an unanswered offer leaves the card as it was.
  */
 export async function keepCardsInAgent(
   agent: Agent,
   store: VtiCommunityStore,
   persona: VtiPersona,
-  task: VaultTask
+  task: VaultTask,
+  options: { offerProofSetsAgain?: boolean } = {}
 ): Promise<{ kept: string[]; cannotKeep: string[]; pending: string[] }> {
   const result = { kept: [] as string[], cannotKeep: [] as string[], pending: [] as string[] }
   for (const card of await cardsOf(store, persona)) {
     const now = cardVaultStateOf(card.credentialId)
-    if (now.state === 'kept' || now.state === 'cannotKeep') continue
+    const offeredAgain = now.state === 'cannotKeep' && now.reason === 'proofSet' && options.offerProofSetsAgain === true
+    if (now.state === 'kept' || (now.state === 'cannotKeep' && !offeredAgain)) continue
     const base = { credentialId: card.credentialId, communityDid: card.communityDid, kind: card.kind }
     try {
       await task(VAULT_RECEIVE, { credential: card.credential, id: card.credentialId, contextId: persona.contextId })
@@ -173,7 +184,7 @@ export async function keepCardsInAgent(
         const reason = Array.isArray(card.credential.proof) ? 'proofSet' : 'refusedByAgent'
         await setState(agent, { ...base, vault: { state: 'cannotKeep', reason } })
         result.cannotKeep.push(card.credentialId)
-      } else {
+      } else if (!offeredAgain) {
         await setState(agent, { ...base, vault: { state: 'pending' } })
         result.pending.push(card.credentialId)
       }
@@ -242,7 +253,11 @@ export async function recoverCardsFromAgent(
       continue
     }
     if (item.kind === 'membership') {
-      const existing = await store.getMembership(item.communityDid)
+      const found = await store.getMembership(item.communityDid)
+      // The very card the community ended does not bring the membership back.
+      if (found && !isCurrentMembership(found) && found.vmc?.id === credential.id) continue
+      // A membership the community ended lends nothing to a new one.
+      const existing = found && isCurrentMembership(found) ? found : undefined
       await store.saveMembership({
         communityDid: item.communityDid,
         personaDid: persona.did,
@@ -255,10 +270,7 @@ export async function recoverCardsFromAgent(
       })
     } else if (item.kind === 'role') {
       const existing = await store.getMembership(item.communityDid)
-      const role = String(
-        ((credential.credentialSubject as Record<string, unknown>)?.endorsement as Record<string, unknown>)?.role ??
-          'member'
-      )
+      const role = String(roleNameOf(credential) ?? 'member')
       if (existing) await store.saveMembership({ ...existing, role, roleVec: credential })
       else await store.saveHeldCredential({ ...item, kind: 'role' })
     } else if (item.kind === 'vetter-grant') {
@@ -287,7 +299,9 @@ export async function recoverCardsFromAgent(
 /**
  * Keep every persona's cards in its agent: once the agent is connected, again
  * whenever it reconnects, and whenever a new card arrives. One run at a time;
- * a card already kept, or one the agent refused, is not sent again.
+ * a card already kept, or one the agent refused, is not sent again — except
+ * that each connect offers the proof-set refusals once more (see
+ * `keepCardsInAgent`), and a new card arriving does not.
  */
 export function useVtiCardVault(agent: Agent | undefined): void {
   useEffect(() => {
@@ -295,6 +309,8 @@ export function useVtiCardVault(agent: Agent | undefined): void {
     let running = false
     let again = false
     let stopped = false
+    // Set by a connect, taken by the next run: at most one second offer per connect.
+    let offerProofSetsAgain = true
     const run = async () => {
       if (running) {
         again = true
@@ -310,8 +326,10 @@ export function useVtiCardVault(agent: Agent | undefined): void {
           const task: VaultTask = <T>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload)
           const store = new GenericRecordsCommunityStore(agent)
           const personas = await new GenericRecordsIdentityStore(agent).listPersonas()
+          const offer = offerProofSetsAgain
+          offerProofSetsAgain = false
           for (const persona of personas.filter((p) => p.vtaDid === vtaDid))
-            await keepCardsInAgent(agent, store, persona, task)
+            await keepCardsInAgent(agent, store, persona, task, { offerProofSetsAgain: offer })
         } while (again && !stopped)
       } catch (e) {
         agent.config?.logger?.warn?.(`[VTI] keeping cards in the agent: ${(e as Error)?.message ?? e}`)
@@ -322,7 +340,10 @@ export function useVtiCardVault(agent: Agent | undefined): void {
     let wasConnected = vtaAgent.getState().status === 'connected'
     const unsubscribe = vtaAgent.subscribe(() => {
       const connected = vtaAgent.getState().status === 'connected'
-      if (connected && !wasConnected) void run()
+      if (connected && !wasConnected) {
+        offerProofSetsAgain = true
+        void run()
+      }
       wasConnected = connected
     })
     const sub = DeviceEventEmitter.addListener(VTI_PERSONA_DELIVERIES_EVENT, () => void run())

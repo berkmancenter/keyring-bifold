@@ -22,6 +22,7 @@
  *
  *   linked carries one connection sub-state:
  *       online ⇄ offline(since, reason) ⇄ reconnecting(attempt, nextRetryAt, since)
+ *       offline / reconnecting / connecting ─agentGone─▶ gone(why) ─sessionOpened─▶ online
  *
  * Pure: a reducer and two helpers, no I/O, so every transition is a unit
  * test. An event that does not apply to the current state leaves it as it is
@@ -30,10 +31,26 @@
  * @module trust-tasks/module/vtaLinkMachine
  */
 
+import type { AgentGoneWhy } from './agentGone'
+import type { HostLinkFailure } from './agentHostConnection'
+
 export type VtaConnection =
   | { kind: 'online' }
+  /**
+   * Not yet online since the app started: the saved link is back and the
+   * first session is still being opened (IN-48). Failed start-up attempts
+   * stay here; `connectionShown` turns it into offline once
+   * `STARTUP_GRACE_MS` has passed.
+   */
+  | { kind: 'connecting'; since: number; reason?: string }
   | { kind: 'reconnecting'; attempt: number; nextRetryAt: number; since: number }
   | { kind: 'offline'; since: number; reason?: string }
+  /**
+   * The agent is gone for good (agentGone.ts): its address does not exist, or
+   * it has not been reached for days. Retrying stops; reaching it again (a
+   * foreground, "Try again") still brings it back online.
+   */
+  | { kind: 'gone'; since: number; why: AgentGoneWhy }
 
 export interface VtaIdentityOfAgent {
   vtaDid: string
@@ -42,10 +59,19 @@ export interface VtaIdentityOfAgent {
 
 export type VtaLinkState =
   | { kind: 'notLinked'; lastError?: VtaLinkFailure }
-  | ({ kind: 'confirming'; offerUrl: string; exp: number } & VtaIdentityOfAgent)
-  | ({ kind: 'submitting'; offerUrl: string; exp: number } & VtaIdentityOfAgent)
-  | ({ kind: 'awaitingGrant'; offerUrl: string; exp: number; code: string } & VtaIdentityOfAgent)
-  | ({ kind: 'showingKey'; did: string; checking: boolean; notYet?: boolean; noAnswer?: boolean } & VtaIdentityOfAgent)
+  | ({ kind: 'confirming'; offerUrl: string; exp: number; via?: 'host' } & VtaIdentityOfAgent)
+  | ({ kind: 'submitting'; offerUrl: string; exp: number; via?: 'host' } & VtaIdentityOfAgent)
+  /** `host`: an agent host's automatic connection — no code to compare; the host sets the agent up. */
+  | ({ kind: 'awaitingGrant'; offerUrl: string; exp: number; code: string; via?: 'host' } & VtaIdentityOfAgent)
+  | ({
+      kind: 'showingKey'
+      did: string
+      checking: boolean
+      notYet?: boolean
+      noAnswer?: boolean
+      /** `scan`: the agent's address was scanned or pasted — usually another phone's "Add another phone" code (#30). */
+      via?: 'scan'
+    } & VtaIdentityOfAgent)
   | ({ kind: 'linking'; step: 'connecting' | 'rotating' } & VtaIdentityOfAgent)
   | ({ kind: 'linked'; linkedAt: string; connection: VtaConnection } & VtaIdentityOfAgent)
   | ({ kind: 'revoked'; reason: string; cause: RevocationCause } & VtaIdentityOfAgent)
@@ -67,11 +93,13 @@ export function revocationCause(reason: string): RevocationCause {
 export interface VtaLinkFailure {
   reason: 'expired' | 'refused' | 'unreachable' | 'rejected' | 'failed'
   detail?: string
+  /** An agent host's automatic connection stopped: why, in its own words for a screen (agentHostConnection.ts). */
+  hostReason?: HostLinkFailure
 }
 
 export type VtaLinkEvent =
   | { type: 'restored'; link?: VtaIdentityOfAgent & { linkedAt: string }; now: number }
-  | ({ type: 'offerScanned'; offerUrl: string; exp: number } & VtaIdentityOfAgent)
+  | ({ type: 'offerScanned'; offerUrl: string; exp: number; via?: 'host' } & VtaIdentityOfAgent)
   | { type: 'confirmed' }
   | { type: 'cancelled' }
   | { type: 'submitted'; code: string }
@@ -89,11 +117,13 @@ export type VtaLinkEvent =
   | { type: 'sessionOpened' }
   | { type: 'sessionDropped'; reason?: string; now: number }
   | { type: 'retryScheduled'; attempt: number; nextRetryAt: number }
+  /** The agent was found gone for good (agentGone.ts). Never from online. */
+  | { type: 'agentGone'; why: AgentGoneWhy; now: number }
   | { type: 'accessRevoked'; reason: string }
   | { type: 'relink' }
   /** The person unlinked this phone from its agent: from any state, back to no agent. */
   | { type: 'unlinked' }
-  | ({ type: 'keyShown'; did: string } & VtaIdentityOfAgent)
+  | ({ type: 'keyShown'; did: string; via?: 'scan' } & VtaIdentityOfAgent)
   | { type: 'grantCheckStarted' }
   | { type: 'grantNotYet' }
   | { type: 'grantNoAnswer' }
@@ -103,8 +133,8 @@ export const initialLinkState: VtaLinkState = { kind: 'notLinked' }
 export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkState {
   switch (event.type) {
     case 'restored':
-      // Only at start-up: the persisted link comes back offline until a
-      // session proves otherwise; nothing live is ever restored.
+      // Only at start-up: the persisted link comes back connecting until a
+      // session proves it online; nothing live is ever restored.
       if (state.kind !== 'notLinked') return state
       return event.link
         ? {
@@ -112,14 +142,21 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
             vtaDid: event.link.vtaDid,
             label: event.link.label,
             linkedAt: event.link.linkedAt,
-            connection: { kind: 'offline', since: event.now },
+            connection: { kind: 'connecting', since: event.now },
           }
         : state
 
     case 'offerScanned':
       // A new offer replaces an unfinished attempt, never a working link.
       if (state.kind === 'linked' || state.kind === 'linking') return state
-      return { kind: 'confirming', vtaDid: event.vtaDid, label: event.label, offerUrl: event.offerUrl, exp: event.exp }
+      return {
+        kind: 'confirming',
+        vtaDid: event.vtaDid,
+        label: event.label,
+        offerUrl: event.offerUrl,
+        exp: event.exp,
+        ...(event.via ? { via: event.via } : {}),
+      }
 
     case 'confirmed':
       return state.kind === 'confirming' ? { ...state, kind: 'submitting' } : state
@@ -134,7 +171,14 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
 
     case 'keyShown':
       return state.kind === 'notLinked'
-        ? { kind: 'showingKey', vtaDid: event.vtaDid, label: event.label, did: event.did, checking: false }
+        ? {
+            kind: 'showingKey',
+            vtaDid: event.vtaDid,
+            label: event.label,
+            did: event.did,
+            checking: false,
+            ...(event.via ? { via: event.via } : {}),
+          }
         : state
 
     case 'grantCheckStarted':
@@ -195,6 +239,11 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
 
     case 'sessionDropped':
       if (state.kind !== 'linked') return state
+      // A failed start-up attempt is still connecting; the clock decides when
+      // that reads as offline (connectionShown).
+      if (state.connection.kind === 'connecting') {
+        return { ...state, connection: { ...state.connection, reason: event.reason } }
+      }
       // Keep the moment it first went away: "Offline since" is about the
       // person's view, not about the latest failed retry.
       return state.connection.kind !== 'online'
@@ -202,7 +251,10 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
         : { ...state, connection: { kind: 'offline', since: event.now, reason: event.reason } }
 
     case 'retryScheduled':
-      return state.kind === 'linked' && state.connection.kind !== 'online'
+      return state.kind === 'linked' &&
+        state.connection.kind !== 'online' &&
+        state.connection.kind !== 'connecting' &&
+        state.connection.kind !== 'gone'
         ? {
             ...state,
             connection: {
@@ -212,6 +264,11 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
               since: state.connection.since,
             },
           }
+        : state
+
+    case 'agentGone':
+      return state.kind === 'linked' && state.connection.kind !== 'online'
+        ? { ...state, connection: { kind: 'gone', since: event.now, why: event.why } }
         : state
 
     case 'accessRevoked':
@@ -239,12 +296,35 @@ export function reconnectDelayMs(attempt: number): number {
 }
 
 /**
+ * How long a start-up connect may take before it reads as offline. On an
+ * emulator a relaunch took ~33 s from agent start to its first persona login
+ * (226 gate §10), so this is not the 5 s a drop gets.
+ */
+export const STARTUP_GRACE_MS = 30_000
+
+/**
+ * The connection as a person should see it at `now`: a start-up connect is
+ * "connecting" for `STARTUP_GRACE_MS`, then offline since the app started.
+ * Every other state is shown as it is.
+ */
+export function connectionShown(connection: VtaConnection, now: number): VtaConnection {
+  if (connection.kind !== 'connecting' || now - connection.since < STARTUP_GRACE_MS) return connection
+  return connection.reason === undefined
+    ? { kind: 'offline', since: connection.since }
+    : { kind: 'offline', since: connection.since, reason: connection.reason }
+}
+
+/**
  * Whether the app-wide "agent offline" banner shows. A brief drop does not
- * flash it: only a connection that has not been online for `thresholdMs`.
+ * flash it: only a connection that has not been online for `thresholdMs`,
+ * and never a start-up connect still within its grace.
  */
 export function showsOfflineBanner(state: VtaLinkState, now: number, thresholdMs = 5000): boolean {
-  if (state.kind !== 'linked' || state.connection.kind === 'online') return false
-  return now - state.connection.since >= thresholdMs
+  if (state.kind !== 'linked') return false
+  const shown = connectionShown(state.connection, now)
+  // Gone has its own card, which says more than "offline" can.
+  if (shown.kind === 'online' || shown.kind === 'connecting' || shown.kind === 'gone') return false
+  return now - shown.since >= thresholdMs
 }
 
 /**

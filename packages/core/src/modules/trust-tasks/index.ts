@@ -41,6 +41,16 @@ export {
   TRUST_TASKS_MIN_RCE_VERSION,
 } from './ceremony'
 
+// 228 writer: DTG Credentials v1 shapes are written only when this is on (default off).
+export {
+  DTG_V1_WRITING_RELEASE_DEFAULT,
+  getDtgV1WritingMode,
+  isDtgV1WritingEnabled,
+  setDtgV1WritingEnabled,
+  setDtgV1WritingMode,
+  type DtgV1WritingMode,
+} from './module/dtgV1Writing'
+
 // R5 — the open type→handler registry and its render/approve-deny scaffold.
 // See docs/plans/reference-app-sdk-packaging.md and its 2026-09-01-al.md /
 // 2026-09-06-agent.md companions.
@@ -69,7 +79,17 @@ export {
   createVtiClientDid,
 } from './module/VtiMediatorTransport'
 export type { VtiMediatorEndpoints, VtiClientIdentity } from './module/VtiMediatorTransport'
-export { vtiAgent, VtiRefusal } from './module/vtiAgent'
+export { vtiAgent, VtiRefusal, isUnsupportedJoinVersion } from './module/vtiAgent'
+export { criterionDigest, joinAsks, readManifest } from './module/joinManifest'
+export type {
+  JoinAdmission,
+  JoinAsks,
+  JoinCredentialIssuers,
+  JoinHolds,
+  JoinWay,
+  JoinWayFault,
+} from './module/joinManifest'
+export { JOIN_WIRES, type JoinWire } from './module/joinWire'
 export { bareDid, classifyDid, classifyDidDocument } from './module/classifyDid'
 export type { ClassifiableDidDocument, DidKind, DidResolverAgent } from './module/classifyDid'
 export { VtaClient, VTA_TASK, resolveVtaMediator, ManagerKeyUnresolved, setVtaSwapTestHook } from './module/VtaClient'

@@ -12,6 +12,8 @@ import { ToastType } from '../components/toast/BaseToast'
 import LoadingView from '../components/views/LoadingView'
 import { TOKENS, useServices } from '../container-api'
 import { useStore } from '../contexts/store'
+import { agentAddressScan } from '../modules/trust-tasks/module/agentAddressScan'
+import { deviceCodeScan } from '../modules/trust-tasks/module/deviceCodeScan'
 import { KeyringLinkError } from '../modules/trust-tasks/module/vtiLinks'
 import { BifoldError, QrCodeScanError } from '../types/error'
 import { ConnectStackParams } from '../types/navigators'
@@ -83,6 +85,28 @@ const Scan: React.FC<ScanProps> = ({ navigation, route }) => {
   const handleCodeScan = useCallback(
     async (value: string) => {
       setQrCodeScanError(null)
+      // "Scan its code" on the phone adding another one (#30): a device code
+      // goes back to that screen instead of being routed as a link.
+      const forDevice = deviceCodeScan.claim(value)
+      if (forDevice?.taken) {
+        navigation.goBack()
+        return
+      }
+      if (forDevice) {
+        setQrCodeScanError(new QrCodeScanError(t('Scan.NotADeviceCode'), value, t('Scan.NotADeviceCode')))
+        return
+      }
+      // "Scan" on Create my agent's address step: an agent's address, or a
+      // host's automatic-connection QR, goes back to that screen.
+      // The scanner closes before the result is handed over: that screen may
+      // navigate on from it, and a second goBack here would then leave it (229).
+      const forAddress = agentAddressScan.claim(value, () => navigation.goBack())
+      if (forAddress?.taken) return
+      if (forAddress) {
+        const said = t(forAddress.why === 'hostNotAllowed' ? 'Scan.HostNotAllowed' : 'Scan.NotAnAgentAddress')
+        setQrCodeScanError(new QrCodeScanError(said, value, said))
+        return
+      }
       try {
         const uri = value
         await handleInvitation(uri)
@@ -90,7 +114,7 @@ const Scan: React.FC<ScanProps> = ({ navigation, route }) => {
         setQrCodeScanError(scanErrorOf(value, e, t('Scan.InvalidQrCode')))
       }
     },
-    [handleInvitation, t]
+    [handleInvitation, navigation, t]
   )
 
   const permissionFlow = useCallback(

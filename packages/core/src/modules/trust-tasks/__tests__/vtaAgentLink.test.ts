@@ -1,7 +1,16 @@
+import { DeviceEventEmitter } from 'react-native'
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
-import { GRANT_HOLD_MS, VtaAgentController } from '../module/vtaAgent'
+import {
+  GRANT_HOLD_MS,
+  MAX_RECONNECT_TRIES,
+  SESSION_CONNECT_DEADLINE_MS,
+  UNLINK_TELL_DEADLINE_MS,
+  UNLINK_TELL_QUEUE_MS,
+  VtaAgentController,
+} from '../module/vtaAgent'
 import { EnrolmentError } from '../module/vtaEnrolment'
+import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 
 // The controller runs the whole link — submit, wait for the admin, sign in as
 // the temporary key, rotate onto a long-lived one, remember the agent — and
@@ -17,11 +26,27 @@ const mockClient = {
   isConnected: false,
   holdPersonaKeys: jest.fn(async () => false),
   borrowKey: jest.fn(async () => ({ keyId: 'k', curve: 'Ed25519' as const, publicKeyMultibase: 'z' })),
+  /** Trust tasks sent through the client; unlink uses it to tell the agent. */
+  task: jest.fn(
+    async (
+      _type: string,
+      _payload: Record<string, unknown>,
+      _timeoutMs?: number,
+      _extras?: Record<string, unknown>,
+      onSent?: () => void
+    ): Promise<unknown> => {
+      onSent?.()
+      return {}
+    }
+  ),
+  /** Drops the tasks queued and not yet sent; unlink calls it before telling the agent. */
+  dropQueued: jest.fn(),
 }
 
 jest.mock('../module/VtaClient', () => ({
   VTA_TASK: jest.requireActual('../module/VtaClient').VTA_TASK,
   ManagerKeyUnresolved: jest.requireActual('../module/VtaClient').ManagerKeyUnresolved,
+  SwapDoneSignInFailed: jest.requireActual('../module/VtaClient').SwapDoneSignInFailed,
   VtaClient: jest.fn(() => mockClient),
   resolveVtaMediator: jest.fn(async () => ({ did: 'did:peer:2.mediator' })),
 }))
@@ -130,6 +155,33 @@ describe('linking through the controller', () => {
     expect(saved).toEqual([])
   })
 
+  // The 227 iOS link failure: the agent took the swap and the phone stored the
+  // new key, but signing in as it stalled — and the whole link was reported as
+  // failed. The swap is done; only the sign-in is outstanding, and that is the
+  // ordinary one, retried.
+  it('a swap that went through but whose new sign-in failed is a link, reconnecting, not a failure', async () => {
+    jest.useFakeTimers()
+    try {
+      const { SwapDoneSignInFailed } = jest.requireActual('../module/VtaClient')
+      mockClient.rotateManagerKey.mockImplementationOnce(async () => {
+        throw new SwapDoneSignInFailed('did:peer:2.permanent', new Error('the mediator authenticate did not answer'))
+      })
+      const { vta, current } = controller()
+      vta.scanOffer(offer)
+      const before = mockClient.connect.mock.calls.length
+      await vta.confirmOffer({} as never)
+      await jest.advanceTimersByTimeAsync(2_000)
+      // Linked, not failed; remembered, since the agent holds this phone's new key…
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: offer.vta })
+      expect(current()).toMatchObject({ vtaDid: offer.vta })
+      // …and it signed in again by itself, and is online.
+      expect(mockClient.connect.mock.calls.length).toBeGreaterThan(before + 1)
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   it('a rotation that fails leaves the phone unlinked, not half-linked', async () => {
     mockClient.rotateManagerKey.mockImplementationOnce(async () => {
       throw new Error('acl/swap-key refused')
@@ -154,6 +206,71 @@ describe('a linked phone after a restart', () => {
     expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
   })
 
+  // IN-53 (226): a sign-in that never settled kept the "already reconnecting"
+  // guard set, so every later attempt (foreground, unlock, retry) returned at
+  // once and the phone never reached its agent again, with nothing in the log.
+  it('a sign-in that never finishes does not block the next: past its deadline it retries and comes online', async () => {
+    jest.useFakeTimers()
+    try {
+      mockClient.connect.mockImplementationOnce(() => new Promise<undefined>(() => undefined))
+      const { vta } = controller({ linked })
+      await vta.restore({} as never)
+      await Promise.resolve()
+      expect(mockClient.connect).toHaveBeenCalledTimes(1)
+      // Past the deadline, and the first backoff: a second sign-in, which answers.
+      await jest.advanceTimersByTimeAsync(SESSION_CONNECT_DEADLINE_MS + 2_000)
+      expect(mockClient.connect).toHaveBeenCalledTimes(2)
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // A reconnect that can never succeed must not loop for ever out of sight:
+  // after its tries, it stops and the agent screen says so, with Try again.
+  it('stops after its tries and says so; Try again starts afresh', async () => {
+    jest.useFakeTimers()
+    try {
+      mockClient.connect.mockImplementation(async () => {
+        throw new Error('the mediator authenticate did not answer within 15000 ms')
+      })
+      const { vta } = controller({ linked })
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(10 * 60_000)
+      expect(mockClient.connect).toHaveBeenCalledTimes(1 + MAX_RECONNECT_TRIES)
+      expect(vta.getState().reconnectGaveUp).toBe(true)
+      // Nothing more by itself…
+      await jest.advanceTimersByTimeAsync(10 * 60_000)
+      expect(mockClient.connect).toHaveBeenCalledTimes(1 + MAX_RECONNECT_TRIES)
+      // …until the person asks; this time the agent answers.
+      mockClient.connect.mockImplementation(async () => undefined)
+      await vta.tryAgainNow({} as never)
+      expect(vta.getState().reconnectGaveUp).toBe(false)
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // The #183 lesson: tries must never stack into parallel sign-ins.
+  it('never runs two sign-ins at once: Try again and an unlock wait on the one in flight', async () => {
+    jest.useFakeTimers()
+    try {
+      mockClient.connect.mockImplementation(() => new Promise<undefined>(() => undefined))
+      const { vta } = controller({ linked })
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(1_000)
+      void vta.tryAgainNow({} as never)
+      void vta.tryAgainNow({} as never)
+      void vta.restore({ tag: 'unlocked' } as never)
+      await jest.advanceTimersByTimeAsync(5_000)
+      expect(mockClient.connect).toHaveBeenCalledTimes(1)
+    } finally {
+      mockClient.connect.mockImplementation(async () => undefined)
+      jest.useRealTimers()
+    }
+  })
+
   it('schedules a quiet retry when the agent cannot be reached', async () => {
     jest.useFakeTimers()
     try {
@@ -162,10 +279,16 @@ describe('a linked phone after a restart', () => {
       })
       const { vta } = controller({ linked })
       await vta.restore({} as never)
-      await Promise.resolve()
-      await Promise.resolve()
-      await Promise.resolve()
-      expect(vta.getState().link).toMatchObject({ connection: { kind: 'reconnecting', attempt: 1, since: 1_000 } })
+      // Let the failed first sign-in settle (no timer is due yet: the retry is 1 s away).
+      await jest.advanceTimersByTimeAsync(0)
+      // Still connecting (IN-48: a start-up failure is not shown as offline yet)…
+      expect(vta.getState().link).toMatchObject({
+        connection: { kind: 'connecting', since: 1_000, reason: 'socket closed' },
+      })
+      // …with a retry scheduled: after the first backoff it tries again.
+      const attempts = mockClient.connect.mock.calls.length
+      await jest.advanceTimersByTimeAsync(1_000)
+      expect(mockClient.connect.mock.calls).toHaveLength(attempts + 1)
     } finally {
       jest.useRealTimers()
     }
@@ -441,6 +564,39 @@ describe('when the app replaces its agent (an unlock after a lock builds a new o
     expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
   })
 
+  it("says when an identity's keys are back, so its inbox can sign in then", async () => {
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => 1_000,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    const held: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_KEYS_HELD_EVENT, (e) => held.push(e))
+    await vta.restore({ tag: 'unlocked' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    sub.remove()
+    expect(held).toEqual([{ did: persona.did }])
+  })
+
+  it('says nothing for an identity whose keys could not be fetched', async () => {
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => 1_000,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    mockClient.holdPersonaKeys.mockRejectedValueOnce(new Error('the VTA did not answer'))
+    const held: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_KEYS_HELD_EVENT, (e) => held.push(e))
+    await vta.restore({ tag: 'unlocked' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    sub.remove()
+    expect(held).toEqual([])
+  })
+
   /** Unlocking is the commonest thing a person does: it must not flash "Signing in" or "offline". */
   it('keeps the link shown online and connected while the new session opens, and opens only one', async () => {
     const vta = new VtaAgentController()
@@ -455,10 +611,16 @@ describe('when the app replaces its agent (an unlock after a lock builds a new o
     await new Promise((resolve) => setImmediate(resolve))
     expect(vta.getState().status).toBe('connected')
     const seen: string[] = []
-    const stop = vta.subscribe(() => seen.push(`${vta.getState().status}/${(vta.getState().link as { connection?: { kind: string } }).connection?.kind}`))
+    const stop = vta.subscribe(() =>
+      seen.push(
+        `${vta.getState().status}/${(vta.getState().link as { connection?: { kind: string } }).connection?.kind}`
+      )
+    )
     mockClient.connect.mockClear()
     let open!: () => void
-    mockClient.connect.mockImplementationOnce(() => new Promise<undefined>((resolve) => (open = () => resolve(undefined))))
+    mockClient.connect.mockImplementationOnce(
+      () => new Promise<undefined>((resolve) => (open = () => resolve(undefined)))
+    )
 
     // The screen's own effect asks for a session while the unlock reopens one.
     const restoring = vta.restore(agentB)
@@ -539,7 +701,10 @@ describe("erasing this phone's copy of its agent", () => {
           setManager: async () => undefined,
           forgetManager,
           forgetPersona,
-          listPersonas: async () => [persona('did:c:mine', offer.vta), persona('did:c:other', 'did:webvh:another-agent')],
+          listPersonas: async () => [
+            persona('did:c:mine', offer.vta),
+            persona('did:c:other', 'did:webvh:another-agent'),
+          ],
         }) as never,
       communityStore: () => ({ forgetCommunity }),
     })
@@ -577,6 +742,217 @@ describe('unlinking this phone from its agent', () => {
     })
     return { vta, clear, forgetManager, stored: () => stored }
   }
+
+  // A6 (228, upstream alignment): Unlink also tells the agent — stop waking this
+  // phone, and end its sessions (auth/revoke-session/0.2, all) — best-effort,
+  // bounded, and never in the way of the local unlink.
+  const SET_WAKE = 'https://trusttasks.org/spec/device/set-wake/0.2'
+  const REVOKE = 'https://trusttasks.org/spec/auth/revoke-session/0.2'
+  const told = () => mockClient.task.mock.calls.map(([type, payload]) => ({ type, payload }))
+
+  it('tells a reachable agent first: stop waking this phone, then end its sessions', async () => {
+    mockClient.task.mockClear()
+    const { vta, stored } = unlinkable()
+    await vta.restore({} as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await vta.unlink({} as never)
+    expect(told()).toEqual([
+      { type: SET_WAKE, payload: {} },
+      { type: REVOKE, payload: { all: true, reason: 'Unlinked on this phone' } },
+    ])
+    expect(stored()).toBeUndefined()
+    expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+  })
+
+  it('still unlinks when the agent refuses either step', async () => {
+    mockClient.task.mockClear()
+    mockClient.task.mockImplementation(async () => {
+      throw new Error('forbidden')
+    })
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await new Promise((resolve) => setImmediate(resolve))
+      await vta.unlink({} as never)
+      expect(told().map((t) => t.type)).toEqual([SET_WAKE, REVOKE])
+      expect(stored()).toBeUndefined()
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+    }
+  })
+
+  it('does not wait on a silent agent past its deadline', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    // Told, and no answer.
+    mockClient.task.mockImplementation((_t, _p, _x, _e, onSent) => {
+      onSent?.()
+      return new Promise(() => undefined)
+    })
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      const done = vta.unlink({} as never)
+      await jest.advanceTimersByTimeAsync(UNLINK_TELL_DEADLINE_MS + 100)
+      await done
+      expect(stored()).toBeUndefined()
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+      jest.useRealTimers()
+    }
+  })
+
+  // 227 gate U4 (09-30, lab): an unlink tapped while the phone's startup
+  // tasks were still queued (whoami … device/list, ~9 s) never reached the
+  // agent: the tell queued behind them and the 5 s deadline, counted from the
+  // tap, ran out first; the agent's session stayed open. The queued tasks are
+  // dropped (they are pointless once the phone unlinks), and the deadline
+  // counts from when the tell leaves the phone.
+  it('drops the tasks still queued, then tells the agent', async () => {
+    mockClient.task.mockClear()
+    mockClient.dropQueued.mockClear()
+    const { vta } = unlinkable()
+    await vta.restore({} as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    await vta.unlink({} as never)
+    expect(mockClient.dropQueued).toHaveBeenCalledTimes(1)
+    expect(mockClient.dropQueued.mock.invocationCallOrder[0]).toBeLessThan(mockClient.task.mock.invocationCallOrder[0])
+  })
+
+  it('waits for the tell behind a task already in flight, past the old 5 s', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    // The task in flight takes 6 s; only then does set-wake leave the phone.
+    mockClient.task.mockImplementation(async (type, _p, _t, _e, onSent) => {
+      if (type === SET_WAKE) await new Promise((resolve) => setTimeout(resolve, 6_000))
+      onSent?.()
+      return {}
+    })
+    try {
+      const { vta, stored, clear } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      const done = vta.unlink({} as never)
+      await jest.advanceTimersByTimeAsync(6_100)
+      await done
+      expect(told().map((t) => t.type)).toEqual([SET_WAKE, REVOKE])
+      // Told before the phone let go of the link: the agent heard it while this phone could still say it.
+      const revoked = mockClient.task.mock.invocationCallOrder[told().findIndex((t) => t.type === REVOKE)]
+      expect(revoked).toBeLessThan(clear.mock.invocationCallOrder[0])
+      expect(stored()).toBeUndefined()
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+      jest.useRealTimers()
+    }
+  })
+
+  it('never waits past the cap in all, even for a tell sent late', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    // Sent 9 s in, behind a slow task, and never answered.
+    mockClient.task.mockImplementation(async (type, _p, _t, _e, onSent) => {
+      if (type === SET_WAKE) await new Promise((resolve) => setTimeout(resolve, 9_000))
+      onSent?.()
+      return new Promise(() => undefined)
+    })
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      let finished = false
+      const done = vta.unlink({} as never).then(() => {
+        finished = true
+      })
+      await jest.advanceTimersByTimeAsync(UNLINK_TELL_QUEUE_MS + 100)
+      expect(finished).toBe(true)
+      await done
+      expect(stored()).toBeUndefined()
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+      jest.useRealTimers()
+    }
+  })
+
+  it('a tell that never leaves the phone is given up on: the phone unlinks', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    mockClient.task.mockImplementation(() => new Promise(() => undefined))
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      const done = vta.unlink({} as never)
+      await jest.advanceTimersByTimeAsync(UNLINK_TELL_QUEUE_MS + 100)
+      await done
+      expect(stored()).toBeUndefined()
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+      jest.useRealTimers()
+    }
+  })
+
+  // 227 gate U5: unlinking with the network off finished in 1.8 s. The link can
+  // still read online while the socket is gone; the telling then fails at once
+  // ("not connected") and the phone unlinks without waiting out a deadline.
+  it('a telling that cannot be sent fails at once: the phone unlinks without waiting', async () => {
+    jest.useFakeTimers()
+    mockClient.task.mockClear()
+    mockClient.task.mockImplementation(async () => {
+      throw new Error('[TrustTasks:VtaClient] not connected')
+    })
+    try {
+      const { vta, stored } = unlinkable()
+      await vta.restore({} as never)
+      await jest.advanceTimersByTimeAsync(0)
+      let finished = false
+      const done = vta.unlink({} as never).then(() => {
+        finished = true
+      })
+      await jest.advanceTimersByTimeAsync(10)
+      expect(finished).toBe(true)
+      await done
+      expect(stored()).toBeUndefined()
+    } finally {
+      mockClient.task.mockImplementation(async (_t, _p, _x, _e, onSent) => {
+        onSent?.()
+        return {}
+      })
+      jest.useRealTimers()
+    }
+  })
+
+  it('offline, sends nothing and unlinks at once', async () => {
+    mockClient.task.mockClear()
+    mockClient.connect.mockImplementationOnce(async () => {
+      throw new Error('socket closed')
+    })
+    const { vta, stored } = unlinkable()
+    await vta.restore({} as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(vta.getState().link).not.toMatchObject({ connection: { kind: 'online' } })
+    await vta.unlink({} as never)
+    expect(told()).toEqual([])
+    expect(stored()).toBeUndefined()
+  })
 
   it('closes the session, forgets the link and the manager key, and lands on no agent', async () => {
     const { vta, clear, forgetManager, stored } = unlinkable()
@@ -631,7 +1007,7 @@ describe('unlinking this phone from its agent', () => {
       await Promise.resolve()
       await Promise.resolve()
       await Promise.resolve()
-      expect(vta.getState().link).toMatchObject({ connection: { kind: 'reconnecting' } })
+      expect(vta.getState().link).toMatchObject({ connection: { kind: 'connecting' } })
       const attempts = mockClient.connect.mock.calls.length
 
       await vta.unlink({} as never)

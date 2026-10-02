@@ -17,13 +17,35 @@ import type { TFunction } from 'i18next'
 import { i18n } from '../../../localization'
 import { registerW3cDisplayOverride, type W3cDisplayOverride } from '../../openid/display'
 import type { W3cCredentialJson } from '../../openid/types'
-import { classifyCredential } from '../module/vtiInbox'
+import { classifyCredential, roleNameOf } from '../module/vtiInbox'
 import { isCommunityCard } from '../module/vtiWalletCards'
 
 import { communityHeadingOf } from './communityName'
+import { localDate } from './localTime'
 
 const day = (iso: unknown): string | undefined =>
-  typeof iso === 'string' && !Number.isNaN(Date.parse(iso)) ? iso.slice(0, 10) : undefined
+  typeof iso === 'string' && !Number.isNaN(Date.parse(iso)) ? localDate(iso) : undefined
+
+/** Roles every community has, worded by the app; any other role is the community's own. */
+const ROLE_WORDS: Record<string, string> = {
+  admin: 'Community.RoleAdmin',
+  member: 'Community.RoleMember',
+  vetter: 'Community.RoleVetter',
+}
+
+/**
+ * A role as a person reads it. Upstream matches roles with or without the
+ * `custom:` prefix (vta-sdk protocols/vetting.rs `role_matches`), so the
+ * prefix is not part of the name: "custom:senior-vetter" reads "Senior vetter".
+ */
+export function roleWords(role: string, t: TFunction): string {
+  const bare = role.replace(/^custom:/, '')
+  const key = ROLE_WORDS[bare]
+  const known: unknown = key ? t(key) : undefined
+  if (typeof known === 'string') return known
+  const words = bare.replace(/[-_]+/g, ' ').trim()
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : role
+}
 
 /** The display of a community card, or undefined for any other credential. */
 export function communityCardDisplay(vc: Record<string, unknown>, t: TFunction): W3cDisplayOverride | undefined {
@@ -31,10 +53,9 @@ export function communityCardDisplay(vc: Record<string, unknown>, t: TFunction):
   const { kind, communityDid } = classifyCredential(vc)
   if (!communityDid) return undefined
   const community = communityHeadingOf(communityDid, t, { claim: 'plain' })
-  const endorsement = (vc.credentialSubject as Record<string, unknown> | undefined)?.endorsement as
-    | Record<string, unknown>
-    | undefined
-  const role = typeof endorsement?.role === 'string' ? endorsement.role : undefined
+  // The endorsement's `role`, or a DTG Credentials v1 VAC's first `role:<name>`.
+  const roleName = roleNameOf(vc)
+  const role = roleName ? roleWords(roleName, t) : undefined
   const words = (key: string, extra: Record<string, unknown> = {}) =>
     t(key, { community, ...extra, interpolation: { escapeValue: false } }) as string
 
@@ -43,12 +64,15 @@ export function communityCardDisplay(vc: Record<string, unknown>, t: TFunction):
       ? words('Community.CardMemberOf')
       : kind === 'vetter-grant'
         ? words('Community.CardVetterFor')
-        : words('Community.CardRoleIn', { role: role ?? '' })
+        : kind === 'identity-check'
+          ? words('Community.CardIdentityCheckedBy')
+          : words('Community.CardRoleIn', { role: role ?? '' })
   const label = (key: string) => t(key) as unknown
   const labels = [
     label('Community.CardCommunity'),
     label('Community.CardRole'),
-    label('Community.CardSince'),
+    // The day a community made its own identity check, rather than a "Since".
+    label(kind === 'identity-check' ? 'Community.CardCheckedOn' : 'Community.CardSince'),
     label('Community.CardUntil'),
   ]
   // Words not loaded (no language yet): the generic display, rather than a card

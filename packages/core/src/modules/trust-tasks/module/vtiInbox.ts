@@ -15,10 +15,18 @@
  * @module trust-tasks/module/vtiInbox
  */
 
+import {
+  communityRoleCard,
+  confersRole,
+  isCommunityIdentityCheck,
+  roleMatches,
+  vettingStatementBody,
+  VETTER_ROLE,
+} from '@bifold/trust-tasks'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { DeviceEventEmitter } from 'react-native'
 
-import type { VtiCommunityStore, VtiMembership } from './VtiCommunityStore'
+import { isCurrentMembership, type VtiCommunityStore, type VtiMembership } from './VtiCommunityStore'
 import type { VtiCardCheckRefusal, VtiDeliveredCardCheck } from './vtiDeliveredCheck'
 
 /**
@@ -29,10 +37,16 @@ import type { VtiCardCheckRefusal, VtiDeliveredCardCheck } from './vtiDeliveredC
 export const VTI_CARD_REFUSED_EVENT = 'vti:card-refused'
 
 export const CREDENTIAL_EXCHANGE_ISSUE = 'https://trusttasks.org/spec/credential-exchange/issue/0.1'
-export const IDENTITY_VETTING_ENDORSEMENT_TYPE = 'https://firstperson.network/endorsements/identity-vetting/0.1'
+export { IDENTITY_VETTING_ENDORSEMENT_TYPE } from '@bifold/trust-tasks'
 export const COMMUNITY_ROLE_ENDORSEMENT_TYPE = 'CommunityRole'
 
-export type VtiCredentialKind = 'membership' | 'role' | 'vetter-grant' | 'vetting-statement' | 'other'
+export type VtiCredentialKind =
+  | 'membership'
+  | 'role'
+  | 'vetter-grant'
+  | 'vetting-statement'
+  | 'identity-check'
+  | 'other'
 
 export interface VtiReceivedCredential {
   kind: VtiCredentialKind
@@ -71,6 +85,23 @@ export function credentialsOfIssue(body: unknown): Record<string, unknown>[] {
   return out
 }
 
+/**
+ * The role a role card confers, in either shape: the endorsement's `role`, or
+ * a DTG Credentials v1 VAC's `role:<name>`. A VAC may confer several; when one
+ * is the vetter role it is the one named, as classifyCredential files such a
+ * card as the vetter grant — so the card is not labelled with another role.
+ * Undefined for anything else.
+ */
+export function roleNameOf(credential: Record<string, unknown>): string | undefined {
+  const endorsement = (credential.credentialSubject as Record<string, unknown> | undefined)?.endorsement as
+    | Record<string, unknown>
+    | undefined
+  if (typeof endorsement?.role === 'string' && endorsement.role) return endorsement.role
+  const card = communityRoleCard(credential)
+  if (!card) return undefined
+  return card.roles.find((role) => roleMatches(role, VETTER_ROLE)) ?? card.roles[0]
+}
+
 /** Say what a credential is, from its type and its endorsement body. */
 export function classifyCredential(vc: Record<string, unknown>): VtiReceivedCredential {
   const t = types(vc)
@@ -78,16 +109,33 @@ export function classifyCredential(vc: Record<string, unknown>): VtiReceivedCred
   const endorsement = subject?.endorsement as Record<string, unknown> | undefined
   let kind: VtiCredentialKind = 'other'
   let communityDid = issuerOf(vc)
+  // A vetting statement in either shape: the endorsement, or a vetted/1
+  // StatementCredential (DTG Credentials v1). Its community is in the body.
+  const statement = vettingStatementBody(vc)
   if (t.includes('MembershipCredential')) kind = 'membership'
-  else if (t.includes('EndorsementCredential') && endorsement) {
+  else if (statement && isCommunityIdentityCheck(vc)) {
+    // A community's own identity check (vetted/1 by the community it names,
+    // none of the vetter-only members): evidence it holds about this person,
+    // kept as its other cards are — not a vetter's statement.
+    kind = 'identity-check'
+    communityDid = String(statement.body.community)
+  } else if (statement) {
+    kind = 'vetting-statement'
+    communityDid = String(statement.body.community ?? communityDid)
+  } else if (t.includes('EndorsementCredential') && endorsement) {
     const et = String(endorsement.type ?? '')
-    if (et === IDENTITY_VETTING_ENDORSEMENT_TYPE) {
-      kind = 'vetting-statement'
-      communityDid = String(endorsement.community ?? communityDid)
-    } else if (et === COMMUNITY_ROLE_ENDORSEMENT_TYPE || endorsement.role !== undefined) {
+    if (et === COMMUNITY_ROLE_ENDORSEMENT_TYPE || endorsement.role !== undefined) {
       kind = String(endorsement.role ?? '') === 'vetter' ? 'vetter-grant' : 'role'
       communityDid = String(endorsement.communityDid ?? endorsement.community ?? communityDid)
     }
+  }
+  // A DTG Credentials v1 role grant: a VAC conferring `role:<name>` at the
+  // community's own DID (vta-sdk community_roles). `role:vetter` is the
+  // vetter grant (tf vetting/vetters/grant/0.1 as recast by #691).
+  const roleGrant = kind === 'other' ? communityRoleCard(vc) : undefined
+  if (roleGrant?.shape === 'vac') {
+    kind = confersRole(roleGrant, VETTER_ROLE) ? 'vetter-grant' : 'role'
+    communityDid = roleGrant.communityDid
   }
   return {
     kind,
@@ -188,12 +236,25 @@ export async function receiveIssue(
     const checked = await options.checkCard(item.credential, sender)
     if (checked) {
       options.onRefused?.(item, checked)
-      DeviceEventEmitter.emit(VTI_CARD_REFUSED_EVENT, { communityDid: item.communityDid, kind: item.kind, refusal: checked })
+      DeviceEventEmitter.emit(VTI_CARD_REFUSED_EVENT, {
+        communityDid: item.communityDid,
+        kind: item.kind,
+        refusal: checked,
+      })
       continue
+    }
+    if (item.kind === 'membership') {
+      // The very card the community ended, delivered again, does not bring
+      // the membership back.
+      const ended = await store.getMembership(item.communityDid)
+      if (ended && !isCurrentMembership(ended) && ended.vmc?.id === item.credential.id) continue
     }
     kept.push(item)
     if (item.kind === 'membership') {
-      const existing = await store.getMembership(item.communityDid)
+      const found = await store.getMembership(item.communityDid)
+      // Joining again after a removal starts afresh: the ended membership's
+      // role, role card and way in are not this one's.
+      const existing = found && isCurrentMembership(found) ? found : undefined
       await store.saveMembership({
         communityDid: item.communityDid,
         personaDid,
@@ -209,10 +270,7 @@ export async function receiveIssue(
       })
     } else if (item.kind === 'role') {
       const existing = await store.getMembership(item.communityDid)
-      const role = String(
-        ((item.credential.credentialSubject as Record<string, unknown>)?.endorsement as Record<string, unknown>)
-          ?.role ?? 'member'
-      )
+      const role = String(roleNameOf(item.credential) ?? 'member')
       if (existing) await store.saveMembership({ ...existing, role, roleVec: item.credential })
       else await store.saveHeldCredential({ ...item, kind: 'role' })
     } else {
