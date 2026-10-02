@@ -460,7 +460,11 @@ describe('runWitnessSession', () => {
           ...vsc,
           taskContext: sessionDoc.id,
           taskDigestMultibase: digestMultibase(sessionDoc),
-          credentialSubject: { ...subject, taskContext: sessionDoc.id, taskDigestMultibase: digestMultibase(sessionDoc) },
+          credentialSubject: {
+            ...subject,
+            taskContext: sessionDoc.id,
+            taskDigestMultibase: digestMultibase(sessionDoc),
+          },
         }
         ;(response.payload as Record<string, unknown>).vwcDigestMultibase = digestMultibase(payload.vwc)
       }
@@ -476,6 +480,33 @@ describe('runWitnessSession', () => {
       expect(storedCredentials).toHaveLength(1)
     })
 
+    test('the digest edge binds a v5-shaped VRC (issuerScope + evidence): ok, and any change to issuerScope breaks it', async () => {
+      const v5Vrc = {
+        ...referencedVrc,
+        '@context': [
+          'https://www.w3.org/ns/credentials/v2',
+          'https://registry.trustoverip.org/dtg/context/v1',
+          'https://www.firstperson.network/hardware-evidence/v1',
+        ],
+        issuerScope: 'pairwise',
+        evidence: [{ id: 'urn:uuid:e1', type: ['BiometricAttestation', 'HardwareKeyAttestation'] }],
+      }
+      const ok = makeFakeAgent()
+      const outcome = await runWitnessSession(ok.agent, {
+        ...baseOptions(makeWitness(withVsc(vscVwc({ digestMultibase: taskDigestMultibase(v5Vrc) }))), []),
+        referencedVrc: v5Vrc,
+      })
+      expect(outcome.subjectBinding).toEqual({ checked: true, ok: true })
+
+      const swapped = makeFakeAgent()
+      await expect(
+        runWitnessSession(swapped.agent, {
+          ...baseOptions(makeWitness(withVsc(vscVwc({ digestMultibase: taskDigestMultibase(v5Vrc) }))), []),
+          referencedVrc: { ...v5Vrc, issuerScope: 'public' },
+        })
+      ).rejects.toThrow('VWC subject binding failed')
+    })
+
     test('no referencedVrc supplied: subjectBinding is unchecked, not falsely ok (cred-spec C5 — an opaque hash, not an identified edge)', async () => {
       const { agent, storedCredentials } = makeFakeAgent()
       const witness = makeWitness(withVsc(vscVwc()))
@@ -487,7 +518,7 @@ describe('runWitnessSession', () => {
       expect(storedCredentials).toHaveLength(1) // unchecked is conforming, not a refusal
     })
 
-    test('a VSC-shaped VWC whose subject is NOT the referenced VRC\'s issuer is refused (the D6 violation this check exists to catch)', async () => {
+    test("a VSC-shaped VWC whose subject is NOT the referenced VRC's issuer is refused (the D6 violation this check exists to catch)", async () => {
       const { agent, storedCredentials } = makeFakeAgent()
       const witness = makeWitness(withVsc(vscVwc({ subjectId: 'did:peer:0zSomeoneElse' })))
 
@@ -539,7 +570,7 @@ describe('runWitnessSession', () => {
       expect(storedCredentials).toHaveLength(0)
     })
 
-    test('issuerScope: pairwise is narrower than the dtg:witnessed profile\'s directed minimum, and is refused', async () => {
+    test("issuerScope: pairwise is narrower than the dtg:witnessed profile's directed minimum, and is refused", async () => {
       const { agent, storedCredentials } = makeFakeAgent()
       const witness = makeWitness(withVsc(vscVwc({ issuerScope: 'pairwise' })))
 

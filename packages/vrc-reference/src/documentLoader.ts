@@ -20,6 +20,10 @@ import {
   RELATIONSHIP_CONTEXT_DOCUMENT,
   WITNESSED_EXCHANGE_CONTEXT_URL,
   WITNESSED_EXCHANGE_CONTEXT_DOCUMENT,
+  REGISTRY_DTG_CONTEXT_URL,
+  REGISTRY_DTG_CONTEXT_DOCUMENT,
+  HARDWARE_EVIDENCE_CONTEXT_URL,
+  HARDWARE_EVIDENCE_CONTEXT_DOCUMENT,
   DTG_REGISTRY_CONTEXT_V1_URL,
   DTG_REGISTRY_CONTEXT_V1_DOCUMENT,
 } from '@bifold/vrc-contexts'
@@ -242,6 +246,15 @@ export const demoDocumentLoader = (_agentContext: AgentContext): DocumentLoader 
         documentUrl: url,
         document: DTG_CONTEXT_DOCUMENT,
       }
+    }
+
+    // Real DTG registry context and the hardware-evidence context (provisional
+    // IRI) — both bundled so new-issuance VRCs resolve offline here too
+    if (normalizedUrl === REGISTRY_DTG_CONTEXT_URL) {
+      return { contextUrl: null, documentUrl: url, document: REGISTRY_DTG_CONTEXT_DOCUMENT }
+    }
+    if (normalizedUrl === HARDWARE_EVIDENCE_CONTEXT_URL) {
+      return { contextUrl: null, documentUrl: url, document: HARDWARE_EVIDENCE_CONTEXT_DOCUMENT }
     }
 
     // DTG Credentials v1 (credentials from VTI 0.47.0 on): the registry's

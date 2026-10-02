@@ -31,7 +31,13 @@
  * it silently falls back to type-string-only detection — document it here.
  */
 
-import { DTG_PREDICATE_WITNESSED, PredicateHandlingConfig, configure, loadAcceptList, loadSchemaStore } from '@bifold/dtg-vocab'
+import {
+  DTG_PREDICATE_WITNESSED,
+  PredicateHandlingConfig,
+  configure,
+  loadAcceptList,
+  loadSchemaStore,
+} from '@bifold/dtg-vocab'
 
 export const VERIFIABLE_CREDENTIAL_TYPE = 'VerifiableCredential'
 export const DTG_CREDENTIAL_TYPE = 'DTGCredential'
@@ -174,7 +180,9 @@ export function isWitnessedStatement(input: CredentialTypeInput): boolean {
  * credential, not just its types.
  */
 export function isWitnessCredential(input: CredentialTypeInput): boolean {
-  return hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE) || isWitnessStatement(input) || isWitnessedStatement(input)
+  return (
+    hasCredentialTypeName(input, WITNESS_CREDENTIAL_TYPE) || isWitnessStatement(input) || isWitnessedStatement(input)
+  )
 }
 
 /**

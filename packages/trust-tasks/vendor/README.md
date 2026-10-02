@@ -11,7 +11,7 @@ package needs is not on npm yet.
 | Tarball                | `openvtc-vti-tsp-js-0.3.0-bfdb0dc.tgz`                                                                                                                                       |
 | Upstream               | `OpenVTC/vta-browser-plugin`, `packages/tsp-js`, commit `bfdb0dcbd875db56b75003c7ab89ae1b92325fd6` (main, after PR #253 merged TSP Rev 3 and #249–#252, #254, #255 followed) |
 | Version in the tarball | 0.3.0 — packs TSP **Rev 3** (`YTSP-AAC`), reads Rev 3 and Rev 2                                                                                                              |
-| Local change           | `vti-tsp-js-hermes-textdecoder.patch`, applied to `src/` before building; plus a post-build `package.json#exports` patch (below)                                            |
+| Local change           | `vti-tsp-js-hermes-textdecoder.patch`, applied to `src/` before building; plus a post-build `package.json#exports` patch (below)                                             |
 | SHA-256                | `ea0a2c3dea2e97900c18cfa0b24ad94af2cc2038294e8b06b9fe2d34ad2caa8e`                                                                                                           |
 
 ## Why a tarball, not a registry version
@@ -45,7 +45,7 @@ such a consumer: its `tsconfig.json` targets `"module": "commonjs"`, so both
 `import` from `@openvtc/vti-tsp-js` in `@bifold/trust-tasks`'s TSP codecs
 (`rev2.ts`, `rev3.ts`, `direct.ts`) down to a `require()` call. This was never
 caught before 2026-09-28 because nothing had actually launched the real
-witness-server *process* with this code present — every prior verification
+witness-server _process_ with this code present — every prior verification
 was Jest-based (which papers over the interop), and the one CI path that
 builds and runs a real container (`staging-witness.yaml`) only triggers on a
 PR into `staging`, which no branch carrying this code had opened.
@@ -54,7 +54,7 @@ The fix costs nothing on the ESM side: Node 20.19+/22+ can `require()` a
 genuine ES module natively, provided the package's own `exports` map offers a
 `"require"` condition to pick. `dist/index.js` (and the two subpath exports)
 are plain, synchronous, no-top-level-await modules, so pointing `"require"`
-at the *same* file as `"import"` is sufficient — verified directly: `node -e
+at the _same_ file as `"import"` is sufficient — verified directly: `node -e
 "require('@openvtc/vti-tsp-js')"` succeeds against the patched tarball and
 fails against the original. No source or `dist/` output changed, only the
 three `exports` entries in `package.json` gained a sibling `"require"` key
