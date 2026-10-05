@@ -45,6 +45,7 @@ import { communityHeadingOf, communityLabelOf } from './communityName'
 import { GetCardsFromAgent } from './GetCardsFromAgent'
 import { shortTask } from './RequestCard'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
+import { releaseWarn as probe } from '../module/releaseLog'
 
 interface Holdings {
   personas: VtiPersona[]
@@ -541,7 +542,9 @@ const VtaAgentHome: React.FC = () => {
                     key={a.vtaDid}
                     style={styles.row}
                     disabled={isCurrent}
+                    onPressIn={() => probe(`[PROBE] row ${i} pressIn current=${isCurrent}`)}
                     onPress={() => {
+                      probe(`[PROBE] row ${i} press`)
                       setSwitcherOpen(false)
                       if (agent) void vtaAgent.useAgent(agent, a.vtaDid)
                     }}
