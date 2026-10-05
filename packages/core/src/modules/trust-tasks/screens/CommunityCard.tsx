@@ -16,6 +16,7 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
+import { probeLayout } from '../module/probeLayout'
 import { useCommunityJourney } from '../module/communityJourney'
 import { isCurrentMembership, type VtiMembership } from '../module/VtiCommunityStore'
 import { vtiAgent } from '../module/vtiAgent'
@@ -121,7 +122,11 @@ export const CommunityCard: React.FC<CommunityCardProps> = ({
   })
 
   return (
-    <View style={styles.card} testID={testIdWithKey(`AgentCommunityCard_${key}`)}>
+    <View
+      style={styles.card}
+      testID={testIdWithKey(`AgentCommunityCard_${key}`)}
+      onLayout={probeLayout(`card ${key} ${join?.kind ?? '-'}`)}
+    >
       <Pressable
         style={styles.row}
         accessibilityRole="button"

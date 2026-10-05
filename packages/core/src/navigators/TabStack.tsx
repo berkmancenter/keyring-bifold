@@ -26,6 +26,7 @@ import { isLinkOnline, useAgentPresence } from '../modules/trust-tasks/module/vt
 import { myAgentTabBadge, useWaitingRequestsCount } from '../modules/trust-tasks/module/waitingRequests'
 import { SiblingNoticeHost } from '../modules/trust-tasks/screens/SiblingNoticeHost'
 import { StepUpAskHost } from '../modules/trust-tasks/screens/StepUpAskHost'
+import { releaseWarn as probe } from '../modules/trust-tasks/module/releaseLog'
 import { VtaOfflineBanner } from '../modules/trust-tasks/screens/VtaStatus'
 import { keyringAgentLinkKind, myAgentLinkParams } from '../modules/trust-tasks/module/vtiLinks'
 import { linkNoticeToast, openKeyringLink, type KeyringLinkNotice } from '../modules/trust-tasks/module/keyringLinkOpen'
@@ -250,6 +251,20 @@ const TabStack: React.FC = () => {
 
   return (
     <SafeAreaView
+      // PROBE (throwaway, switch-miss 234): every touch the app's JS sees, with its native target.
+      onStartShouldSetResponderCapture={(e) => {
+        probe(
+          `[PROBE] root capture ${Math.round(e.nativeEvent.pageX)},${Math.round(e.nativeEvent.pageY)} target=${String(e.nativeEvent.target)}`
+        )
+        return false
+      }}
+      onTouchStart={(e) =>
+        probe(
+          `[PROBE] root touchStart ${Math.round(e.nativeEvent.pageX)},${Math.round(e.nativeEvent.pageY)} target=${String(e.nativeEvent.target)}`
+        )
+      }
+      onTouchEnd={(e) => probe(`[PROBE] root touchEnd target=${String(e.nativeEvent.target)}`)}
+      onTouchCancel={(e) => probe(`[PROBE] root touchCancel target=${String(e.nativeEvent.target)}`)}
       style={{ flex: 1, backgroundColor: GradientBg ? 'transparent' : NavigationTheme.colors.primary }}
       edges={['left', 'right', 'top']}
     >

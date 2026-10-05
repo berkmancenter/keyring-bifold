@@ -46,6 +46,7 @@ import { GetCardsFromAgent } from './GetCardsFromAgent'
 import { shortTask } from './RequestCard'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { releaseWarn as probe } from '../module/releaseLog'
+import { probeLayout } from '../module/probeLayout'
 
 // PROBE (throwaway, switch-miss 234): never merged.
 const at = (e: { nativeEvent: { pageX: number; pageY: number; target?: unknown } }) =>
@@ -500,7 +501,15 @@ const VtaAgentHome: React.FC = () => {
         onMomentumScrollBegin={() => probe('[PROBE] home momentumBegin')}
         onMomentumScrollEnd={() => probe('[PROBE] home momentumEnd')}
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              probe('[PROBE] home refresh start')
+              void onRefresh()
+            }}
+          />
+        }
         testID={testIdWithKey('AgentHome')}
       >
         <View style={styles.card}>
@@ -555,7 +564,7 @@ const VtaAgentHome: React.FC = () => {
             </View>
           ) : null}
           {switcherOpen ? (
-            <View style={{ gap: 4 }} testID={testIdWithKey('AgentSwitcher')}>
+            <View style={{ gap: 4 }} testID={testIdWithKey('AgentSwitcher')} onLayout={probeLayout('switcher')}>
               <ThemedText variant="labelTitle" accessibilityRole="header">
                 {t('VtaLink.SwitcherTitle')}
               </ThemedText>
@@ -582,6 +591,7 @@ const VtaAgentHome: React.FC = () => {
                     accessibilityRole="button"
                     accessibilityState={{ selected: isCurrent, disabled: isCurrent }}
                     testID={testIdWithKey(`AgentSwitcherRow_${i}`)}
+                    onLayout={probeLayout(`row${i}`)}
                   >
                     <View style={{ flex: 1 }}>
                       <ThemedText variant="bold">{agentDisplayName(withAgentName(a, state.agentNames), t)}</ThemedText>
