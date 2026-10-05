@@ -9,6 +9,7 @@
  *
  * @module trust-tasks/module/communityJourney
  */
+import { releaseWarn } from './releaseLog'
 
 import type { Agent } from '@credo-ts/core'
 import { useIsFocused } from '@react-navigation/native'
@@ -106,9 +107,18 @@ export function useCommunityJourney(
       // Only the newest reading may land: an older one finishing late must not
       // put back a state the phone has already moved past.
       const seq = ++latest.current
-      return readCommunityJourney(agent, communityDid, { poll: withPoll, readers: readersRef.current }).then((j) => {
-        if (mounted.current && seq === latest.current) setJourney(j)
-      })
+      // PROBE (throwaway, switch-miss 234): never merged.
+      releaseWarn(`[PROBE] journey read start ${communityDid.slice(-12)} poll=${withPoll} seq=${seq}`)
+      return readCommunityJourney(agent, communityDid, { poll: withPoll, readers: readersRef.current }).then(
+        (j) => {
+          releaseWarn(`[PROBE] journey read end ${communityDid.slice(-12)} seq=${seq} join=${j.join?.kind ?? '-'}`)
+          if (mounted.current && seq === latest.current) setJourney(j)
+        },
+        (e) => {
+          releaseWarn(`[PROBE] journey read failed ${communityDid.slice(-12)} seq=${seq} ${(e as Error)?.message ?? e}`)
+          throw e
+        }
+      )
     },
     [agent, communityDid]
   )

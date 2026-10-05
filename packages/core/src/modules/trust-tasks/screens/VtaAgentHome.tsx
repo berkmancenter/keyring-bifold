@@ -45,6 +45,11 @@ import { communityHeadingOf, communityLabelOf } from './communityName'
 import { GetCardsFromAgent } from './GetCardsFromAgent'
 import { shortTask } from './RequestCard'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
+import { releaseWarn as probe } from '../module/releaseLog'
+
+// PROBE (throwaway, switch-miss 234): never merged.
+const at = (e: { nativeEvent: { pageX: number; pageY: number; target?: unknown } }) =>
+  `${Math.round(e.nativeEvent.pageX)},${Math.round(e.nativeEvent.pageY)} target=${String(e.nativeEvent.target)}`
 
 interface Holdings {
   personas: VtiPersona[]
@@ -128,6 +133,10 @@ const VtaAgentHome: React.FC = () => {
   // The card opens below the button, at the foot of the screen: bring it into
   // view, or a tap on "Unlink this agent" looks like it did nothing (Farm, 2026-09-24).
   const scrollRef = useRef<ScrollView>(null)
+  useEffect(() => {
+    probe('[PROBE] home mount')
+    return () => probe('[PROBE] home unmount')
+  }, [])
   useEffect(() => {
     if (!unlinkOpen) return
     const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50)
@@ -479,6 +488,17 @@ const VtaAgentHome: React.FC = () => {
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView
         ref={scrollRef}
+        onStartShouldSetResponderCapture={(e) => {
+          probe(`[PROBE] home capture start ${at(e)} switcherOpen=${switcherOpen}`)
+          return false
+        }}
+        onTouchStart={(e) => probe(`[PROBE] home touchStart ${at(e)}`)}
+        onTouchEnd={(e) => probe(`[PROBE] home touchEnd ${at(e)}`)}
+        onTouchCancel={(e) => probe(`[PROBE] home touchCancel ${at(e)}`)}
+        onScrollBeginDrag={() => probe('[PROBE] home scrollBeginDrag')}
+        onScrollEndDrag={() => probe('[PROBE] home scrollEndDrag')}
+        onMomentumScrollBegin={() => probe('[PROBE] home momentumBegin')}
+        onMomentumScrollEnd={() => probe('[PROBE] home momentumEnd')}
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />}
         testID={testIdWithKey('AgentHome')}
@@ -492,7 +512,12 @@ const VtaAgentHome: React.FC = () => {
           {/* The agent's name opens the list of agents (several agents, step 2). */}
           <Pressable
             style={styles.row}
-            onPress={() => setSwitcherOpen(!switcherOpen)}
+            onPressIn={() => probe('[PROBE] switcherOpen pressIn')}
+            onPressOut={() => probe('[PROBE] switcherOpen pressOut')}
+            onPress={() => {
+              probe(`[PROBE] switcherOpen press -> ${!switcherOpen}`)
+              setSwitcherOpen(!switcherOpen)
+            }}
             disabled={Boolean(state.switchingTo)}
             accessibilityRole="button"
             // The agent's name is what a screen reader says. `busy` is set only
@@ -546,7 +571,11 @@ const VtaAgentHome: React.FC = () => {
                     key={a.vtaDid}
                     style={styles.row}
                     disabled={isCurrent}
+                    onPressIn={() => probe(`[PROBE] row ${i} pressIn current=${isCurrent}`)}
+                    onPressOut={() => probe(`[PROBE] row ${i} pressOut`)}
+                    onLongPress={() => probe(`[PROBE] row ${i} longPress`)}
                     onPress={() => {
+                      probe(`[PROBE] row ${i} press agent=${Boolean(agent)} switchingTo=${state.switchingTo ?? '-'}`)
                       setSwitcherOpen(false)
                       if (agent) void vtaAgent.useAgent(agent, a.vtaDid)
                     }}
