@@ -186,25 +186,24 @@ export interface VrcFlowOverlayState {
    */
   confirmed: boolean
   /**
-   * Shown with the confirmation when the witness step did not fully succeed:
-   * the exchange went ahead without a witness, or the witness could not
-   * confirm the parties were nearby (IN-128). Undefined otherwise.
+   * The i18n key of a note shown with the confirmation when the witness step
+   * did not fully succeed: the exchange was completed without a witness, or
+   * the witness could not confirm the two people were near each other
+   * (IN-128). Undefined otherwise.
    */
-  witnessNote?: string
+  witnessNoteKey?: string
   onDismissTimeout: () => void
   /** Dismiss the confirmation beat early (e.g. the user tapped through). */
   onDismissConfirmation: () => void
 }
 
-/** What to tell the person about how the witness step ended; undefined when there is nothing to say. */
-export function witnessOutcomeNote(outcome: WitnessOutcome | undefined): string | undefined {
+/** The i18n key of what to tell the person about how the witness step ended; undefined when there is nothing to say. */
+export function witnessOutcomeNoteKey(outcome: WitnessOutcome | undefined): string | undefined {
   switch (outcome?.kind) {
     case 'unwitnessed':
-      return "Your witness couldn't verify this exchange, so it went ahead without a witness."
+      return 'VrcWitness.NoteUnwitnessed'
     case 'nearbyNotConfirmed':
-      return outcome.permissionMissing
-        ? "Your witness verified this exchange, but couldn't confirm you were nearby: Keyring isn't allowed to use Nearby devices. Allow it in Settings before your next exchange."
-        : "Your witness verified this exchange, but couldn't confirm you were nearby."
+      return outcome.permissionMissing ? 'VrcWitness.NoteNotNearbyPermission' : 'VrcWitness.NoteNotNearby'
     default:
       return undefined
   }
@@ -249,13 +248,14 @@ export const RCARD_TRAILING_GRACE_MS = 30000
 // How long the success beat stays up before the dialog clears itself.
 
 export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState => {
+  const { t } = useTranslation()
   const [inProgress, setInProgress] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [timedOut, setTimedOut] = useState(false)
   const [progressFraction, setProgressFraction] = useState(0)
   const [progressComplete, setProgressComplete] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
-  const [witnessNote, setWitnessNote] = useState<string | undefined>(undefined)
+  const [witnessNoteKey, setWitnessNoteKey] = useState<string | undefined>(undefined)
   const confirmTimerRef = useRef<NodeJS.Timeout | null>(null)
   const progressStartedRef = useRef(false)
   const maxFractionRef = useRef(0)
@@ -279,7 +279,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
       confirmTimerRef.current = null
     }
     setConfirmed(false)
-    setWitnessNote(undefined)
+    setWitnessNoteKey(undefined)
     rcardGraceExpiredRef.current = false
     setTimedOut(false)
     setInProgress(false)
@@ -391,7 +391,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
               trustTasks
                 ? isWitnessed
                   ? vrcFlowStore.getWitnessOutcome(connectionId)?.kind === 'unwitnessed'
-                    ? 'Continuing without a witness. Sending your relationship credential...'
+                    ? t('VrcWitness.ContinuingWithoutWitness')
                     : 'Witness verified. Sending your relationship credential...'
                   : 'Preparing your relationship credential...'
                 : isWitnessed
@@ -449,7 +449,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
           setTimedOut(false)
           setStatusText('')
           setConfirmed(true)
-          setWitnessNote(witnessOutcomeNote(vrcFlowStore.getWitnessOutcome(connectionId)))
+          setWitnessNoteKey(witnessOutcomeNoteKey(vrcFlowStore.getWitnessOutcome(connectionId)))
           // No auto-dismiss. The confirmation is the one moment the user is
           // asked to act — it offers a way through to Contacts — and a timer
           // was yanking it away mid-reach (device 2026-08-29). It now waits
@@ -515,7 +515,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
         confirmTimerRef.current = null
       }
     }
-  }, [connectionId])
+  }, [connectionId, t])
   
   const onDismissConfirmation = useCallback(() => {
     if (completionTimerRef.current) {
@@ -523,7 +523,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
       completionTimerRef.current = null
     }
     setConfirmed(false)
-    setWitnessNote(undefined)
+    setWitnessNoteKey(undefined)
     setInProgress(false)
     setStatusText('')
     setProgressFraction(0)
@@ -542,7 +542,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
     progressFraction,
     progressComplete,
     confirmed,
-    witnessNote,
+    witnessNoteKey,
     onDismissTimeout,
     onDismissConfirmation,
   }

@@ -95,6 +95,12 @@
     "MinutesAgo": "Il y a {{ count }} minutes",
     "JustNow": "Maintenant"
   },
+  "VrcWitness": {
+    "ContinuingWithoutWitness": "Poursuite sans témoin. Envoi de votre justificatif de relation...",
+    "NoteUnwitnessed": "Votre témoin n'a pas pu vérifier cet échange : il a donc été effectué sans témoin.",
+    "NoteNotNearbyPermission": "Votre témoin a vérifié cet échange, mais n'a pas pu confirmer que vous étiez près l'un de l'autre : Keyring n'est pas autorisé à utiliser les Appareils à proximité. Autorisez-le dans les Paramètres avant votre prochain échange.",
+    "NoteNotNearby": "Votre témoin a vérifié cet échange, mais n'a pas pu confirmer que vous étiez près l'un de l'autre."
+  },
   "Language": {
     "code_en": "Anglais",
     "code_fr": "Français",

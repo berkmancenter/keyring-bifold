@@ -122,7 +122,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const { connectedWitness } = useWitnessConnection()
   
   // Track VRC flow in progress to show loading overlay during exchanges
-  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, progressFraction, progressComplete, confirmed: vrcConfirmed, witnessNote, onDismissTimeout, onDismissConfirmation } = useVrcFlowInProgress(connectionId)
+  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, progressFraction, progressComplete, confirmed: vrcConfirmed, witnessNoteKey, onDismissTimeout, onDismissConfirmation } = useVrcFlowInProgress(connectionId)
 
   // Check if this connection is a witness connection by matching connectionId
   const _isWitnessConnection = connectedWitness?.connectionId === connectionId
@@ -250,9 +250,9 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
                       ? `Relationship confirmed — ${theirLabel} added to Contacts`
                       : 'Relationship confirmed — contact added'}
                   </Text>
-                  {witnessNote ? (
+                  {witnessNoteKey ? (
                     <Text style={styles.flowOverlayText} testID={testIdWithKey('VrcWitnessNote')}>
-                      {witnessNote}
+                      {t(witnessNoteKey)}
                     </Text>
                   ) : null}
                   <TouchableOpacity

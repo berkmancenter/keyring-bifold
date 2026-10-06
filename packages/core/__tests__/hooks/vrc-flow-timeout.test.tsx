@@ -2,7 +2,7 @@ import { renderHook, act } from '@testing-library/react-native'
 
 import {
   useVrcFlowInProgress,
-  witnessOutcomeNote,
+  witnessOutcomeNoteKey,
   FLOW_TIMEOUT_MS_NON_WITNESSED,
   FLOW_TIMEOUT_MS_WITNESSED,
 } from '../../src/hooks/chat-messages'
@@ -488,14 +488,10 @@ describe('useVrcFlowInProgress - how the witness step ended (IN-128)', () => {
 
   it('a failed witness ceremony no longer reads "Witness verified"', () => {
     const { result } = renderHook(() => useVrcFlowInProgress('conn-1'))
-    expect(witnessedExchange(result, { kind: 'unwitnessed' })).toBe(
-      'Continuing without a witness. Sending your relationship credential...'
-    )
+    expect(witnessedExchange(result, { kind: 'unwitnessed' })).toBe('VrcWitness.ContinuingWithoutWitness')
     complete()
     expect(result.current.confirmed).toBe(true)
-    expect(result.current.witnessNote).toBe(
-      "Your witness couldn't verify this exchange, so it went ahead without a witness."
-    )
+    expect(result.current.witnessNoteKey).toBe('VrcWitness.NoteUnwitnessed')
   })
 
   it('witnessed, locality not confirmed for want of a permission: says so, and what to allow', () => {
@@ -504,8 +500,7 @@ describe('useVrcFlowInProgress - how the witness step ended (IN-128)', () => {
       'Witness verified. Sending your relationship credential...'
     )
     complete()
-    expect(result.current.witnessNote).toContain("couldn't confirm you were nearby")
-    expect(result.current.witnessNote).toContain('Nearby devices')
+    expect(result.current.witnessNoteKey).toBe('VrcWitness.NoteNotNearbyPermission')
   })
 
   it('a verified witness adds nothing to the confirmation, and dismissing clears the note', () => {
@@ -513,7 +508,7 @@ describe('useVrcFlowInProgress - how the witness step ended (IN-128)', () => {
     witnessedExchange(result, { kind: 'verified' })
     complete()
     expect(result.current.confirmed).toBe(true)
-    expect(result.current.witnessNote).toBeUndefined()
+    expect(result.current.witnessNoteKey).toBeUndefined()
     act(() => {
       result.current.onDismissConfirmation()
     })
@@ -521,14 +516,32 @@ describe('useVrcFlowInProgress - how the witness step ended (IN-128)', () => {
   })
 })
 
-describe('witnessOutcomeNote', () => {
+describe('witnessOutcomeNoteKey', () => {
   it('says nothing for a verified witness or none at all', () => {
-    expect(witnessOutcomeNote({ kind: 'verified' })).toBeUndefined()
-    expect(witnessOutcomeNote(undefined)).toBeUndefined()
+    expect(witnessOutcomeNoteKey({ kind: 'verified' })).toBeUndefined()
+    expect(witnessOutcomeNoteKey(undefined)).toBeUndefined()
   })
 
   it('without a permission problem, names only the missing nearby confirmation', () => {
-    const note = witnessOutcomeNote({ kind: 'nearbyNotConfirmed', permissionMissing: false })
-    expect(note).toBe("Your witness verified this exchange, but couldn't confirm you were nearby.")
+    expect(witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: false })).toBe(
+      'VrcWitness.NoteNotNearby'
+    )
+  })
+
+  it('every key it names exists in en, fr and pt-br', () => {
+    const keys = [
+      'VrcWitness.ContinuingWithoutWitness',
+      witnessOutcomeNoteKey({ kind: 'unwitnessed' }),
+      witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: true }),
+      witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: false }),
+    ]
+    for (const lang of ['en', 'fr', 'pt-br']) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const strings = require(`../../src/localization/${lang}/${lang}.json`) as Record<string, Record<string, string>>
+      for (const key of keys) {
+        const [section, name] = String(key).split('.')
+        expect(typeof strings[section]?.[name]).toBe('string')
+      }
+    }
   })
 })
