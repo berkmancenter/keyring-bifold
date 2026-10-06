@@ -98,6 +98,20 @@ export type VrcFlowStatus =
 export type VrcFlowDialect = 'legacy' | 'trust-tasks'
 
 /**
+ * How this side's witness step ended, for what the person is told (IN-128):
+ * the ceremony used to fail into an unwitnessed exchange with only a log
+ * line, and the dialog still said "Witness verified".
+ * - `verified`: the witness issued its credential (and confirmed locality, if it ran);
+ * - `nearbyNotConfirmed`: witnessed, but locality ran and was not confirmed —
+ *   `permissionMissing` when the device knew it lacked a Bluetooth permission;
+ * - `unwitnessed`: the ceremony failed, and the exchange went ahead without a witness.
+ */
+export type WitnessOutcome =
+  | { kind: 'verified' }
+  | { kind: 'nearbyNotConfirmed'; permissionMissing: boolean }
+  | { kind: 'unwitnessed' }
+
+/**
  * A pending relationship proposal awaiting the user's consent (the trust-task
  * dialect's consent moment: accepting the proposal, not each credential).
  */
@@ -115,6 +129,7 @@ class VrcFlowStore extends EventEmitter {
   private flowErrors: Map<string, VrcFlowError> = new Map()
   private proposalPrompts: Map<string, RelationshipProposalPrompt> = new Map()
   private dialects: Map<string, VrcFlowDialect> = new Map()
+  private witnessOutcomes: Map<string, WitnessOutcome> = new Map()
   // The inbound R-Card (the peer's contact card, what names them locally).
   // Fired/tracked separately from the VRC completion flags above: the R-Card
   // is best-effort and never gates isExchangeComplete — the overlay only uses
@@ -165,6 +180,16 @@ class VrcFlowStore extends EventEmitter {
     // Clear any existing error when status changes (unless it's an error trigger)
     this.flowErrors.delete(connectionId)
     this.emit('flowUpdate', { connectionId, status })
+  }
+
+  /** Record how this side's witness step ended (trust-task dialect). */
+  setWitnessOutcome(connectionId: string, outcome: WitnessOutcome): void {
+    this.witnessOutcomes.set(connectionId, outcome)
+    this.emit('flowUpdate', { connectionId, status: this.getStatus(connectionId) })
+  }
+
+  getWitnessOutcome(connectionId: string): WitnessOutcome | undefined {
+    return this.witnessOutcomes.get(connectionId)
   }
 
   getStatus(connectionId: string): VrcFlowStatus {
@@ -286,6 +311,7 @@ class VrcFlowStore extends EventEmitter {
   clearFlow(connectionId: string): void {
     this.flowStatus.delete(connectionId)
     this.isWitnessed.delete(connectionId)
+    this.witnessOutcomes.delete(connectionId)
     this.dialects.delete(connectionId)
     this.hasReceivedOffer.delete(connectionId)
     this.hasSentOffer.delete(connectionId)

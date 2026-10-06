@@ -24,6 +24,7 @@ import { useWitnessConnection } from '../modules/vrc/context/WitnessConnectionPr
 import { Role } from '../types/chat'
 import { BasicMessageMetadata, basicMessageCustomMetadata } from '../types/metadata'
 import { setActiveChatConnectionId } from '../utils/activeChatTracker'
+import { testIdWithKey } from '../utils/testable'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
 import { Animated, Easing, View, StyleSheet, Text, TouchableOpacity } from 'react-native'
 
@@ -121,7 +122,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const { connectedWitness } = useWitnessConnection()
   
   // Track VRC flow in progress to show loading overlay during exchanges
-  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, progressFraction, progressComplete, confirmed: vrcConfirmed, onDismissTimeout, onDismissConfirmation } = useVrcFlowInProgress(connectionId)
+  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, progressFraction, progressComplete, confirmed: vrcConfirmed, witnessNote, onDismissTimeout, onDismissConfirmation } = useVrcFlowInProgress(connectionId)
 
   // Check if this connection is a witness connection by matching connectionId
   const _isWitnessConnection = connectedWitness?.connectionId === connectionId
@@ -249,6 +250,11 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
                       ? `Relationship confirmed — ${theirLabel} added to Contacts`
                       : 'Relationship confirmed — contact added'}
                   </Text>
+                  {witnessNote ? (
+                    <Text style={styles.flowOverlayText} testID={testIdWithKey('VrcWitnessNote')}>
+                      {witnessNote}
+                    </Text>
+                  ) : null}
                   <TouchableOpacity
                     style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
                     onPress={() => {

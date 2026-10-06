@@ -33,7 +33,9 @@
  *
  * SCOPE NOTE, stated so it isn't overclaimed: this component requests the
  * Android 31+ runtime permissions the native module's manifest actually
- * declares (`BLUETOOTH_ADVERTISE`, `BLUETOOTH_SCAN`). It does NOT request
+ * declares and needs (`BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT` — see
+ * `bluetoothPermissions.ts`; it asked for SCAN instead of CONNECT until a
+ * tester's report, IN-128). It does NOT request
  * pre-API-31 `ACCESS_FINE_LOCATION` — the manifest doesn't declare that
  * permission at all (locality-plan.md §10.3 item 9's own write-up), so
  * requesting it here would silently no-op; adding it is a manifest change,
@@ -43,8 +45,7 @@
  */
 
 import React, { useState } from 'react'
-import { Linking, Platform, StyleSheet, View } from 'react-native'
-import { PERMISSIONS, RESULTS, request } from 'react-native-permissions'
+import { Linking, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
@@ -52,23 +53,8 @@ import SafeAreaModal from '../../../components/modals/SafeAreaModal'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
+import { requestBluetoothPermissions } from '../bluetoothPermissions'
 import { useWitnessConnection } from '../context/WitnessConnectionProvider'
-
-/**
- * Best-effort. Android: request both permissions the manifest declares,
- * granted only if both are. iOS: the single Bluetooth authorization —
- * react-native-permissions' handler stands up a CBCentralManager to raise the
- * system prompt, which is the same authorization the peripheral later runs
- * under (CoreBluetooth authorization is per app, not per role).
- */
-async function requestBluetoothPermissions(): Promise<boolean> {
-  if (Platform.OS === 'ios') {
-    return (await request(PERMISSIONS.IOS.BLUETOOTH)) === RESULTS.GRANTED
-  }
-  const advertise = await request(PERMISSIONS.ANDROID.BLUETOOTH_ADVERTISE)
-  const scan = await request(PERMISSIONS.ANDROID.BLUETOOTH_SCAN)
-  return advertise === RESULTS.GRANTED && scan === RESULTS.GRANTED
-}
 
 const LocalityPreflightModal: React.FC = () => {
   const { localityPreflight, resolveLocalityPreflight } = useWitnessConnection()

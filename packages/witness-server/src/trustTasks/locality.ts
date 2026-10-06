@@ -336,3 +336,38 @@ export function assertionFromObservation(
     localityRttBoundMs: observation.corroboration?.rttBoundMs,
   }
 }
+
+/**
+ * How long a submit that carries no device transcript still waits for the
+ * sensor's own observation. The phone sends its submit only after its radio
+ * phase has ended, so with no transcript in it nothing more is coming over
+ * the air: an observation that completed has already resolved, and waiting
+ * the rest of the window only outlasts the wallet's own wait for this reply.
+ * That is what turned a missing Bluetooth permission into a silently
+ * unwitnessed exchange (a tester's report, IN-128: the wallet gave up at 60 s,
+ * the witness answered `windowLost` at 120 s). A short grace covers an
+ * observation settling in the same moment the submit arrives.
+ */
+export const NO_TRANSCRIPT_GRACE_MS = 3000
+
+/**
+ * The sensor's observation for a submit. With a device transcript in the
+ * submit, wait for the observation as before (it is in hand or moments
+ * away). Without one, wait at most `graceMs`, then treat it as lost (null).
+ */
+export async function observationForSubmit<T>(
+  pending: Promise<T | null>,
+  deviceSentTranscript: boolean,
+  graceMs: number = NO_TRANSCRIPT_GRACE_MS
+): Promise<T | null> {
+  if (deviceSentTranscript) return pending
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const grace = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), graceMs)
+  })
+  try {
+    return await Promise.race([pending, grace])
+  } finally {
+    clearTimeout(timer)
+  }
+}

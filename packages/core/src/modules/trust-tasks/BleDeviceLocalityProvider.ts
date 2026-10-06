@@ -28,6 +28,7 @@ import type {
 import { ensureHardwareSigningKey } from '../vrc/vrc-hardware-signing'
 import { resolveHardwareSigningAuthMode } from '../vrc/vrc-biometric'
 import { createEvidenceBuilder } from '../vrc/services/EvidenceBuilder'
+import { missingBluetoothPermissions } from '../vrc/bluetoothPermissions'
 import {
   deriveEid,
   serviceUuidFromEid,
@@ -36,7 +37,13 @@ import {
   LOCALITY_BINDING_CONTEXT,
   NullDeviceLocalityProvider,
 } from './deviceLocality'
-import type { DeviceLocalityProvider, LocalitySensorDirective, LocalityTranscript, HardwareAttestationState } from './deviceLocality'
+import type {
+  DeviceLocalityProvider,
+  LocalityRadioFailure,
+  LocalitySensorDirective,
+  LocalityTranscript,
+  HardwareAttestationState,
+} from './deviceLocality'
 
 export type { NativeRespondToSensorParams, NativeLocalityTranscriptResult }
 
@@ -70,9 +77,13 @@ export class BleDeviceLocalityProvider implements DeviceLocalityProvider {
    */
   readonly name = `${Platform.OS}-ble-peripheral`
 
+  lastFailure?: LocalityRadioFailure
+
   constructor(
     private readonly bridge: NativeLocalityPeripheralBridge,
-    private readonly getHardwareAttestationState: GetHardwareAttestationState
+    private readonly getHardwareAttestationState: GetHardwareAttestationState,
+    /** What the OS has not granted the peripheral; injectable for tests. */
+    private readonly missingPermissions: () => Promise<string[]> = missingBluetoothPermissions
   ) {}
 
   async respondToSensor(params: {
@@ -80,6 +91,14 @@ export class BleDeviceLocalityProvider implements DeviceLocalityProvider {
     challenge: string
     directive: LocalitySensorDirective
   }): Promise<LocalityTranscript | null> {
+    this.lastFailure = undefined
+    // The native module declines to advertise without these, and says nothing
+    // (IN-128): check first, so the reason is known rather than guessed.
+    const missing = await this.missingPermissions()
+    if (missing.length) {
+      this.lastFailure = { reason: 'permissionMissing', detail: `not granted: ${missing.join(', ')}` }
+      return null
+    }
     const eid = deriveEid(params.challenge, params.taskDigestMultibase)
     const serviceUuid = serviceUuidFromEid(eid)
     const hardwareAttestation = await this.getHardwareAttestationState()

@@ -16,7 +16,7 @@ import {
   transcriptDigestMultibase,
 } from '../deviceLocality'
 import { digestMultibase } from '../documentProof'
-import { resolveWitnessResponse, runWitnessSession } from '../witnessCeremony'
+import { resolveWitnessResponse, runWitnessSession, witnessOutcomeOf } from '../witnessCeremony'
 
 const STUB_PROOF = {
   type: 'DataIntegrityProof',
@@ -288,7 +288,7 @@ describe('runWitnessSession', () => {
 
       const submitDoc = witness.sent[1] as { payload: { ext?: Record<string, unknown> } }
       expect(submitDoc.payload.ext).toEqual({ [LOCALITY_EXT_NAMESPACE]: { locality: { transcript: FAKE_TRANSCRIPT } } })
-      expect(outcome.locality).toEqual({ transcriptProduced: true })
+      expect(outcome.locality).toEqual({ transcriptProduced: true, confirmed: false })
     })
 
     test('windowLost (provider resolves null) is recorded honestly — no transcript, session still completes', async () => {
@@ -313,8 +313,55 @@ describe('runWitnessSession', () => {
 
       const submitDoc = witness.sent[1] as { payload: { ext?: unknown } }
       expect(submitDoc.payload.ext).toBeUndefined() // no transcript to attach
-      expect(outcome.locality).toEqual({ transcriptProduced: false })
+      expect(outcome.locality).toEqual({ transcriptProduced: false, confirmed: false })
       expect(storedCredentials).toHaveLength(1) // the exchange still completes
+    })
+
+    test('a missing Bluetooth permission is logged by name, and the outcome carries it with the witness reason (IN-128)', async () => {
+      const directive = {
+        [LOCALITY_EXT_NAMESPACE]: {
+          locality: {
+            policy: 'offered',
+            method: 'ble-challenge-response/0.1',
+            sensorDid: 'did:peer:4witness',
+            windowSeconds: 120,
+          },
+        },
+      }
+      const witness = makeWitness(undefined, {
+        challengeExt: directive,
+        observationFor: () => ({
+          [LOCALITY_EXT_NAMESPACE]: { locality: { observation: { confirmed: false, reason: 'windowLost' } } },
+        }),
+      })
+      const { agent } = makeFakeAgent()
+      const radioFailure = {
+        reason: 'permissionMissing' as const,
+        detail: 'not granted: android.permission.BLUETOOTH_CONNECT',
+      }
+      const provider: DeviceLocalityProvider = {
+        name: 'fake',
+        respondToSensor: async () => null,
+        lastFailure: radioFailure,
+      }
+
+      const outcome = await runWitnessSession(agent, {
+        ...baseOptions(witness, []),
+        localityOffered: true,
+        deviceLocalityProvider: provider,
+      })
+
+      expect(agent.config.logger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /locality radio phase did not complete \(session .+\): permissionMissing — not granted: android\.permission\.BLUETOOTH_CONNECT/
+        )
+      )
+      expect(outcome.locality).toEqual({
+        transcriptProduced: false,
+        confirmed: false,
+        reason: 'windowLost',
+        radioFailure,
+      })
     })
 
     test('a witness claiming a confirmed observation this device never produced a transcript for is refused', async () => {
@@ -398,7 +445,7 @@ describe('runWitnessSession', () => {
         deviceLocalityProvider: fakeDeviceLocalityProvider(FAKE_TRANSCRIPT),
       })
 
-      expect(outcome.locality).toEqual({ transcriptProduced: true })
+      expect(outcome.locality).toEqual({ transcriptProduced: true, confirmed: true })
       expect(storedCredentials).toHaveLength(1)
     })
   })
@@ -441,5 +488,30 @@ describe('runWitnessSession with a witnessed/1 VWC', () => {
     const witness = makeWitness(asWitnessedV1('some-other-session'))
     await expect(runWitnessSession(agent, baseOptions(witness, []))).rejects.toThrow('taskContext')
     expect(storedCredentials).toHaveLength(0)
+  })
+})
+
+describe('witnessOutcomeOf: what the person is told about a completed witness session (IN-128)', () => {
+  it('no locality leg, or a confirmed one: verified', () => {
+    expect(witnessOutcomeOf({})).toEqual({ kind: 'verified' })
+    expect(witnessOutcomeOf({ locality: { transcriptProduced: true, confirmed: true } })).toEqual({ kind: 'verified' })
+  })
+
+  it('a locality leg that was not confirmed: said, with whether a missing permission is why', () => {
+    expect(
+      witnessOutcomeOf({ locality: { transcriptProduced: false, confirmed: false, reason: 'windowLost' } })
+    ).toEqual({
+      kind: 'nearbyNotConfirmed',
+      permissionMissing: false,
+    })
+    expect(
+      witnessOutcomeOf({
+        locality: {
+          transcriptProduced: false,
+          confirmed: false,
+          radioFailure: { reason: 'permissionMissing', detail: 'not granted: android.permission.BLUETOOTH_CONNECT' },
+        },
+      })
+    ).toEqual({ kind: 'nearbyNotConfirmed', permissionMissing: true })
   })
 })
