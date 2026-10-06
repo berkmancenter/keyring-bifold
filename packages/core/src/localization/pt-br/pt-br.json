@@ -1151,6 +1151,7 @@
     "Someone": "Alguém",
     "Open": "Abrir esta comunidade",
     "Leave": "Sair da comunidade",
+    "HowToJoin": "Escolher como entrar",
     "HeldElsewhere": "Sua identidade em {{community}} está em {{agent}}, não no agente que você usa agora.",
     "HeldElsewhereLinked": "Mude para {{agent}} para usá-la ou para sair de {{community}}.",
     "HeldElsewhereUnlinked": "{{agent}} não está mais vinculado a este telefone. Adicione-o de novo para usar esta identidade ou para sair de {{community}}.",
@@ -1243,6 +1244,11 @@
     "FailedCommunityAgent": "Este é o agente de uma comunidade. Vincule o Keyring ao seu agente pessoal.",
     "FailedCommunityAgentCleanup": "Se você adicionou este telefone nas configurações desse agente, remova-o lá.",
     "FailedOther": "Algo deu errado ao vincular. Escaneie o código novamente.",
+    "SwapFailed": {
+      "held": "Seu agente está segurando a vinculação deste telefone até que alguém a aprove: uma regra de aprovação no seu agente pede isso. Aprove em um dispositivo que possa, ou remova essa regra onde ela foi definida, e vincule de novo.",
+      "refused": "Seu agente se recusou a concluir a vinculação deste telefone. Verifique o acesso deste telefone onde seu agente é gerenciado e vincule de novo.",
+      "noAnswer": "Seu agente não respondeu enquanto este telefone concluía a vinculação, e nada foi alterado. Vincule de novo."
+    },
     "LinkYourAgent": "Vincular seu agente",
     "YourAgentFallback": "seu agente",
     "LinkYourAgentHint": "Escaneie o código na página do seu agente ou cole o link.",
@@ -1680,6 +1686,8 @@
     "CardReceived": "O cartão dela",
     "Attest": "Verifiquei a pessoa e o documento — atestar",
     "StatementIssued": "Declaração emitida",
+    "FinishedName": "Nome confirmado: {{name}}",
+    "FinishedIdentity": "Identidade da pessoa: {{name}}",
     "YourFace": "Seu rosto",
     "LegalName": "Nome legal",
     "LegalNamePlaceholder": "Como no seu passaporte ou identidade",
@@ -1833,6 +1841,8 @@
     "ApplyRefused": "A comunidade não admitiu você.",
     "ApplyRefusedNeeds": "A comunidade não admitiu você. Ela pede: {{needs}}.",
     "AlreadyApplied": "Você já tinha se candidatado a esta comunidade — veja em que pé está essa candidatura.",
+    "ReplaceRequestExplains": "Sua solicitação anterior foi enviada sem a sua verificação, e a comunidade não aceita uma segunda enquanto ela estiver aberta. Substituí-la por uma solicitação que inclua a sua verificação?",
+    "ReplaceRequest": "Substituir minha solicitação",
     "AddWhatTheyAsked": "Adicionar o que pediram"
   },
   "Errors": {
