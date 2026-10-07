@@ -6,6 +6,7 @@
 import { useNavigation } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'
+import { DeviceEventEmitter, StyleSheet } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
@@ -14,7 +15,7 @@ import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { vtaAgent } from '../module/vtaAgent'
 import { vtiAgent } from '../module/vtiAgent'
-import { emitCommunityChanged } from '../module/communityChanged'
+import { emitCommunityChanged, VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
 import { communityTarget } from '../module/vtiCommunityLink'
 import VtiJoin, { asksFrom } from '../screens/VtiJoin'
 
@@ -223,6 +224,15 @@ describe('I want to join a community', () => {
     expect(tree.getByTestId(testIdWithKey('JoinScanCommunity'))).toBeTruthy()
   })
 
+  // 238, iPhone: "Which community?" sat at the top and its button at the
+  // foot, the screen between them. Kept together and centred.
+  it('"Which community?" and its button sit together, centred', async () => {
+    const tree = await renderJoin()
+    const scroll = StyleSheet.flatten(tree.getByTestId(testIdWithKey('JoinScroll')).props.contentContainerStyle)
+    expect(scroll.justifyContent).toBe('center')
+    expect(StyleSheet.flatten(tree.getByTestId(testIdWithKey('JoinActions')).props.style).marginTop).toBe(8)
+  })
+
   it('a suggested community that does not answer is not called gone', async () => {
     const tree = await renderJoin()
     expect(tree.queryByTestId(testIdWithKey('JoinRememberedUnreachable'))).toBeNull()
@@ -277,9 +287,38 @@ describe('I want to join a community', () => {
     }
     afterEach(() => mockReadJoinState.mockResolvedValue({ kind: 'none' }))
 
+    // 238: the community holds no request this phone sent. Said, with the way
+    // to send it again; the plain ways in alone said nothing of what happened.
+    it('a request that never reached the community: said, and Send it again starts it over', async () => {
+      const tree = await standAt({ kind: 'none', lost: true })
+      expect(tree.getByTestId(testIdWithKey('JoinRequestLost'))).toHaveTextContent(/Join\.RequestLost/)
+      await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('JoinSendAgain'))))
+      expect(tree.getByTestId(testIdWithKey('JoinAsContinue'))).toBeTruthy()
+    })
+
+    it('a request merely unanswered is not said to be lost', async () => {
+      const tree = await standAt({ kind: 'sent', submission })
+      expect(tree.queryByTestId(testIdWithKey('JoinRequestLost'))).toBeNull()
+    })
+
+    it('a late answer about the request makes the screen ask again, at once', async () => {
+      await standAt({ kind: 'sent', submission })
+      mockReadJoinState.mockClear()
+      await act(async () => {
+        DeviceEventEmitter.emit(VTI_JOIN_STATUS_LATE_EVENT, { communityDid: linked })
+      })
+      expect(mockReadJoinState).toHaveBeenCalledWith(
+        expect.anything(),
+        linked,
+        expect.not.objectContaining({ poll: false })
+      )
+    })
+
     // The several-agents device check (R2): with B current, A's membership
     // showed as B's ("You're a member"), and A was never offered.
-    it("another agent's membership is not the current agent's: Join offers that agent", async () => {
+    // Joining uses the current agent, as chosen on "Your agent": no "with
+    // which agent?" and no other agent offered (Alberto, 239).
+    it("another agent's membership is not the current agent's: Join goes on with the current agent", async () => {
       const A = 'did:webvh:join-screen:agent-a'
       const B = 'did:webvh:join-screen:agent-b'
       const personaOfA = {
@@ -309,8 +348,9 @@ describe('I want to join a community', () => {
         jest.advanceTimersByTime(10)
       })
       expect(tree.queryByTestId(testIdWithKey('JoinStandingText'))).toBeNull()
-      expect(tree.getByTestId(testIdWithKey('JoinAgentSuggested'))).toBeTruthy()
-      expect(tree.getByTestId(testIdWithKey('JoinUseSuggestedAgent'))).toBeTruthy()
+      expect(tree.queryByTestId(testIdWithKey('JoinWithAgent'))).toBeNull()
+      expect(tree.queryByTestId(testIdWithKey('JoinUseSuggestedAgent'))).toBeNull()
+      expect(tree.getByTestId(testIdWithKey('JoinAsks'))).toBeTruthy()
       ;(vtaAgent as unknown as Setter).set({ agents: undefined })
     })
 
@@ -327,17 +367,22 @@ describe('I want to join a community', () => {
       expect(mockReadJoinState).toHaveBeenLastCalledWith(expect.anything(), linked, { poll: false })
     })
 
-    it('a member: Open, not Join', async () => {
-      const navigation = useNavigation() as unknown as { navigate: jest.Mock }
+    // Alberto, 238: a success state in place. Done goes back to Your agent
+    // with the community's card picked out; View community takes Join's
+    // place, so back from it is Your agent, not this screen again.
+    it('a member: a success state, Done back to Your agent, View community in place of Join', async () => {
+      const navigation = useNavigation() as unknown as { navigate: jest.Mock; replace: jest.Mock }
       navigation.navigate.mockClear()
+      navigation.replace.mockClear()
       const tree = await standAt({ kind: 'member', membership: {} })
+      expect(tree.getByTestId(testIdWithKey('JoinMemberCheck'))).toBeTruthy()
       expect(tree.getByTestId(testIdWithKey('JoinStandingText'))).toHaveTextContent('Join.StandingMember')
       expect(tree.queryByTestId(testIdWithKey('JoinStart'))).toBeNull()
-      // IN-102: opened on a community a link named, a member had only "Open"
-      // and no way to another community.
-      expect(tree.getByTestId(testIdWithKey('JoinScanCommunity'))).toBeTruthy()
+      expect(tree.queryByTestId(testIdWithKey('JoinWays'))).toBeNull()
+      await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('JoinDone'))))
+      expect(navigation.navigate).toHaveBeenCalledWith(Screens.VtaAgent, { highlightCommunity: linked })
       await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('JoinOpenCommunity'))))
-      expect(navigation.navigate).toHaveBeenCalledWith(Screens.VtiCommunity, { communityDid: linked })
+      expect(navigation.replace).toHaveBeenCalledWith(Screens.VtiCommunity, { communityDid: linked })
     })
 
     it('sent and not yet answered: says so, and whether the invitation went with it; Check again asks', async () => {

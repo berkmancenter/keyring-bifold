@@ -3,8 +3,8 @@
  * doors and where they are on the journey — and the vetter role appears only
  * when a grant stands, never as a locked button up front.
  */
-import { useIsFocused, useNavigation } from '@react-navigation/native'
-import { act, fireEvent, render } from '@testing-library/react-native'
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
+import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
 import { DeviceEventEmitter, StyleSheet } from 'react-native'
 
@@ -18,7 +18,7 @@ import { vtaAgent } from '../module/vtaAgent'
 import { communityTarget } from '../module/vtiCommunityLink'
 import { emitCommunityChanged } from '../module/communityChanged'
 import { VTI_PERSONA_DELIVERIES_EVENT } from '../module/vtiPersonaInbox'
-import VtaAgentHome, { forgetAgentHoldings, VETTER_RECHECK_MS } from '../screens/VtaAgentHome'
+import VtaAgentHome, { forgetAgentHoldings, HIGHLIGHT_MS, VETTER_RECHECK_MS } from '../screens/VtaAgentHome'
 import { communityCardKey } from '../screens/CommunityCard'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -767,7 +767,9 @@ describe('Your agent — after linking', () => {
     )
   }
 
-  it('after joining: the communities first, Join in the header with its two ways in, and a gear for settings', async () => {
+  // Alberto, 239: the header's Join menu said again what the page's cards
+  // say. A member joins another community from one row at the page's end.
+  it('after joining: the communities first, "Join another community" at the end, and a gear for settings', async () => {
     const navigate = useNavigation().navigate as jest.Mock
     const tree = await renderHome([persona, membership])
     expect(tree.getByTestId(testIdWithKey('AgentHomeTitle'))).toHaveTextContent('VtaLink.SwitcherTitle')
@@ -775,52 +777,88 @@ describe('Your agent — after linking', () => {
     expect(tree.getByTestId(testIdWithKey('AgentHolds'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('AgentDevices'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('AgentRequests'))).toBeTruthy()
-    // The doors are behind Join.
+    // The two doors give way to one row, after everything else.
     expect(tree.queryByTestId(testIdWithKey('AgentDoors'))).toBeNull()
+    const ids: string[] = []
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) return node.forEach(walk)
+      const n = node as { props?: { testID?: string }; children?: unknown[] }
+      if (n.props?.testID) ids.push(n.props.testID)
+      n.children?.forEach(walk)
+    }
+    walk(tree.toJSON())
+    expect(ids.indexOf(testIdWithKey('AgentJoinAnother'))).toBeGreaterThan(ids.indexOf(testIdWithKey('AgentDevices')))
+    expect(tree.getByTestId(testIdWithKey('AgentJoinAnother'))).toHaveTextContent(/VtaLink\.JoinAnother/)
     // Nothing of settings is on the page.
     for (const key of ['AgentSettings', 'AgentUnlink', 'AgentActivity', 'AgentDetailsToggle']) {
       expect(tree.queryByTestId(testIdWithKey(key))).toBeNull()
     }
 
-    const header = corners()
-    expect(header.queryByTestId(testIdWithKey('AgentJoinMenu'))).toBeNull()
-    fireEvent.press(header.getByTestId(testIdWithKey('AgentJoinCorner')))
-    expect(header.getByTestId(testIdWithKey('AgentJoinMenuJoin'))).toHaveTextContent(/VtaLink\.JoinAnother/)
     navigate.mockClear()
-    fireEvent.press(header.getByTestId(testIdWithKey('AgentJoinMenuInvited')))
-    expect(navigate).toHaveBeenCalledWith(Screens.VtiInvited)
-    expect(header.queryByTestId(testIdWithKey('AgentJoinMenu'))).toBeNull()
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentJoinAnother')))
+    expect(navigate).toHaveBeenCalledWith(Screens.VtiJoin)
+
+    const header = corners()
+    expect(header.queryByTestId(testIdWithKey('AgentJoinCorner'))).toBeNull()
     fireEvent.press(header.getByTestId(testIdWithKey('AgentSettings')))
     expect(navigate).toHaveBeenCalledWith(Screens.VtaAgentSettings)
   })
 
-  it('before joining: the two doors lead the page, and Join is in the header too', async () => {
+  // Alberto, 239: Requests below "What brings you here?", and a line between
+  // sections so it is clear where each one ends.
+  it('Requests follows the ways in, and a line sets each section apart', async () => {
+    const tree = await renderHome([persona])
+    const ids: string[] = []
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) return node.forEach(walk)
+      const n = node as { props?: { testID?: string }; children?: unknown[] }
+      if (n.props?.testID) ids.push(n.props.testID)
+      n.children?.forEach(walk)
+    }
+    walk(tree.toJSON())
+    const at = (key: string) => ids.indexOf(testIdWithKey(key))
+    expect(at('AgentDoors')).toBeGreaterThan(-1)
+    expect(at('AgentRequests')).toBeGreaterThan(at('AgentDoors'))
+    expect(at('AgentHolds')).toBeGreaterThan(at('AgentRequests'))
+    // A line before the ways in, Requests, what the agent holds, and devices.
+    const rules = ids.map((id, i) => (id === testIdWithKey('AgentSectionRule') ? i : -1)).filter((i) => i >= 0)
+    expect(rules).toHaveLength(4)
+    expect(rules[0]).toBeLessThan(at('AgentDoors'))
+    expect(rules[1]).toBeGreaterThan(at('AgentDoors'))
+    expect(rules[1]).toBeLessThan(at('AgentRequests'))
+    expect(rules[2]).toBeLessThan(at('AgentHolds'))
+  })
+
+  it('before joining: the two doors lead the page, and the header has only the gear', async () => {
     const tree = await renderHome([persona])
     expect(tree.getByTestId(testIdWithKey('AgentDoors'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('AgentInvited'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('AgentJoinCommunity'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentJoinAnother'))).toBeNull()
     const header = corners()
-    fireEvent.press(header.getByTestId(testIdWithKey('AgentJoinCorner')))
-    expect(header.getByTestId(testIdWithKey('AgentJoinMenuJoin'))).toHaveTextContent(/VtaLink\.WantToJoin/)
+    expect(header.queryByTestId(testIdWithKey('AgentJoinCorner'))).toBeNull()
     expect(header.getByTestId(testIdWithKey('AgentSettings'))).toBeTruthy()
   })
 
-  // Pixel, 10-06: "+ Join" in a pill was squeezed into the narrow corner,
-  // its letters stacked. Both corners are icons of one size; Join keeps its name for a screen reader.
-  it('the two corners are icon buttons of one size, each named for a screen reader', async () => {
+  // As wide as the app's own header buttons (IconButton: the icon and 15 on
+  // the screen's side). With padding on both sides it was clipped at the
+  // edge (236, iPhone and Pixel).
+  it("the gear is an icon button the size of the app's own, named for a screen reader", async () => {
     await renderHome([persona, membership])
-    const header = corners()
-    const join = header.getByTestId(testIdWithKey('AgentJoinCorner'))
-    const gear = header.getByTestId(testIdWithKey('AgentSettings'))
-    expect(join.props.accessibilityLabel).toBe('VtaLink.JoinCorner')
+    const gear = corners().getByTestId(testIdWithKey('AgentSettings'))
     expect(gear.props.accessibilityLabel).toBe('VtaLink.AgentSettings')
-    // No words in the corner: they did not fit.
-    expect(join).not.toHaveTextContent(/VtaLink\.JoinCorner/)
-    const box = (el: typeof join) => {
-      const { paddingHorizontal, paddingVertical } = StyleSheet.flatten(el.props.style)
-      return { paddingHorizontal, paddingVertical }
-    }
-    expect(box(join)).toEqual(box(gear))
+    const { paddingHorizontal, paddingLeft, paddingRight, marginLeft, marginRight } = StyleSheet.flatten(
+      gear.props.style
+    )
+    expect({ paddingHorizontal, paddingLeft, paddingRight, marginLeft, marginRight }).toEqual({
+      paddingHorizontal: undefined,
+      paddingLeft: undefined,
+      paddingRight: undefined,
+      marginLeft: undefined,
+      marginRight: 15,
+    })
   })
 
   it('the introduction has no header corners', async () => {
@@ -831,6 +869,33 @@ describe('Your agent — after linking', () => {
     expect(options.headerLeft()).toBeNull()
     expect(options.headerRight()).toBeNull()
     controller.set({ introSeen: true })
+  })
+
+  // 239 and 238, iPhone: the panel sat high, as it kept room for a tab bar
+  // that sits below the screen, not over it. The words and their buttons are
+  // centred together, with no such room.
+  it('the introduction, words and buttons together, is centred between the header and the tab bar', async () => {
+    controller.set({ introSeen: false })
+    const tree = await renderHome([])
+    const intro = tree.getByTestId(testIdWithKey('AgentIntro'))
+    const style = StyleSheet.flatten(intro.props.style)
+    expect(style).toMatchObject({ flex: 1, justifyContent: 'center', padding: 20 })
+    expect(style.paddingBottom).toBeUndefined()
+    expect(within(intro).getByTestId(testIdWithKey('AgentIntroNext'))).toBeTruthy()
+    controller.set({ introSeen: true })
+  })
+
+  // Alberto, 238: Join's "Done" after an admission comes back here with the
+  // new community's card picked out for a moment.
+  it('a community just joined is picked out on its card for a moment', async () => {
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { highlightCommunity: communityDid } })
+    const tree = await renderHome([persona, membership])
+    expect(tree.getByTestId(testIdWithKey('AgentCommunityHighlighted'))).toBeTruthy()
+    await act(async () => {
+      jest.advanceTimersByTime(HIGHLIGHT_MS)
+    })
+    expect(tree.queryByTestId(testIdWithKey('AgentCommunityHighlighted'))).toBeNull()
+    ;(useRoute as jest.Mock).mockReturnValue({ params: {} })
   })
 
   it('no approval waiting: no banner', async () => {
@@ -919,11 +984,32 @@ describe('Your agent — several agents', () => {
     expect(navigate).toHaveBeenCalledWith(Screens.VtaLink)
   })
 
-  it('one agent: one chip, and "Add another agent"', async () => {
+  // 238, iPhone: between leaving the current agent and the link screen,
+  // this page drew "Link your agent" for an instant. Nothing is drawn.
+  it('"Add" draws no "Link your agent" while it leaves for the link screen', async () => {
+    const before = vtaAgent.getState().link
+    jest.spyOn(vtaAgent, 'startAddingAgent').mockImplementation(async () => {
+      controller.set({ link: { kind: 'notLinked' } })
+    })
+    const tree = await renderHome()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentHomeLeaving'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentHomeLink'))).toBeNull()
+    controller.set({ link: before })
+  })
+
+  // 237, iPhone: "Add another agent" ran off the screen's edge beside one
+  // agent's chip. The chip says "Add"; a screen reader hears it whole.
+  it('one agent: one chip, and "Add", named "Add another agent" for a screen reader', async () => {
     controller.set({ agents: [{ vtaDid: HOME, label: 'Home' }] })
     const tree = await renderHome()
     expect(tree.queryByTestId(testIdWithKey('AgentSwitcherRow_1'))).toBeNull()
-    expect(tree.getByTestId(testIdWithKey('AgentSwitcherAdd'))).toHaveTextContent(/VtaLink\.SwitcherAdd/)
+    const add = tree.getByTestId(testIdWithKey('AgentSwitcherAdd'))
+    expect(add).toHaveTextContent(/VtaLink\.ChipAdd/)
+    expect(add).not.toHaveTextContent(/VtaLink\.SwitcherAdd/)
+    expect(add.props.accessibilityLabel).toBe('VtaLink.SwitcherAdd')
   })
 
   it('two agents with no name: "Agent 1" and "Agent 2", never "your agent" twice', async () => {
