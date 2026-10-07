@@ -87,6 +87,12 @@
     "MinutesAgo": "{{ count }} minutes ago",
     "JustNow": "Just now"
   },
+  "VrcWitness": {
+    "ContinuingWithoutWitness": "Continuing without a witness. Sending your relationship credential...",
+    "NoteUnwitnessed": "Your witness couldn't verify this exchange, so it was completed without a witness.",
+    "NoteNotNearbyPermission": "Your witness verified this exchange, but couldn't confirm you two were near each other: Keyring isn't allowed to use \"Nearby devices\". Allow it in Settings before your next exchange.",
+    "NoteNotNearby": "Your witness verified this exchange, but couldn't confirm you two were near each other."
+  },
   "Language": {
     "code_en": "English",
     "code_fr": "French",

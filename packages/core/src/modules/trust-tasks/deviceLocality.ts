@@ -145,6 +145,21 @@ export interface DeviceLocalityProvider {
     challenge: string
     directive: LocalitySensorDirective
   }): Promise<LocalityTranscript | null>
+  /**
+   * Why the last `respondToSensor` resolved `null`, when the provider knows —
+   * for the log and for what the person is told (IN-128: a missing Bluetooth
+   * permission ended every radio phase with nothing said). Undefined when it
+   * produced a transcript, or does not know.
+   */
+  readonly lastFailure?: LocalityRadioFailure
+}
+
+/** Why a radio phase produced no transcript, when the device can tell. */
+export interface LocalityRadioFailure {
+  /** `permissionMissing`: the OS has not granted what the peripheral needs, so it never advertised. */
+  reason: 'permissionMissing'
+  /** For the log: what is missing. */
+  detail: string
 }
 
 /** No-op — used when locality is off, or until a real BLE peripheral (item 9) exists. */

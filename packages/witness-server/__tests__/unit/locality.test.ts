@@ -11,6 +11,7 @@ import {
   assertionFromObservation,
   bindingFor,
   deriveEid,
+  observationForSubmit,
   residualsFor,
   serviceUuidFromEid,
   transcriptDigestMultibase,
@@ -376,5 +377,38 @@ describe('verifyTranscript — iOS App Attest transcripts', () => {
     const android = makeSignedTranscript(randomBytes(32))
     expect(Buffer.from(android.signature, 'base64url')[0]).toBe(0x30)
     expect(verifyTranscript(android, expected)).toEqual({ ok: true })
+  })
+})
+
+describe('observationForSubmit: a submit with no device transcript is not held for the whole window (IN-128)', () => {
+  beforeEach(() => jest.useFakeTimers())
+  afterEach(() => jest.useRealTimers())
+
+  const never = () => new Promise<string | null>(() => undefined)
+
+  it('no transcript and nothing observed: lost after the grace, not after the window', async () => {
+    let settled: string | null | undefined
+    const waiting = observationForSubmit(never(), false, 3000).then((r) => (settled = r))
+    await jest.advanceTimersByTimeAsync(2999)
+    expect(settled).toBeUndefined()
+    await jest.advanceTimersByTimeAsync(1)
+    await waiting
+    expect(settled).toBeNull()
+  })
+
+  it('no transcript, but the observation already settled: it is used', async () => {
+    await expect(observationForSubmit(Promise.resolve('observed'), false, 3000)).resolves.toBe('observed')
+  })
+
+  it('with a transcript, waits for the observation as before', async () => {
+    let resolve: (v: string) => void = () => undefined
+    const pending = new Promise<string | null>((r) => (resolve = r))
+    let settled: string | null | undefined
+    const waiting = observationForSubmit(pending, true, 3000).then((r) => (settled = r))
+    await jest.advanceTimersByTimeAsync(60_000)
+    expect(settled).toBeUndefined()
+    resolve('observed')
+    await waiting
+    expect(settled).toBe('observed')
   })
 })
