@@ -9,7 +9,7 @@ import { useNavigation, useRoute } from '@react-navigation/native'
 import type { TFunction } from 'i18next'
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
-import { Share } from 'react-native'
+import { AppState, Share } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import QRCode from 'react-native-qrcode-svg'
 
@@ -25,7 +25,7 @@ import ptBrCopy from '../../../localization/pt-br/pt-br.json'
 import { agentAddressScan } from '../module/agentAddressScan'
 import { VtiRefusal } from '../module/vtiAgent'
 import { deviceCodeScan } from '../module/deviceCodeScan'
-import { vtaAgent } from '../module/vtaAgent'
+import { AgentAlreadyOnPhone, vtaAgent } from '../module/vtaAgent'
 import { DeviceActionRefused, DeviceCannotOwn } from '../module/vtaOwner'
 import VtaCreateAgent, { GRANT_POLL_EVERY_MS, GRANT_POLL_WINDOW_MS, readyNameOf } from '../screens/VtaCreateAgent'
 
@@ -114,6 +114,25 @@ describe('create my agent: a link that fails is said', () => {
 })
 
 describe('create my agent: the address comes first', () => {
+  // IN-132: an agent this phone already has, entered by its address: said,
+  // with a switch to it, and nothing made.
+  test('an agent this phone already has is said so, with a switch to it', async () => {
+    jest.spyOn(vtaAgent, 'startCreateAgent').mockRejectedValue(new AgentAlreadyOnPhone(VTA))
+    const toIt = jest.spyOn(vtaAgent, 'switchToExisting').mockResolvedValue(undefined)
+    const nav = useNavigation() as unknown as { reset: jest.Mock }
+    nav.reset.mockClear()
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentCreateContinue')))
+    fireEvent.changeText(tree.getByTestId(id('AgentCreateAddressInput')), VTA)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentCreateAddressContinue')))
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent('VtaLink.AlreadyOnPhone')
+    fireEvent.press(tree.getByTestId(id('AgentCreateSwitchToExisting')))
+    expect(toIt).toHaveBeenCalledWith(expect.anything(), VTA)
+    expect(nav.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: Screens.VtaAgent }] })
+  })
+
   // "No code? Use your agent's address" (Alberto, 239): straight to the
   // address, without the introduction's Continue first.
   test('opened for an address, it starts at the address', () => {
@@ -366,6 +385,20 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     expect(tree.getByTestId(id('AgentBackupNone'))).toHaveTextContent('CreateAgent.BackupLater')
   })
 
+  // 238 gate, Android: Done popped back to the panel, which swapped itself for
+  // the agent's page while the pop still animated, and the app was gone. Done
+  // sets the stack to the agent's page instead, in one step.
+  test("Done sets the stack to the agent's page, rather than going back", () => {
+    linked()
+    const nav = useNavigation() as unknown as { goBack: jest.Mock; reset: jest.Mock }
+    nav.goBack.mockClear()
+    nav.reset.mockClear()
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentCreateDone')))
+    expect(nav.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: Screens.VtaAgent }] })
+    expect(nav.goBack).not.toHaveBeenCalled()
+  })
+
   // IN-123: a computer or another app (pnm) does not scan the agent's code;
   // the way to enter its code is said on the first step, not found after Next.
   test('a computer or another app: said on the first step, with "Enter its code" straight to the code', () => {
@@ -607,6 +640,40 @@ describe('the phone waits for the agent to admit the code, on its own', () => {
       controller.set({ link: { kind: 'linking', step: 'rotating', vtaDid: VTA, label: 'a' } })
     })
     expect(tree.getByTestId(id('AgentCreateProgress'))).toBeTruthy()
+  })
+
+  // IN-135: the window counts time in Keyring, not time asleep. A phone that
+  // slept through a slow setup comes back still waiting, with what was left.
+  test('time with the app in the background does not count against the window', async () => {
+    showingKey()
+    ;(confirmOwner as jest.Mock).mockResolvedValue({ ok: true })
+    jest.spyOn(vtaAgent, 'checkManualGrant').mockResolvedValue(undefined)
+    const changes: ((next: string) => void)[] = []
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: (next: string) => void) => {
+      changes.push(handler)
+      return { remove: () => undefined }
+    }) as never)
+    const tree = show()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentCreateCopyCode')))
+    })
+    await act(async () => {
+      jest.advanceTimersByTime(4 * 60 * 1000)
+    })
+    await act(async () => changes.forEach((c) => c('background')))
+    await act(async () => {
+      jest.advanceTimersByTime(30 * 60 * 1000)
+    })
+    await act(async () => changes.forEach((c) => c('active')))
+    await act(async () => {
+      jest.advanceTimersByTime(4 * 60 * 1000)
+    })
+    // Eight minutes in the app: still waiting.
+    expect(tree.getByTestId(id('AgentCreateWaiting'))).toBeTruthy()
+    await act(async () => {
+      jest.advanceTimersByTime(3 * 60 * 1000)
+    })
+    expect(tree.queryByTestId(id('AgentCreateWaiting'))).toBeNull()
   })
 
   test('after 10 minutes it stops and offers Check again, which waits another window', async () => {

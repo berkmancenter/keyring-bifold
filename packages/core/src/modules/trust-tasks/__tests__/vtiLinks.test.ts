@@ -357,14 +357,37 @@ describe('a bare DID, scanned or pasted', () => {
       expect(navigate).toHaveBeenCalledWith('VtaLink')
     })
 
+    // IN-138: the add began, the link screen never opened; the agent before comes back.
+    it('an add whose link could not start is given up, back to the agent before', async () => {
+      linkedTo('did:webvh:Qm:other')
+      jest.spyOn(vtaAgent, 'startAddingAgent').mockResolvedValue(undefined)
+      jest.spyOn(vtaAgent, 'startManualLink').mockRejectedValue(new Error('no key'))
+      const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+      const navigate = jest.fn()
+      await expect(routeKeyringAgentLink(agentDid, withDoc(doc(['VTARest'])), navigate)).rejects.toThrow('no key')
+      expect(cancel).toHaveBeenCalledTimes(1)
+      expect(navigate).not.toHaveBeenCalled()
+    })
+
     it('one this phone already has is said so, and nothing starts', async () => {
       linkedTo(agentDid)
       const add = jest.spyOn(vtaAgent, 'startAddingAgent').mockResolvedValue(undefined)
       const start = jest.spyOn(vtaAgent, 'startManualLink').mockResolvedValue(undefined)
       await expect(routeKeyringAgentLink(agentDid, withDoc(doc(['VTARest'])), jest.fn())).rejects.toThrow(
-        /already linked to this agent/
+        /already has that agent/
       )
       expect(add).not.toHaveBeenCalled()
+      expect(start).not.toHaveBeenCalled()
+    })
+
+    // IN-132: after an "Add" the current agent has been left, so the phone
+    // is not linked; an agent it already has is still refused, by its DID.
+    it('one this phone already has is refused after an "Add" too, when nothing is current', async () => {
+      controller.set({ link: { kind: 'notLinked' }, agents: [{ vtaDid: agentDid, label: 'x' }] })
+      const start = jest.spyOn(vtaAgent, 'startManualLink').mockResolvedValue(undefined)
+      const route = routeKeyringAgentLink(agentDid, withDoc(doc(['VTARest'])), jest.fn())
+      await expect(route).rejects.toBeInstanceOf(KeyringLinkError)
+      await expect(route).rejects.toMatchObject({ messageKey: 'VtaLink.FailedAlreadyLinked' })
       expect(start).not.toHaveBeenCalled()
     })
   })
@@ -534,7 +557,7 @@ describe("an agent host's automatic-connection QR", () => {
       const scan = jest.spyOn(vtaAgent, 'scanHostOffer')
       await expect(
         routeKeyringAgentLink(qr({ vta_did: vtaDid, callback_url: callback }), {} as never, jest.fn())
-      ).rejects.toThrow(/already linked to this agent/)
+      ).rejects.toThrow(/already has that agent/)
       expect(add).not.toHaveBeenCalled()
       expect(scan).not.toHaveBeenCalled()
     })

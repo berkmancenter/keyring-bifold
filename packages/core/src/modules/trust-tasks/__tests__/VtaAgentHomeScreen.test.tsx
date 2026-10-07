@@ -1000,6 +1000,31 @@ describe('Your agent — several agents', () => {
     controller.set({ link: before })
   })
 
+  // IN-138: an add that failed or was left by another way, and the person is
+  // back on this page: the add is given up and the agent before returns.
+  it('arriving here with an "Add" still open and nothing under way gives it up', async () => {
+    const before = vtaAgent.getState().link
+    const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+    controller.set({ addingAgent: true, link: { kind: 'notLinked', lastError: { reason: 'communityAgent' } } })
+    await renderHome()
+    expect(cancel).toHaveBeenCalledTimes(1)
+    controller.set({ addingAgent: false, link: before })
+  })
+
+  it('pressing "Add" on this page does not give the add up', async () => {
+    const before = vtaAgent.getState().link
+    const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+    jest.spyOn(vtaAgent, 'startAddingAgent').mockImplementation(async () => {
+      controller.set({ addingAgent: true, link: { kind: 'notLinked' } })
+    })
+    const tree = await renderHome()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
+    })
+    expect(cancel).not.toHaveBeenCalled()
+    controller.set({ addingAgent: false, link: before })
+  })
+
   // 237, iPhone: "Add another agent" ran off the screen's edge beside one
   // agent's chip. The chip says "Add"; a screen reader hears it whole.
   it('one agent: one chip, and "Add", named "Add another agent" for a screen reader', async () => {
@@ -1044,6 +1069,25 @@ describe('Your agent — several agents', () => {
     expect(ack).toHaveBeenCalled()
     fireEvent.press(tree.getByTestId(testIdWithKey('AgentAddedKeep')))
     expect(use).toHaveBeenCalledWith(expect.anything(), WORK)
+  })
+
+  // 238 gate, Android: Done after adding an agent by its address now lands
+  // here (#349). The new agent's introduction comes first, then the choice
+  // to use it or keep the one before.
+  it('an agent just added: its introduction first, then use it or keep the one before', async () => {
+    controller.set({ introSeen: false, addedAgent: { from: WORK, added: HOME } })
+    jest.spyOn(vtaAgent, 'markIntroSeen').mockImplementation(async () => {
+      controller.set({ introSeen: true })
+    })
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentIntro'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentAddedCard'))).toBeNull()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentIntroSkip')))
+    })
+    expect(tree.queryByTestId(testIdWithKey('AgentIntro'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('AgentAddedCard'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentAddedKeep'))).toBeTruthy()
   })
 
   it("each agent's chip carries its own count of requests waiting", async () => {

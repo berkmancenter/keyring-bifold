@@ -46,7 +46,7 @@ import { testIdWithKey } from '../../../utils/testable'
 import QRRenderer from '../../../components/misc/QRRenderer'
 import { confirmOwner, ownerLockKind, type OwnerConfirmFailure, type OwnerLockKind } from '../module/ownerConfirm'
 import type { AgentLabel } from '../module/agentLabel'
-import { vtaAgent } from '../module/vtaAgent'
+import { AgentAlreadyOnPhone, vtaAgent } from '../module/vtaAgent'
 import { agentAddressScan, type ScannedAgent } from '../module/agentAddressScan'
 import { deviceCodeScan } from '../module/deviceCodeScan'
 import { DeviceCannotOwn, deviceCodeIn, deviceRefusalOf, type DeviceRefusalReason } from '../module/vtaOwner'
@@ -134,6 +134,8 @@ const VtaCreateAgent: React.FC = () => {
   // passcode to ask for: it is added as a device instead, as an admin adds
   // any other (Alberto, 239: one way to link by address, not two).
   const [asDevice, setAsDevice] = useState(false)
+  // The agent named is one this phone already has: offered as a switch.
+  const [existingAgent, setExistingAgent] = useState<string | undefined>()
   const [pollUntil, setPollUntil] = useState<number | undefined>()
   const [pollExpired, setPollExpired] = useState(false)
   // Paused only when the app is known to be away; an unknown state keeps waiting.
@@ -271,6 +273,7 @@ const VtaCreateAgent: React.FC = () => {
   /** Step 2 → 3: resolve the agent and make this phone's key (it names the agent's mediator). */
   const onAddressContinue = async (scanned?: string) => {
     setError(undefined)
+    setExistingAgent(undefined)
     const did = (scanned ?? address).trim()
     if (!looksLikeAgentAddress(did)) {
       setError(t('CreateAgent.NotAnAddress'))
@@ -282,6 +285,12 @@ const VtaCreateAgent: React.FC = () => {
       setAsDevice(false)
       await vtaAgent.startCreateAgent(agent, did, did)
     } catch (e) {
+      // An agent this phone already has (IN-132): said, with a switch to it.
+      if (e instanceof AgentAlreadyOnPhone) {
+        setError(t('VtaLink.AlreadyOnPhone'))
+        setExistingAgent(e.vtaDid)
+        return
+      }
       if (!(e instanceof DeviceCannotOwn)) {
         setError(t('CreateAgent.NotConfirmed'))
         return
@@ -373,6 +382,23 @@ const VtaCreateAgent: React.FC = () => {
   // inside the window. checkManualGrant skips while one is already in flight.
   const showingCode = link.kind === 'showingKey'
   const waiting = showingCode && pollUntil !== undefined && !pollExpired
+  // The window counts time in Keyring, not time asleep (IN-135): leaving the
+  // app keeps what was left of it, and coming back starts that again. A
+  // phone that slept through a slow setup came back to "Check again" with
+  // the window spent.
+  const pollLeft = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (pollUntil === undefined || pollExpired) return
+    if (!appActive) {
+      if (pollLeft.current === undefined) pollLeft.current = Math.max(0, pollUntil - Date.now())
+      return
+    }
+    if (pollLeft.current !== undefined) {
+      const left = pollLeft.current
+      pollLeft.current = undefined
+      setPollUntil(Date.now() + left)
+    }
+  }, [appActive, pollUntil, pollExpired])
   useEffect(() => {
     if (!waiting || !focused || !appActive || !agent || pollUntil === undefined) return
     const timer = setInterval(() => {
@@ -482,6 +508,24 @@ const VtaCreateAgent: React.FC = () => {
     actions = (
       <>
         {errorLine('AgentCreateError')}
+        {existingAgent && agent ? (
+          <Button
+            title={t('VtaLink.SwitchToIt')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              const target = existingAgent
+              setExistingAgent(undefined)
+              void vtaAgent.switchToExisting(agent, target)
+              ;(
+                navigation as unknown as { reset: (state: { index: number; routes: { name: string }[] }) => void }
+              ).reset({
+                index: 0,
+                routes: [{ name: Screens.VtaAgent }],
+              })
+            }}
+            testID={testIdWithKey('AgentCreateSwitchToExisting')}
+          />
+        ) : null}
         {/* The host's page shows the agent's address as a QR, or its
             automatic-connection QR: Scan takes either (228). */}
         <Button
@@ -792,7 +836,17 @@ const VtaCreateAgent: React.FC = () => {
         <Button
           title={t('Global.Done')}
           buttonType={ButtonType.Secondary}
-          onPress={() => navigation.goBack()}
+          // The stack is set to the agent's page, not popped back to the
+          // panel this began on: that panel, linked now, swapped itself for
+          // the agent's page while the pop was still animating, and on
+          // Android that left the app gone (238 gate). The agent's page plays
+          // the first-link introduction.
+          onPress={() =>
+            (navigation as unknown as { reset: (state: { index: number; routes: { name: string }[] }) => void }).reset({
+              index: 0,
+              routes: [{ name: Screens.VtaAgent }],
+            })
+          }
           testID={testIdWithKey('AgentCreateDone')}
         />
       </>
