@@ -9,6 +9,10 @@
  *       │                                         │ rotated
  *       └──── relink ◀── revoked ◀── linked ◀─────┘
  *
+ *   an agent host's automatic connection waits in awaitingGrant (via host)
+ *   and names where it has got to: hostStage creating → connecting →
+ *   signingIn(try n of 24), each with the time it began (VtaLink shows it).
+ *
  *   without a QR (plan §5.1 fallback): notLinked ─keyShown─▶ showingKey
  *   ─granted─▶ linking — the admin pastes the key into their own console.
  *
@@ -62,7 +66,15 @@ export type VtaLinkState =
   | ({ kind: 'confirming'; offerUrl: string; exp: number; via?: 'host' } & VtaIdentityOfAgent)
   | ({ kind: 'submitting'; offerUrl: string; exp: number; via?: 'host' } & VtaIdentityOfAgent)
   /** `host`: an agent host's automatic connection — no code to compare; the host sets the agent up. */
-  | ({ kind: 'awaitingGrant'; offerUrl: string; exp: number; code: string; via?: 'host' } & VtaIdentityOfAgent)
+  | ({
+      kind: 'awaitingGrant'
+      offerUrl: string
+      exp: number
+      code: string
+      via?: 'host'
+      /** Where the host's setup has got to, once the phone knows (`hostStage`). */
+      stage?: HostSetupStage
+    } & VtaIdentityOfAgent)
   | ({
       kind: 'showingKey'
       did: string
@@ -71,6 +83,11 @@ export type VtaLinkState =
       noAnswer?: boolean
       /** `scan`: the agent's address was scanned or pasted — usually another phone's "Add another phone" code (#30). */
       via?: 'scan'
+      /**
+       * Shown again for a link the phone left part-way (a sleep, a lock, a
+       * restart): the same key, which the agent may already hold (IN-135).
+       */
+      resumed?: boolean
     } & VtaIdentityOfAgent)
   | ({ kind: 'linking'; step: 'connecting' | 'rotating' } & VtaIdentityOfAgent)
   | ({ kind: 'linked'; linkedAt: string; connection: VtaConnection } & VtaIdentityOfAgent)
@@ -89,12 +106,38 @@ export function revocationCause(reason: string): RevocationCause {
   return /has been wiped/i.test(reason) ? 'wiped' : 'notInAcl'
 }
 
+/**
+ * Where an agent host's setup has got to, for the screen to name.
+ * `creating`: the host says `provisioning`. `connecting`: it says the agent is
+ * ready for this phone (`awaiting_mobile`) and the first sign-in is under way.
+ * `signingIn`: that sign-in is being tried again (`attempt` of `of`), as the
+ * agent may take a moment to answer after its restart. `since`: when this step
+ * began. `startedAt`: when the first step began — the screen shows one clock
+ * for the whole setup, counted from it, rather than restarting at each step.
+ */
+export interface HostSetupStage {
+  step: 'creating' | 'connecting' | 'signingIn'
+  since: number
+  startedAt: number
+  attempt?: number
+  of?: number
+}
+
 /** Why a link attempt ended, in a form a screen can word for a person. */
 export interface VtaLinkFailure {
-  reason: 'expired' | 'refused' | 'unreachable' | 'rejected' | 'failed'
+  /**
+   * `communityAgent`: the agent serves a community; Keyring links only to a person's own agent.
+   * `alreadyLinked`: this phone already has that agent (IN-132); switch to it instead.
+   */
+  reason: 'expired' | 'refused' | 'unreachable' | 'rejected' | 'failed' | 'communityAgent' | 'alreadyLinked'
   detail?: string
   /** An agent host's automatic connection stopped: why, in its own words for a screen (agentHostConnection.ts). */
   hostReason?: HostLinkFailure
+  /** The swap onto the long-term key did not happen, and the agent confirmed it: why (VtaClient KeySwapNotDone). */
+  swap?: 'held' | 'refused' | 'noAnswer'
+  /** The agent the attempt was for, when the phone knew it. */
+  vtaDid?: string
+  label?: string
 }
 
 export type VtaLinkEvent =
@@ -103,6 +146,8 @@ export type VtaLinkEvent =
   | { type: 'confirmed' }
   | { type: 'cancelled' }
   | { type: 'submitted'; code: string }
+  /** An agent host's setup moved on (VtaAgentController, agentHostConnection). */
+  | { type: 'hostStage'; step: HostSetupStage['step']; attempt?: number; of?: number; now: number }
   | { type: 'granted' }
   | { type: 'rotating' }
   /**
@@ -123,12 +168,37 @@ export type VtaLinkEvent =
   | { type: 'relink' }
   /** The person unlinked this phone from its agent: from any state, back to no agent. */
   | { type: 'unlinked' }
-  | ({ type: 'keyShown'; did: string; via?: 'scan' } & VtaIdentityOfAgent)
+  | ({ type: 'keyShown'; did: string; via?: 'scan'; resumed?: boolean } & VtaIdentityOfAgent)
   | { type: 'grantCheckStarted' }
   | { type: 'grantNotYet' }
   | { type: 'grantNoAnswer' }
 
 export const initialLinkState: VtaLinkState = { kind: 'notLinked' }
+
+/**
+ * The agent a failed link can be tried again for, with the key the phone
+ * still holds (IN-135): an attempt that broke off (no answer, a dropped
+ * connection), never a refusal — the agent's, the swap's, or Keyring's own
+ * (a community's agent, an agent already on the phone) — and never a host
+ * code that is dead. The Try again button and the automatic pick-up both ask
+ * this, so they cannot drift apart.
+ *
+ * `manual`: the person's own Try again. A swap held for an approver also
+ * counts: once it is approved, the same key goes straight through, and a new
+ * key would waste that approval. The automatic pick-up never retries it, as
+ * each try would wait on the approver again.
+ */
+export function resumableFailure(
+  failure: VtaLinkFailure | undefined,
+  options: { manual?: boolean } = {}
+): string | undefined {
+  if (!failure?.vtaDid) return undefined
+  if (failure.reason !== 'failed' && failure.reason !== 'unreachable') return undefined
+  if (failure.swap && failure.swap !== 'noAnswer' && !(options.manual && failure.swap === 'held')) return undefined
+  if (['expired', 'timedOut', 'notAccepted', 'needsScreenLock'].includes(String(failure.hostReason ?? '')))
+    return undefined
+  return failure.vtaDid
+}
 
 export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkState {
   switch (event.type) {
@@ -178,6 +248,7 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
             did: event.did,
             checking: false,
             ...(event.via ? { via: event.via } : {}),
+            ...(event.resumed ? { resumed: true } : {}),
           }
         : state
 
@@ -195,6 +266,25 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
 
     case 'submitted':
       return state.kind === 'submitting' ? { ...state, kind: 'awaitingGrant', code: event.code } : state
+
+    case 'hostStage': {
+      if (state.kind !== 'awaitingGrant' || state.via !== 'host') return state
+      const was = state.stage
+      // A repeat of the same step (each poll says `provisioning` again) changes
+      // nothing, so the screen's snapshot stays the same object.
+      if (was && was.step === event.step && was.attempt === event.attempt) return state
+      const since = was && was.step === event.step ? was.since : event.now
+      return {
+        ...state,
+        stage: {
+          step: event.step,
+          since,
+          startedAt: was?.startedAt ?? event.now,
+          ...(event.attempt !== undefined ? { attempt: event.attempt } : {}),
+          ...(event.of !== undefined ? { of: event.of } : {}),
+        },
+      }
+    }
 
     case 'granted':
       return state.kind === 'awaitingGrant' || state.kind === 'showingKey'
@@ -231,7 +321,13 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
         state.kind === 'awaitingGrant' ||
         state.kind === 'showingKey' ||
         state.kind === 'linking'
-        ? { kind: 'notLinked', lastError: event.failure }
+        ? {
+            kind: 'notLinked',
+            // Which agent the attempt was for, so the failure can offer to
+            // try again with the same key (IN-135).
+            lastError:
+              'vtaDid' in state ? { vtaDid: state.vtaDid, label: state.label, ...event.failure } : event.failure,
+          }
         : state
 
     case 'sessionOpened':

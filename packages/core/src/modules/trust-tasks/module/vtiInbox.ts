@@ -35,6 +35,21 @@ import type { VtiCardCheckRefusal, VtiDeliveredCardCheck } from './vtiDeliveredC
  * plain words (`useVtiRefusedCardNotice`).
  */
 export const VTI_CARD_REFUSED_EVENT = 'vti:card-refused'
+/**
+ * Emitted with `{ communityDid }` when a membership card makes this phone a
+ * member of a community it was not a current member of: the first card, or
+ * the first after a removal. A renewed card for a current membership is not
+ * news, and a card brought back from the agent's keeping does not pass here.
+ */
+export const VTI_JOINED_EVENT = 'vti:joined'
+
+/**
+ * A community made this phone's identity a vetter: emitted with
+ * `{ communityDid }` when a vetter grant is kept that this phone did not
+ * already hold — the first grant, or a new one after a revoke or expiry.
+ * The same grant delivered again is not news.
+ */
+export const VTI_VETTER_GRANTED_EVENT = 'vti:vetterGranted'
 
 export const CREDENTIAL_EXCHANGE_ISSUE = 'https://trusttasks.org/spec/credential-exchange/issue/0.1'
 export { IDENTITY_VETTING_ENDORSEMENT_TYPE } from '@bifold/trust-tasks'
@@ -246,12 +261,12 @@ export async function receiveIssue(
     if (item.kind === 'membership') {
       // The very card the community ended, delivered again, does not bring
       // the membership back.
-      const ended = await store.getMembership(item.communityDid)
+      const ended = await store.getMembership(item.communityDid, personaDid)
       if (ended && !isCurrentMembership(ended) && ended.vmc?.id === item.credential.id) continue
     }
     kept.push(item)
     if (item.kind === 'membership') {
-      const found = await store.getMembership(item.communityDid)
+      const found = await store.getMembership(item.communityDid, personaDid)
       // Joining again after a removal starts afresh: the ended membership's
       // role, role card and way in are not this one's.
       const existing = found && isCurrentMembership(found) ? found : undefined
@@ -268,13 +283,20 @@ export async function receiveIssue(
         validUntil: typeof item.credential.validUntil === 'string' ? (item.credential.validUntil as string) : undefined,
         via: existing?.via ?? options.via ?? 'unknown',
       })
+      if (!existing) DeviceEventEmitter.emit(VTI_JOINED_EVENT, { communityDid: item.communityDid })
     } else if (item.kind === 'role') {
-      const existing = await store.getMembership(item.communityDid)
+      const existing = await store.getMembership(item.communityDid, personaDid)
       const role = String(roleNameOf(item.credential) ?? 'member')
       if (existing) await store.saveMembership({ ...existing, role, roleVec: item.credential })
       else await store.saveHeldCredential({ ...item, kind: 'role' })
     } else {
+      const news =
+        item.kind === 'vetter-grant' &&
+        !((await store.listHeldCredentials?.('vetter-grant', item.communityDid).catch(() => [])) ?? []).some(
+          (held) => held.credential?.id !== undefined && held.credential.id === item.credential.id
+        )
       await store.saveHeldCredential({ ...item, kind: item.kind })
+      if (news) DeviceEventEmitter.emit(VTI_VETTER_GRANTED_EVENT, { communityDid: item.communityDid })
     }
   }
   return kept

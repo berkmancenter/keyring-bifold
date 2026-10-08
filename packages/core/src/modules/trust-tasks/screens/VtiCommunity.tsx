@@ -25,7 +25,7 @@ import { Screens, type MyAgentStackParams } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
-import { selfRemoveRefusal, vtiAgent, type VtiManifest, type VtiVerdict } from '../module/vtiAgent'
+import { selfRemoveRefusal, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { leaveCommunity } from '../module/vtiJoin'
 import { GenericRecordsVettingStore } from '../module/vtiVetting'
 
@@ -33,9 +33,12 @@ import { communityTarget } from '../module/vtiCommunityLink'
 import { useCommunityJourney } from '../module/communityJourney'
 
 import { communityLabelAnsweredOf, communityLabelOf, communityLabelStartOf } from './communityName'
+import { HeldByAnotherAgent } from './HeldByAnotherAgent'
+import { useAgentsHoldingIdentity } from './agentsHoldingIdentity'
 import { plainError } from './plainError'
 import { useCommunityCalled } from './useCommunity'
 import { localDate } from './localTime'
+import { useToastAboveTabBar, useRoomAboveTabBar } from './aboveTabBar'
 
 /** The raw text behind a plain line, for Details: a framework code, else the message. */
 const detailOf = (err: unknown): string => {
@@ -44,14 +47,17 @@ const detailOf = (err: unknown): string => {
 }
 
 const VtiCommunity: React.FC = () => {
+  // The tab bar draws over the page: the last line scrolls clear of it.
+  const roomAboveTabBar = useRoomAboveTabBar()
   const { t } = useTranslation()
+  // Bottom toasts sit clear of the tab bar (aboveTabBar).
+  const toastBottomOffset = useToastAboveTabBar()
   const { ColorPalette, TextTheme } = useTheme()
   const { params } = useRoute<RouteProp<MyAgentStackParams, Screens.VtiCommunity>>()
   const communityDid = params.communityDid
   const called = useCommunityCalled(communityDid)
 
   const [manifest, setManifest] = useState<VtiManifest>()
-  const [verdict, setVerdict] = useState<VtiVerdict>()
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string>()
   // A refusal's framework code belongs behind Details, not in the sentence.
@@ -61,8 +67,12 @@ const VtiCommunity: React.FC = () => {
   const navigation = useNavigation()
   // Where this phone stands with the community: a member is not asked to apply.
   const { journey } = useCommunityJourney(agent, communityDid)
-  const membership = journey?.join.kind === 'member' ? journey.join.membership : undefined
-  const vetsHere = journey?.vetterGrant.state === 'active'
+  // What the phone knows here may be another agent's: its identity, its
+  // membership. Then this agent is not a member and cannot leave (10-06).
+  const holding = useAgentsHoldingIdentity(communityDid)
+  const heldElsewhere = holding.onlyOthers ? holding.holders.find(Boolean) : undefined
+  const membership = !heldElsewhere && journey?.join.kind === 'member' ? journey.join.membership : undefined
+  const vetsHere = !heldElsewhere && journey?.vetterGrant.state === 'active'
   // Leaving cannot be undone from the phone, so it asks once, in place, with
   // buttons that say what each does (plan §4.3).
   const [confirmingLeave, setConfirmingLeave] = useState(false)
@@ -134,11 +144,12 @@ const VtiCommunity: React.FC = () => {
               ? 'Community.LeftTombstone'
               : left.disposition === 'historical'
                 ? 'Community.LeftHistorical'
-                : 'Community.LeftPurge',
-          left.alreadyGone
+                : 'Community.LeftPurge'
         ),
         visibilityTime: 6000,
         position: 'bottom',
+        // It is read on the screen this goes back to, over the tabs.
+        bottomOffset: toastBottomOffset,
       })
       navigation.goBack()
     } catch (err) {
@@ -157,11 +168,11 @@ const VtiCommunity: React.FC = () => {
       setLeaving(false)
       setConfirmingLeave(false)
     }
-  }, [agent, communityDid, navigation, keep, t])
+  }, [agent, communityDid, navigation, keep, t, toastBottomOffset])
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
-    content: { padding: 24, gap: 20 },
+    content: { padding: 24, paddingBottom: 24 + roomAboveTabBar, gap: 20 },
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 12, padding: 20, gap: 12 },
     label: { ...TextTheme.labelSubtitle, color: ColorPalette.grayscale.mediumGrey },
     value: { ...TextTheme.normal, color: TextTheme.normal.color },
@@ -193,23 +204,19 @@ const VtiCommunity: React.FC = () => {
     }
   }, [communityDid, agent, t])
 
-  const onApply = useCallback(async () => {
-    if (!manifest) return
-    setBusy(true)
-    setError(undefined)
-    try {
-      setVerdict(await vtiAgent.apply(communityDid, manifest))
-    } catch (err) {
-      setError(t(plainError(err).line))
-      setRefusalCode(detailOf(err))
-    } finally {
-      setBusy(false)
-    }
-  }, [communityDid, manifest, t])
+  // Joining is chosen, never sent from here: this screen's "Apply to join"
+  // sent a plain request at once, and the vetting that followed could not be
+  // added to it (IN-127, 10-06: four refusals after the statement). Join shows
+  // the community's ways in — ask to join, or join through vetting — and the
+  // person picks one, with one identity whichever they pick.
+  const onApply = useCallback(() => {
+    communityTarget.set({ communityDid })
+    ;(navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiJoin)
+  }, [communityDid, navigation])
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey('CommunityScroll')}>
         {/* What it is called, not what it is keyed by. The DID was the
             headline here; it is the only checkable thing on the screen, so it
             stays — one tap away, in the same place as every other detail. */}
@@ -238,6 +245,13 @@ const VtiCommunity: React.FC = () => {
           ) : null}
         </View>
 
+        {heldElsewhere ? (
+          <HeldByAnotherAgent
+            communityDid={communityDid}
+            community={communityLabelOf(communityDid, t)}
+            holderVtaDid={heldElsewhere}
+          />
+        ) : null}
         {membership ? (
           <View style={styles.card} testID={testIdWithKey('CommunityMember')}>
             <View style={styles.row}>
@@ -268,7 +282,7 @@ const VtiCommunity: React.FC = () => {
           </View>
         ) : null}
 
-        {membership ? null : (
+        {membership || heldElsewhere ? null : (
           <Text style={{ ...TextTheme.headingFour, color: TextTheme.normal.color }}>{t('MyAgent.WhatIsAsked')}</Text>
         )}
         {busy && !manifest && !membership ? <ActivityIndicator color={ColorPalette.brand.primary} /> : null}
@@ -280,25 +294,6 @@ const VtiCommunity: React.FC = () => {
                 <Text style={[styles.value, { flex: 1 }]}>{criterion.description ?? criterion.id}</Text>
               </View>
             ))}
-          </View>
-        ) : null}
-
-        {verdict ? (
-          <View style={styles.card} testID={testIdWithKey('CommunityVerdict')}>
-            <Text style={styles.label}>{t('MyAgent.Verdict')}</Text>
-            <Text style={styles.value} testID={testIdWithKey('CommunityVerdictEffect')}>
-              {verdict.effect}
-            </Text>
-            {verdict.needs.length > 0 ? (
-              <>
-                <Text style={styles.label}>{t('MyAgent.StillNeeded')}</Text>
-                {verdict.needs.map((need) => (
-                  <Text style={styles.value} key={need}>
-                    {need}
-                  </Text>
-                ))}
-              </>
-            ) : null}
           </View>
         ) : null}
 
@@ -324,23 +319,22 @@ const VtiCommunity: React.FC = () => {
           </View>
         ) : null}
 
-        {manifest && !verdict && !membership ? (
+        {manifest && !membership && !heldElsewhere ? (
           <Pressable
             style={styles.button}
             testID={testIdWithKey('ApplyToCommunityButton')}
             accessibilityRole="button"
-            disabled={busy}
             onPress={onApply}
           >
-            {busy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{t('MyAgent.Apply')}</Text>}
+            <Text style={styles.buttonText}>{t('Community.HowToJoin')}</Text>
           </Pressable>
         ) : null}
 
-        {!holds ? null : confirmingLeave ? (
+        {!holds || heldElsewhere ? null : confirmingLeave ? (
           <View style={styles.card} testID={testIdWithKey('LeaveCommunityConfirmCard')}>
             <Text style={styles.value}>
               {t('Community.LeaveExplains', {
-                community: communityLabelStartOf(communityDid, t),
+                community: communityLabelOf(communityDid, t),
                 interpolation: { escapeValue: false },
               })}
             </Text>

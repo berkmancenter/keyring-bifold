@@ -23,18 +23,26 @@ import { isOpenIdCredentialOffer } from '../utils/parsers'
 import { testIdWithKey } from '../utils/testable'
 import { vtaAgent } from '../modules/trust-tasks/module/vtaAgent'
 import { isLinkOnline, useAgentPresence } from '../modules/trust-tasks/module/vtaPresence'
+import { myAgentTabBadge, useWaitingRequestsCount } from '../modules/trust-tasks/module/waitingRequests'
 import { SiblingNoticeHost } from '../modules/trust-tasks/screens/SiblingNoticeHost'
 import { StepUpAskHost } from '../modules/trust-tasks/screens/StepUpAskHost'
 import { VtaOfflineBanner } from '../modules/trust-tasks/screens/VtaStatus'
-import { MY_AGENT_SCREEN, keyringAgentLinkKind } from '../modules/trust-tasks/module/vtiLinks'
+import { keyringAgentLinkKind, myAgentLinkParams } from '../modules/trust-tasks/module/vtiLinks'
 import { linkNoticeToast, openKeyringLink, type KeyringLinkNotice } from '../modules/trust-tasks/module/keyringLinkOpen'
 import { useVtiCardVault } from '../modules/trust-tasks/module/vtiCardVault'
 import { useVtiWalletCards } from '../modules/trust-tasks/module/vtiWalletCards'
+import { useCardAgentNames } from '../modules/trust-tasks/screens/cardAgentNames'
 // How a community's card reads in the Wallet (registers itself on import).
 import '../modules/trust-tasks/screens/communityCardDisplay'
 import { useVtiPersonaInbox } from '../modules/trust-tasks/module/vtiPersonaInbox'
+import { useVtiIdentityListeners } from '../modules/trust-tasks/module/vtiIdentityListeners'
+import { useLookAtOtherAgents } from '../modules/trust-tasks/module/lookAtOtherAgents'
 import { useVtiRefusedCardNotice } from '../modules/trust-tasks/screens/refusedCardNotice'
+import { useVtiJoinedNotice } from '../modules/trust-tasks/screens/joinedNotice'
+import { useVtiVetterGrantedNotice } from '../modules/trust-tasks/screens/vetterNotice'
+import { useToastAboveTabBar } from '../modules/trust-tasks/screens/aboveTabBar'
 import { useVtiRemovedNotice } from '../modules/trust-tasks/screens/removedNotice'
+import { useVtiTurnedDownNotice } from '../modules/trust-tasks/screens/turnedDownNotice'
 import { communityTarget } from '../modules/trust-tasks/module/vtiCommunityLink'
 import { useChosenCommunityDid } from '../modules/trust-tasks/screens/useCommunity'
 
@@ -55,6 +63,8 @@ const TabStack: React.FC = () => {
     TOKENS.COMPONENT_APP_GLOBAL_LISTENER,
   ])
   const { t } = useTranslation()
+  // Bottom toasts sit clear of the tab bar (aboveTabBar).
+  const toastBottomOffset = useToastAboveTabBar()
   const Tab = createBottomTabNavigator<TabStackParams>()
   const { assertNetworkConnected } = useNetwork()
   const { TabTheme, TextTheme, Assets, NavigationTheme, GradientTheme } = useTheme()
@@ -73,10 +83,16 @@ const TabStack: React.FC = () => {
   // The community a link chose (else the build's suggestion) gets the inbox.
   const inboxCommunityDid = useChosenCommunityDid(vti?.communityDid)
   useVtiPersonaInbox(agent, { mediatorDid: vti?.mediatorDid, communityDid: inboxCommunityDid, onError: onInboxError })
+  // …and every other identity this phone holds listens on its own, so what a
+  // community sends any of them arrives, whichever is chosen (IN-102).
+  useVtiIdentityListeners(agent, vti?.mediatorDid)
+  useLookAtOtherAgents(agent)
   // Each persona's cards are kept by its agent too, so a new phone can get them back (226).
   useVtiCardVault(agent)
   // …and shown in the Wallet while they stand, copied from the community store.
   useVtiWalletCards(agent)
+  // …each saying which agent holds it, when there are several.
+  useCardAgentNames(agent)
   // A delivered card the inbox did not keep is said in plain words.
   useVtiRefusedCardNotice()
   // This phone tells its agent it is here, from unlock (#10): registered once,
@@ -95,14 +111,33 @@ const TabStack: React.FC = () => {
   useAgentPresence(presencePort, presenceFailed, presenceLog)
   // A community's removal notice is said in plain words when it arrives.
   useVtiRemovedNotice()
+  // …and a community making this phone a member.
+  useVtiJoinedNotice()
+  // …and a community making this phone a vetter.
+  useVtiVetterGrantedNotice()
+  // …and a community turning a request down, once, when the app first learns it.
+  useVtiTurnedDownNotice()
   const navigation = useNavigation<StackNavigationProp<TabStackParams>>()
   const { fontScale } = useWindowDimensions()
   const showLabels = fontScale * TabTheme.tabBarTextStyle.fontSize < 18
   const [showQRCodeBottomSheet, setShowQRCodeBottomSheet] = React.useState(false)
   const { totalUnread } = useUnreadMessages()
+  // Requests waiting for this phone's decision: said on the tab, wherever the person is.
+  const myAgentBadge = myAgentTabBadge(useWaitingRequestsCount(), t)
   const styles = StyleSheet.create({
     tabBarIcon: {
       flex: 1,
+    },
+    // One badge for every tab that counts something waiting.
+    tabBarBadge: {
+      backgroundColor: '#D21E30',
+      color: '#FFFFFF',
+      fontSize: 11,
+      fontWeight: '600',
+      minWidth: 18,
+      height: 18,
+      borderRadius: 9,
+      lineHeight: 17,
     },
   })
 
@@ -129,11 +164,11 @@ const TabStack: React.FC = () => {
               (destination) =>
                 (navigation as unknown as { navigate: (name: string, params?: object) => void }).navigate(
                   Stacks.TabStack,
-                  { screen: TabStacks.MyAgentStack, params: { screen: MY_AGENT_SCREEN[destination] } }
+                  { screen: TabStacks.MyAgentStack, params: myAgentLinkParams(destination) }
                 ),
               (notice: KeyringLinkNotice) => {
                 if (notice.kind === 'unusable') logger.warn(`agent link not usable: ${notice.message ?? 'unreadable'}`)
-                const toast = linkNoticeToast(notice, t)
+                const toast = linkNoticeToast(notice, t, toastBottomOffset)
                 if (toast === 'hide') Toast.hide()
                 else Toast.show(toast)
               }
@@ -192,6 +227,7 @@ const TabStack: React.FC = () => {
       store.preferences.walletName,
       t,
       dispatch,
+      toastBottomOffset,
     ]
   )
 
@@ -274,16 +310,7 @@ const TabStack: React.FC = () => {
           options={{
             tabBarIconStyle: styles.tabBarIcon,
             tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
-            tabBarBadgeStyle: {
-              backgroundColor: '#D21E30',
-              color: '#FFFFFF',
-              fontSize: 11,
-              fontWeight: '600',
-              minWidth: 18,
-              height: 18,
-              borderRadius: 9,
-              lineHeight: 17,
-            },
+            tabBarBadgeStyle: styles.tabBarBadge,
             tabBarIcon: ({ color, focused }) => (
               <AttachTourStep tourID={BaseTourID.HomeTour} index={0}>
                 <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
@@ -387,6 +414,8 @@ const TabStack: React.FC = () => {
           component={MyAgentStack}
           options={{
             tabBarIconStyle: styles.tabBarIcon,
+            tabBarBadge: myAgentBadge.badge,
+            tabBarBadgeStyle: styles.tabBarBadge,
             tabBarIcon: ({ color, focused }) => (
               <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
                 <Icon name={focused ? 'shield-account' : 'shield-account-outline'} size={24} color={color} />
@@ -404,7 +433,7 @@ const TabStack: React.FC = () => {
               </View>
             ),
             tabBarShowLabel: false,
-            tabBarAccessibilityLabel: t('TabStack.MyAgent'),
+            tabBarAccessibilityLabel: myAgentBadge.label,
             // A literal key, not the translated label: the tabs that pass a
             // translated string into testIdWithKey have locale-dependent
             // testIDs, which the e2e harness already works around.

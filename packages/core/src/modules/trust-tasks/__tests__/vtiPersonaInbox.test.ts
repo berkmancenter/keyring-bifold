@@ -41,6 +41,8 @@ jest.mock('../module/vtiAgent', () => ({
     }),
   },
 }))
+/** What listPersonas returns, when a test sets it: every agent's identities on this phone. */
+let mockPersonas: Array<typeof mockPersona> | undefined
 const mockPersona = {
   did: 'did:webvh:p:host:craft-fatal',
   communityDid: 'did:webvh:c:host',
@@ -50,7 +52,7 @@ const mockPersona = {
 jest.mock('../module/VtiIdentityStore', () => ({
   GenericRecordsIdentityStore: jest.fn().mockImplementation(() => ({
     getPersona: async (c: string) => (c === mockPersona.communityDid ? mockPersona : null),
-    listPersonas: async () => [mockPersona],
+    listPersonas: async () => mockPersonas ?? [mockPersona],
   })),
 }))
 const mockSaveInvitation = jest.fn(async () => undefined)
@@ -66,11 +68,18 @@ jest.mock('../module/vtiTsp', () => ({ GenericRecordsTspPeerRevisionStore: jest.
 const mockReceiveIssue = jest.fn()
 jest.mock('../module/vtiInbox', () => ({ receiveIssue: (...a: unknown[]) => mockReceiveIssue(...a) }))
 const mockReceiveStatement = jest.fn(async () => undefined)
+const mockForgetApplication = jest.fn(async () => undefined)
 jest.mock('../module/vtiVetting', () => ({
-  GenericRecordsVettingStore: jest.fn(),
+  GenericRecordsVettingStore: jest.fn().mockImplementation(() => ({ forgetApplication: mockForgetApplication })),
   VtiApplicant: jest.fn().mockImplementation(() => ({ receiveStatement: mockReceiveStatement })),
 }))
+const mockReceiveNotice = jest.fn(async (): Promise<string> => 'ignored')
+jest.mock('../module/vtiCommunityNotices', () => ({
+  ...jest.requireActual('../module/vtiCommunityNotices'),
+  receiveCommunityNotice: (...a: unknown[]) => mockReceiveNotice(...(a as [])),
+}))
 
+import { setCurrentAgentDid } from '../module/currentAgent'
 import { startPersonaInbox as start, VTI_PERSONA_DELIVERIES_EVENT } from '../module/vtiPersonaInbox'
 import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 import { vtiAgent } from '../module/vtiAgent'
@@ -195,6 +204,46 @@ describe('startPersonaInbox', () => {
     stop()
   })
 
+  // IN-114 (237): a second agent current, the inbox signed in as the first
+  // agent's newer persona, whose key is borrowed only while that agent is
+  // connected — "key not found", then "no persona yet".
+  describe('with identities under two agents', () => {
+    const A = 'did:webvh:a:host:vta-a'
+    const B = 'did:webvh:b:host:vta-b'
+    const olderUnderA = {
+      ...mockPersona,
+      did: 'did:webvh:p:host:under-a',
+      vtaDid: A,
+      createdAt: '2026-09-01T00:00:00Z',
+    }
+    const newerUnderB = {
+      ...mockPersona,
+      did: 'did:webvh:p:host:under-b',
+      vtaDid: B,
+      createdAt: '2026-10-01T00:00:00Z',
+    }
+    afterEach(() => {
+      mockPersonas = undefined
+      setCurrentAgentDid(undefined)
+    })
+
+    it("signs in as the current agent's latest identity, never another agent's newer one", async () => {
+      mockPersonas = [olderUnderA, newerUnderB]
+      setCurrentAgentDid(A)
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      expect((vtiAgent.connect as jest.Mock).mock.calls[0][2].persona.did).toBe(olderUnderA.did)
+    })
+
+    it('signs in as nobody when the current agent holds no identity on this phone', async () => {
+      mockPersonas = [newerUnderB]
+      setCurrentAgentDid(A)
+      startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000 })
+      await flush()
+      expect(vtiAgent.connect).not.toHaveBeenCalled()
+    })
+  })
+
   it('stores a grant and announces it', async () => {
     mockReceiveIssue.mockResolvedValue([{ kind: 'vetter-grant', communityDid: mockPersona.communityDid }])
     const seen: unknown[] = []
@@ -216,6 +265,23 @@ describe('startPersonaInbox', () => {
     expect(seen).toEqual([{ communityDid: mockPersona.communityDid, kinds: ['vetter-grant'] }])
     sub.remove()
     stop()
+  })
+
+  // IN-104: an application gathered by the removed identity read, on joining
+  // again, as statements held — "Join, admitted straight away" for a request
+  // that carried none. A removal ends the application with the membership.
+  it('a removal notice clears the vetting application for that community; a join receipt does not', async () => {
+    startPersonaInbox(agent, { mediatorDid: 'did:peer:m', communityDid: mockPersona.communityDid, intervalMs: 60_000 })
+    await flush()
+    mockForgetApplication.mockClear()
+    mockReceiveNotice.mockResolvedValueOnce('acknowledged')
+    mockHandlers[0]({ type: 'https://trusttasks.org/spec/vtc/join-requests/submit-receipt/0.1' })
+    await flush()
+    expect(mockForgetApplication).not.toHaveBeenCalled()
+    mockReceiveNotice.mockResolvedValueOnce('removed')
+    mockHandlers[0]({ type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1' })
+    await flush()
+    expect(mockForgetApplication).toHaveBeenCalledWith(mockPersona.communityDid)
   })
 
   it("hands a vetter's statement to the applicant's full check, never storing it itself", async () => {
@@ -378,12 +444,16 @@ describe("a community admin console's Send: a pushed invitation offer", () => {
     }
   })
 
-  it('says so when it has no persona for the chosen community', async () => {
+  // IN-102: the session signed in as another of this phone's identities (a
+  // community other than the chosen one) used to drop what came for it, as
+  // "no persona". It is kept for that identity now.
+  it('keeps what comes for another of this phone’s identities while the session is signed in as it', async () => {
     const warn = jest.fn()
     const logged = { config: { logger: { warn, info: jest.fn(), debug: jest.fn() } } } as never
     startPersonaInbox(logged, { communityDid: 'did:webvh:other:host' })
     await flush()
-    mockAgentState.isConnected = true // a session this phone holds, for an identity of another community
+    mockReceiveNotice.mockClear()
+    mockAgentState.isConnected = true // the session is this phone's identity for another community
     mockHandlers.forEach((h) =>
       h({
         type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1',
@@ -392,7 +462,13 @@ describe("a community admin console's Send: a pushed invitation offer", () => {
       })
     )
     await flush()
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/persona inbox skipped .*removal-notice.*no persona/))
+    expect(mockReceiveNotice).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      mockPersona.did,
+      expect.anything()
+    )
+    expect(warn).not.toHaveBeenCalledWith(expect.stringMatching(/persona inbox skipped .*removal-notice/))
   })
 })
 

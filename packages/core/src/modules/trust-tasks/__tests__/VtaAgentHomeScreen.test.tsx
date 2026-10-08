@@ -3,20 +3,22 @@
  * doors and where they are on the journey — and the vetter role appears only
  * when a grant stands, never as a locked button up front.
  */
-import { useIsFocused, useNavigation } from '@react-navigation/native'
-import { act, fireEvent, render } from '@testing-library/react-native'
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
+import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
-import { DeviceEventEmitter, ScrollView } from 'react-native'
+import { DeviceEventEmitter, StyleSheet } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
+import { TAB_BAR_CLEARANCE } from '../screens/aboveTabBar'
 import { vtaAgent } from '../module/vtaAgent'
+import { communityTarget } from '../module/vtiCommunityLink'
 import { emitCommunityChanged } from '../module/communityChanged'
 import { VTI_PERSONA_DELIVERIES_EVENT } from '../module/vtiPersonaInbox'
-import VtaAgentHome, { forgetAgentHoldings, VETTER_RECHECK_MS } from '../screens/VtaAgentHome'
+import VtaAgentHome, { forgetAgentHoldings, HIGHLIGHT_MS, VETTER_RECHECK_MS } from '../screens/VtaAgentHome'
 import { communityCardKey } from '../screens/CommunityCard'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -80,6 +82,8 @@ function fakeAgent(records: Rec[]) {
 describe('Your agent — after linking', () => {
   beforeEach(() => {
     jest.useFakeTimers()
+    // Before the requests below expire: one past its expiry does not wait.
+    jest.setSystemTime(new Date('2026-09-23T04:00:00Z'))
     forgetAgentHoldings()
     mockGrantState.mockReset()
     mockGrantState.mockResolvedValue({ state: 'none' })
@@ -130,8 +134,61 @@ describe('Your agent — after linking', () => {
     again.mockRestore()
   })
 
+  // VTI #1978: replies stopped reaching the phone; asks wait, and the screen says why.
+  it('says the agent is catching up while replies are not reaching this phone, and not otherwise', async () => {
+    controller.set({ repliesStalled: true })
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentCatchingUp'))).toHaveTextContent('VtaLink.CatchingUp')
+    controller.set({ repliesStalled: false })
+    expect((await renderHome([])).queryByTestId(testIdWithKey('AgentCatchingUp'))).toBeNull()
+  })
+
+  // Gate 235 shots, iOS: My devices, the last row, sat half under the tab bar.
+  it('leaves room at its foot for the tab bar, so its last row scrolls clear of it', async () => {
+    const tree = await renderHome([])
+    expect(
+      StyleSheet.flatten(tree.getByTestId(testIdWithKey('AgentHome')).props.contentContainerStyle).paddingBottom
+    ).toBeGreaterThanOrEqual(TAB_BAR_CLEARANCE)
+  })
+
+  // 234 known issue: after a refused request, Android's SwipeRefreshLayout
+  // behind pull-to-refresh took every tap on the switcher's rows. My Agent has
+  // no pull-to-refresh; it reads again on focus.
+  it('has no pull-to-refresh', async () => {
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentHome')).props.refreshControl).toBeUndefined()
+  })
+
+  // The several-agents device check: a switch took about 20 s with nothing on screen.
+  it('says which agent it is switching to while a switch lasts, and the chips wait', async () => {
+    controller.set({ switchingTo: 'did:webvh:home-screen:other-vta' })
+    const use = jest.spyOn(vtaAgent, 'useAgent').mockResolvedValue(undefined)
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentSwitching'))).toHaveTextContent(/VtaLink\.Switching/)
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')).props.accessibilityState).toMatchObject({
+      disabled: true,
+    })
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
+    expect(use).not.toHaveBeenCalled()
+    controller.set({ switchingTo: undefined })
+    use.mockRestore()
+  })
+
+  // 234 final gate: Android read the `busy` key even when false, and said "busy" in place of the agent's name.
+  it("names each agent's chip to a screen reader by the agent's name, the current one selected", async () => {
+    const tree = await renderHome([])
+    const chip = tree.getByTestId(testIdWithKey('AgentSwitcherRow_0'))
+    // "<name>, Current", as the list's rows read (the e2e switch checks read it).
+    expect(chip.props.accessibilityLabel).toBe(
+      `${tree.getByTestId(testIdWithKey('AgentHomeName')).props.children}, VtaLink.SwitcherCurrent`
+    )
+    expect(chip.props.accessibilityState).toEqual({ selected: true, disabled: true })
+    // No busy value at all (234: Android said "busy" for a false one).
+    expect(chip.props.accessibilityState.busy).toBeUndefined()
+  })
+
   // 228 agent-gone: an agent that no longer exists is said so, with a new one as the way on.
-  it('says the agent cannot be found and why, and Link a new agent confirms unlinking in words for a gone agent', async () => {
+  it('says the agent cannot be found and why, and Link a new agent opens Agent settings at its unlink', async () => {
     const { link } = controller.getState()
     controller.set({ link: { ...(link as object), connection: { kind: 'gone', why: 'notFound', since: 0 } } as never })
     const unlink = jest.spyOn(vtaAgent, 'unlink').mockResolvedValue(undefined)
@@ -141,10 +198,12 @@ describe('Your agent — after linking', () => {
     expect(tree.getByTestId(testIdWithKey('VtaStatusText'))).toHaveTextContent(/VtaLink\.StatusGone/)
     expect(tree.queryByTestId(testIdWithKey('AgentGaveUp'))).toBeNull()
 
+    // Unlinking is confirmed in Agent settings, opened at its unlink (VtaAgentSettingsScreen.test).
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
     fireEvent.press(tree.getByTestId(testIdWithKey('AgentGoneLinkNew')))
-    expect(tree.getByTestId(testIdWithKey('AgentUnlinkBody'))).toHaveTextContent(/VtaLink\.UnlinkBodyGone/)
-    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('AgentUnlinkConfirm'))))
-    expect(unlink).toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith(Screens.VtaAgentSettings, { unlink: true })
+    expect(unlink).not.toHaveBeenCalled()
     unlink.mockRestore()
   })
 
@@ -174,7 +233,7 @@ describe('Your agent — after linking', () => {
     expect(tree.queryByTestId(testIdWithKey('AgentApprovalCard'))).toBeNull()
   })
 
-  it('says an approval is waiting on every segment, and shows it in Manage with what it is and when it expires', async () => {
+  it('names a waiting request in the Requests section, and it opens the Requests screen', async () => {
     controller.set({
       approvals: [
         {
@@ -187,26 +246,16 @@ describe('Your agent — after linking', () => {
       ],
     })
     const tree = await renderHome([])
-    expect(tree.getByTestId(testIdWithKey('AgentApprovalBanner'))).toHaveTextContent(/VtaLink\.ApprovalsWaiting/)
+    const navigation = useNavigation() as unknown as { navigate: jest.Mock }
+    navigation.navigate.mockClear()
+    expect(tree.getByTestId(testIdWithKey('AgentApprovalBanner'))).toHaveTextContent(/Requests\.AsksTo/)
     fireEvent.press(tree.getByTestId(testIdWithKey('AgentApprovalBanner')))
-    expect(tree.getByTestId(testIdWithKey('AgentSegment_manage')).props.accessibilityState).toEqual({ selected: true })
-    const card = tree.getByTestId(testIdWithKey('AgentApprovalCard'))
-    // The task, not its URI; the requester short, not entire.
-    expect(card).toHaveTextContent(/MyAgent\.ApprovalAsks/)
-    expect(card).toHaveTextContent(/MyAgent\.ApprovalExpires/)
-    // The task URI is ours to read, not the person's.
-    expect(card).not.toHaveTextContent(/trusttasks\.org/)
-    expect(tree.getByTestId(testIdWithKey('ApproveConsentButton'))).toBeTruthy()
-    expect(tree.getByTestId(testIdWithKey('DenyConsentButton'))).toBeTruthy()
-    // Nothing said what it would do: the card says it could not tell, never "no effects".
-    expect(tree.getByTestId(testIdWithKey('ApprovalOutcomeUnknown'))).toHaveTextContent(
-      /MyAgent\.ApprovalOutcomeUnknown/
-    )
-    expect(tree.queryByTestId(testIdWithKey('ApprovalMatchCode'))).toBeNull()
+    expect(navigation.navigate).toHaveBeenCalledWith(Screens.VtaRequests)
     controller.set({ approvals: [] })
   })
 
-  it('shows what approving would do and the code to compare', async () => {
+  // Alberto, 10-06: requests live on "Your agent", not under Agent settings.
+  it('Requests are on the page, not under settings: a row says how many wait and leads to Requests', async () => {
     controller.set({
       approvals: [
         {
@@ -215,18 +264,45 @@ describe('Your agent — after linking', () => {
           taskType: 'https://trusttasks.org/spec/keys/export-secret/0.1',
           expiresAt: '2026-09-23T04:30:00Z',
           status: 'pending',
-          matchCode: 'abcdef',
-          outcome: { from: 'effects', lines: ['Hands a copy of the signing key to the requester'] },
         },
       ],
     })
     const tree = await renderHome([])
-    fireEvent.press(tree.getByTestId(testIdWithKey('AgentApprovalBanner')))
-    const outcome = tree.getByTestId(testIdWithKey('ApprovalOutcome'))
-    expect(outcome).toHaveTextContent(/MyAgent\.ApprovalWouldDo/)
-    expect(outcome).toHaveTextContent(/Hands a copy of the signing key to the requester/)
-    expect(tree.queryByTestId(testIdWithKey('ApprovalOutcomeUnknown'))).toBeNull()
-    expect(tree.getByTestId(testIdWithKey('ApprovalMatchCode'))).toHaveTextContent('abcdef')
+    const navigation = useNavigation() as unknown as { navigate: jest.Mock }
+    navigation.navigate.mockClear()
+    // Decided on Requests, not here.
+    expect(tree.queryByTestId(testIdWithKey('AgentApprovalCard'))).toBeNull()
+    expect(tree.queryByTestId(testIdWithKey('ApproveConsentButton'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('AgentRequestsRowCount'))).toHaveTextContent(/Requests\.RowWaiting/)
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentRequestsRow')))
+    expect(navigation.navigate).toHaveBeenCalledWith(Screens.VtaRequests)
+    controller.set({ approvals: [] })
+  })
+
+  it('the Requests section is there with nothing waiting, with "Ask me before…"', async () => {
+    controller.set({ approvals: [] })
+    const navigation = useNavigation() as unknown as { navigate: jest.Mock }
+    navigation.navigate.mockClear()
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentRequestsRowCount'))).toHaveTextContent(/Requests\.RowNone/)
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentAskMeRow')))
+    expect(navigation.navigate).toHaveBeenCalledWith(Screens.VtaAskMe)
+  })
+
+  it('lists at most three waiting requests, then "See all"', async () => {
+    const one = (id: string) => ({
+      id,
+      requester: 'did:peer:2.Vz6MkrequesterXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      taskType: 'https://trusttasks.org/spec/vta/contexts/list/1.0',
+      expiresAt: '2026-09-23T04:30:00Z',
+      status: 'pending',
+    })
+    controller.set({ approvals: ['r1', 'r2', 'r3', 'r4'].map(one) })
+    const tree = await renderHome([])
+    expect(tree.getByTestId(testIdWithKey('AgentApprovalBanner'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentRequestsItem_2'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentRequestsItem_3'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('AgentRequestsAll'))).toHaveTextContent(/VtaLink\.RequestsSeeAll/)
     controller.set({ approvals: [] })
   })
 
@@ -256,6 +332,23 @@ describe('Your agent — after linking', () => {
     } as never)
     const one = await renderHome([])
     expect(one.getByTestId(testIdWithKey('AgentApprovalBanner'))).toBeTruthy()
+    controller.set({ approvals: [] })
+  })
+
+  it('says nothing is waiting for a request past its expiry', async () => {
+    controller.set({
+      approvals: [
+        {
+          id: 'late',
+          requester: 'did:peer:2.Vz6MkrequesterXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+          taskType: 'https://trusttasks.org/spec/vta/contexts/list/1.0',
+          expiresAt: '2026-09-23T03:59:00Z',
+          status: 'pending',
+        },
+      ],
+    } as never)
+    const tree = await renderHome([])
+    expect(tree.queryByTestId(testIdWithKey('AgentApprovalBanner'))).toBeNull()
     controller.set({ approvals: [] })
   })
 
@@ -417,7 +510,7 @@ describe('Your agent — after linking', () => {
     })
 
     it("another agent never shows the last one's reading", async () => {
-      (await renderHome([persona, membership])).unmount()
+      ;(await renderHome([persona, membership])).unmount()
       controller.set({
         link: {
           kind: 'linked',
@@ -431,27 +524,15 @@ describe('Your agent — after linking', () => {
       expect(mount().queryByTestId(testIdWithKey('AgentSeat'))).toBeNull()
     })
 
-    it('forgets the reading on unlink', async () => {
-      const first = await renderHome([persona, membership])
-      await act(async () => fireEvent.press(first.getByTestId(testIdWithKey('AgentSegment_manage'))))
-      await act(async () => fireEvent.press(first.getByTestId(testIdWithKey('AgentUnlink'))))
-      await act(async () => fireEvent.press(first.getByTestId(testIdWithKey('AgentUnlinkConfirm'))))
-      first.unmount()
-      controller.set({
-        link: {
-          kind: 'linked',
-          vtaDid: 'did:webvh:example:vta',
-          label: 'bob',
-          linkedAt: '2026-09-24T00:00:00Z',
-          connection: { kind: 'online', since: 0 },
-        },
-      })
+    it('forgets the reading when told to (unlinking does, from Agent settings)', async () => {
+      ;(await renderHome([persona, membership])).unmount()
+      forgetAgentHoldings()
       ;(useAgent as jest.Mock).mockReturnValue(hanging([persona, membership]))
       expect(mount().queryByTestId(testIdWithKey('AgentSeat'))).toBeNull()
     })
 
     it('a refresh that fails keeps the reading and says it could not refresh', async () => {
-      (await renderHome([persona, membership])).unmount()
+      ;(await renderHome([persona, membership])).unmount()
       const failing = fakeAgent([persona, membership])
       failing.agent.genericRecords.findAllByQuery = async () => {
         throw new Error('storage unavailable')
@@ -486,14 +567,23 @@ describe('Your agent — after linking', () => {
     expect(tree.queryByTestId(testIdWithKey('AgentVetterCard'))).toBeNull()
   })
 
+  // IN-102: "Join community" opened on the last community a link named, where a
+  // member saw only "Open". It starts from the beginning now.
+  it('"Join community" starts from the beginning, not on the last community a link opened', async () => {
+    communityTarget.set({ communityDid: 'did:webvh:QmLinked:vtc.linked.example', name: 'Linked' })
+    const tree = await renderHome([])
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('AgentJoinCommunity'))))
+    expect(communityTarget.getViewing()).toBeUndefined()
+    expect(useNavigation().navigate).toHaveBeenCalledWith(Screens.VtiJoin)
+  })
+
   it('a grant that stands shows "You can now vet people" with the desk', async () => {
     mockGrantState.mockResolvedValue({ state: 'active', statusChecked: true })
     const tree = await renderHome([persona, grant])
     expect(tree.getByTestId(testIdWithKey('AgentVetterCard'))).toHaveTextContent(/VtaLink.YouCanVet/)
-    // The desk is the community card's one button; the vetter card no longer repeats it.
-    expect(
-      tree.getByTestId(testIdWithKey(`AgentCommunityPrimary_${communityCardKey(communityDid)}`))
-    ).toHaveTextContent('VtaLink.OpenDesk')
+    // The desk is the vetter card's one button, at the top; the community's card does not repeat it.
+    expect(tree.getByTestId(testIdWithKey('AgentOpenDesk'))).toHaveTextContent('VtaLink.OpenDesk')
+    expect(tree.queryByTestId(testIdWithKey(`AgentCommunityPrimary_${communityCardKey(communityDid)}`))).toBeNull()
     expect(tree.queryByTestId(testIdWithKey('AgentVetOthers'))).toBeNull()
   })
 
@@ -522,9 +612,9 @@ describe('Your agent — after linking', () => {
     expect(tree.getByTestId(testIdWithKey('AgentShareIdentity'))).toBeTruthy()
   })
 
-  it('a member: the journey says "Joined" and names the community', async () => {
+  it('a member: a status line names the community, in place of the step bar', async () => {
     const tree = await renderHome([persona, membership])
-    expect(tree.getByTestId(testIdWithKey('AgentJourneyJoined'))).toHaveTextContent('✓ VtaLink.JourneyJoined')
+    expect(tree.getByTestId(testIdWithKey('AgentJourneyJoined'))).toHaveTextContent(/VtaLink\.StatusMemberOf/)
     expect(tree.queryByTestId(testIdWithKey('AgentJourneyJoin'))).toBeNull()
   })
 
@@ -632,7 +722,7 @@ describe('Your agent — after linking', () => {
    * member's only way to a community. Both now start here, so a linked phone
    * never needs the panel.
    */
-  it('an applicant can carry on with vetting from the line that says why', async () => {
+  it('an applicant can carry on with vetting from the next-step card', async () => {
     const navigate = useNavigation().navigate as jest.Mock
     navigate.mockClear()
     const tree = await renderHome([persona])
@@ -657,102 +747,365 @@ describe('Your agent — after linking', () => {
     expect(navigate).not.toHaveBeenCalledWith(Screens.MyAgent)
   })
 
-  // IN-20c: the same three places every time, Communities first.
-  it('opens on Communities; Manage and Status hold the rest; devices are in reach from each', async () => {
+  // Alberto, 10-06: Join and the gear in the header's corners; requests on the
+  // page; the rest of what was under "Agent settings" on its own screen.
+  // The mock navigation is a plain object; not a hook here.
+  const navigationMock = useNavigation
+  const corners = () => {
+    const setOptions = navigationMock().setOptions as jest.Mock
+    const options = setOptions.mock.calls.at(-1)?.[0] as {
+      headerLeft: () => React.ReactNode
+      headerRight: () => React.ReactNode
+    }
+    return render(
+      <BasicAppContext>
+        <>
+          {options.headerLeft()}
+          {options.headerRight()}
+        </>
+      </BasicAppContext>
+    )
+  }
+
+  // Alberto, 239: the header's Join menu said again what the page's cards
+  // say. A member joins another community from one row at the page's end.
+  it('after joining: the communities first, "Join another community" at the end, and a gear for settings', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
     const tree = await renderHome([persona, membership])
-    expect(tree.getByTestId(testIdWithKey('AgentHomeTitle'))).toHaveTextContent('MyAgent.Title')
+    expect(tree.getByTestId(testIdWithKey('AgentHomeTitle'))).toHaveTextContent('VtaLink.SwitcherTitle')
     expect(tree.getByTestId(testIdWithKey('AgentHomeName'))).toBeTruthy()
-    expect(tree.getByTestId(testIdWithKey('AgentSegment_communities')).props.accessibilityState).toEqual({
-      selected: true,
-    })
     expect(tree.getByTestId(testIdWithKey('AgentHolds'))).toBeTruthy()
     expect(tree.getByTestId(testIdWithKey('AgentDevices'))).toBeTruthy()
-    expect(tree.queryByTestId(testIdWithKey('AgentUnlink'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('AgentRequests'))).toBeTruthy()
+    // The two doors give way to one row, after everything else.
+    expect(tree.queryByTestId(testIdWithKey('AgentDoors'))).toBeNull()
+    const ids: string[] = []
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) return node.forEach(walk)
+      const n = node as { props?: { testID?: string }; children?: unknown[] }
+      if (n.props?.testID) ids.push(n.props.testID)
+      n.children?.forEach(walk)
+    }
+    walk(tree.toJSON())
+    expect(ids.indexOf(testIdWithKey('AgentJoinAnother'))).toBeGreaterThan(ids.indexOf(testIdWithKey('AgentDevices')))
+    expect(tree.getByTestId(testIdWithKey('AgentJoinAnother'))).toHaveTextContent(/VtaLink\.JoinAnother/)
+    // Nothing of settings is on the page.
+    for (const key of ['AgentSettings', 'AgentUnlink', 'AgentActivity', 'AgentDetailsToggle']) {
+      expect(tree.queryByTestId(testIdWithKey(key))).toBeNull()
+    }
 
-    fireEvent.press(tree.getByTestId(testIdWithKey('AgentSegment_manage')))
-    expect(tree.getByTestId(testIdWithKey('AgentUnlink'))).toBeTruthy()
-    expect(tree.queryByTestId(testIdWithKey('AgentHolds'))).toBeNull()
-    expect(tree.getByTestId(testIdWithKey('AgentDevices'))).toBeTruthy()
+    navigate.mockClear()
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentJoinAnother')))
+    expect(navigate).toHaveBeenCalledWith(Screens.VtiJoin)
 
-    fireEvent.press(tree.getByTestId(testIdWithKey('AgentSegment_status')))
-    expect(tree.getByTestId(testIdWithKey('AgentActivity'))).toBeTruthy()
-    expect(tree.getByTestId(testIdWithKey('AgentDetailsToggle'))).toBeTruthy()
-    // The agent's identifier stays behind Details.
-    expect(tree.queryByTestId(testIdWithKey('AgentDetails'))).toBeNull()
-    expect(tree.getByTestId(testIdWithKey('AgentDevices'))).toBeTruthy()
+    const header = corners()
+    expect(header.queryByTestId(testIdWithKey('AgentJoinCorner'))).toBeNull()
+    fireEvent.press(header.getByTestId(testIdWithKey('AgentSettings')))
+    expect(navigate).toHaveBeenCalledWith(Screens.VtaAgentSettings)
   })
 
-  it('comes back to the segment the person left it on', async () => {
-    const first = await renderHome([persona, membership])
-    fireEvent.press(first.getByTestId(testIdWithKey('AgentSegment_status')))
-    first.unmount()
-    const again = await renderHome([persona, membership])
-    expect(again.getByTestId(testIdWithKey('AgentSegment_status')).props.accessibilityState).toEqual({ selected: true })
+  // Alberto, 239: Requests below "What brings you here?", and a line between
+  // sections so it is clear where each one ends.
+  it('Requests follows the ways in, and a line sets each section apart', async () => {
+    const tree = await renderHome([persona])
+    const ids: string[] = []
+    const walk = (node: unknown) => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) return node.forEach(walk)
+      const n = node as { props?: { testID?: string }; children?: unknown[] }
+      if (n.props?.testID) ids.push(n.props.testID)
+      n.children?.forEach(walk)
+    }
+    walk(tree.toJSON())
+    const at = (key: string) => ids.indexOf(testIdWithKey(key))
+    expect(at('AgentDoors')).toBeGreaterThan(-1)
+    expect(at('AgentRequests')).toBeGreaterThan(at('AgentDoors'))
+    expect(at('AgentHolds')).toBeGreaterThan(at('AgentRequests'))
+    // A line before the ways in, Requests, what the agent holds, and devices.
+    const rules = ids.map((id, i) => (id === testIdWithKey('AgentSectionRule') ? i : -1)).filter((i) => i >= 0)
+    expect(rules).toHaveLength(4)
+    expect(rules[0]).toBeLessThan(at('AgentDoors'))
+    expect(rules[1]).toBeGreaterThan(at('AgentDoors'))
+    expect(rules[1]).toBeLessThan(at('AgentRequests'))
+    expect(rules[2]).toBeLessThan(at('AgentHolds'))
+  })
+
+  it('before joining: the two doors lead the page, and the header has only the gear', async () => {
+    const tree = await renderHome([persona])
+    expect(tree.getByTestId(testIdWithKey('AgentDoors'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentInvited'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentJoinCommunity'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentJoinAnother'))).toBeNull()
+    const header = corners()
+    expect(header.queryByTestId(testIdWithKey('AgentJoinCorner'))).toBeNull()
+    expect(header.getByTestId(testIdWithKey('AgentSettings'))).toBeTruthy()
+  })
+
+  // As wide as the app's own header buttons (IconButton: the icon and 15 on
+  // the screen's side). With padding on both sides it was clipped at the
+  // edge (236, iPhone and Pixel).
+  it("the gear is an icon button the size of the app's own, named for a screen reader", async () => {
+    await renderHome([persona, membership])
+    const gear = corners().getByTestId(testIdWithKey('AgentSettings'))
+    expect(gear.props.accessibilityLabel).toBe('VtaLink.AgentSettings')
+    const { paddingHorizontal, paddingLeft, paddingRight, marginLeft, marginRight } = StyleSheet.flatten(
+      gear.props.style
+    )
+    expect({ paddingHorizontal, paddingLeft, paddingRight, marginLeft, marginRight }).toEqual({
+      paddingHorizontal: undefined,
+      paddingLeft: undefined,
+      paddingRight: undefined,
+      marginLeft: undefined,
+      marginRight: 15,
+    })
+  })
+
+  it('the introduction has no header corners', async () => {
+    controller.set({ introSeen: false })
+    await renderHome([])
+    const setOptions = useNavigation().setOptions as jest.Mock
+    const options = setOptions.mock.calls.at(-1)?.[0] as { headerLeft: () => unknown; headerRight: () => unknown }
+    expect(options.headerLeft()).toBeNull()
+    expect(options.headerRight()).toBeNull()
+    controller.set({ introSeen: true })
+  })
+
+  // 239 and 238, iPhone: the panel sat high, as it kept room for a tab bar
+  // that sits below the screen, not over it. The words and their buttons are
+  // centred together, with no such room.
+  it('the introduction, words and buttons together, is centred between the header and the tab bar', async () => {
+    controller.set({ introSeen: false })
+    const tree = await renderHome([])
+    const intro = tree.getByTestId(testIdWithKey('AgentIntro'))
+    const style = StyleSheet.flatten(intro.props.style)
+    expect(style).toMatchObject({ flex: 1, justifyContent: 'center', padding: 20 })
+    expect(style.paddingBottom).toBeUndefined()
+    expect(within(intro).getByTestId(testIdWithKey('AgentIntroNext'))).toBeTruthy()
+    controller.set({ introSeen: true })
+  })
+
+  // Alberto, 238: Join's "Done" after an admission comes back here with the
+  // new community's card picked out for a moment.
+  it('a community just joined is picked out on its card for a moment', async () => {
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { highlightCommunity: communityDid } })
+    const tree = await renderHome([persona, membership])
+    expect(tree.getByTestId(testIdWithKey('AgentCommunityHighlighted'))).toBeTruthy()
+    await act(async () => {
+      jest.advanceTimersByTime(HIGHLIGHT_MS)
+    })
+    expect(tree.queryByTestId(testIdWithKey('AgentCommunityHighlighted'))).toBeNull()
+    ;(useRoute as jest.Mock).mockReturnValue({ params: {} })
   })
 
   it('no approval waiting: no banner', async () => {
     const tree = await renderHome([])
     expect(tree.queryByTestId(testIdWithKey('AgentApprovalBanner'))).toBeNull()
   })
+})
 
-  describe('unlinking this agent', () => {
-    afterEach(() => jest.restoreAllMocks())
-
-    const openCard = async (tree: Awaited<ReturnType<typeof renderHome>>) => {
-      // Unlinking is in Manage (IN-20c).
-      await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('AgentSegment_manage'))))
-      await act(async () => {
-        fireEvent.press(tree.getByTestId(testIdWithKey('AgentUnlink')))
-      })
-    }
-
-    it('asks first, in place, naming the agent and saying what the person loses', async () => {
-      const unlink = jest.spyOn(vtaAgent, 'unlink').mockResolvedValue(undefined)
-      controller.set({ agentNames: { 'did:webvh:example:vta': { label: 'keyring-runner-uiux', source: 'vtaName' } } })
-      const tree = await renderHome([persona])
-      expect(tree.queryByTestId(testIdWithKey('AgentUnlinkCard'))).toBeNull()
-      await openCard(tree)
-      // The test translator returns keys; the agent's name is what is passed in.
-      expect(tree.getByTestId(testIdWithKey('AgentUnlinkTitle'))).toHaveTextContent('VtaLink.UnlinkTitle')
-      expect(tree.getByTestId(testIdWithKey('AgentUnlinkBody'))).toHaveTextContent('VtaLink.UnlinkBody')
-      expect(tree.getByTestId(testIdWithKey('AgentUnlinkConfirm'))).toBeTruthy()
-      expect(tree.getByTestId(testIdWithKey('AgentUnlinkCancel'))).toBeTruthy()
-      // Nothing happens until the person confirms.
-      expect(unlink).not.toHaveBeenCalled()
+// Several agents, step 2: the agent's name opens the list; switching, adding,
+// and the question after an agent is added.
+describe('Your agent — several agents', () => {
+  // DIDs no other test names: the controller keeps agent names across tests.
+  const HOME = 'did:webvh:example:switch-home-vta'
+  const WORK = 'did:webvh:example:switch-work-vta'
+  beforeEach(() => {
+    jest.useFakeTimers()
+    forgetAgentHoldings()
+    mockGrantState.mockReset()
+    mockGrantState.mockResolvedValue({ state: 'none' })
+    controller.set({
+      introSeen: true,
+      activity: [],
+      addedAgent: undefined,
+      agents: [
+        { vtaDid: HOME, label: 'Home' },
+        { vtaDid: WORK, label: 'Work' },
+      ],
+      link: {
+        kind: 'linked',
+        vtaDid: HOME,
+        label: 'Home',
+        linkedAt: '2026-09-22T00:00:00Z',
+        connection: { kind: 'online', since: 0 },
+      },
     })
-
-    it('unlinks on confirm and lands on linking an agent', async () => {
-      const unlink = jest.spyOn(vtaAgent, 'unlink').mockResolvedValue(undefined)
-      const navigate = useNavigation().navigate as jest.Mock
-      navigate.mockClear()
-      const tree = await renderHome([persona])
-      await openCard(tree)
-      await act(async () => {
-        fireEvent.press(tree.getByTestId(testIdWithKey('AgentUnlinkConfirm')))
-      })
-      expect(unlink).toHaveBeenCalledTimes(1)
-      expect(navigate).toHaveBeenCalledWith(Screens.VtaLink)
+  })
+  afterEach(() => {
+    controller.set({ agents: undefined, addedAgent: undefined })
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+  const renderHome = async () => {
+    ;(useAgent as jest.Mock).mockReturnValue(fakeAgent([]))
+    const tree = render(
+      <BasicAppContext>
+        <VtaAgentHome />
+      </BasicAppContext>
+    )
+    await act(async () => {
+      jest.advanceTimersByTime(10)
     })
+    return tree
+  }
 
-    it('brings the card into view when it opens, at the foot of the screen', async () => {
-      const scroll = jest.spyOn(ScrollView.prototype, 'scrollToEnd').mockImplementation(() => undefined)
-      const tree = await renderHome([persona])
-      await openCard(tree)
-      await act(async () => {
-        jest.advanceTimersByTime(100)
-      })
-      expect(scroll).toHaveBeenCalledWith({ animated: true })
+  it('the agents are chips: each one by name, the current one filled and selected, and Add at the end', async () => {
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcher'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherRow_0'))).toHaveTextContent(/Home/)
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherRow_0')).props.accessibilityState).toMatchObject({
+      selected: true,
     })
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherCurrent'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherOther_1'))).toHaveTextContent('Work')
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherRow_1')).props.accessibilityState).toMatchObject({
+      selected: false,
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherAdd'))).toBeTruthy()
+  })
 
-    it('Cancel closes the card and keeps the link', async () => {
-      const unlink = jest.spyOn(vtaAgent, 'unlink').mockResolvedValue(undefined)
-      const tree = await renderHome([persona])
-      await openCard(tree)
-      await act(async () => {
-        fireEvent.press(tree.getByTestId(testIdWithKey('AgentUnlinkCancel')))
-      })
-      expect(tree.queryByTestId(testIdWithKey('AgentUnlinkCard'))).toBeNull()
-      expect(unlink).not.toHaveBeenCalled()
+  it('choosing another agent switches to it', async () => {
+    const use = jest.spyOn(vtaAgent, 'useAgent').mockResolvedValue(undefined)
+    const tree = await renderHome()
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherRow_1')))
+    expect(use).toHaveBeenCalledWith(expect.anything(), WORK)
+  })
+
+  it('"Add" leaves the current agent and opens linking', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const start = jest.spyOn(vtaAgent, 'startAddingAgent').mockResolvedValue(undefined)
+    const tree = await renderHome()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
     })
+    expect(start).toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith(Screens.VtaLink)
+  })
+
+  // 238, iPhone: between leaving the current agent and the link screen,
+  // this page drew "Link your agent" for an instant. Nothing is drawn.
+  it('"Add" draws no "Link your agent" while it leaves for the link screen', async () => {
+    const before = vtaAgent.getState().link
+    jest.spyOn(vtaAgent, 'startAddingAgent').mockImplementation(async () => {
+      controller.set({ link: { kind: 'notLinked' } })
+    })
+    const tree = await renderHome()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentHomeLeaving'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentHomeLink'))).toBeNull()
+    controller.set({ link: before })
+  })
+
+  // IN-138: an add that failed or was left by another way, and the person is
+  // back on this page: the add is given up and the agent before returns.
+  it('arriving here with an "Add" still open and nothing under way gives it up', async () => {
+    const before = vtaAgent.getState().link
+    const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+    controller.set({ addingAgent: true, link: { kind: 'notLinked', lastError: { reason: 'communityAgent' } } })
+    await renderHome()
+    expect(cancel).toHaveBeenCalledTimes(1)
+    controller.set({ addingAgent: false, link: before })
+  })
+
+  it('pressing "Add" on this page does not give the add up', async () => {
+    const before = vtaAgent.getState().link
+    const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+    jest.spyOn(vtaAgent, 'startAddingAgent').mockImplementation(async () => {
+      controller.set({ addingAgent: true, link: { kind: 'notLinked' } })
+    })
+    const tree = await renderHome()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentSwitcherAdd')))
+    })
+    expect(cancel).not.toHaveBeenCalled()
+    controller.set({ addingAgent: false, link: before })
+  })
+
+  // 237, iPhone: "Add another agent" ran off the screen's edge beside one
+  // agent's chip. The chip says "Add"; a screen reader hears it whole.
+  it('one agent: one chip, and "Add", named "Add another agent" for a screen reader', async () => {
+    controller.set({ agents: [{ vtaDid: HOME, label: 'Home' }] })
+    const tree = await renderHome()
+    expect(tree.queryByTestId(testIdWithKey('AgentSwitcherRow_1'))).toBeNull()
+    const add = tree.getByTestId(testIdWithKey('AgentSwitcherAdd'))
+    expect(add).toHaveTextContent(/VtaLink\.ChipAdd/)
+    expect(add).not.toHaveTextContent(/VtaLink\.SwitcherAdd/)
+    expect(add.props.accessibilityLabel).toBe('VtaLink.SwitcherAdd')
+  })
+
+  it('two agents with no name: "Agent 1" and "Agent 2", never "your agent" twice', async () => {
+    controller.set({
+      agents: [
+        { vtaDid: HOME, label: HOME },
+        { vtaDid: WORK, label: WORK },
+      ],
+      link: {
+        kind: 'linked',
+        vtaDid: HOME,
+        label: HOME,
+        linkedAt: '2026-09-22T00:00:00Z',
+        connection: { kind: 'online', since: 0 },
+      },
+    })
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentHomeName'))).toHaveTextContent('VtaLink.ChipUnnamed')
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherOther_1'))).toHaveTextContent('VtaLink.ChipUnnamed')
+  })
+
+  it('after an agent is added: use it now, or keep the one before', async () => {
+    controller.set({
+      addedAgent: { from: WORK, added: HOME },
+    })
+    const use = jest.spyOn(vtaAgent, 'useAgent').mockResolvedValue(undefined)
+    const ack = jest.spyOn(vtaAgent, 'acknowledgeAdded').mockImplementation(() => undefined)
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentAddedCard'))).toHaveTextContent(/VtaLink\.AddedLinked/)
+    expect(tree.getByTestId(testIdWithKey('AgentAddedKeep'))).toHaveTextContent('VtaLink.AddedKeep')
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentAddedUse')))
+    expect(ack).toHaveBeenCalled()
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentAddedKeep')))
+    expect(use).toHaveBeenCalledWith(expect.anything(), WORK)
+  })
+
+  // 238 gate, Android: Done after adding an agent by its address now lands
+  // here (#349). The new agent's introduction comes first, then the choice
+  // to use it or keep the one before.
+  it('an agent just added: its introduction first, then use it or keep the one before', async () => {
+    controller.set({ introSeen: false, addedAgent: { from: WORK, added: HOME } })
+    jest.spyOn(vtaAgent, 'markIntroSeen').mockImplementation(async () => {
+      controller.set({ introSeen: true })
+    })
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentIntro'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('AgentAddedCard'))).toBeNull()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentIntroSkip')))
+    })
+    expect(tree.queryByTestId(testIdWithKey('AgentIntro'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('AgentAddedCard'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('AgentAddedKeep'))).toBeTruthy()
+  })
+
+  it("each agent's chip carries its own count of requests waiting", async () => {
+    controller.set({
+      otherRequests: {
+        [WORK]: {
+          approvals: [{ id: 'w1', status: 'pending', receivedAt: 't', challenge: 'c' }],
+          reachable: true,
+          at: 0,
+        },
+      },
+    })
+    const tree = await renderHome()
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherBadge_1'))).toHaveTextContent('1')
+    expect(tree.getByTestId(testIdWithKey('AgentSwitcherRow_1')).props.accessibilityLabel).toMatch(
+      /^Work, VtaLink\.SwitcherWaiting/
+    )
+    expect(tree.queryByTestId(testIdWithKey('AgentSwitcherBadge_0'))).toBeNull()
+    controller.set({ otherRequests: undefined })
   })
 })

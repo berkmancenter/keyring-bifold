@@ -424,6 +424,13 @@ export interface VettingApplication {
   startedAt: string
   /** The join request this application produced, once submitted. */
   submission?: VettingSubmission
+  /**
+   * A vetter's ticket this phone holds but has not asked with yet — scanned with
+   * the camera, opened from a link or pasted. Kept with the application so
+   * leaving the vetting screen does not lose it: it lived only in the screen,
+   * and Step 2 asked for it again (TestFlight 236). Cleared once asked.
+   */
+  pendingTicket?: string
 }
 
 export interface VtiVettingStore {
@@ -437,6 +444,8 @@ export interface VtiVettingStore {
   saveProfile(profile: VettingVetterProfile): Promise<void>
   getApplication(communityDid: string): Promise<VettingApplication | undefined>
   saveApplication(application: VettingApplication): Promise<void>
+  /** The application alone, leaving a vetter's desk, tickets and profile for that community. */
+  forgetApplication?(communityDid: string): Promise<void>
   forget(communityDid: string): Promise<void>
 }
 
@@ -498,6 +507,14 @@ export class GenericRecordsVettingStore implements VtiVettingStore {
   async saveApplication(a: VettingApplication) {
     await this.put('application', a.communityDid, { ...a })
     emitCommunityChanged(a.communityDid, 'application')
+  }
+  async forgetApplication(communityDid: string) {
+    const rs = await this.agent.genericRecords.findAllByQuery({ recordType: RECORD_TYPE, kind: 'application' })
+    for (const r of rs) {
+      if ((r.content as { communityDid?: string }).communityDid === communityDid)
+        await this.agent.genericRecords.delete(r)
+    }
+    emitCommunityChanged(communityDid, 'application')
   }
   async forget(communityDid: string) {
     const rs = await this.agent.genericRecords.findAllByQuery({ recordType: RECORD_TYPE })
@@ -656,6 +673,13 @@ export const MAX_CARD_VALIDITY_MS = 15 * 60 * 1000
  * sessions before PR E.
  */
 export const VETTING_SESSION_MS = 15 * 60 * 1000
+
+/**
+ * How long the vetter's desk waits before reading the community's vetting
+ * requirements a second time, when the first read fails: they decide the
+ * statement's shape, and a guess is only the fallback.
+ */
+export const STATEMENT_SHAPE_RETRY_MS = 2000
 
 /**
  * Why a vetter did not accept a Vetting Card — vta-sdk `verify_card`'s errors
@@ -839,6 +863,8 @@ export function cardDigestMultibase(card: Record<string, unknown>): string {
 // ---------------------------------------------------------------------------
 
 export class VtiVetterDesk {
+  /** The wait before a second read of the requirements (STATEMENT_SHAPE_RETRY_MS); shorter in tests. */
+  static shapeRetryMs = STATEMENT_SHAPE_RETRY_MS
   private stop?: () => void
   constructor(
     private readonly agent: Agent,
@@ -1311,13 +1337,18 @@ export class VtiVetterDesk {
     const mode = getDtgV1WritingMode()
     if (mode !== 'auto') return chooseStatementShape({ mode })
     let statementType: string | undefined
-    try {
-      statementType = publishedStatementType(await vtiAgent.fetchManifest(communityDid, this.agent))
-    } catch (e) {
-      this.agent.config?.logger?.info?.(
-        `[VTI] statement shape: the community's requirements could not be read (${(e as Error)?.message ?? e}); deciding by this vetter's grant`,
-        { communityDid }
-      )
+    let unread: string | undefined
+    // Read twice before giving up: the requirements decide the shape, and the
+    // fallback is a guess (a guess of the old shape made a vetting not count).
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        statementType = publishedStatementType(await vtiAgent.fetchManifest(communityDid, this.agent))
+        unread = undefined
+        break
+      } catch (e) {
+        unread = (e as Error)?.message ?? String(e)
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
+      }
     }
     const grants =
       (await this.communityStore?.listHeldCredentials?.('vetter-grant', communityDid).catch(() => [])) ?? []
@@ -1325,7 +1356,13 @@ export class VtiVetterDesk {
       .filter((g) => g.subjectDid === this.persona.did)
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
     const grantShape = communityRoleCard(own[0]?.credential)?.shape
-    return chooseStatementShape({ mode, statementType, grantShape })
+    const choice = chooseStatementShape({ mode, statementType, grantShape })
+    if (unread) {
+      releaseWarn(
+        `[VTI] statement shape: the community's requirements could not be read twice (${unread}); writing ${choice.shape} by ${choice.by}`
+      )
+    }
+    return choice
   }
 
   async attest(
@@ -1507,8 +1544,16 @@ export class VtiApplicant {
    * that break their published shape cannot be evaluated, and throw
    * `VettingRequirementsError` rather than being gathered against by guess.
    */
-  async start(manifest: VtiManifest, claims: Record<string, string>): Promise<VettingApplication> {
-    const existing = await this.store.getApplication(this.persona.communityDid)
+  async start(
+    manifest: VtiManifest,
+    claims: Record<string, string>,
+    options: { ticket?: string } = {}
+  ): Promise<VettingApplication> {
+    const found = await this.store.getApplication(this.persona.communityDid)
+    // An application gathered by an earlier identity for this community (one
+    // a removal ended) is not this one's: its statements name that identity.
+    // Joining again starts a new one (IN-104).
+    const existing = found && found.joinDid === this.persona.did ? found : undefined
     const published = manifest.criteria.map((c) => (c as { vetting?: unknown }).vetting).find(Boolean)
     if (published !== undefined) {
       const shape = checkVettingRequirements(published)
@@ -1560,9 +1605,20 @@ export class VtiApplicant {
     application.maxStatementAge = vetting?.maxStatementAge
     application.independence = vetting?.independence
     application.claims = { ...application.claims, ...claims }
+    if (options.ticket?.trim()) application.pendingTicket = options.ticket.trim()
     await this.store.saveApplication(application)
     this.onChange?.()
     return application
+  }
+
+  /** Keep a ticket with the application until it is asked with (see `pendingTicket`). */
+  async keepTicket(link: string): Promise<void> {
+    const application = await this.store.getApplication(this.persona.communityDid)
+    const ticket = link.trim()
+    if (!application || application.joinDid !== this.persona.did || !ticket || application.pendingTicket === ticket)
+      return
+    await this.store.saveApplication({ ...application, pendingTicket: ticket })
+    this.onChange?.()
   }
 
   listen(): () => void {
@@ -1671,6 +1727,8 @@ export class VtiApplicant {
       updatedAt: new Date().toISOString(),
     }
     application.requests = [...application.requests.filter((r) => r.vetterDid !== vetterDid), request]
+    // Asked with: nothing is held any more for a later visit.
+    delete application.pendingTicket
     await this.store.saveApplication(application)
     this.onChange?.()
     return request
@@ -2085,10 +2143,20 @@ export class VtiApplicant {
     requirementsDigest?: string,
     // Sent with a fresh application only: a supplement answers the open one,
     // whose consent was given when it was sent.
-    registryConsent?: boolean
+    registryConsent?: boolean,
+    // The person chose to replace an open request sent without the vetting
+    // (pending, under review): it is withdrawn first, then this one is sent.
+    // A community takes no second request while one is open (IN-127, 10-06).
+    options: { replacePending?: boolean } = {}
   ): Promise<VtiVerdict> {
-    const application = await this.app()
+    let application = await this.app()
     const communityDid = this.persona.communityDid
+    if (options.replacePending && application.submission?.state === 'pending') {
+      const outcome = await this.withdraw('replaced by a request with vetting statements')
+      if (outcome === 'alreadyDecided') throw new Error('vtiVetting: the community already decided the earlier request')
+      // Withdrawn: what follows is a fresh application, sent and recorded as one.
+      application = await this.app()
+    }
     const open = application.submission?.state === 'deferred' ? application.submission : undefined
     let verdict: VtiVerdict
     if (open) {

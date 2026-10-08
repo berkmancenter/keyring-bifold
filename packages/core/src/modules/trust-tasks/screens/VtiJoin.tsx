@@ -16,9 +16,9 @@
 
 import { useAgent } from '@bifold/react-hooks'
 import { useIsFocused, useNavigation } from '@react-navigation/native'
-import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, DeviceEventEmitter, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
@@ -28,22 +28,41 @@ import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { requestBiometricConfirmationWithUI } from '../../vrc/vrc-biometric'
+import { joinAsks, type JoinAsks, type JoinHolds } from '../module/joinManifest'
+import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
-import { vtiAgent, type VtiManifest } from '../module/vtiAgent'
+import { isUnsupportedJoinVersion, joinRequestRefusal, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { communityTarget } from '../module/vtiCommunityLink'
-import { useCommunityChanged } from '../module/communityChanged'
-import { ensurePersonaFor, readJoinState, type CommunityJoinState } from '../module/vtiJoin'
+import { useCommunityChanged, VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
+import { ensurePersonaFor, joinCommunity, readJoinState, type CommunityJoinState } from '../module/vtiJoin'
 import { joinSeed } from '../module/vtiJoinSeed'
 
-import { communityName } from './communityName'
+import { communityName, identityWord, unnamedCommunityLabel } from './communityName'
 import { openScanner } from './openScanner'
 import { plainError, type PlainError } from './plainError'
 import { claimWords, joinNeedWords } from './claimWords'
 import { DidDetails } from './DidDetails'
 import { JoinAs, useJoinAsChoice } from './JoinAs'
+import { readJoinHolds } from './joinHolds'
+import { joinCard } from './joinWays'
+import { JoinWaysCard } from './JoinWaysCard'
+import { useAgentsHoldingIdentity } from './agentsHoldingIdentity'
 import { useCommunity } from './useCommunity'
 import { useVtaDid } from './VtaStatus'
+
+export { identityWord } from './communityName'
+
+/**
+ * The identity's word as said aloud: its DID's own last path name whole
+ * ("bunker-noodle"), or, for a DID with none, the last characters, "…"
+ * marking them as cut (Alberto, 238).
+ */
+const wholeWord = (did: string): string => {
+  const word = identityWord(did)
+  return word.startsWith('…') && did.endsWith(`:${word.slice(1)}`) ? word.slice(1) : word
+}
 import { useTakingLong } from './useTakingLong'
+import { useRoomAboveTabBar } from './aboveTabBar'
 
 type Step = 'which' | 'asks' | 'as'
 
@@ -77,6 +96,9 @@ export interface Asks {
 }
 
 const INVITATION = /invit/i
+
+/** What a new identity holds towards a community: nothing yet. */
+const NOTHING_HELD: JoinHolds = {}
 
 export function asksFrom(manifest: VtiManifest): Asks {
   const criteria = manifest.criteria
@@ -112,6 +134,8 @@ export interface VtiJoinProps {
 }
 
 const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
+  // The tab bar draws over the page: the last line scrolls clear of it.
+  const roomAboveTabBar = useRoomAboveTabBar()
   const { t } = useTranslation()
   const { agent } = useAgent()
   const navigation = useNavigation()
@@ -125,16 +149,28 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
   const called = communityName(communityDid ?? '', community)
   // The phone remembers a community it joined; the build merely suggests one.
   const remembered = Boolean(communityDid && chosenBefore?.communityDid === communityDid)
-  const name = called.name ?? called.technical
+  // In a sentence, an unnamed community is said to be one — never its host,
+  // which communities share (communityName).
+  const name = called.name ?? unnamedCommunityLabel(communityDid ?? '', t)
 
   // A community named by a link goes straight to what it asks; the build's
   // suggestion is offered first, beside "a different community".
   const [step, setStep] = useState<Step>(chosenByLink ? 'asks' : 'which')
   const [asks, setAsks] = useState<Asks>()
+  // From manifest 0.3 the community states its ways in and what follows each
+  // (joinWays.ts); at 0.2 this reads as `legacy` and `asks` above is shown.
+  const [manifest, setManifest] = useState<VtiManifest>()
+  const [holds, setHolds] = useState<JoinHolds>({})
+  // The community answers no join version this app speaks.
+  const [unsupported, setUnsupported] = useState<string>()
+  // A request was refused because the community changed what it asks meanwhile.
+  const [changed, setChanged] = useState(false)
+  const [reread, setReread] = useState(0)
   // Where the person already stands with this community (220): what the phone
   // holds, at once, then what the community says while a request is open. It
   // used to say only "You joined this one before", whatever had happened since.
   const [standing, setStanding] = useState<CommunityJoinState>()
+  const holding = useAgentsHoldingIdentity(communityDid)
   const [checking, setChecking] = useState(false)
   // "Join again" was chosen: the next identity for this community is a new one.
   const [again, setAgain] = useState(false)
@@ -162,6 +198,8 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     if (!communityDid) return
     let live = true
     setAsks(undefined)
+    setManifest(undefined)
+    setUnsupported(undefined)
     // No session needed: a community answers the join manifest over REST, which
     // is how an applicant reads what is asked of them before any channel
     // exists. Guarding this on `connected` is why a community's published name
@@ -171,21 +209,49 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
       .fetchManifest(communityDid, agent)
       // Reading the manifest also teaches the app what the community calls
       // itself; vtiAgent does that for every fetch, so nothing is needed here.
-      .then((m) => live && setAsks(asksFrom(m)))
-      .catch(() => {
-        if (live) setUnreachable(communityDid)
+      .then(async (m) => {
+        const held = agent ? await readJoinHolds(agent, communityDid).catch(() => ({})) : {}
+        if (!live) return
+        setAsks(asksFrom(m))
+        setHolds(held)
+        setManifest(m)
+      })
+      .catch((e) => {
+        if (!live) return
+        // Reached, but it speaks no join version this app does: not "unreachable".
+        if (isUnsupportedJoinVersion(e)) setUnsupported(communityDid)
+        else setUnreachable(communityDid)
       })
       .finally(() => live && setNameRead(communityDid))
     return () => {
       live = false
     }
-  }, [communityDid, agent])
+  }, [communityDid, agent, reread])
 
   // A different community starts from nothing; the same one keeps what it showed.
   useEffect(() => {
     setStanding(undefined)
     setAgain(false)
+    setChanged(false)
+    setPlainRequest(false)
   }, [communityDid])
+
+  // What the card shows at 0.3: each way, the one this phone meets, the button.
+  // After "Join again" the request goes out under a new identity, which holds
+  // nothing yet: what the earlier one gathered (statements, an invitation to
+  // it) does not meet a way for it. Read as held, a removed member was offered
+  // "Join", admitted straight away, for a request that carried nothing (IN-104).
+  const heldNow = again ? NOTHING_HELD : holds
+  const offer = useMemo<JoinAsks | undefined>(
+    () => (manifest ? joinAsks(manifest, heldNow) : undefined),
+    [manifest, heldNow]
+  )
+  const card = offer ? joinCard(offer, heldNow) : undefined
+  const ways = card?.mode === 'ways' ? card : undefined
+  // A request this screen sends itself: a way the phone meets that needs no
+  // invitation (those go through "I was invited"). Chosen by the button the
+  // person pressed, since a card can offer vetting and asking side by side.
+  const [plainRequest, setPlainRequest] = useState(false)
 
   // Read each time the screen comes into view, not only when it first mounts:
   // a join finished elsewhere (the invited screen, the vetting) shows here.
@@ -215,6 +281,20 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
   }, [agent, communityDid])
   useCommunityChanged(rereadHeld, communityDid)
 
+  // The community answered where the request stands after the ask gave up
+  // waiting: ask again, which takes the answer already in hand (238: a
+  // request lost on the way left this on "Sent" with the answer received).
+  useEffect(() => {
+    if (!agent || !communityDid) return
+    const sub = DeviceEventEmitter.addListener(VTI_JOIN_STATUS_LATE_EVENT, (e?: { communityDid?: string }) => {
+      if (e?.communityDid !== communityDid) return
+      void readJoinState(agent, communityDid, { mediatorDid: config?.mediatorDid })
+        .then(setStanding)
+        .catch(() => undefined)
+    })
+    return () => sub.remove()
+  }, [agent, communityDid, config?.mediatorDid])
+
   const onCheckAgain = useCallback(async () => {
     if (!agent || !communityDid) return
     setChecking(true)
@@ -230,7 +310,7 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     content: { flexGrow: 1, padding: 20, gap: 16 },
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 8 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    actions: { padding: 20, gap: 12 },
+    actions: { marginTop: 'auto', paddingTop: 4, gap: 12 },
     errorDetail: { maxHeight: 160 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     error: { color: ColorPalette.semantic.error },
@@ -247,6 +327,29 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     if (!confirmed.success) return
     setBusy(true)
     try {
+      if (plainRequest) {
+        // The way the phone meets asks for nothing more: make the identity and
+        // send the request. What the community answers shows as where the
+        // person stands — admitted, or waiting for an administrator.
+        communityTarget.choose(communityDid)
+        if (joinAs.selected) joinSeed.set(communityDid, joinAs.selected.seed)
+        await joinCommunity(
+          {
+            agent,
+            identityStore: new GenericRecordsIdentityStore(agent),
+            communityStore: new GenericRecordsCommunityStore(agent),
+            vtaDid,
+            mediatorDid: config?.mediatorDid,
+            communityDid,
+          },
+          undefined,
+          { freshPersona: again }
+        )
+        setAgain(false)
+        setStanding(await readJoinState(agent, communityDid, { poll: false }))
+        setStep('asks')
+        return
+      }
       await ensurePersonaFor(
         { agent, identityStore: new GenericRecordsIdentityStore(agent), vtaDid, communityDid },
         { fresh: again }
@@ -258,11 +361,28 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
       const stack = navigation as unknown as { navigate: (name: string) => void }
       stack.navigate(Screens.VtiVetting)
     } catch (e) {
-      setError(plainError(e))
+      if (joinRequestRefusal(e) === 'criterionUnknown') {
+        // The community changed what it asks while the request went: read it
+        // again and show it, rather than leave the person on a dead step.
+        setChanged(true)
+        setReread((n) => n + 1)
+        setStep('asks')
+      } else if (plainRequest && e instanceof Error && e.name === 'VtiSentNoAnswer') {
+        // The request went; its answer did not come in time. Not a failure to
+        // fix with Continue: show where the request stands, asking the
+        // community now (its status task finds the request from the identity),
+        // and a late answer, if it comes, shows there too (7b's R5, 10-06:
+        // the screen sat on "hasn't answered yet" for four minutes).
+        setAgain(false)
+        setStanding(await readJoinState(agent, communityDid, { mediatorDid: config?.mediatorDid }))
+        setStep('asks')
+      } else {
+        setError(plainError(e))
+      }
     } finally {
       setBusy(false)
     }
-  }, [agent, vtaDid, communityDid, name, navigation, t, joinAs.selected, again])
+  }, [agent, vtaDid, communityDid, name, navigation, t, joinAs.selected, again, plainRequest, config?.mediatorDid])
 
   if (!vtaDid) {
     return (
@@ -324,7 +444,27 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
 
   let body: React.ReactNode
   let actions: React.ReactNode
+  // Whether "A different community" is already in the body (the ways card has it).
+  let differentInBody = false
   const current: Step = !communityDid ? 'which' : step
+  const mayJoinAgain =
+    standing?.kind === 'rejected' ||
+    standing?.kind === 'withdrawn' ||
+    standing?.kind === 'left' ||
+    standing?.kind === 'removed'
+  // Where the person stands overrides the way in, except once "Join again" is
+  // chosen — and except when that standing is another agent's: with several
+  // agents, a membership or request held by an identity of another agent is
+  // not the current agent's, and Join offers that agent instead (#280 device
+  // check: on B it said "You're a member", which only A was).
+  const standingShown = Boolean(
+    communityDid &&
+      standing &&
+      standing.kind !== 'none' &&
+      current !== 'as' &&
+      !(again && mayJoinAgain) &&
+      !holding.onlyOthers
+  )
 
   switch (current) {
     case 'which':
@@ -338,7 +478,8 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
               <hostname>", which read as the community's name when nothing had
               named it at all (tester report #14). A name is shown only when
               something actually gave one; otherwise the card says so and the
-              DID's host stands as the identifier, not as a name. */}
+              DID's handle stands as the identifier, not as a name; the full DID
+              waits behind Details. */}
           {communityDid ? (
             <View style={styles.card} testID={testIdWithKey('JoinSuggested')}>
               <View style={styles.row}>
@@ -380,6 +521,7 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
               <ThemedText style={styles.muted} testID={testIdWithKey('JoinSuggestedWhere')}>
                 {called.technical}
               </ThemedText>
+              <DidDetails did={communityDid} testIdStem="JoinSuggested" />
             </View>
           ) : null}
         </>
@@ -408,7 +550,175 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
       )
       break
 
-    case 'asks':
+    case 'asks': {
+      const named = { community: name, interpolation: { escapeValue: false } }
+      const different = (
+        <Button
+          title={t('Join.Different')}
+          buttonType={ButtonType.Tertiary}
+          onPress={() => openScanner(navigation)}
+          testID={testIdWithKey('JoinScanCommunity')}
+        />
+      )
+      const toInvited = () =>
+        (navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiInvited)
+      const waysTitle = (
+        <ThemedText variant="headingThree" accessibilityRole="header" testID={testIdWithKey('JoinWaysTitle')}>
+          {t('Join.Ways.Title', named)}
+        </ThemedText>
+      )
+      // The community speaks no join version this app does: reached, but unreadable.
+      if (communityDid && unsupported === communityDid) {
+        body = (
+          <>
+            {waysTitle}
+            <View style={styles.card} testID={testIdWithKey('JoinVersionUnsupported')}>
+              <ThemedText>{t('Join.Ways.VersionUnsupported', named)}</ThemedText>
+            </View>
+          </>
+        )
+        actions = different
+        break
+      }
+      // It publishes no way in: it accepts no applications at present.
+      if (card?.mode === 'notAccepting') {
+        body = (
+          <>
+            {waysTitle}
+            <View style={styles.card} testID={testIdWithKey('JoinNotAccepting')}>
+              <ThemedText>{t('Join.Ways.NotAccepting', named)}</ThemedText>
+            </View>
+            {communityDid ? <DidDetails did={communityDid} testIdStem="JoinCommunity" /> : null}
+          </>
+        )
+        actions = different
+        break
+      }
+      // Manifest 0.3: its ways in, and what follows each (joinWays.ts).
+      if (ways) {
+        const suggestedWay = offer?.suggested
+        const mainButton =
+          ways.button === 'invited' ? (
+            <Button
+              title={t('VtaLink.IWasInvited')}
+              buttonType={ButtonType.Primary}
+              onPress={toInvited}
+              testID={testIdWithKey('JoinGoInvited')}
+            />
+          ) : ways.button !== 'none' ? (
+            <Button
+              title={
+                ways.button === 'join'
+                  ? t('Join.Ways.ButtonJoin', named)
+                  : ways.button === 'ask'
+                    ? t('Join.Ways.ButtonAsk')
+                    : // Beside "Ask to join", the button names where it leads.
+                      ways.alsoAsk
+                      ? t('Join.Ways.ButtonVetting')
+                      : t('Join.Start')
+              }
+              buttonType={ButtonType.Primary}
+              onPress={() => {
+                if (ways.button === 'start') {
+                  setPlainRequest(false)
+                  setStep('as')
+                } else if (suggestedWay?.requires.invitation) {
+                  // An invitation the phone holds is presented from "I was invited", where it is.
+                  toInvited()
+                } else {
+                  setPlainRequest(true)
+                  setStep('as')
+                }
+              }}
+              testID={testIdWithKey('JoinStart')}
+            />
+          ) : null
+        // The other door: the review way the phone meets as it stands.
+        const askButton = ways.alsoAsk ? (
+          <Button
+            title={t('Join.Ways.ButtonAsk')}
+            buttonType={ButtonType.Secondary}
+            onPress={() => {
+              setPlainRequest(true)
+              setStep('as')
+            }}
+            testID={testIdWithKey('JoinAsk')}
+          />
+        ) : null
+        // Two things to do: each button sits under the way it acts on, below
+        // what follows that way. Both under the list made a fixed area tall
+        // enough to cover the last way's lines on a phone — the line that says
+        // an administrator decides among them (the Farm run of 2026-10-02).
+        const vettingRow = ways.rows.find((row) => row.canStartVetting)?.id
+        // One thing to do sits under its way too, so no fixed button covers the
+        // last way's lines on a small phone (IN-104): "Start" under the vetting
+        // way, "Join" / "Ask to join" under the way the phone meets, "I was
+        // invited" under the invitation way. Below the list only when no way
+        // is its own (it then stays fixed, as before).
+        const mainRow =
+          ways.button === 'start'
+            ? vettingRow
+            : ways.button === 'join' || ways.button === 'ask'
+              ? ways.rows.find((row) => row.suggested)?.id
+              : ways.button === 'invited'
+                ? ways.rows.find((row) => row.needs.some((need) => need.kind === 'invitation'))?.id
+                : undefined
+        const buttonsInRows = !standingShown && (ways.alsoAsk || mainRow !== undefined)
+        // A community whose ways never ask a vetter: said, so nobody looks for
+        // vetting that is not there (IN-104).
+        const noVetting = !ways.rows.some((row) => row.needs.some((need) => need.kind === 'vetting'))
+        body = (
+          <>
+            {waysTitle}
+            {changed ? (
+              <ThemedText testID={testIdWithKey('JoinChanged')}>{t('Join.Ways.Changed', named)}</ThemedText>
+            ) : null}
+            <JoinWaysCard
+              card={ways}
+              community={name}
+              readOnly={standingShown}
+              // Under where the person stands (a member, a request open, a
+              // removal) the ways are shown, not offered: their buttons sat in
+              // the rows, out of reach of the standing card that replaces the
+              // buttons below, and a removed member pressed "Meet a vetter"
+              // under the old identity without "Join again" (IN-104, path B).
+              rowAction={
+                buttonsInRows
+                  ? (row) =>
+                      ways.alsoAsk
+                        ? row.id === vettingRow
+                          ? mainButton
+                          : row.suggested
+                            ? askButton
+                            : null
+                        : row.id === mainRow
+                          ? mainButton
+                          : null
+                  : undefined
+              }
+            />
+            {noVetting ? (
+              <ThemedText style={styles.muted} testID={testIdWithKey('JoinNoVetting')}>
+                {t('Join.Ways.NoVetting', named)}
+              </ThemedText>
+            ) : null}
+            {ways.button === 'start' ? <ThemedText style={styles.muted}>{t('Join.AsksNext')}</ThemedText> : null}
+            {communityDid ? <DidDetails did={communityDid} testIdStem="JoinCommunity" /> : null}
+            {/* With the list, not under the buttons, so the fixed area stays short. */}
+            {different}
+          </>
+        )
+        actions = buttonsInRows ? (
+          errorLine
+        ) : (
+          <>
+            {errorLine}
+            {mainButton}
+          </>
+        )
+        differentInBody = true
+        break
+      }
       body = (
         <>
           <ThemedText variant="headingThree" accessibilityRole="header">
@@ -478,15 +788,11 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
               lands here, not on "which community?". Without this a person who
               brought the wrong one had no way to another from Join (found on the
               empty-config gate, 2026-09-23: a store build names none). */}
-          <Button
-            title={t('Join.Different')}
-            buttonType={ButtonType.Tertiary}
-            onPress={() => openScanner(navigation)}
-            testID={testIdWithKey('JoinScanCommunity')}
-          />
+          {different}
         </>
       )
       break
+    }
 
     case 'as':
       body = (
@@ -527,20 +833,31 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
       break
   }
 
-  // Where the person stands overrides the way in, except once "Join again" is chosen.
   const tp = (key: string, values: Record<string, unknown> = {}) =>
     t(key, { community: name, ...values, interpolation: { escapeValue: false } }) as string
-  const mayJoinAgain =
-    standing?.kind === 'rejected' ||
-    standing?.kind === 'withdrawn' ||
-    standing?.kind === 'left' ||
-    standing?.kind === 'removed'
-  if (communityDid && standing && standing.kind !== 'none' && current !== 'as' && !(again && mayJoinAgain)) {
-    const withInvitation =
-      (standing.kind === 'sent' || standing.kind === 'pending') && standing.submission.withInvitation
+  if (standingShown && communityDid && standing) {
+    const waiting = standing.kind === 'sent' || standing.kind === 'pending'
+    const withInvitation = waiting && standing.submission.withInvitation
     const standingCard = (
       <View style={styles.card} testID={testIdWithKey('JoinStanding')}>
-        <ThemedText testID={testIdWithKey('JoinStandingText')}>
+        {waiting ? (
+          <ThemedText variant="headingThree" accessibilityRole="header" testID={testIdWithKey('JoinRequestSent')}>
+            {t('Join.RequestSentTitle')}
+          </ThemedText>
+        ) : null}
+        {standing.kind === 'member' ? (
+          <Icon
+            name="check-circle"
+            size={40}
+            color={ColorPalette.semantic.success}
+            testID={testIdWithKey('JoinMemberCheck')}
+          />
+        ) : null}
+        <ThemedText
+          variant={standing.kind === 'member' ? 'headingThree' : undefined}
+          accessibilityRole={standing.kind === 'member' ? 'header' : undefined}
+          testID={testIdWithKey('JoinStandingText')}
+        >
           {standing.kind === 'member'
             ? tp('Join.StandingMember')
             : standing.kind === 'removed'
@@ -548,7 +865,10 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
               : standing.kind === 'sent'
                 ? tp('Join.StandingSent')
                 : standing.kind === 'pending'
-                  ? tp('Join.StandingPending')
+                  ? // From manifest 0.3 a request left open is one an administrator reviews.
+                    offer?.wire === '0.3'
+                    ? tp('Join.Ways.SentForReview')
+                    : tp('Join.StandingPending')
                   : standing.kind === 'deferred'
                     ? tp('Join.StandingDeferred')
                     : standing.kind === 'rejected'
@@ -557,6 +877,9 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
                         ? tp('Join.StandingWithdrawn')
                         : tp('Join.StandingLeft')}
         </ThemedText>
+        {waiting ? (
+          <ThemedText testID={testIdWithKey('JoinWillShow')}>{t('Join.WillShowWhenAccepted')}</ThemedText>
+        ) : null}
         {withInvitation ? (
           <ThemedText style={styles.muted} testID={testIdWithKey('JoinStandingInvitation')}>
             {t('Join.StandingWithInvitation')}
@@ -575,17 +898,52 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
             {tp('Join.StandingReason', { reason: standing.reason })}
           </ThemedText>
         ) : null}
-        {mayJoinAgain ? <ThemedText style={styles.muted}>{t('Join.StandingAgain')}</ThemedText> : null}
+        {/* While the request is open, the identity it was sent as, in a word
+            a person can say out loud: the applicant tells the operator "I'm
+            term-benefit", and the operator finds it among the join requests.
+            The whole DID, with Copy, behind its toggle (as on Your agent, #305). */}
+        {(standing.kind === 'sent' || standing.kind === 'pending' || standing.kind === 'deferred') &&
+        standing.submission.personaDid ? (
+          <View testID={testIdWithKey('JoinStandingIdentity')}>
+            {/* "You asked to join as", then the word, a size up (Alberto, 238). */}
+            <ThemedText style={styles.muted}>{t('Join.AskedAs')}</ThemedText>
+            <ThemedText variant="headingFour" testID={testIdWithKey('JoinStandingIdentityName')}>
+              {wholeWord(standing.submission.personaDid)}
+            </ThemedText>
+            <DidDetails
+              did={standing.submission.personaDid}
+              label={t('Join.SeeFullPersonaId')}
+              hint={tp('VtaLink.ShowIdentityCodeHint')}
+              copy
+              testIdStem="JoinStandingIdentity"
+            />
+          </View>
+        ) : null}
+        {/* No promise of a new identity: asking again makes one, and the
+            vetting path was seen to carry on with the earlier one (IN-104).
+            A removal already says "You can ask to join again." itself. */}
+        {mayJoinAgain && standing.kind !== 'removed' ? (
+          <ThemedText style={styles.muted} testID={testIdWithKey('JoinStandingAgain')}>
+            {t('Join.StandingAgain')}
+          </ThemedText>
+        ) : null}
       </View>
     )
-    body = (
-      <>
-        {standingCard}
-        {body}
-      </>
-    )
+    // Waiting, or a member: what the community asks is behind them, and
+    // said again it pushed "Check again" below the fold (Alberto, 238).
+    body =
+      waiting || standing.kind === 'member' ? (
+        standingCard
+      ) : (
+        <>
+          {standingCard}
+          {body}
+        </>
+      )
+    // "A different community" is always in reach, from the community a person
+    // is already in too: a member's card used to offer only "Open" (IN-102).
     const different =
-      current === 'which' ? (
+      standing.kind !== 'member' && (current === 'which' || !differentInBody) ? (
         <Button
           title={t('Join.Different')}
           buttonType={ButtonType.Secondary}
@@ -598,12 +956,28 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     actions = (
       <>
         {standing.kind === 'member' ? (
-          <Button
-            title={tp('Join.Open')}
-            buttonType={ButtonType.Primary}
-            onPress={() => go(Screens.VtiCommunity, { communityDid })}
-            testID={testIdWithKey('JoinOpenCommunity')}
-          />
+          // Done: back to Your agent, the new community's card picked out.
+          // View community takes Join's place, so back from it is Your agent,
+          // not this screen again (Alberto, 238).
+          <>
+            <Button
+              title={t('Global.Done')}
+              buttonType={ButtonType.Primary}
+              onPress={() => go(Screens.VtaAgent, { highlightCommunity: communityDid })}
+              testID={testIdWithKey('JoinDone')}
+            />
+            <Button
+              title={t('Join.ViewCommunity')}
+              buttonType={ButtonType.Secondary}
+              onPress={() =>
+                (navigation as unknown as { replace: (screen: string, params?: object) => void }).replace(
+                  Screens.VtiCommunity,
+                  { communityDid }
+                )
+              }
+              testID={testIdWithKey('JoinOpenCommunity')}
+            />
+          </>
         ) : standing.kind === 'sent' || standing.kind === 'pending' ? (
           <Button
             title={t('Join.CheckAgain')}
@@ -637,10 +1011,51 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     )
   }
 
+  const whichCentred = step === 'which' && !standingShown
+
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>{body}</ScrollView>
-      {actions ? <View style={styles.actions}>{actions}</View> : null}
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
+      {/* The buttons scroll with the page, after everything it says: held
+          below it, above the tab bar, they left only a band for the page,
+          and its last lines showed half-hidden behind them (239, iPhone). A
+          short page still keeps them at the bottom. */}
+      {/* "Which community?" is a few lines and one button: kept together and
+          centred, not the words at the top and the button at the foot with
+          the screen between them (238, iPhone). The tab bar sits below the
+          screen, so the centre is the screen's own. */}
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          whichCentred ? { justifyContent: 'center', paddingBottom: 20 } : { paddingBottom: 20 + roomAboveTabBar },
+        ]}
+        testID={testIdWithKey('JoinScroll')}
+      >
+        {/* The request this phone sent never reached the community (it says
+            it holds none): said, with the way to send it again (238). */}
+        {standing?.kind === 'none' && standing.lost && step !== 'as' ? (
+          <View style={styles.card} testID={testIdWithKey('JoinRequestLost')}>
+            <ThemedText>{t('Join.RequestLost', { community: name, interpolation: { escapeValue: false } })}</ThemedText>
+            <Button
+              title={t('Join.SendAgain')}
+              buttonType={ButtonType.Primary}
+              onPress={() => {
+                setPlainRequest(true)
+                setStep('as')
+              }}
+              testID={testIdWithKey('JoinSendAgain')}
+            />
+          </View>
+        ) : null}
+        {body}
+        {actions ? (
+          <View
+            style={[styles.actions, whichCentred ? { marginTop: 8 } : undefined]}
+            testID={testIdWithKey('JoinActions')}
+          >
+            {actions}
+          </View>
+        ) : null}
+      </ScrollView>
     </SafeAreaView>
   )
 }

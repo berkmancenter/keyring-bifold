@@ -17,10 +17,12 @@
  * reconnects as the persona only when nothing is open.
  */
 import type { Agent } from '@credo-ts/core'
+import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { useEffect } from 'react'
 import { DeviceEventEmitter } from 'react-native'
 
 import { VTI_PERSONA_DELIVERIES_EVENT, VTI_PERSONA_KEYS_HELD_EVENT } from './communityChanged'
+import { currentAgentDid } from './currentAgent'
 import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import { deliveredCardCheck } from './vtiDeliveredCheck'
@@ -49,7 +51,12 @@ export interface PersonaInboxOptions {
 async function personaFor(agent: Agent, communityDid?: string): Promise<VtiPersona | undefined> {
   const identity = new GenericRecordsIdentityStore(agent)
   if (communityDid) return (await identity.getPersona(communityDid)) ?? undefined
-  const all = await identity.listPersonas()
+  // The latest of the identities under the agent this phone acts with now, as
+  // getPersona answers for one community. Another agent's persona cannot sign
+  // in here: its key is borrowed only while that agent is connected (IN-114:
+  // the second agent current, the first agent's persona tried, key not found).
+  const vtaDid = currentAgentDid()
+  const all = (await identity.listPersonas()).filter((p) => !vtaDid || p.vtaDid === vtaDid)
   return all.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0]
 }
 
@@ -64,13 +71,71 @@ function ownedByInbox(message: { type?: unknown; body?: unknown }): boolean {
   )
 }
 
+/**
+ * Keep what a community sent one of this phone's identities: a removal notice
+ * or a join receipt applied, an invitation offer taken, a card kept. The same
+ * for the shared session's identity (the inbox below) and for every other
+ * identity's listener (vtiIdentityListeners). Throws when the message should
+ * stay on the mediator for another try.
+ */
+export async function keepForPersona(
+  agent: Agent,
+  target: VtiPersona,
+  message: DidCommV2PlaintextMessage,
+  options: Pick<PersonaInboxOptions, 'onError'> = {}
+): Promise<void> {
+  const community = new GenericRecordsCommunityStore(agent)
+  const vetting = new GenericRecordsVettingStore(agent)
+  // The community removed this persona, or received its join request: applied
+  // once checked (vtiCommunityNotices), and nothing else to do with it.
+  if (message.type === REMOVAL_NOTICE || message.type === SUBMIT_RECEIPT) {
+    return receiveCommunityNotice(agent, community, target.did, message).then(async (outcome) => {
+      // A removal ends what was gathered to join, too: joining again is a new
+      // identity, and a new application (IN-104).
+      if (outcome === 'removed') await vetting.forgetApplication(target.communityDid).catch(() => undefined)
+      if (outcome === 'removed' || outcome === 'acknowledged')
+        DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
+          communityDid: target.communityDid,
+          kinds: [outcome],
+        })
+    })
+  }
+  // A community admin console's Send: an offer of the invitation, redeemed
+  // here for the invitation itself, which "I was invited" then joins with.
+  const offer = invitationOfferOfMessage(message)
+  if (offer) return takeInvitationOffer(agent, community, target, offer, options)
+  // Returned: stored before the mediator is told it was taken (vtiAgent.onInbound).
+  // A statement is kept only through the applicant's full check.
+  const acceptStatement = (m: typeof message) => new VtiApplicant(agent, target, vetting, community).receiveStatement(m)
+  const onRefused = (item: VtiReceivedCredential, refusal: string) =>
+    agent.config?.logger?.warn?.(`[VTI] delivered ${item.kind} credential not kept (${refusal})`, {
+      from: String(message.from ?? ''),
+    })
+  return receiveIssue(community, target.did, message, {
+    acceptStatement,
+    onRefused,
+    checkCard: deliveredCardCheck(agent),
+  }).then(
+    (got: VtiReceivedCredential[]) => {
+      if (got.length) {
+        DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
+          communityDid: target.communityDid,
+          kinds: got.map((c) => c.kind),
+        })
+      }
+    },
+    (e) => {
+      options.onError?.(e)
+      throw e
+    }
+  )
+}
+
 /** A look that has been busy this long says so: something it waits on has not settled. */
 export const PERSONA_INBOX_STUCK_MS = 60_000
 
 /** Start collecting; returns the function that stops it. */
 export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): () => void {
-  const community = new GenericRecordsCommunityStore(agent)
-  const vetting = new GenericRecordsVettingStore(agent)
   const peerRevisionStore = new GenericRecordsTspPeerRevisionStore(agent)
   let persona: VtiPersona | undefined
   let stopped = false
@@ -128,53 +193,24 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
         `[VTI] persona inbox: ${String(message.type ?? '')} from ${didPrefix(message.from)} not taken yet: the session's identity is not known`
       )
     }
-    if (!target)
-      return skipped(`no persona for ${options.communityDid ? didPrefix(options.communityDid) : 'any community'}`)
-    if (sessionDid !== target.did)
+    // Kept for whichever of this phone's identities the session is: the other
+    // identities each have a listener, which steps aside while the session
+    // holds theirs (vtiIdentityListeners), so this is where theirs arrive then.
+    const holder =
+      target?.did === sessionDid
+        ? target
+        : sessionDid
+          ? (await new GenericRecordsIdentityStore(agent).listPersonas().catch(() => [])).find(
+              (p) => p.did === sessionDid
+            )
+          : undefined
+    if (!holder)
       return skipped(
-        `the session is ${sessionDid ? didPrefix(sessionDid) : 'not connected'}, not ${didPrefix(target.did)}`
+        target
+          ? `the session is ${sessionDid ? didPrefix(sessionDid) : 'not connected'}, not an identity of this phone`
+          : `no persona for ${options.communityDid ? didPrefix(options.communityDid) : 'any community'}`
       )
-    // The community removed this persona, or received its join request: applied
-    // once checked (vtiCommunityNotices), and nothing else to do with it.
-    if (message.type === REMOVAL_NOTICE || message.type === SUBMIT_RECEIPT) {
-      return receiveCommunityNotice(agent, community, target.did, message).then((outcome) => {
-        if (outcome === 'removed' || outcome === 'acknowledged')
-          DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
-            communityDid: target.communityDid,
-            kinds: [outcome],
-          })
-      })
-    }
-    // A community admin console's Send: an offer of the invitation, redeemed
-    // here for the invitation itself, which "I was invited" then joins with.
-    const offer = invitationOfferOfMessage(message)
-    if (offer) return takeInvitationOffer(agent, community, target, offer, options)
-    // Returned: stored before the mediator is told it was taken (vtiAgent.onInbound).
-    // A statement is kept only through the applicant's full check.
-    const acceptStatement = (m: typeof message) =>
-      new VtiApplicant(agent, target, vetting, community).receiveStatement(m)
-    const onRefused = (item: VtiReceivedCredential, refusal: string) =>
-      agent.config?.logger?.warn?.(`[VTI] delivered ${item.kind} credential not kept (${refusal})`, {
-        from: String(message.from ?? ''),
-      })
-    return receiveIssue(community, target.did, message, {
-      acceptStatement,
-      onRefused,
-      checkCard: deliveredCardCheck(agent),
-    }).then(
-      (got: VtiReceivedCredential[]) => {
-        if (got.length) {
-          DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
-            communityDid: target.communityDid,
-            kinds: got.map((c) => c.kind),
-          })
-        }
-      },
-      (e) => {
-        options.onError?.(e)
-        throw e
-      }
-    )
+    return keepForPersona(agent, holder, message, options)
   })
 
   const tick = async (): Promise<void> => {

@@ -6,9 +6,9 @@
  */
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useNavigation } from '@react-navigation/native'
-import { act, fireEvent, render, within } from '@testing-library/react-native'
+import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'
-import { DeviceEventEmitter, ScrollView } from 'react-native'
+import { DeviceEventEmitter } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
@@ -154,10 +154,9 @@ describe('I was invited', () => {
     })
     expect(tree.getByTestId(testIdWithKey('InvitedError'))).toHaveTextContent('Errors.NoDidHost')
     expect(tree.queryByText(raw)).toBeNull()
-    // Above Continue, outside the scrolled body: at the body's end it fell
-    // below the fold on Android and Continue looked dead (221).
-    const [body] = tree.UNSAFE_getAllByType(ScrollView)
-    expect(within(body).queryByTestId(testIdWithKey('InvitedErrorCard'))).toBeNull()
+    // Right above Continue: at the body's end, with Continue held below the
+    // page, it fell below the fold on Android and Continue looked dead (221).
+    // The buttons now scroll with the page (239), and the error stays next to them.
     const order = tree.root
       .findAll((n) => typeof n.type === 'string' && typeof n.props.testID === 'string')
       .map((n) => n.props.testID as string)
@@ -337,6 +336,45 @@ describe('I was invited', () => {
     first.tree.unmount()
     const again = await renderInvited([personaRecord])
     expect(again.tree.getByTestId(testIdWithKey('InvitedJoined'))).toBeTruthy()
+  })
+
+  // Alberto's iPhone, 10-06: the membership was al-phone's identity's, and
+  // "I was invited" on al-signer flashed to "You're a member".
+  test('another agent\'s membership is not this agent\'s: no "You joined"', async () => {
+    mockReadJoinState.mockResolvedValue({ kind: 'member', membership: { communityDid } })
+    const theirs: Rec = {
+      ...personaRecord,
+      content: { ...personaRecord.content, vtaDid: 'did:webvh:example:unlinked-vta' },
+    }
+    const { tree } = await renderInvited([theirs])
+    expect(tree.queryByTestId(testIdWithKey('InvitedJoined'))).toBeNull()
+  })
+
+  // 233: a member of one community, invited by another, only ever saw the first.
+  test('a member can bring an invitation from a different community, whose link comes back here', async () => {
+    communityLinkReturn.take()
+    mockReadJoinState.mockResolvedValue({ kind: 'member', membership: { communityDid } })
+    const { tree } = await renderInvited([personaRecord])
+    expect(tree.getByTestId(testIdWithKey('InvitedJoined'))).toBeTruthy()
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('InvitedDifferentCommunity'))))
+    expect(communityLinkReturn.take()).toBe(true)
+  })
+
+  test('after joining one community here, another brought here starts at its own beginning', async () => {
+    const { tree } = await renderInvited([personaRecord, invitationRecord])
+    mockJoin.mockResolvedValue({ membership: {} })
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('InvitedJoin')))
+    })
+    expect(tree.getByTestId(testIdWithKey('InvitedJoined'))).toBeTruthy()
+    // The other community has nothing stored, and no identity yet.
+    mockReadJoinState.mockResolvedValue({ kind: 'none' })
+    await act(async () => {
+      communityTarget.set({ communityDid: 'did:webvh:QmOther:vtc.example.org:other' })
+      jest.advanceTimersByTime(10)
+    })
+    expect(tree.queryByTestId(testIdWithKey('InvitedJoined'))).toBeNull()
+    communityTarget.clear()
   })
 
   // Android, 2026-09-26 (1 run in 2): the join saves its request as it sends

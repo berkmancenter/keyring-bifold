@@ -15,12 +15,14 @@ import { encodeTicketUri } from '@bifold/trust-tasks'
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
-import VtiVetting, { requestRef, requestTestKey, whenShown } from '../screens/VtiVetting'
+import VtiVetting, { confirmedNameOf, requestRef, requestTestKey, whenShown } from '../screens/VtiVetting'
 import { vtaAgent } from '../module/vtaAgent'
 import { vtiAgent } from '../module/vtiAgent'
 import { resolveVtaDid } from '../module/vtaLinkMachine'
 import * as grantState from '../module/vtiGrantState'
-import { VtiVetterDesk } from '../module/vtiVetting'
+import { VtiApplicant, VtiVetterDesk } from '../module/vtiVetting'
+import { routeKeyringAgentLink } from '../module/vtiLinks'
+import { TAB_BAR_CLEARANCE } from '../screens/aboveTabBar'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 // The desk's attest asks for a face or fingerprint first; here it is given.
@@ -225,10 +227,28 @@ describe('Vetting — a member', () => {
     expect(within(scroll).getByTestId(testIdWithKey('VettingAlreadyMember'))).toBeTruthy()
   })
 
+  // Gate 235 persona shots, iOS: the last line sat under the tab bar, which draws over the page.
+  test('the page leaves room at its foot for the tab bar, so its last line scrolls clear of it', async () => {
+    const tree = await renderAs('member')
+    await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))
+    const scroll = tree.UNSAFE_getByType(KeyboardAwareScrollView)
+    expect(StyleSheet.flatten(scroll.props.contentContainerStyle).paddingBottom).toBeGreaterThanOrEqual(
+      TAB_BAR_CLEARANCE
+    )
+  })
+
   test('the page names its step for a driver: a member is on "member"', async () => {
     const tree = await renderAs('member')
     await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))
     expect(tree.getByTestId(testIdWithKey('VettingApplicantStep_member'))).toBeTruthy()
+  })
+
+  test("the applicant's side keeps the usual header and says whose side it is", async () => {
+    const setOptions = useNavigation().setOptions as jest.Mock
+    setOptions.mockClear()
+    const tree = await renderAs('member')
+    await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))
+    expect(setOptions).toHaveBeenLastCalledWith({ title: 'Screens.GettingVetted', headerVariant: undefined })
   })
 
   test('a role that says more than member is named', async () => {
@@ -315,6 +335,49 @@ describe('Vetting — one filled button per step', () => {
     } as never)
     fireEvent.changeText(tree.getByTestId(testIdWithKey('VettingTicketInput')), ticket)
     expect(filled(tree)).toEqual(['VettingRequestButton'])
+  })
+
+  // TestFlight 236: a ticket scanned with the Camera app lived only in the
+  // screen, so leaving it after "Start my application" lost the ticket.
+  test('a ticket kept with the application is back in Step 2 when the screen opens again', async () => {
+    const ticket = encodeTicketUri({
+      community: communityDid,
+      vetter: 'did:webvh:example:vetter',
+      presentation: { code: { code: 'ABCD-EFGH' } },
+    } as never)
+    const kept = { ...application, content: { ...(application.content as object), pendingTicket: ticket } }
+    const tree = await renderWith([persona, kept])
+    await tree.findByTestId(testIdWithKey('VettingApplicantStep_ticket'))
+    expect(tree.getByTestId(testIdWithKey('VettingTicketInput')).props.value).toBe(ticket)
+    expect(filled(tree)).toEqual(['VettingRequestButton'])
+  })
+
+  // TestFlight 236: a scan on Step 2 put the link in the field and waited for
+  // "Use this link"; a scan acts at once elsewhere in Keyring.
+  test('a ticket scanned from Step 2 asks the vetter at once; a pasted one still waits', async () => {
+    const ask = jest.spyOn(VtiApplicant.prototype, 'requestVetter').mockResolvedValue({} as never)
+    const tree = await renderWith([persona, application])
+    await tree.findByTestId(testIdWithKey('VettingApplicantStep_ticket'))
+    const ticket = encodeTicketUri({
+      community: communityDid,
+      vetter: 'did:webvh:example:vetter',
+      presentation: { code: { code: 'ABCD-EFGH' } },
+    } as never)
+
+    fireEvent.changeText(tree.getByTestId(testIdWithKey('VettingTicketInput')), ticket)
+    await act(async () => {
+      jest.advanceTimersByTime(10)
+    })
+    expect(ask).not.toHaveBeenCalled()
+
+    fireEvent.changeText(tree.getByTestId(testIdWithKey('VettingTicketInput')), '')
+    fireEvent.press(tree.getByTestId(testIdWithKey('VettingScanTicketButton')))
+    await act(async () => {
+      await routeKeyringAgentLink(ticket, {} as never, jest.fn())
+      jest.advanceTimersByTime(10)
+    })
+    expect(ask).toHaveBeenCalledWith({ link: ticket })
+    ask.mockRestore()
   })
 
   test('a link for another community does not become the step', async () => {
@@ -449,6 +512,29 @@ describe('Vetting — the desk', () => {
       )
     )
 
+  test("the vetter's desk asks for its own header: another title and the gradient's far end changed", async () => {
+    const setOptions = useNavigation().setOptions as jest.Mock
+    setOptions.mockClear()
+    const tree = await renderDesk([persona, grant])
+    await tree.findByTestId(testIdWithKey('VettingVetterStep_ticket'))
+    expect(setOptions).toHaveBeenLastCalledWith({ title: 'Screens.VetterDesk', headerVariant: 'vetter' })
+  })
+
+  test('a finished request says the name the vetter confirmed (IN-127)', async () => {
+    const tree = await renderDesk([
+      persona,
+      grant,
+      deskRequest('attested', { card: { claims: [{ type: 'name.legal', value: 'Alice Example' }] } }),
+    ])
+    await tree.findByTestId(testIdWithKey('VettingDeskFinishedToggle'))
+    fireEvent.press(tree.getByTestId(testIdWithKey('VettingDeskFinishedToggle')))
+    expect(tree.getByTestId(testIdWithKey('VettingDeskFinishedName'))).toHaveTextContent(/Vetting\.FinishedName/)
+    expect(confirmedNameOf({ card: { claims: [{ type: 'name.legal', value: ' Alice Example ' }] } })).toBe(
+      'Alice Example'
+    )
+    expect(confirmedNameOf({})).toBeUndefined()
+  })
+
   test('only a finished request on the desk: it opens on a new ticket, the finished one folded away', async () => {
     const tree = await renderDesk([persona, grant, deskRequest('attested')])
     expect(await tree.findByTestId(testIdWithKey('VettingVetterStep_ticket'))).toBeTruthy()
@@ -461,6 +547,11 @@ describe('Vetting — the desk', () => {
     expect(tree.queryByTestId(testIdWithKey('VettingDeskClearButton'))).toBeNull()
     fireEvent.press(tree.getByTestId(testIdWithKey('VettingDeskFinishedToggle')))
     expect(tree.getAllByTestId(testIdWithKey('VettingDeskFinishedRequest'))).toHaveLength(1)
+    // Who it was: their identity's word, the DID behind a toggle (IN-127).
+    expect(tree.getByTestId(testIdWithKey('VettingDeskFinishedIdentity'))).toHaveTextContent(
+      /Vetting\.FinishedIdentity/
+    )
+    expect(tree.getByTestId(testIdWithKey('VettingDeskFinishedApplicantToggle'))).toBeTruthy()
 
     // Clearing them still works, from inside.
     await act(async () => {
@@ -537,6 +628,20 @@ describe('Vetting — the desk', () => {
     })
     const tree = await renderDesk(records)
     await tree.findByTestId(testIdWithKey('VettingVetterStep_check'))
+    // IN-120: whom the statement will be about, as the community sees them,
+    // behind words and with Copy, beside the card being checked.
+    expect(tree.getByTestId(testIdWithKey('VettingCheckApplicantToggle'))).toHaveTextContent(/Vetting\.TheirIdentity$/)
+    fireEvent.press(tree.getByTestId(testIdWithKey('VettingCheckApplicantToggle')))
+    expect(tree.getByTestId(testIdWithKey('VettingCheckApplicantDid'))).toHaveTextContent('did:key:z6MkApplicant')
+    expect(tree.getByTestId(testIdWithKey('VettingCheckApplicantHint'))).toHaveTextContent('Vetting.TheirIdentityHint')
+    expect(tree.getByTestId(testIdWithKey('VettingCheckApplicantCopy'))).toBeTruthy()
+    // Its label wraps on a phone: inset from the button's edges, centred on each line.
+    const attest = tree.getByTestId(testIdWithKey('VettingAttestButton'))
+    expect(StyleSheet.flatten(attest.props.style)).toMatchObject({ paddingHorizontal: 16 })
+    expect(StyleSheet.flatten(within(attest).getByText('Vetting.Attest').props.style)).toMatchObject({
+      flexShrink: 1,
+      textAlign: 'center',
+    })
     await act(async () => {
       fireEvent.press(tree.getByTestId(testIdWithKey('VettingAttestButton')))
     })

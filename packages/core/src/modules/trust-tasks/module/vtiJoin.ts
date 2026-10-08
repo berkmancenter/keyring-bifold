@@ -25,7 +25,7 @@ import {
   type VtiMembership,
 } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiIdentityStore, type VtiPersona } from './VtiIdentityStore'
-import { selfRemoveRefusal, vtiAgent, type JoinRequestStatus, type VtiVerdict } from './vtiAgent'
+import { selfRemoveRefusal, vtiAgent, VtiSentNoAnswer, type JoinRequestStatus, type VtiVerdict } from './vtiAgent'
 import { recordCardRevocation } from './vtiCardStanding'
 import { checkDeliveredCard, deliveredCardCheck, VtiCardStatusUnreadable } from './vtiDeliveredCheck'
 import { receiveIssue, roleNameOf, VTI_CARD_REFUSED_EVENT } from './vtiInbox'
@@ -134,6 +134,19 @@ export async function joinCommunity(
     })
   } catch (e) {
     await recordAnswer(deps.communityStore, deps.communityDid, { refusal: e }).catch(() => undefined)
+    // The request went and its answer did not come in time: it may still. If
+    // it comes while the ask is held, it is recorded as an answer in time
+    // would have been, and the screens reading the request learn it (7b's R5,
+    // 10-06). Cards it brings still arrive by delivery: the inbox stays open
+    // as long.
+    if (e instanceof VtiSentNoAnswer) {
+      void vtiAgent
+        .lateVerdict(e)
+        .then((late) => late && recordAnswer(deps.communityStore, deps.communityDid, { verdict: late }))
+        .catch((refusal) => recordAnswer(deps.communityStore, deps.communityDid, { refusal }))
+        .catch(() => undefined)
+        .finally(stopInbox)
+    } else setTimeout(stopInbox, 30000)
     throw e
   }
   await recordAnswer(deps.communityStore, deps.communityDid, { verdict }).catch(() => undefined)
@@ -168,7 +181,7 @@ export async function joinCommunity(
         // The card comes by delivery, not inline: give the outbox a moment.
         for (let i = 0; i < 20 && !membership; i++) {
           await new Promise((resolve) => setTimeout(resolve, 1500))
-          membership = await deps.communityStore.getMembership(deps.communityDid)
+          membership = await deps.communityStore.getMembership(deps.communityDid, persona.did)
         }
       }
       if (membership) {
@@ -234,7 +247,12 @@ export function membershipFromVerdict(
  * Never throws: a poll that fails falls back to what the phone last knew.
  */
 export type CommunityJoinState =
-  | { kind: 'none' }
+  /**
+   * Nothing stands. `lost`: this phone sent a request and the community, asked,
+   * holds none — the send never reached it. Only ever from that answer, never
+   * from a request that is merely unanswered (238).
+   */
+  | { kind: 'none'; lost?: boolean }
   | { kind: 'member'; membership: VtiMembership }
   | { kind: 'removed'; membership: VtiMembership; at?: string }
   | { kind: 'sent'; submission: JoinSubmission }
@@ -263,10 +281,27 @@ export async function readJoinState(
 ): Promise<CommunityJoinState> {
   const store = options.communityStore ?? new GenericRecordsCommunityStore(agent)
 
-  const membership = await store.getMembership(communityDid).catch(() => undefined)
+  let membership = await store.getMembership(communityDid).catch(() => undefined)
+  let submission = await store.getSubmission?.(communityDid).catch(() => undefined)
+  // The store keeps one membership and one request per community, not per
+  // agent. When the current agent holds an identity here, what was kept for a
+  // different identity is another agent's standing, not this one's: with B
+  // current, A's membership read "You're a member" and hid B's refused
+  // request (several-agents device check, R5, 10-04).
+  const mine = await (options.identityStore ?? new GenericRecordsIdentityStore(agent))
+    .getPersona(communityDid)
+    .catch(() => undefined)
+  const anotherIdentity = (personaDid: string | undefined) => Boolean(mine && personaDid && personaDid !== mine.did)
+  if (membership && anotherIdentity(membership.personaDid)) membership = undefined
+  if (submission && anotherIdentity(submission.personaDid)) submission = undefined
+  // A request sent after the membership ended is where the person stands now:
+  // "removed you" above a request that went out hid it (IN-104).
+  const sentSince = (at: string | undefined) =>
+    Boolean(submission && at && Date.parse(submission.sentAt) > Date.parse(at))
   // The community said so in a signed notice: removed, whatever the card says.
-  if (membership?.removal) return { kind: 'removed', membership, at: membership.removal.decidedAt }
-  if (membership) {
+  if (membership?.removal && !sentSince(membership.removal.decidedAt))
+    return { kind: 'removed', membership, at: membership.removal.decidedAt }
+  if (membership && !membership.removal) {
     const cardStatus =
       options.cardStatus ??
       (async (m: VtiMembership) => {
@@ -280,10 +315,11 @@ export async function readJoinState(
         return result.state === 'revoked' ? { revoked: true, at: result.checkedAt } : { revoked: false }
       })
     const card = await cardStatus(membership).catch(() => ({ revoked: false, at: undefined }))
-    return card.revoked ? { kind: 'removed', membership, at: card.at } : { kind: 'member', membership }
+    if (!card.revoked) return { kind: 'member', membership }
+    // Revoked: a request sent since the membership began is the person asking again.
+    if (!sentSince(membership.grantedAt)) return { kind: 'removed', membership, at: card.at }
   }
 
-  let submission = await store.getSubmission?.(communityDid).catch(() => undefined)
   // Left on this phone, and nothing sent since: "You left", not "Join".
   const departure = await store.getDeparture?.(communityDid).catch(() => undefined)
   if (departure && (!submission || submission.sentAt <= departure.at)) {
@@ -301,7 +337,9 @@ export async function readJoinState(
       options.status ??
       (async (did: string, requestId?: string) => {
         const persona = await (options.identityStore ?? new GenericRecordsIdentityStore(agent)).getPersona(did)
-        if (!persona) return undefined
+        // No identity to ask with is not an answer: nothing is known, so the
+        // request is not taken for lost.
+        if (!persona) throw new Error('vtiJoin: no identity to ask with')
         await vtiAgent.connect(agent, options.mediatorDid, {
           persona,
           peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
@@ -311,8 +349,9 @@ export async function readJoinState(
     try {
       const polled = await poll(communityDid, submission.requestId)
       // The community holds no such request: the send never reached it, or it
-      // was swept. There is nothing to wait for — the person can send again.
-      if (!polled) return { kind: 'none' }
+      // was swept. There is nothing to wait for — the person can send again,
+      // and is told why (238).
+      if (!polled) return { kind: 'none', lost: true }
       submission = (await recordStatus(store, communityDid, polled)) ?? submission
     } catch {
       // Keep what the phone last knew.
@@ -402,11 +441,11 @@ export async function leaveCommunity(
   }
   // What the community no longer holds, the phone no longer shows. Each step
   // on its own: one store failing must not leave the others half-cleared.
-  await deps.communityStore.forgetCommunity(communityDid).catch(() => undefined)
+  await deps.communityStore.forgetCommunity(communityDid, persona.did).catch(() => undefined)
   await deps.vettingStore?.forget(communityDid).catch(() => undefined)
   await deps.identityStore.forgetPersona(communityDid).catch(() => undefined)
   await deps.communityStore
-    .saveDeparture?.({ communityDid, disposition, at: new Date().toISOString() })
+    .saveDeparture?.({ communityDid, personaDid: persona.did, disposition, at: new Date().toISOString() })
     .catch(() => undefined)
   return { disposition, alreadyGone }
 }

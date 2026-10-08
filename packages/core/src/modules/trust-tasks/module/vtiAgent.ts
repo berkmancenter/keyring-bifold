@@ -22,6 +22,7 @@ import type { Agent } from '@credo-ts/core'
 import { utils } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { tsp, TRUST_TASK_V2_ENVELOPE_TYPE } from '@bifold/trust-tasks'
+import { DeviceEventEmitter } from 'react-native'
 
 import { signDocumentProof } from '../documentProof'
 import { purposeForDocumentType } from './proofPurpose'
@@ -56,6 +57,7 @@ import { communityTarget } from './vtiCommunityLink'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import { fetchWaitingIfBusy } from './vtcBusy'
 import { didPrefix } from './didPrefix'
+import { VTI_JOIN_STATUS_LATE_EVENT } from './communityChanged'
 import { releaseWarn } from './releaseLog'
 import { readManifest, type VtiManifest } from './joinManifest'
 import {
@@ -373,6 +375,18 @@ interface AskEntry {
   answer?: DidCommV2PlaintextMessage
 }
 
+/** A trust-task-error's code and words, cut short for a log line that reaches problem reports. */
+export function refusalWordsOf(plaintext: DidCommV2PlaintextMessage): { code: string; message?: string } {
+  const payload = ((plaintext.body as { payload?: unknown } | undefined)?.payload ?? {}) as {
+    code?: unknown
+    message?: unknown
+  }
+  const code = typeof payload.code === 'string' && payload.code ? payload.code : 'unknown'
+  const message =
+    typeof payload.message === 'string' ? payload.message.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined
+  return { code, ...(message ? { message } : {}) }
+}
+
 const hostOf = (endpoint?: string) => {
   if (!endpoint) return undefined
   const match = /^[a-z]+:\/\/([^/]+)/i.exec(endpoint)
@@ -383,6 +397,8 @@ class VtiAgentController {
   private state: VtiAgentState = { status: 'disconnected' }
   private listeners = new Set<Listener>()
   private session?: VtiMediatorSession
+  /** Run before the session signs in as a DID (see `beforeSignIn`). */
+  private readonly signInGuards = new Set<(did: string) => Promise<void>>()
   private mediator?: VtiMediatorEndpoints
   private agent?: Agent
   /**
@@ -400,6 +416,13 @@ class VtiAgentController {
   private readonly asks = new Map<string, AskEntry>()
   /** How long `ask` waits for an answer when the caller names no time. */
   answerTimeoutMs = 30000
+  /**
+   * How long a join submit waits. A community deciding a join may look up the
+   * applicant's DIDs, and after a DID host's 429 it retries 30 s later
+   * (VTI-69): its answer then lands just past a 30 s clock (7b's R5, 10-06,
+   * 0.2 s late). The longer clock covers one such retry.
+   */
+  submitAnswerTimeoutMs = 60000
   private inbox: ((plaintext: DidCommV2PlaintextMessage) => void | Promise<void>)[] = []
   private tsp?: TspSessionIdentity
   /** The persona this session speaks as, when it is one: its borrowed signing key signs what a spec requires. */
@@ -524,6 +547,17 @@ class VtiAgentController {
     )
     this.dropExpiredHolds()
     const entry = this.askAnswered(plaintext)
+    // A community's refusal, said in the log with its code and words and what
+    // it answers: four refusals of a join reached a tester's report as bare
+    // "inbound trust-task-error" lines (IN-127, 10-06), and nothing said why.
+    if (String(plaintext.type ?? '').startsWith(TASK_ERROR)) {
+      const refusal = refusalWordsOf(plaintext)
+      this.agent?.config?.logger?.warn?.(
+        `vtiAgent: ${didPrefix(plaintext.from)} refused ${entry ? taskName(entry.type) : 'a task'}: ${refusal.code}${
+          refusal.message ? ` — ${refusal.message}` : ''
+        }`
+      )
+    }
     if (entry) {
       this.settle(
         entry,
@@ -607,6 +641,14 @@ class VtiAgentController {
       `vtiAgent: ${entry.communityDid} answered ${taskName(entry.type)} after its clock ran out — kept for the next caller`
     )
     this.listeners.forEach((listener) => listener())
+    // Where a join request stands, answered late: whoever shows it asks again.
+    if (entry.type === STATUS) {
+      try {
+        DeviceEventEmitter.emit(VTI_JOIN_STATUS_LATE_EVENT, { communityDid: entry.communityDid })
+      } catch {
+        // A listener's failure is the listener's.
+      }
+    }
   }
 
   private dropExpiredHolds(now = Date.now()): void {
@@ -660,6 +702,41 @@ class VtiAgentController {
     if (!held) return undefined
     this.asks.delete(held.id)
     return held.answer
+  }
+
+  /**
+   * The answer to a submit that came back unanswered, if it arrives while the
+   * ask is held (`VTI_ANSWER_HOLD_MS`): taken once, as a verdict, the way an
+   * answer in time would have been — a refusal is thrown. Undefined when none
+   * comes in that time. 7b's R5, 10-06: the community answered a join 0.2 s
+   * after the 30 s clock, and the Join screen never learned it.
+   */
+  lateVerdict(sent: VtiSentNoAnswer, holdMs = VTI_ANSWER_HOLD_MS): Promise<VtiVerdict | undefined> {
+    const communityDid = sent.communityDid
+    if (!communityDid || !sent.requestId) return Promise.resolve(undefined)
+    return new Promise((resolve, reject) => {
+      let done = false
+      const finish = (verdict?: VtiVerdict, error?: unknown) => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        unsubscribe()
+        if (error) reject(error)
+        else resolve(verdict)
+      }
+      const look = () => {
+        const answer = this.takeHeldAnswer(communityDid, sent.taskType, sent.requestId)
+        if (!answer) return
+        try {
+          finish(this.verdictOf(answer, communityDid, sent.taskType))
+        } catch (error) {
+          finish(undefined, error)
+        }
+      }
+      const unsubscribe = this.subscribe(look)
+      const timer = setTimeout(() => finish(undefined), holdMs)
+      look()
+    })
   }
 
   /**
@@ -838,6 +915,9 @@ class VtiAgentController {
             }
           : {}),
       })
+      // Whatever else holds a connection for this DID lets go first: a mediator
+      // keeps one live connection per DID (vtiIdentityListeners).
+      for (const guard of [...this.signInGuards]) await guard(did).catch(() => undefined)
       step(`signing in as ${didPrefix(did)} (challenge, then the socket)`)
       this.set({ signingInAs: did })
       await session.start()
@@ -939,6 +1019,18 @@ class VtiAgentController {
 
   get isConnected(): boolean {
     return this.session?.isOpen === true
+  }
+
+  /**
+   * Run `guard` before every sign-in, with the DID about to sign in, and wait
+   * for it: a listener holding its own connection for that DID closes it first.
+   * Returns the function that removes the guard.
+   */
+  beforeSignIn(guard: (did: string) => Promise<void>): () => void {
+    this.signInGuards.add(guard)
+    return () => {
+      this.signInGuards.delete(guard)
+    }
   }
 
   /** The DID this session presents. */
@@ -1261,12 +1353,47 @@ class VtiAgentController {
    * app learns what a community calls itself; teaching the target here rather
    * than at each screen means a published name cannot be missed by whichever
    * screen happened to fetch.
+   *
+   * A manifest carries a name only when the operator has set branding, which a
+   * fresh community has not. Its public profile has a `name` of its own, so
+   * without branding that is read instead — in the background, since a screen
+   * that subscribes to `communityTarget` picks the name up whenever it lands.
    */
   private learnManifest(communityDid: string, agent: Agent | undefined, manifest: VtiManifest): VtiManifest {
     if (manifest.wire) this.joinWireByCommunity.set(communityDid, manifest.wire)
-    communityTarget.publishedName(communityDid, manifest.branding?.displayName)
-    rememberCommunityName(agent, communityDid, manifest.branding?.displayName)
+    const branded = manifest.branding?.displayName?.trim()
+    if (branded) {
+      communityTarget.publishedName(communityDid, branded)
+      rememberCommunityName(agent, communityDid, branded)
+    } else {
+      this.profileNameRead = this.learnProfileName(communityDid, agent)
+    }
     return manifest
+  }
+
+  /** The last public-profile read `learnManifest` started, for a caller (a test) to wait on. */
+  profileNameRead: Promise<void> = Promise.resolve()
+
+  /**
+   * The name a community gives itself in its public profile, learned as its
+   * published name. Read from the same `VTCRest` endpoint as the manifest; a
+   * community with no profile, an empty name or no reachable endpoint is
+   * simply left unnamed.
+   */
+  private async learnProfileName(communityDid: string, agent: Agent | undefined): Promise<void> {
+    if (!agent) return
+    try {
+      const doc = await agent.dids.resolveDidDocument(communityDid)
+      const service = doc.service?.find((s) => s.type === 'VTCRest')
+      const base = typeof service?.serviceEndpoint === 'string' ? service.serviceEndpoint : undefined
+      if (!base) return
+      const name = await readPublicProfileName(base, communityDid)
+      if (!name) return
+      communityTarget.publishedName(communityDid, name)
+      rememberCommunityName(agent, communityDid, name)
+    } catch {
+      // Only the name is lost: the community is shown as unnamed.
+    }
   }
 
   /**
@@ -1520,7 +1647,8 @@ class VtiAgentController {
           vp: this.presentation(options.credentials),
           registryConsent: options.registryConsent === true,
           criterion,
-        })
+        }),
+        this.submitAnswerTimeoutMs
       )
       const refusal = answer ? refusalOf(answer) : undefined
       refused.push(wire)
@@ -1564,4 +1692,36 @@ function rememberCommunityName(agent: Agent | undefined, communityDid: string, n
 export function vtcRestUrl(base: string, path: string): string {
   const root = base.replace(/\/+$/, '')
   return `${/\/v1$/.test(root) ? root : `${root}/v1`}/${path.replace(/^\/+/, '')}`
+}
+
+/**
+ * The `name` a community's public profile gives it — `GET
+ * {VTCRest}/community/public-profile`, unauthenticated and Trust-Task-exempt
+ * (vtc-service `routes/community/profile.rs`, `PublicCommunityProfile`).
+ *
+ * Undefined unless the profile is answered, is about this very community
+ * (`communityDid`: communities share hosts, and one service must not name
+ * another), and has a non-empty name — a community's profile is created with
+ * an empty one (`CommunityProfile::new(did, "")` at bootstrap).
+ */
+export async function readPublicProfileName(
+  base: string,
+  communityDid: string,
+  doFetch: typeof fetch = fetch
+): Promise<string | undefined> {
+  try {
+    const response = await fetchWaitingIfBusy(
+      doFetch,
+      vtcRestUrl(base, 'community/public-profile'),
+      { method: 'GET', headers: { accept: 'application/json' } },
+      undefined,
+      3_000
+    )
+    if (!response.ok) return undefined
+    const body = (await response.json()) as { communityDid?: unknown; name?: unknown } | undefined
+    if (body?.communityDid !== communityDid || typeof body.name !== 'string') return undefined
+    return body.name.trim() || undefined
+  } catch {
+    return undefined
+  }
 }

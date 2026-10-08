@@ -15,6 +15,7 @@ import { useAgent } from '@bifold/react-hooks'
 import enCopy from '../../../localization/en/en.json'
 import frCopy from '../../../localization/fr/fr.json'
 import ptBrCopy from '../../../localization/pt-br/pt-br.json'
+import Button, { ButtonType } from '../../../components/buttons/Button'
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens, Stacks } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
@@ -344,6 +345,28 @@ describe('giving the code to an admin', () => {
       },
     })
 
+  // IN-125: one main button at a time. Before the code is handed out, Share is
+  // it; once copied or shared, "I've been added" is.
+  test('one main button: Share until the code is handed out, then "I\'ve been added"', async () => {
+    const mockUseAgent = useAgent as jest.Mock
+    mockUseAgent.mockReturnValue({ agent: {} })
+    showKey()
+    const tree = render(
+      <BasicAppContext>
+        <VtaLink />
+      </BasicAppContext>
+    )
+    const typeOf = (key: string) =>
+      tree.UNSAFE_getAllByType(Button).find((b) => b.props.testID === testIdWithKey(key))?.props.buttonType
+    expect(typeOf('VtaLinkShareKey')).toBe(ButtonType.Primary)
+    expect(typeOf('VtaLinkCheckGrant')).toBe(ButtonType.Secondary)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('VtaLinkCopyKey')))
+    })
+    expect(typeOf('VtaLinkShareKey')).toBe(ButtonType.Secondary)
+    expect(typeOf('VtaLinkCheckGrant')).toBe(ButtonType.Primary)
+  })
+
   test('the two things to do come before the code, which starts hidden', () => {
     const mockUseAgent = useAgent as jest.Mock
     mockUseAgent.mockReturnValue({ agent: {} })
@@ -406,6 +429,44 @@ describe('a link that failed', () => {
     })
     expect(tree.getByTestId(testIdWithKey('VtaLinkErrorDetail'))).toHaveTextContent(raw)
   })
+
+  // Alberto, 10-05: "block it" — and the admin is told to clean up the key.
+  test("a community's own agent: said so, with where to remove this phone's key", () => {
+    const mockUseAgent = useAgent as jest.Mock
+    mockUseAgent.mockReturnValue({ agent: {} })
+    failed({ reason: 'communityAgent' })
+    const tree = render(
+      <BasicAppContext>
+        <VtaLink />
+      </BasicAppContext>
+    )
+    expect(tree.getByTestId(testIdWithKey('VtaLinkError'))).toHaveTextContent('VtaLink.FailedCommunityAgent')
+    expect(tree.getByTestId(testIdWithKey('VtaLinkCommunityAgentCleanup'))).toHaveTextContent(
+      'VtaLink.FailedCommunityAgentCleanup'
+    )
+  })
+
+  // #287's device check, Run A (10-05): an approval rule held the swap, and the
+  // screen said only "That didn't work, and the app doesn't know why".
+  test.each(['held', 'refused', 'noAnswer'])(
+    'a swap the agent did not make (%s): says why, with the original text behind Details',
+    async (swap) => {
+      const mockUseAgent = useAgent as jest.Mock
+      mockUseAgent.mockReturnValue({ agent: {} })
+      const raw = 'auth:consent_required'
+      failed({ reason: 'failed', detail: raw, swap })
+      const tree = render(
+        <BasicAppContext>
+          <VtaLink />
+        </BasicAppContext>
+      )
+      expect(tree.getByTestId(testIdWithKey('VtaLinkError'))).toHaveTextContent(`VtaLink.SwapFailed.${swap}`)
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey('VtaLinkErrorDetailsToggle')))
+      })
+      expect(tree.getByTestId(testIdWithKey('VtaLinkErrorDetail'))).toHaveTextContent(raw)
+    }
+  )
 
   test('with nothing caught, the general sentence and no Details', () => {
     const mockUseAgent = useAgent as jest.Mock
@@ -556,6 +617,21 @@ describe("an agent host's automatic connection", () => {
     expect(tree.getByTestId(testIdWithKey('VtaLinkCancel'))).toBeTruthy()
   })
 
+  test('names the step the setup is at, and how long the whole setup has taken', () => {
+    at('awaitingGrant', {
+      code: '',
+      stage: { step: 'signingIn', attempt: 3, of: 24, since: Date.now() - 5_000, startedAt: Date.now() - 65_000 },
+    })
+    const tree = show()
+    expect(tree.getByTestId(testIdWithKey('VtaLinkHostStep_creating'))).toHaveTextContent(
+      /VtaLink\.Host\.Steps\.Creating/
+    )
+    // The current step carries the screen's state line, which the runners read.
+    expect(tree.getByTestId(testIdWithKey('VtaLinkState'))).toHaveTextContent(/VtaLink\.Host\.Steps\.SigningIn/)
+    expect(tree.getByTestId(testIdWithKey('VtaLinkHostStepElapsed'))).toHaveTextContent(/^1:0[56]$/)
+    expect(tree.getByTestId(testIdWithKey('VtaLinkHostSettingUp'))).not.toHaveTextContent(/SettingUpWaiting/)
+  })
+
   test.each([
     'badKey',
     'badRequest',
@@ -587,5 +663,120 @@ describe("an agent host's automatic connection", () => {
       expect(host).not.toMatch(/farm/i)
       expect(host).toContain('Admin DID')
     }
+  })
+})
+
+// 239, iPhone: "Add" on the agent chips, then back, and "Your agent" read
+// "Link your agent" until the app was restarted. Leaving this screen while an
+// agent is being added, before it is linked, gives the adding up, as Cancel does.
+describe('leaving while adding another agent', () => {
+  const nav = useNavigation() as unknown as { addListener?: jest.Mock }
+  let leave: (() => void) | undefined
+  beforeEach(() => {
+    leave = undefined
+    nav.addListener = jest.fn((event: string, handler: () => void) => {
+      if (event === 'beforeRemove') leave = handler
+      return jest.fn()
+    })
+  })
+  afterEach(() => {
+    delete nav.addListener
+    ;(vtaAgent as unknown as Setter).set({ addingAgent: false, link: { kind: 'notLinked' } })
+    jest.restoreAllMocks()
+  })
+
+  const leaveWith = (state: Record<string, unknown>) => {
+    ;(vtaAgent as unknown as Setter).set(state)
+    // An earlier test in this file spies on it too: count from here.
+    const cancel = jest.spyOn(vtaAgent, 'cancelLink').mockImplementation(() => undefined)
+    cancel.mockClear()
+    render(
+      <BasicAppContext>
+        <VtaLink />
+      </BasicAppContext>
+    )
+    expect(leave).toBeDefined()
+    act(() => leave?.())
+    return cancel
+  }
+
+  test('before the new agent is linked: back to the agent before', () => {
+    expect(leaveWith({ addingAgent: true, link: { kind: 'notLinked' } })).toHaveBeenCalledTimes(1)
+  })
+
+  test('once the new agent is linked, or when not adding one: nothing to give up', () => {
+    expect(
+      leaveWith({
+        addingAgent: true,
+        link: {
+          kind: 'linked',
+          vtaDid: 'did:webvh:new',
+          label: 'new',
+          linkedAt: 't',
+          connection: { kind: 'online', since: 0 },
+        },
+      })
+    ).not.toHaveBeenCalled()
+    jest.restoreAllMocks()
+    expect(leaveWith({ addingAgent: false, link: { kind: 'notLinked' } })).not.toHaveBeenCalled()
+  })
+})
+
+// IN-135: a link left part-way picks back up with the same key; a failure
+// that was not a refusal offers to try again with it.
+describe('picking a link back up', () => {
+  const render_ = () =>
+    render(
+      <BasicAppContext>
+        <VtaLink />
+      </BasicAppContext>
+    )
+  beforeEach(() => (useAgent as jest.Mock).mockReturnValue({ agent: {} }))
+  afterEach(() => {
+    ;(vtaAgent as unknown as Setter).set({ link: { kind: 'notLinked' } })
+    jest.restoreAllMocks()
+  })
+
+  test('a key shown again says the agent may already have added this phone', () => {
+    ;(vtaAgent as unknown as Setter).set({
+      link: {
+        kind: 'showingKey',
+        vtaDid: 'did:webvh:example:vta',
+        label: 'alice',
+        did: 'did:key:z6Mk',
+        checking: false,
+        resumed: true,
+      },
+    })
+    expect(render_().getByTestId(testIdWithKey('VtaLinkResumed'))).toHaveTextContent('VtaLink.ResumedHint')
+  })
+
+  test('a failure that was not a refusal, with the key still held: Try again uses it', async () => {
+    jest.spyOn(vtaAgent, 'pendingLinkKey').mockResolvedValue({ vtaDid: 'did:webvh:example:vta', did: 'did:key:z6Mk' })
+    const resume = jest.spyOn(vtaAgent, 'resumeLink').mockResolvedValue(true)
+    ;(vtaAgent as unknown as Setter).set({
+      link: { kind: 'notLinked', lastError: { reason: 'failed', vtaDid: 'did:webvh:example:vta', label: 'alice' } },
+    })
+    const tree = render_()
+    await act(async () => undefined)
+    fireEvent.press(tree.getByTestId(testIdWithKey('VtaLinkTryAgain')))
+    expect(resume).toHaveBeenCalledWith(expect.anything(), 'did:webvh:example:vta')
+  })
+
+  test('a dead host code, or a refusal, offers no Try again: it says to make a new code', async () => {
+    const pending = jest
+      .spyOn(vtaAgent, 'pendingLinkKey')
+      .mockResolvedValue({ vtaDid: 'did:webvh:example:vta', did: 'did:key:z6Mk' })
+    for (const lastError of [
+      { reason: 'expired', hostReason: 'expired', vtaDid: 'did:webvh:example:vta', label: 'alice' },
+      { reason: 'communityAgent', vtaDid: 'did:webvh:example:vta', label: 'alice' },
+    ]) {
+      ;(vtaAgent as unknown as Setter).set({ link: { kind: 'notLinked', lastError } })
+      const tree = render_()
+      await act(async () => undefined)
+      expect(tree.queryByTestId(testIdWithKey('VtaLinkTryAgain'))).toBeNull()
+      tree.unmount()
+    }
+    expect(pending).not.toHaveBeenCalled()
   })
 })

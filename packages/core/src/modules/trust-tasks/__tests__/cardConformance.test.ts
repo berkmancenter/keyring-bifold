@@ -85,7 +85,7 @@ import {
   type VtiVettingStore,
 } from '../module/vtiVetting'
 // eslint-disable-next-line import/order
-import { setDtgV1WritingEnabled } from '../module/dtgV1Writing'
+import { DTG_V1_WRITING_RELEASE_DEFAULT, setDtgV1WritingEnabled, setDtgV1WritingMode } from '../module/dtgV1Writing'
 // eslint-disable-next-line import/order
 import { verifyEligibilityPresentation } from '../module/vtiEligibility'
 import { purposeForDocumentType } from '../module/proofPurpose'
@@ -199,10 +199,18 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       kmsKeyIds: { signing: 'vetter-key', keyAgreement: 'vetter-key' },
     }
     mockSend.mockClear()
-    await new VtiVetterDesk(vetter.agent as never, vetterPersona as never, deskStore, {} as never).attest(
-      desk.requestId,
-      { documentClasses: ['passport'], claimsVerified: ['name.legal'], livenessConfirmed: true }
-    )
+    // statement.json is the endorsement-shaped statement, written on purpose:
+    // with no requirements and no grant here, mode auto now writes vetted/1,
+    // which statement-v1.json below already covers.
+    setDtgV1WritingMode('off')
+    try {
+      await new VtiVetterDesk(vetter.agent as never, vetterPersona as never, deskStore, {} as never).attest(
+        desk.requestId,
+        { documentClasses: ['passport'], claimsVerified: ['name.legal'], livenessConfirmed: true }
+      )
+    } finally {
+      setDtgV1WritingMode(DTG_V1_WRITING_RELEASE_DEFAULT)
+    }
     // Delivered as openvtc delivers and opens one (openvtc b52dc28
     // vetting/wire.rs:188-205 `credential_delivery`, :218-240 `open`): a signed
     // Trust Task document, its type the message's, issued by the vetter,
@@ -378,6 +386,76 @@ describe('a Vetting Card from the shipping code, really signed', () => {
       })
     ).resolves.toMatchObject({ ok: true })
 
+    // The same request answered with the grant a DTG Credentials v1 community
+    // issues: a role VAC (vta-sdk 0.55 vetting/eligibility.rs takes only this).
+    // No credentialStatus, so an upstream checker can judge it offline.
+    const second = (ms: number) => new Date(Math.floor(ms / 1000) * 1000).toISOString().replace('.000Z', 'Z')
+    const vac = await signDocumentProof(
+      grantor.agent as never,
+      {
+        '@context': ['https://www.w3.org/ns/credentials/v2', 'https://registry.trustoverip.org/dtg/context/v1'],
+        type: ['VerifiableCredential', 'DTGCredential', 'AuthorityCredential'],
+        id: 'urn:uuid:vac-conformance',
+        issuer: grantor.did,
+        issuerScope: 'public',
+        validFrom: second(new Date().getTime() - 86400000),
+        validUntil: second(new Date().getTime() + 90 * 86400000),
+        credentialSubject: {
+          id: vetter.did,
+          authority: { scope: grantor.did, actions: ['role:vetter'], maxAttenuation: 0 },
+        },
+      },
+      grantor.did,
+      { kmsKeyId: 'community-key', verificationMethodId: grantor.verificationMethodId }
+    )
+    const requestV1DocumentId = 'urn:uuid:request-conformance-v1'
+    const intakeV1 = new VtiVetterDesk(
+      vetter.agent as never,
+      { ...vetterPersona, communityDid: grantor.did } as never,
+      { ...intakeStore, listTickets: async () => [{ ...ticket }] } as unknown as VtiVettingStore,
+      {
+        listHeldCredentials: async () => [
+          {
+            kind: 'vetter-grant',
+            communityDid: grantor.did,
+            subjectDid: vetter.did,
+            credential: vac,
+            receivedAt: new Date().toISOString(),
+          },
+        ],
+      } as never
+    )
+    mockSend.mockClear()
+    await (intakeV1 as unknown as { takeRequest(m: unknown): Promise<void> }).takeRequest({
+      id: 'urn:uuid:didcomm-conformance-v1',
+      type: VETTING.request,
+      from: applicant.did,
+      body: {
+        id: requestV1DocumentId,
+        type: VETTING.request,
+        issuer: applicant.did,
+        recipient: vetter.did,
+        payload: { community: grantor.did, joinDid: applicant.did, ticket: { code: ticket.code } },
+      },
+    })
+    const responseV1 = (
+      mockSend.mock.calls.at(-1) as unknown as [string, string, { payload: Record<string, unknown> }]
+    )[2]
+    const eligibilityV1 = responseV1.payload.eligibilityVp as Record<string, unknown>
+    const eligibilityV1Expect = { ...eligibilityExpect, challenge: requestV1DocumentId, now: new Date().toISOString() }
+    const presentedV1 = (eligibilityV1.verifiableCredential as Record<string, unknown>[] | undefined) ?? []
+    expect(presentedV1.map((c) => c.type)).toContainEqual([
+      'VerifiableCredential',
+      'DTGCredential',
+      'AuthorityCredential',
+    ])
+    await expect(
+      verifyEligibilityPresentation(vetter.agent as never, eligibilityV1, {
+        ...eligibilityV1Expect,
+        now: new Date(eligibilityV1Expect.now),
+      })
+    ).resolves.toMatchObject({ ok: true })
+
     const out = process.env.CARD_OUT
     if (out) {
       mkdirSync(out, { recursive: true })
@@ -396,6 +474,7 @@ describe('a Vetting Card from the shipping code, really signed', () => {
         JSON.stringify({ applicant: applicant.did, vetter: vetter.did }, null, 2)
       )
       writeFileSync(join(out, 'eligibility.json'), JSON.stringify(eligibility, null, 2))
+      writeFileSync(join(out, 'eligibility-v1.json'), JSON.stringify(eligibilityV1, null, 2))
       writeFileSync(
         join(out, 'expect.json'),
         JSON.stringify(
@@ -407,6 +486,8 @@ describe('a Vetting Card from the shipping code, really signed', () => {
             domain: session.domain,
             requiredClaims: session.requiredClaims,
             eligibility: eligibilityExpect,
+            // The role-VAC presentation (eligibility-v1.json), for a v1 checker.
+            eligibilityV1: eligibilityV1Expect,
           },
           null,
           2
@@ -583,6 +664,7 @@ describe('every Trust Task Keyring signs, from the shipping code', () => {
       state: { status: 'connected', did: applicant.did },
     })
     controller.answerTimeoutMs = 1
+    controller.submitAnswerTimeoutMs = 1
     const community_ = community.did
     const manifest = { criteria: [], requirementsDigest: 'zQmDigest' } as never
     const asks: [string, () => Promise<unknown>][] = [
