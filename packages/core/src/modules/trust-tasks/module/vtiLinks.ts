@@ -22,6 +22,7 @@ import {
 } from '@bifold/trust-tasks'
 
 import { Screens } from '../../../types/navigators'
+import { agentHomeScreen } from '../screens/agentHome'
 
 import { AgentHostConnectionError, looksLikeAgentHostQr, parseAgentHostQr } from './agentHostConnection'
 import { bareDid, classifyDid } from './classifyDid'
@@ -46,11 +47,17 @@ export class KeyringLinkError extends Error {
   constructor(
     message: string,
     /** For a vetter's ticket that cannot be used here: why, typed, so a screen can word it. */
-    readonly ticket?: VettingTicketError
+    readonly ticket?: VettingTicketError,
+    /** The words, as a localization key, for a screen that can translate; `message` stays the English. */
+    readonly messageKey?: string
   ) {
     super(message)
   }
 }
+
+/** A KeyringLinkError in the person's language where the screen can translate it, else as written. */
+export const keyringLinkErrorText = (e: KeyringLinkError, t?: (key: string) => string): string =>
+  e.messageKey && t ? t(e.messageKey) : e.message
 
 /**
  * The app's own link to the waiting approvals (the agent home). A push notification
@@ -137,6 +144,28 @@ export function otherDidMessage(did: string): string {
 const didHost = (did: string) => did.split(':')[3] ?? did
 
 /**
+ * An agent scanned on a phone already linked to one: added beside it, as My
+ * Agent's "Add another agent" does (several agents). The scan refused it
+ * outright before, though the phone can hold several agents (feedback,
+ * 10-05). The current agent is left, not forgotten; a link given up goes back
+ * to it (`cancelLink`). One this phone already has is said so instead.
+ */
+async function makeRoomForAgent(vtaDid: string): Promise<boolean> {
+  // Checked whatever the link is now (IN-132): after an "Add" the current
+  // agent has been left, and the agent named may be the one left.
+  if (vtaAgent.hasAgent(vtaDid)) {
+    throw new KeyringLinkError(
+      'This phone already has that agent. Switch to it on Your agent.',
+      undefined,
+      'VtaLink.FailedAlreadyLinked'
+    )
+  }
+  if (vtaAgent.getState().link.kind !== 'linked') return false
+  await vtaAgent.startAddingAgent()
+  return true
+}
+
+/**
  * A bare DID, classified by what its document advertises and routed: an agent
  * to linking, a community to Join (or back to "I was invited", when that is
  * where the person came from). Anything else says, in words, why there is
@@ -155,18 +184,26 @@ async function routeBareDid(
       communityTarget.set({ communityDid: did })
       navigate(communityLinkReturn.take() ? 'VtiInvited' : 'VtiJoin')
       return
-    case 'agent':
-      if (vtaAgent.getState().link.kind === 'linked') {
-        throw new KeyringLinkError('This phone is already linked to an agent.')
-      }
+    case 'agent': {
+      const adding = await makeRoomForAgent(did)
       // Scanned or pasted: usually another phone's "Add another phone" code, so
       // this phone shows its own code for that phone to scan (#30).
-      await vtaAgent.startManualLink(agent, did, didHost(did), { via: 'scan' })
+      try {
+        await vtaAgent.startManualLink(agent, did, didHost(did), { via: 'scan' })
+      } catch (error) {
+        // The link screen never opened: the add it started is given up, and
+        // the agent before comes back (IN-138).
+        if (adding) vtaAgent.cancelLink()
+        throw error
+      }
       navigate('VtaLink')
       return
+    }
     case 'ambiguous':
       throw new KeyringLinkError(
-        'This code belongs to both an agent and a community. Ask whoever gave it to you which one it is.'
+        'This code belongs to both an agent and a community. Ask whoever gave it to you which one it is.',
+        undefined,
+        'Scan.BothAgentAndCommunity'
       )
     case 'relay':
       throw new KeyringLinkError(
@@ -187,16 +224,37 @@ async function routeBareDid(
 }
 
 /** Where a link lands, inside the My Agent stack. */
-export type MyAgentDestination = 'VtaLink' | 'MyAgent' | 'VtaAgent' | 'VtiVetting' | 'VtiJoin' | 'VtiInvited'
+export type MyAgentDestination =
+  | 'VtaLink'
+  | 'MyAgent'
+  | 'VtaAgent'
+  | 'VtaRequests'
+  | 'VtiVetting'
+  | 'VtiJoin'
+  | 'VtiInvited'
 
 export const MY_AGENT_SCREEN: Record<MyAgentDestination, Screens> = {
   VtaLink: Screens.VtaLink,
   MyAgent: Screens.MyAgent,
-  // The agent home, where waiting approvals are listed (VtaAgentHome).
   VtaAgent: Screens.VtaAgent,
+  // What waits for the person's decision (VtaRequests).
+  VtaRequests: Screens.VtaRequests,
   VtiVetting: Screens.VtiVetting,
   VtiJoin: Screens.VtiJoin,
   VtiInvited: Screens.VtiInvited,
+}
+
+/**
+ * The My Agent stack's params for a link's destination. `initial: false` keeps
+ * the stack's own first screen ("Your agent") under the screen a link opens.
+ * Every tab unmounts on blur, so a link that arrived from another tab made that
+ * screen the stack's only route: Join opened by a community link had no back,
+ * and a press on the My Agent tab stayed on it (233). The first screen itself
+ * goes without it, or it would sit on top of itself.
+ */
+export function myAgentLinkParams(destination: MyAgentDestination): { screen: Screens; initial?: false } {
+  const screen = MY_AGENT_SCREEN[destination]
+  return screen === agentHomeScreen() ? { screen } : { screen, initial: false }
 }
 
 /**
@@ -253,9 +311,6 @@ export async function routeKeyringAgentLink(
   const trimmed = text.trim()
   switch (keyringAgentLinkKind(trimmed)) {
     case 'agentHost': {
-      if (vtaAgent.getState().link.kind === 'linked') {
-        throw new KeyringLinkError('This phone is already linked to an agent.')
-      }
       let offer
       try {
         offer = parseAgentHostQr(trimmed)
@@ -269,12 +324,13 @@ export async function routeKeyringAgentLink(
       }
       if (!offer)
         throw new KeyringLinkError("This agent host's code couldn't be read. Make a new one and scan it again.")
+      await makeRoomForAgent(offer.vtaDid)
       vtaAgent.scanHostOffer(offer)
       navigate('VtaLink')
       return
     }
     case 'approvals':
-      navigate('VtaAgent')
+      navigate('VtaRequests')
       return
     case 'enrolment': {
       let offer

@@ -31,7 +31,14 @@ import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 
 import { TRUST_TASK_V2_ENVELOPE_TYPE, signCompactJws, signDocumentProof, tsp } from '@bifold/trust-tasks'
 
-import { EPHEMERAL_KMS_BACKEND, importVtaKey, inMemoryKeyId, isInMemoryKeyId, type VtaExportedKey } from './vtaKeys'
+import {
+  EPHEMERAL_KMS_BACKEND,
+  heldInMemory,
+  importVtaKey,
+  inMemoryKeyId,
+  isInMemoryKeyId,
+  type VtaExportedKey,
+} from './vtaKeys'
 import {
   createVtiClientDid,
   resolveVtiMediator,
@@ -45,10 +52,21 @@ import type { VtiIdentityStore, VtiManagerIdentity, VtiMintRequest, VtiPersona }
 import { VtiRefusal } from './vtiAgent'
 import { STEP_UP_TASK, StepUpDeclined, approveResponsePayload, stepUpRequestOf, type StepUpRequest } from './stepUp'
 import { isDigestMultibase } from './vettingShape'
+import { TaskVersions } from './taskVersions'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import { packTrustTaskForPeer, tspSessionForManager, unpackTrustTaskFromPeer, type TspSessionIdentity } from './vtiTsp'
 import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
+import {
+  DECLARATIVE_POLICY_ID,
+  DECLARATIVE_POLICY_NAME,
+  DECLARATIVE_POLICY_PRIORITY,
+  EXT_KEY_APPROVER_SETS,
+  EXT_KEY_RULES,
+  synthesizeRego,
+  validateApprovals,
+} from './approvalsPolicy'
+import { EMPTY_APPROVALS, modelFromExt, ruleForWire, withKeySwapped, type ApprovalsModel } from './approvalRules'
 
 const LOG_PREFIX = '[TrustTasks:VtaClient]'
 
@@ -80,6 +98,8 @@ export const VTA_TASK = {
   serversList: 'https://trusttasks.org/spec/vta/webvh/servers/list/1.0',
   consentRequest: 'https://trusttasks.org/spec/task-consent/request/0.1',
   consentDecision: 'https://trusttasks.org/spec/task-consent/decision/0.1',
+  /** decision/0.2 adds only OPTIONAL members; a 0.1 decision re-typed as 0.2 means the same (trust-tasks-tf ce07a039 task-consent/decision/0.2 spec.md:122-124). */
+  consentDecision02: 'https://trusttasks.org/spec/task-consent/decision/0.2',
   consentGranted: 'https://trusttasks.org/spec/task-consent/granted/0.1',
   aclSwapKey: 'https://trusttasks.org/spec/acl/swap-key/0.1',
   // The canonical ACL family (vta-sdk trust_tasks.rs:222-260), each gated by
@@ -88,6 +108,54 @@ export const VTA_TASK = {
   aclGrant: 'https://trusttasks.org/spec/acl/grant/0.1',
   aclRevoke: 'https://trusttasks.org/spec/acl/revoke/0.1',
   aclUpdate: 'https://trusttasks.org/spec/acl/update/0.1',
+  // acl/*/0.2 (trust-tasks-tf ce07a039, released in #715), asked first and
+  // stepped down from on `unsupportedVersion` (taskVersions.ts). vta-service
+  // v0.52.0 serves only 0.1 (trust_tasks/mod.rs:2245-2256).
+  aclList02: 'https://trusttasks.org/spec/acl/list/0.2',
+  aclGrant02: 'https://trusttasks.org/spec/acl/grant/0.2',
+  aclRevoke02: 'https://trusttasks.org/spec/acl/revoke/0.2',
+  aclUpdate02: 'https://trusttasks.org/spec/acl/update/0.2',
+  // Only "Send me a test request" sends these (approvalRules.ts TEST_REQUEST_TASKS).
+  contextsDelete: 'https://trusttasks.org/spec/vta/contexts/delete/1.0',
+  // The approval rules' row (vta-sdk trust_tasks.rs:2048-2060). Writing is super-admin.
+  policyGet: 'https://trusttasks.org/spec/policy/get/0.1',
+  policyUpsert: 'https://trusttasks.org/spec/policy/upsert/0.2',
+} as const
+
+/**
+ * Each family this client speaks in more than one version, in the order to
+ * ask: newest first, except where agents in use serve only the older one.
+ */
+export const VTA_TASK_VERSIONS = {
+  // 0.1 first: vta-service 0.53.1 and 0.54.0 serve acl/{list,grant,update,
+  // revoke} only at 0.1 (trust_tasks/mod.rs:2245-2255 in both), and a refused
+  // 0.2 never reached the phone over TSP, so an add to My devices read as "no
+  // answer" (al-phone, 10-05). 0.2 is asked if an agent ever refuses 0.1.
+  aclList: [VTA_TASK.aclList, VTA_TASK.aclList02],
+  aclGrant: [VTA_TASK.aclGrant, VTA_TASK.aclGrant02],
+  aclRevoke: [VTA_TASK.aclRevoke, VTA_TASK.aclRevoke02],
+  aclUpdate: [VTA_TASK.aclUpdate, VTA_TASK.aclUpdate02],
+  // 0.1 first: vta-service 0.53.1 and 0.54.0 serve only task-consent/decision/0.1
+  // (trust_tasks/mod.rs:2242, TASK_TASK_CONSENT_DECISION_0_1), and its refusal of
+  // a 0.2 decision never reached the phone over TSP, so the step-down never
+  // ran and an Approve hung (al-phone, 10-05). This client sends only 0.1's
+  // members; 0.2 is asked if an agent ever refuses 0.1.
+  consentDecision: [VTA_TASK.consentDecision, VTA_TASK.consentDecision02],
+} as const
+
+/** Is this one of the 0.2 access-list URIs (where a revoke may answer `entry: null`)? */
+const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.2$/.test(uri)
+
+/**
+ * A full administrator's authority as an `acl/_shared/0.2` entry spells it:
+ * every context, every key, up to the granter's own ceiling — what a 0.1 admin
+ * entry with no scopes and no allowedKeys meant (acl/_shared/0.2 CONVENTIONS.md
+ * §8, lines 175-189). 0.2 makes all three REQUIRED (acl-entry.schema.json:12-18).
+ */
+export const FULL_ADMIN_AUTHORITY_02 = {
+  act: { scope: 'all' },
+  keys: { scope: 'all' },
+  capabilities: { scope: 'ceiling' },
 } as const
 
 /** What a VTA sends an approver: the request document's payload (`consent_request.rs`). */
@@ -281,6 +349,30 @@ export class SwapDoneSignInFailed extends Error {
   }
 }
 
+/**
+ * The agent kept the key the phone signed in with: the swap onto the long-term
+ * key did not happen, and asking the agent confirmed it. Why, for a sentence
+ * rather than "the app doesn't know why" (#287's device check, Run A, 10-05):
+ * `held`, an approval rule held the swap for consent until the wait ran out;
+ * `refused`, the agent answered no; `noAnswer`, it did not answer at all. The
+ * message is the original one, for Details.
+ */
+export class KeySwapNotDone extends Error {
+  constructor(
+    readonly why: 'held' | 'refused' | 'noAnswer',
+    readonly cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'KeySwapNotDone'
+  }
+}
+
+/** Why a swap the agent confirmed it did not make failed. */
+export function keySwapNotDone(error: unknown): KeySwapNotDone {
+  const why = consentPendingOf(error) ? 'held' : error instanceof VtiRefusal ? 'refused' : 'noAnswer'
+  return new KeySwapNotDone(why, error)
+}
+
 export class ManagerKeyUnresolved extends Error {
   constructor(
     readonly vtaDid: string,
@@ -350,6 +442,7 @@ const UNSOLICITED = new Set<string>([
   VTA_TASK.consentGranted,
   STEP_UP_TASK.approveRequest01,
   STEP_UP_TASK.approveRequest02,
+  STEP_UP_TASK.approveRequest04,
 ])
 
 /** Persona mints running now, by VTA and community (see `ensurePersona`). */
@@ -360,6 +453,30 @@ export class VtaTaskDropped extends Error {
   constructor(readonly taskType: string) {
     super(`${LOG_PREFIX} ${taskType} was dropped before it was sent`)
     this.name = 'VtaTaskDropped'
+  }
+}
+
+/** TSP no-answers in a row that open the breaker (vta-sdk `REPLY_TIMEOUT_BREAKER`). */
+export const REPLY_TIMEOUT_BREAKER = 2
+/**
+ * How long the breaker stays open before one probe: the VTA's own window for a
+ * peer it found not collecting its inbox (VTI #1978, `UncollectedPeers`).
+ */
+export const REPLIES_STALLED_WINDOW_MS = 5 * 60_000
+
+/**
+ * Not sent: the last asks over TSP got no answer, so replies are not reaching
+ * this phone (vta-sdk `VtaError::RepliesNotArriving`). Sending more would only
+ * queue more replies the phone cannot collect, or be dropped by a VTA that
+ * found it not collecting.
+ */
+export class VtaRepliesNotArriving extends Error {
+  constructor(
+    readonly taskType: string,
+    readonly consecutiveTimeouts: number
+  ) {
+    super(`${LOG_PREFIX} ${taskType} not sent; replies are not reaching this phone`)
+    this.name = 'VtaRepliesNotArriving'
   }
 }
 
@@ -401,8 +518,12 @@ export class VtaClient {
   private tsp?: TspSessionIdentity
   /** §4.2's per-peer decision, taken once per session. */
   private readonly carriageByPeer = new Map<string, Carriage>()
-  /** Whether the VTA has been greeted (§7.2.2) this session. */
+  /** Whether the VTA has been greeted (§7.2.2) this session; cleared by an ask over TSP that got no answer. */
   private greeted = false
+  /** TSP asks in a row that got no answer; any reply resets it. */
+  private noAnswerInARow = 0
+  /** While set, asks over TSP fail at once, until this time; then one goes as a probe. */
+  private stalledUntil?: number
   private queue: Promise<unknown> = Promise.resolve()
   /** Each task's place in the queue; {@link dropQueued} drops those not yet sent. */
   private tickets = 0
@@ -435,7 +556,22 @@ export class VtaClient {
     }
   }
 
+  /** A reply came: the breaker closes and the count starts again. */
+  private repliesArrived(): void {
+    const wasOpen = this.stalledUntil !== undefined
+    this.noAnswerInARow = 0
+    this.stalledUntil = undefined
+    if (wasOpen) this.options.onRepliesStalled?.(false)
+  }
+
+  /** Whether replies have stopped reaching this phone: the breaker is open. */
+  get repliesStalled(): boolean {
+    return this.stalledUntil !== undefined
+  }
+
   private deliver(plaintext: DidCommV2PlaintextMessage): void {
+    // Anything from the agent shows replies reach this phone again.
+    this.repliesArrived()
     // A granted notice answers a wait, never a task.
     const body = plaintext.body as { type?: string; payload?: { payloadDigest?: string } } | undefined
     if (body?.type === VTA_TASK.consentGranted) {
@@ -499,6 +635,10 @@ export class VtaClient {
 
   /** Grants this client is waiting for, by the payload digest the VTA names. */
   private grantWaiters = new Map<string, () => void>()
+  /** Which version of each family this agent was found to serve (taskVersions.ts). */
+  private readonly versions = new TaskVersions((family, from, to) =>
+    this.agent.config.logger.info(`${LOG_PREFIX} ${this.vtaDid} does not serve ${from}; asking ${to} (${family})`)
+  )
 
   constructor(
     private readonly agent: Agent,
@@ -525,6 +665,8 @@ export class VtaClient {
       swapTimeoutMs?: number
       /** How long each `whoami` asked while settling a swap waits for its answer. */
       probeTimeoutMs?: number
+      /** Replies stopped reaching this phone (the breaker opened), or came back. */
+      onRepliesStalled?: (stalled: boolean) => void
     } = {}
   ) {}
 
@@ -582,6 +724,7 @@ export class VtaClient {
       ? undefined
       : await tspSessionForManager(this.agent, did).catch(() => undefined)
     this.greeted = false
+    this.repliesArrived()
     this.carriageByPeer.clear()
     const session = new VtiMediatorSession(this.agent, this.identity, this.mediator, {
       onError: (error) => this.options.onError?.(error),
@@ -628,27 +771,16 @@ export class VtaClient {
     /** Members beside `payload` on the signed document itself — e.g. `idempotencyKey`. */
     documentExtras: Record<string, unknown> = {},
     /** Called once the task has left the phone — the moment `timeoutMs` starts. */
-    onSent?: () => void
+    onSent?: () => void,
+    /**
+     * `waitForConsent: false`: a task held for consent is refused at once, as
+     * held, instead of waiting for the grant — for a task this phone sends
+     * about itself, where the approver a rule names may be this phone, so the
+     * wait could never end (approvalRules.ts, PHONE_SENDS).
+     */
+    sendOptions: { waitForConsent?: boolean } = {}
   ): Promise<T> {
-    const ticket = ++this.tickets
-    const run = (): Promise<T> =>
-      ticket <= this.droppedThrough
-        ? Promise.reject(new VtaTaskDropped(type))
-        : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
-            this.inFlight = undefined
-          })
-    // One task at a time: one queued behind another says what it waits on, so a
-    // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
-    const ahead = this.inFlight
-    if (ahead) {
-      this.agent.config.logger.info(
-        `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
-      )
-    }
-    // Chain behind whatever is in flight, but do not let one failure poison the next.
-    const next = this.queue.then(run, run)
-    this.queue = next.catch(() => undefined)
-    return next.catch(async (error: unknown) => {
+    return this.enqueue<T>(type, payload, timeoutMs, documentExtras, onSent).catch(async (error: unknown) => {
       const stepUp = this.managerDid ? stepUpRequestOf(error, { vtaDid: this.vtaDid, me: this.managerDid }) : undefined
       if (stepUp)
         return this.answerStepUp<T>(stepUp, error, type, () =>
@@ -660,7 +792,7 @@ export class VtaClient {
       // is single-use and consumed by re-submitting the same payload.
       const pending = consentPendingOf(error)
       const waitMs = this.options.consentWaitMs ?? 180000
-      if (!pending || waitMs <= 0) throw error
+      if (!pending || waitMs <= 0 || sendOptions.waitForConsent === false) throw error
       this.options.onConsentPending?.({ taskType: type, payloadDigest: pending.payloadDigest })
       if (pending.omitted) {
         // Those approvers are reached only by the VTA's own push (vti #1680);
@@ -695,6 +827,35 @@ export class VtaClient {
     })
   }
 
+  /** One send in the queue, behind whatever is in flight — no step-up or consent handling. */
+  private enqueue<T>(
+    type: string,
+    payload: Record<string, unknown>,
+    timeoutMs: number,
+    documentExtras: Record<string, unknown>,
+    onSent?: () => void
+  ): Promise<T> {
+    const ticket = ++this.tickets
+    const run = (): Promise<T> =>
+      ticket <= this.droppedThrough
+        ? Promise.reject(new VtaTaskDropped(type))
+        : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
+            this.inFlight = undefined
+          })
+    // One task at a time: one queued behind another says what it waits on, so a
+    // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
+    const ahead = this.inFlight
+    if (ahead) {
+      this.agent.config.logger.info(
+        `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
+      )
+    }
+    // Chain behind whatever is in flight, but do not let one failure poison the next.
+    const next = this.queue.then(run, run)
+    this.queue = next.catch(() => undefined)
+    return next
+  }
+
   /**
    * Answer the agent's step-up for a task, then re-submit it once approved.
    * The answer goes on this session, signed by this client's identity — the
@@ -714,7 +875,7 @@ export class VtaClient {
     }
     const answer = await ask(stepUp.request, { taskType })
     const decision = answer === 'approve' ? 'approved' : 'denied'
-    await this.sendTask(STEP_UP_TASK.approveResponse, approveResponsePayload(stepUp.request, decision), 30000)
+    await this.sendTask(stepUp.request.responseType, approveResponsePayload(stepUp.request, decision), 30000)
     if (decision === 'denied') throw new StepUpDeclined()
     return resubmit()
   }
@@ -774,13 +935,21 @@ export class VtaClient {
         Boolean(this.tsp) && tsp.CODEC_FORMS_RELATIONSHIPS,
         { decided: this.carriageByPeer }
       )
+      const overTsp = carriage === 'tsp' && Boolean(this.tsp)
+      // The breaker (vta-sdk's D4 breaker, VTI #1978): after two TSP asks in a
+      // row went unanswered, nothing more is sent until the window passes; the
+      // first ask after it goes as the probe, with a fresh greeting.
+      if (overTsp && this.stalledUntil !== undefined && Date.now() < this.stalledUntil) {
+        this.pending = undefined
+        throw new VtaRepliesNotArriving(type, this.noAnswerInARow)
+      }
       if (carriage === 'tsp' && this.tsp) {
         if (!this.greeted) {
-          this.greeted = true
           // Our mediator, then us: §5.3.3 ends a hop list at our own VID.
           const route = [this.mediator!.did, did]
           const invite = await tsp.packInviteRev3(did, this.vtaDid, this.tsp.identity, this.tsp.resolver, { route })
           await session.sendTspFrame(invite.bytes)
+          this.greeted = true
           this.agent.config.logger.info(`${LOG_PREFIX} greeted ${this.vtaDid} with an XRFI invite`)
         }
         const packed = await packTrustTaskForPeer(this.tsp, did, this.vtaDid, document)
@@ -809,7 +978,35 @@ export class VtaClient {
       this.cancelInFlight = undefined
       this.pending = undefined
       if (answer === 'dropped') throw new VtaTaskDropped(type)
-      if (!answer) throw new Error(`${LOG_PREFIX} the VTA did not answer ${type}`)
+      if (!answer) {
+        // A VTA that restarted may have forgotten the relationship, and a
+        // peer it does not know drops our frames in silence (§7.2.2): the
+        // session stays open, so nothing here would greet it again until the
+        // app relaunched (al-phone, 10-05). Greet again on the next ask —
+        // upstream's own reset on a reply-timeout (vta-service
+        // tsp_transport.rs `reset_relationship`). If the VTA kept the
+        // relationship, it takes the repeat invite as a no-op. This ask still
+        // fails: resending it could run it twice.
+        if (overTsp) {
+          this.greeted = false
+          this.noAnswerInARow += 1
+          if (this.noAnswerInARow >= REPLY_TIMEOUT_BREAKER) {
+            // A VTA that found this phone not collecting drops its replies and
+            // sends no accept for 5 min (VTI #1978): greeting it at every ask
+            // only adds sends it ignores. Wait the window out, then probe.
+            const wasOpen = this.stalledUntil !== undefined
+            this.stalledUntil = Date.now() + REPLIES_STALLED_WINDOW_MS
+            this.agent.config.logger.warn(
+              `${LOG_PREFIX} ${this.noAnswerInARow} asks in a row got no answer over TSP; replies are not reaching this phone — holding asks to ${this.vtaDid} for ${REPLIES_STALLED_WINDOW_MS / 1000} s`
+            )
+            if (!wasOpen) this.options.onRepliesStalled?.(true)
+          } else
+            this.agent.config.logger.info(
+              `${LOG_PREFIX} no answer over TSP; greeting ${this.vtaDid} again on the next ask`
+            )
+        }
+        throw new Error(`${LOG_PREFIX} the VTA did not answer ${type}`)
+      }
 
       // An auth/ACL refusal never reaches the task handler: the VTA answers
       // with a DIDComm problem-report (`app_err_to_response`, handlers.rs),
@@ -899,12 +1096,17 @@ export class VtaClient {
       return Promise.reject(
         new Error(`${LOG_PREFIX} the consent request's payloadDigest is not a digestMultibase; not deciding it`)
       )
-    return this.task<{ status?: string }>(VTA_TASK.consentDecision, {
+    const payload = {
       challenge: request.challenge,
       payloadDigest: request.payloadDigest,
       decision,
       ...(reason ? { reason } : {}),
-    })
+    }
+    return this.versions
+      .ask('consentDecision', VTA_TASK_VERSIONS.consentDecision, (type) =>
+        this.task<{ status?: string }>(type, payload)
+      )
+      .then(({ answer }) => answer)
   }
 
   /** `timeoutMs` bounds the wait for the VTA's answer, counted from the send (`onSent`). */
@@ -972,13 +1174,15 @@ export class VtaClient {
       await this.disconnect()
       const live = await this.resolvePendingSwap(record)
       if (live === next) return next
-      throw error
+      throw keySwapNotDone(error)
     }
     await this.store.setManager({
       vtaDid: this.vtaDid,
       did: next,
       createdAt: new Date().toISOString(),
       stage: 'permanent',
+      // The approval rules still name `current`; moved at the next signed-in session.
+      approversFrom: current,
     })
     await this.disconnect()
     try {
@@ -1023,6 +1227,7 @@ export class VtaClient {
         did: next,
         createdAt: manager.pendingNext.createdAt,
         stage: 'permanent',
+        approversFrom: current,
       })
       log.info(`${LOG_PREFIX} the VTA knows the swapped-in key; adopted ${next}`)
       return next
@@ -1077,7 +1282,9 @@ export class VtaClient {
    * `direction`, trust_tasks/acl.rs:42-48), so callers filter here.
    */
   async listAcl(): Promise<VtaAclEntry[]> {
-    const answer = await this.task<{ entries?: unknown; truncated?: unknown }>(VTA_TASK.aclList, {})
+    const { answer } = await this.versions.ask('aclList', VTA_TASK_VERSIONS.aclList, (uri) =>
+      this.task<{ entries?: unknown; truncated?: unknown }>(uri, {})
+    )
     if (answer?.truncated === true) {
       this.agent.config.logger.warn(
         `${LOG_PREFIX} ${this.vtaDid} answered a partial access list; showing the first page`
@@ -1099,10 +1306,17 @@ export class VtaClient {
    */
   async grantAdmin(did: string, options: { label?: string } = {}): Promise<VtaAclEntry> {
     const label = options.label?.trim().slice(0, ACL_LABEL_MAX)
-    const answer = await this.task(VTA_TASK.aclGrant, {
-      entry: { subject: did, role: 'admin', ...(label ? { label } : {}) },
-    })
-    return answeredEntry(VTA_TASK.aclGrant, answer)
+    const { uri, answer } = await this.versions.ask('aclGrant', VTA_TASK_VERSIONS.aclGrant, (type) =>
+      this.task(type, {
+        entry: {
+          subject: did,
+          role: 'admin',
+          ...(label ? { label } : {}),
+          ...(isAcl02(type) ? FULL_ADMIN_AUTHORITY_02 : {}),
+        },
+      })
+    )
+    return answeredEntry(uri, answer)
   }
 
   /**
@@ -1111,9 +1325,16 @@ export class VtaClient {
    * revoke is refused, operations/acl.rs:1104-1126). The VTA refuses a caller
    * removing itself (operations/acl.rs:792-796). Answers the entry as it stood.
    */
-  async revokeSubject(did: string): Promise<VtaAclEntry> {
-    const answer = await this.task(VTA_TASK.aclRevoke, { subject: did })
-    return answeredEntry(VTA_TASK.aclRevoke, answer)
+  async revokeSubject(did: string): Promise<VtaAclEntry | undefined> {
+    // 0.2 makes the narrowing explicit: `revocation: {kind: "entry"}` is a full
+    // removal, and leaving it out is invalid (acl/revoke/0.2
+    // payload.invalid-examples.json:3-4). Its answer's `entry` is null for a
+    // removal (payload.schema.json:71); 0.1 answered the entry as it stood.
+    const { uri, answer } = await this.versions.ask('aclRevoke', VTA_TASK_VERSIONS.aclRevoke, (type) =>
+      this.task(type, isAcl02(type) ? { subject: did, revocation: { kind: 'entry' } } : { subject: did })
+    )
+    if (isAcl02(uri) && (answer as { entry?: unknown } | undefined)?.entry === null) return undefined
+    return answeredEntry(uri, answer)
   }
 
   /**
@@ -1123,8 +1344,139 @@ export class VtaClient {
    * its own included (vta-service operations/acl.rs:517-545).
    */
   async labelAclEntry(did: string, label: string): Promise<VtaAclEntry> {
-    const answer = await this.task(VTA_TASK.aclUpdate, { subject: did, label: label.trim().slice(0, ACL_LABEL_MAX) })
-    return answeredEntry(VTA_TASK.aclUpdate, answer)
+    const { uri, answer } = await this.versions.ask('aclUpdate', VTA_TASK_VERSIONS.aclUpdate, (type) =>
+      this.task(type, { subject: did, label: label.trim().slice(0, ACL_LABEL_MAX) })
+    )
+    return answeredEntry(uri, answer)
+  }
+
+  /**
+   * The agent's approval rules: the reserved `approvals` row read with
+   * `policy/get/0.1` (vta-sdk protocols/policy_management.rs GetPolicyBody →
+   * `{policy}`). An agent with no row yet answers `not_found`
+   * (vta-service operations/policy.rs:141), read as no rules at version 0 —
+   * the version an upsert expects for a row that does not exist (:203-209).
+   */
+  async readApprovals(): Promise<ReturnType<typeof modelFromExt>> {
+    try {
+      const answer = await this.task<{ policy?: { version?: unknown; ext?: unknown } }>(VTA_TASK.policyGet, {
+        id: DECLARATIVE_POLICY_ID,
+      })
+      const version = typeof answer?.policy?.version === 'number' ? answer.policy.version : 0
+      return modelFromExt(answer?.policy?.ext, version)
+    } catch (error) {
+      const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
+      if (details?.reason === 'not_found') return { ...EMPTY_APPROVALS, unreadable: false }
+      throw error
+    }
+  }
+
+  /**
+   * Write the approval rules: `policy/upsert/0.2` on the reserved row, its
+   * Rego generated from the rules exactly as the SDK does — the agent derives
+   * it again and refuses a write that differs, and refuses the reserved id
+   * without the rules in `ext` (operations/policy.rs:172-197). Validated here
+   * first, so a model the agent would refuse is refused in its words before
+   * anything is sent. `expectedVersion` is the version read: a row changed
+   * since is a `conflict` (:203-209), and nothing is overwritten. Writing is
+   * super-admin only (:159). Answers the version now held.
+   */
+  async writeApprovals(model: Pick<ApprovalsModel, 'rules' | 'sets'>, expectedVersion: number): Promise<number> {
+    const rules = model.rules.map(ruleForWire)
+    validateApprovals(rules, model.sets)
+    const answer = await this.task<{ policy?: { version?: unknown } }>(VTA_TASK.policyUpsert, {
+      id: DECLARATIVE_POLICY_ID,
+      name: DECLARATIVE_POLICY_NAME,
+      module: synthesizeRego(rules),
+      priority: DECLARATIVE_POLICY_PRIORITY,
+      enabled: true,
+      expectedVersion,
+      ext: { [EXT_KEY_RULES]: rules, [EXT_KEY_APPROVER_SETS]: model.sets },
+    })
+    return typeof answer?.policy?.version === 'number' ? answer.policy.version : expectedVersion + 1
+  }
+
+  /**
+   * After a key swap, move the agent's approval rules from the retired key to
+   * this phone's key now ({@link withKeySwapped}), so the phone keeps being
+   * asked. Runs on a signed-in session while the identity record still names
+   * a retired key (`approversFrom`), and clears it once the rules no longer
+   * name that key — or when there is nothing this phone may change: an
+   * unreadable row (never written back), or any refusal to write (only a
+   * super-admin may, vta-service operations/policy.rs:159, answered as
+   * `permissionDenied`). A lost answer or a version clash leaves it for the
+   * next session. Answers what happened, for the log.
+   */
+  async carryApproversAcrossSwap(): Promise<'none' | 'moved' | 'unchanged' | 'notAllowed' | 'unreadable' | 'later'> {
+    const record = await this.store.getManager(this.vtaDid)
+    const from = record?.approversFrom
+    const to = record?.did
+    if (!record || !from || !to || from === to) return 'none'
+    const done = async () => {
+      const latest = await this.store.getManager(this.vtaDid)
+      if (latest?.approversFrom === from) {
+        const cleared = { ...latest }
+        delete cleared.approversFrom
+        await this.store.setManager(cleared)
+      }
+    }
+    try {
+      const model = await this.readApprovals()
+      if (model.unreadable) {
+        await done()
+        return 'unreadable'
+      }
+      const next = withKeySwapped(model, from, to)
+      if (!next.changed) {
+        await done()
+        return 'unchanged'
+      }
+      await this.writeApprovals(next, model.version)
+      await done()
+      return 'moved'
+    } catch (error) {
+      // No answer, or the row changed in between: try again at the next session.
+      if (!(error instanceof VtiRefusal)) return 'later'
+      if ((error.details as { reason?: unknown } | undefined)?.reason === 'conflict') return 'later'
+      // Any other answer is the agent's word (permissionDenied for a phone that
+      // is not super-admin, helpers.rs; a consent this phone must give itself):
+      // asking again each session would only hear it again.
+      await done()
+      return 'notAllowed'
+    }
+  }
+
+  /**
+   * "Send me a test request": ask the agent to create a context this phone's
+   * own rule holds, and do not wait for the grant. Approving a request does not
+   * run its task — the requester has to re-submit with the grant
+   * (vta-service consent_request.rs:41-42, 207-214) — and this never
+   * re-submits, so nothing is created. `held`: the agent asked its approvers,
+   * this phone among them. `letThrough`: the agent created it, so it enforces
+   * no rules where it is hosted; the context is deleted again, best effort
+   * (`cleanedUp` says whether that worked).
+   *
+   * It goes through `enqueue`, never `task()` or `createContext()`: `task()`
+   * waits for the grant and re-submits, and the first re-submit after an
+   * approval consumes the grant and runs the task — the test would then create
+   * the context it promised not to.
+   */
+  async sendTestRequest(): Promise<{ kind: 'held' } | { kind: 'letThrough'; cleanedUp: boolean }> {
+    const id = `keyring-test-request-${Date.now()}`
+    try {
+      await this.enqueue(VTA_TASK.contextsCreate, { id, name: 'Keyring test request' }, 30000, {})
+    } catch (error) {
+      const pending = consentPendingOf(error)
+      if (!pending) throw error
+      // A did:webvh approver hears of it only if the requester relays it (VtaClient.task).
+      await this.relayConsentRequests(pending.requests)
+      return { kind: 'held' }
+    }
+    const cleanedUp = await this.enqueue(VTA_TASK.contextsDelete, { id, force: true }, 30000, {}).then(
+      () => true,
+      () => false
+    )
+    return { kind: 'letThrough', cleanedUp }
   }
 
   async listContexts(): Promise<VtaContext[]> {
@@ -1352,10 +1704,14 @@ export class VtaClient {
     let fetched = false
     for (const [kmsKeyId, vtaKeyId] of pairs) {
       if (!kmsKeyId || !isInMemoryKeyId(kmsKeyId)) continue
-      const held = await this.agent.kms
-        .getPublicKey({ keyId: kmsKeyId, backend: EPHEMERAL_KMS_BACKEND })
-        .then(() => true)
-        .catch(() => false)
+      // Asked without fetching: getPublicKey would fetch a missing copy itself
+      // (EphemeralKeyManagementService), and this is the fetch.
+      const held =
+        (await heldInMemory(this.agent, kmsKeyId)) ??
+        (await this.agent.kms
+          .getPublicKey({ keyId: kmsKeyId, backend: EPHEMERAL_KMS_BACKEND })
+          .then(() => true)
+          .catch(() => false))
       if (held) continue
       await this.connect()
       await this.borrowKey(vtaKeyId)

@@ -26,6 +26,10 @@ const ACL_LIST = 'https://trusttasks.org/spec/acl/list/0.1'
 const ACL_GRANT = 'https://trusttasks.org/spec/acl/grant/0.1'
 const ACL_REVOKE = 'https://trusttasks.org/spec/acl/revoke/0.1'
 const ACL_UPDATE = 'https://trusttasks.org/spec/acl/update/0.1'
+const POLICY_GET = 'https://trusttasks.org/spec/policy/get/0.1'
+const POLICY_UPSERT = 'https://trusttasks.org/spec/policy/upsert/0.2'
+const CONTEXTS_CREATE = 'https://trusttasks.org/spec/vta/contexts/create/1.0'
+const CONTEXTS_DELETE = 'https://trusttasks.org/spec/vta/contexts/delete/1.0'
 const VTA = 'did:webvh:QmFarm:farm.example:alice'
 const PHONE = 'did:peer:2.phone'
 const BACKUP = 'did:peer:2.backup'
@@ -47,10 +51,17 @@ const mockVta = {
   /** Hold these task types for consent until `consentGranted` is true. */
   consentFor: new Set<string>(),
   consentGranted: false,
+  /** Never answer these task types: a reply lost on the way. */
+  silentFor: new Set<string>(),
   /** A session start that never finishes: an agent that cannot be reached (IN-53). */
   startHangs: false,
   /** Members a newer VTA might add to every list entry — ignored by the phone. */
   extraEntryMembers: {} as Record<string, unknown>,
+  /** whoami's roles and scopes for every caller. */
+  whoami: { roles: ['admin'] } as { roles: string[]; scopes?: string[] },
+  /** The reserved `approvals` row, as vta-service keeps it (operations/policy.rs). */
+  policy: undefined as { version: number; module: string; ext: Record<string, unknown> } | undefined,
+  contexts: new Set<string>(),
 }
 const mockSessions: { did: string; onMessage: (m: unknown) => void; open: boolean }[] = []
 let mockMinted: string[] = []
@@ -138,6 +149,7 @@ jest.mock('../module/VtiMediatorTransport', () => ({
         refuse({ code: 'permissionDenied', message: `forbidden: DID not in ACL: ${from}` })
         return
       }
+      if (mockVta.silentFor.has(body.type)) return
       const injected = mockVta.refuseNext.get(body.type)
       if (injected) {
         mockVta.refuseNext.delete(body.type)
@@ -155,7 +167,67 @@ jest.mock('../module/VtiMediatorTransport', () => ({
       }
       switch (body.type) {
         case WHOAMI:
-          mockAnswer(this.record, `${WHOAMI}#response`, { roles: ['admin'] })
+          mockAnswer(this.record, `${WHOAMI}#response`, mockVta.whoami)
+          return
+        case POLICY_GET:
+          // operations/policy.rs:129-144: NotFound → taskFailed, details.reason not_found.
+          if (payload.id !== 'approvals' || !mockVta.policy) {
+            refuse({
+              code: 'taskFailed',
+              message: `not found: policy \`${String(payload.id)}\` not found`,
+              details: { reason: 'not_found' },
+            })
+            return
+          }
+          mockAnswer(this.record, `${POLICY_GET}#response`, {
+            policy: { id: 'approvals', name: 'Declarative approvals', priority: 200, enabled: true, ...mockVta.policy },
+          })
+          return
+        case POLICY_UPSERT: {
+          // operations/policy.rs:152-251, in its order: super-admin, the
+          // declarative row checked against its rules, then the version.
+          if (!mockVta.whoami.roles.includes('admin') || mockVta.whoami.scopes?.length) {
+            refuse({ code: 'permissionDenied', message: 'forbidden: super admin role required' })
+            return
+          }
+          const { synthesizeRego, validateApprovals } = jest.requireActual('../module/approvalsPolicy')
+          const ext = payload.ext as Record<string, unknown>
+          try {
+            validateApprovals(ext['openvtc.approvals'], ext['openvtc.approver-sets'])
+          } catch (e) {
+            refuse({ code: 'taskFailed', message: `validation error: ${(e as Error).message}` })
+            return
+          }
+          if (payload.id !== 'approvals' || payload.module !== synthesizeRego(ext['openvtc.approvals'])) {
+            refuse({
+              code: 'taskFailed',
+              message: 'validation error: the submitted `module` is not what ext synthesizes to',
+            })
+            return
+          }
+          const current = mockVta.policy?.version ?? 0
+          if (payload.expectedVersion !== undefined && payload.expectedVersion !== current) {
+            refuse({
+              code: 'taskFailed',
+              message: `conflict: policy \`approvals\` is at version ${current}, not the expected ${String(payload.expectedVersion)}`,
+              details: { reason: 'conflict' },
+            })
+            return
+          }
+          mockVta.policy = { version: current + 1, module: String(payload.module), ext }
+          mockAnswer(this.record, `${POLICY_UPSERT}#response`, {
+            policy: { id: 'approvals', ...mockVta.policy },
+            created: current === 0,
+          })
+          return
+        }
+        case CONTEXTS_CREATE:
+          mockVta.contexts.add(String(payload.id))
+          mockAnswer(this.record, `${CONTEXTS_CREATE}#response`, { id: payload.id, name: payload.name })
+          return
+        case CONTEXTS_DELETE:
+          mockVta.contexts.delete(String(payload.id))
+          mockAnswer(this.record, `${CONTEXTS_DELETE}#response`, { id: payload.id, deleted: true })
           return
         case SWAP: {
           const newSubject = String(payload.newSubject)
@@ -222,6 +294,9 @@ jest.mock('../module/VtiMediatorTransport', () => ({
           mockAnswer(this.record, `${ACL_UPDATE}#response`, { entry: mockWireEntry(subject, row) })
           return
         }
+        case 'https://trusttasks.org/spec/device/set-wake/0.2':
+          mockAnswer(this.record, `${body.type}#response`, { pushCapable: true })
+          return
         default:
           refuse({ code: 'unsupportedType', message: `no handler for ${body.type}` })
       }
@@ -247,9 +322,12 @@ jest.mock('../module/VtaClient', () => {
   return { ...actual, VtaClient: FastVtaClient }
 })
 
+import { DeviceEventEmitter } from 'react-native'
+
+import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 import { VtaClient } from '../module/VtaClient'
 import type { VtaLink } from '../module/VtaLinkStore'
-import type { VtiManagerIdentity } from '../module/VtiIdentityStore'
+import type { VtiManagerIdentity, VtiPersona } from '../module/VtiIdentityStore'
 import { VtaAgentController } from '../module/vtaAgent'
 import {
   DeviceActionRefused,
@@ -355,8 +433,12 @@ beforeEach(() => {
   mockVta.refuseNext = new Map()
   mockVta.consentFor = new Set()
   mockVta.consentGranted = false
+  mockVta.silentFor = new Set()
   mockVta.startHangs = false
   mockVta.extraEntryMembers = {}
+  mockVta.whoami = { roles: ['admin'] }
+  mockVta.policy = undefined
+  mockVta.contexts = new Set()
   mockSessions.length = 0
   mockMinted = []
   for (const key of Object.keys(mockClientOptions)) delete mockClientOptions[key]
@@ -661,6 +743,54 @@ describe('removing a device', () => {
   })
 })
 
+// IN-123: a computer (pnm) added to the agent is named, and renamed later,
+// through its access-list label; the agent refuses a caller's own entry, so
+// this phone keeps its own rename (device/register).
+describe('renaming another device', () => {
+  it('asks the owner first, then sets the label on that device only', async () => {
+    mockVta.acl.set(BACKUP, { role: 'admin', label: 'Another device' })
+    const confirmOwner = confirmed()
+    const { vta } = await linkedPhone({ confirmOwner })
+    const before = sentOf(ACL_UPDATE).length
+    await vta.renameAgentDevice(agent, BACKUP, 'Work laptop (pnm)')
+
+    expect(mockVta.log.some((l) => /^confirmOwner: Rename a device/.test(l))).toBe(true)
+    const sent = sentOf(ACL_UPDATE)
+      .slice(before)
+      .map((a) => a.payload)
+    expect(sent).toEqual([expect.objectContaining({ label: 'Work laptop (pnm)' })])
+    expect(mockVta.acl.get(BACKUP)?.label).toBe('Work laptop (pnm)')
+  })
+
+  it('a cancelled owner check renames nothing', async () => {
+    mockVta.acl.set(BACKUP, { role: 'admin', label: 'Another device' })
+    const confirmOwner = jest.fn(async () => ({ ok: false, reason: 'cancelled' }) as OwnerConfirmation)
+    const { vta } = await linkedPhone({ confirmOwner })
+    await expect(vta.renameAgentDevice(agent, BACKUP, 'X')).rejects.toMatchObject({ name: 'OwnerNotConfirmed' })
+    expect(mockVta.acl.get(BACKUP)?.label).toBe('Another device')
+  })
+
+  it('this phone is refused before the owner or the agent is asked', async () => {
+    const confirmOwner = confirmed()
+    const { vta } = await linkedPhone({ confirmOwner })
+    await expect(vta.renameAgentDevice(agent, PHONE, 'X')).rejects.toMatchObject({ reason: 'thisPhone' })
+    expect(confirmOwner).not.toHaveBeenCalled()
+  })
+})
+
+// IN-124: My devices spun forever. Reading the list signs in through
+// connect, which shares a sign-in already in flight and has no deadline of
+// its own; one stuck sign-in held the list for good.
+describe('reading the device list', () => {
+  it('a sign-in that never finishes is "no answer" at the deadline, not a wait for ever', async () => {
+    const { vta } = await linkedPhone({ confirmOwner: confirmed(), deviceListDeadlineMs: 50 } as never)
+    jest
+      .spyOn(vta as unknown as { connect: () => Promise<void> }, 'connect')
+      .mockReturnValue(new Promise(() => undefined))
+    await expect(vta.agentDevices(agent)).rejects.toMatchObject({ name: 'DeviceActionRefused', reason: 'noAnswer' })
+  })
+})
+
 describe('an agent that asks for more than the owner check (policy gate)', () => {
   it('a re-authentication (step-up) rule is reported once, not retried', async () => {
     // policy_gate.rs:213-221 → step_up.rs:1300-1308: taskFailed with the reason
@@ -811,5 +941,441 @@ describe('creating an agent', () => {
   it('the owned marker survives a restart', async () => {
     const { vta } = await linkedPhone()
     expect(vta.getState().ownsAgent).toBe(true)
+  })
+})
+
+describe('a link whose swap onto the long-term key does not happen says why', () => {
+  async function linkByHand() {
+    const p = phone()
+    const vta = new VtaAgentController()
+    alive.push(vta)
+    vta.configure({ linkStore: () => p.links, identityStore: () => p.identities as never })
+    await vta.startManualLink(agent, VTA, 'farm.example')
+    mockVta.acl.set(TEMPORARY, { role: 'admin' })
+    await vta.checkManualGrant(agent).catch(() => undefined)
+    return { vta, ...p }
+  }
+  const failure = (vta: VtaAgentController) => {
+    const link = vta.getState().link
+    return link.kind === 'notLinked' ? link.lastError : undefined
+  }
+
+  it('held by an approval rule: the failure says so, and the agent kept the first key', async () => {
+    // #287's device check, Run A: a consent rule held the swap until the wait ran out.
+    mockClientOptions.consentWaitMs = 50
+    mockVta.consentFor.add(SWAP)
+    // The setup pins Date.now, and the consent wait's deadline is read from it.
+    const clock = Date.now as jest.Mock
+    const pinned = Date.now()
+    let tick = pinned
+    clock.mockImplementation(() => (tick += 25))
+    let linked: Awaited<ReturnType<typeof linkByHand>>
+    try {
+      linked = await linkByHand()
+    } finally {
+      clock.mockImplementation(() => pinned)
+    }
+    const { vta, disk } = linked
+    expect(failure(vta)).toMatchObject({ reason: 'failed', swap: 'held' })
+    expect(mockVta.acl.has(TEMPORARY)).toBe(true)
+    expect(disk.link).toBeUndefined()
+  })
+
+  it('refused: the failure says the agent refused', async () => {
+    mockVta.refuseNext.set(SWAP, { code: 'permissionDenied', message: 'forbidden: super admin role required' })
+    const { vta } = await linkByHand()
+    expect(failure(vta)).toMatchObject({ reason: 'failed', swap: 'refused' })
+    expect(mockVta.acl.has(TEMPORARY)).toBe(true)
+  })
+
+  it('not answered, and the agent then confirms it kept the first key: the failure says no answer', async () => {
+    mockClientOptions.swapTimeoutMs = 50
+    mockVta.silentFor.add(SWAP)
+    const { vta } = await linkByHand()
+    expect(failure(vta)).toMatchObject({ reason: 'failed', swap: 'noAnswer' })
+    expect(mockVta.acl.has(TEMPORARY)).toBe(true)
+  })
+
+  it('a link that fails some other way carries no swap reason', async () => {
+    const p = phone()
+    const vta = new VtaAgentController()
+    alive.push(vta)
+    vta.configure({ linkStore: () => p.links, identityStore: () => p.identities as never })
+    await vta.startManualLink(agent, VTA, 'farm.example')
+    mockVta.acl.set(TEMPORARY, { role: 'admin' })
+    mockVta.refuseNext.set(WHOAMI, { code: 'taskFailed', message: 'something new' })
+    await vta.checkManualGrant(agent).catch(() => undefined)
+    expect(failure(vta)?.swap).toBeUndefined()
+  })
+})
+
+describe("an identity's key copy used before any session fetched it (TestFlight 239)", () => {
+  const OTHER = 'did:webvh:QmFarm:farm.example:bob'
+  const persona = (vtaDid: string, name: string): VtiPersona =>
+    ({
+      vtaDid,
+      did: `did:webvh:QmP:dids.example:${name}`,
+      communityDid: `did:webvh:QmC:community-${name}`,
+      vtaKeyIds: {
+        signing: `did:webvh:QmP:dids.example:${name}#key-0`,
+        keyAgreement: `did:webvh:QmP:dids.example:${name}#key-1`,
+      },
+      kmsKeyIds: {
+        signing: `vta-copy:${vtaDid}:did:webvh:QmP:dids.example:${name}#key-0`,
+        keyAgreement: `vta-copy:${vtaDid}:did:webvh:QmP:dids.example:${name}#key-1`,
+      },
+    }) as unknown as VtiPersona
+
+  /** A phone linked to VTA (current) and OTHER, holding the given identities, on an agent with an in-memory backend. */
+  async function restartedPhone(personas: VtiPersona[], { waitOnline = true } = {}) {
+    const p = phone({
+      manager: linkedManager,
+      link: { vtaDid: VTA, label: 'farm.example', linkedAt: 'x', owner: true },
+    })
+    const links = {
+      ...p.links,
+      list: async () => [
+        { vtaDid: VTA, label: 'farm.example', linkedAt: 'x' },
+        { vtaDid: OTHER, label: 'bob', linkedAt: 'y' },
+      ],
+    }
+    const identities = { ...p.identities, listPersonas: jest.fn(async () => personas) }
+    let fetcher: ((keyId: string) => Promise<void>) | undefined
+    const backend = { backend: 'ephemeral', setMissingKeyFetcher: (f: typeof fetcher) => (fetcher = f) }
+    const kmsAgent = {
+      ...(agent as object),
+      dependencyManager: { resolve: () => ({ backends: [{ backend: 'askar' }, backend] }) },
+    } as never
+    const other = { holdPersonaKeys: jest.fn(async () => true), disconnect: jest.fn(async () => undefined) }
+    const keyClient = jest.fn(() => other)
+    const vta = new VtaAgentController()
+    alive.push(vta)
+    vta.configure({ linkStore: () => links as never, identityStore: () => identities as never, keyClient } as never)
+    await vta.restore(kmsAgent)
+    if (waitOnline) {
+      await until(() => {
+        const link = vta.getState().link
+        return link.kind === 'linked' && link.connection.kind === 'online'
+      })
+    }
+    return {
+      vta,
+      fetch: (keyId: string) => (fetcher as NonNullable<typeof fetcher>)(keyId),
+      keyClient,
+      other,
+      hasFetcher: () => Boolean(fetcher),
+    }
+  }
+
+  it('the app registers the fetcher with the in-memory backend when it hands over its agent', async () => {
+    const { hasFetcher } = await restartedPhone([])
+    expect(hasFetcher()).toBe(true)
+  })
+
+  it("a persona under a non-current agent, after a restart: fetched through that agent's own short session", async () => {
+    const tiger = persona(OTHER, 'tiger-silver')
+    const held = jest.spyOn(VtaClient.prototype, 'holdPersonaKeys')
+    const { fetch, keyClient, other } = await restartedPhone([tiger])
+    const announced: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_KEYS_HELD_EVENT, (e) => announced.push(e))
+    await fetch(tiger.kmsKeyIds?.keyAgreement as string)
+    sub.remove()
+    // Its inbox looks again at once, rather than at its next 30 s look.
+    expect(announced).toEqual([{ did: tiger.did }])
+    expect(keyClient).toHaveBeenCalledTimes(1)
+    expect((keyClient.mock.calls[0] as unknown[])[1]).toBe(OTHER)
+    expect(other.holdPersonaKeys).toHaveBeenCalledWith(tiger)
+    expect(other.disconnect).toHaveBeenCalledTimes(1)
+    // Not on the current agent's session: that agent does not hold this identity's keys.
+    expect(held).not.toHaveBeenCalled()
+    held.mockRestore()
+  })
+
+  it("used straight after a restart: waits for the current agent's session, then fetches on it", async () => {
+    const mine = persona(VTA, 'mine')
+    const held = jest.spyOn(VtaClient.prototype, 'holdPersonaKeys').mockResolvedValue(true)
+    const { vta, fetch, keyClient } = await restartedPhone([mine], { waitOnline: false })
+    const before = vta.getState().link
+    // Asked for before the session that fetches the keys has opened.
+    expect(before.kind === 'linked' && before.connection.kind).not.toBe('online')
+    const fetching = fetch(mine.kmsKeyIds?.signing as string)
+    await fetching
+    const link = vta.getState().link
+    expect(link.kind === 'linked' && link.connection.kind).toBe('online')
+    expect(held).toHaveBeenCalledWith(mine)
+    expect(keyClient).not.toHaveBeenCalled()
+    held.mockRestore()
+  })
+
+  it('an identity of the agent being linked right now waits for that link, never a second session as the same key', async () => {
+    // A relink of an agent whose identities this phone still holds: the link
+    // signs in as this phone's manager key, and a side session beside it would
+    // be the same DID twice at the mediator.
+    const p = phone()
+    // finishLink keeps the link before it swaps keys, so for that while the
+    // agent is on the list and the link is still in progress.
+    const listed: { vtaDid: string; label: string; linkedAt: string }[] = []
+    const links = { ...p.links, list: async () => listed }
+    const tiger = persona(OTHER, 'tiger-silver')
+    const identities = { ...p.identities, listPersonas: jest.fn(async () => [tiger]) }
+    let fetcher: ((keyId: string) => Promise<void>) | undefined
+    const backend = { backend: 'ephemeral', setMissingKeyFetcher: (f: typeof fetcher) => (fetcher = f) }
+    const kmsAgent = {
+      ...(agent as object),
+      dependencyManager: { resolve: () => ({ backends: [backend] }) },
+    } as never
+    const keyClient = jest.fn(() => ({
+      holdPersonaKeys: jest.fn(async () => true),
+      disconnect: jest.fn(async () => undefined),
+    }))
+    const vta = new VtaAgentController()
+    alive.push(vta)
+    vta.configure({
+      linkStore: () => links as never,
+      identityStore: () => identities as never,
+      keyClient,
+      keyFetchWaitMs: 300,
+    } as never)
+    await vta.restore(kmsAgent)
+    await vta.startManualLink(kmsAgent, OTHER, 'bob')
+    expect(vta.getState().link).toMatchObject({ kind: 'showingKey', vtaDid: OTHER })
+    listed.push({ vtaDid: OTHER, label: 'bob', linkedAt: 'y' })
+    await expect((fetcher as NonNullable<typeof fetcher>)(tiger.kmsKeyIds?.signing as string)).rejects.toThrow(
+      /did not come online/
+    )
+    expect(keyClient).not.toHaveBeenCalled()
+  })
+
+  it('a key no identity on this phone names is refused, not guessed at', async () => {
+    const { fetch, keyClient } = await restartedPhone([persona(OTHER, 'tiger-silver')])
+    await expect(fetch('vta-copy:did:webvh:nobody:did:webvh:x#key-1')).rejects.toThrow(
+      /no identity on this phone names/
+    )
+    expect(keyClient).not.toHaveBeenCalled()
+  })
+
+  it('an identity whose agent is no longer linked is refused', async () => {
+    const gone = persona('did:webvh:QmFarm:farm.example:carol', 'gone')
+    const { fetch, keyClient } = await restartedPhone([gone])
+    await expect(fetch(gone.kmsKeyIds?.signing as string)).rejects.toThrow(/no longer linked/)
+    expect(keyClient).not.toHaveBeenCalled()
+  })
+})
+
+describe("Settings → Notifications when an approval rule holds this phone's set-wake", () => {
+  const SET_WAKE = 'https://trusttasks.org/spec/device/set-wake/0.2'
+  const WAKE = { gateway: 'did:web:gateway.example', handle: 'zHandle' }
+
+  it('is refused at once, never waited on, and the agent state says a rule is blocking it', async () => {
+    mockClientOptions.consentWaitMs = 60000
+    mockVta.consentFor.add(SET_WAKE)
+    const { vta } = await linkedPhone()
+    mockVta.asked = []
+    const started = Date.now()
+    await expect(vta.setThisDeviceWake(agent, WAKE)).rejects.toMatchObject({ reason: 'awaitingApproval' })
+    // A 60 s consent wait was not entered: one send, answered at once.
+    expect(Date.now() - started).toBeLessThan(5000)
+    expect(sentOf(SET_WAKE)).toHaveLength(1)
+    expect(vta.getState().wakeBlockedByRule).toBe(true)
+  })
+
+  it('clearing the wake channel is refused at once too', async () => {
+    mockClientOptions.consentWaitMs = 60000
+    mockVta.consentFor.add(SET_WAKE)
+    const { vta } = await linkedPhone()
+    await expect(vta.clearThisDeviceWake(agent)).rejects.toMatchObject({ reason: 'awaitingApproval' })
+    expect(vta.getState().wakeBlockedByRule).toBe(true)
+  })
+
+  it('once the rule no longer holds it, the next set-wake clears the warning', async () => {
+    mockVta.consentFor.add(SET_WAKE)
+    const { vta } = await linkedPhone()
+    await expect(vta.setThisDeviceWake(agent, WAKE)).rejects.toBeTruthy()
+    mockVta.consentFor.delete(SET_WAKE)
+    await expect(vta.setThisDeviceWake(agent, WAKE)).resolves.toMatchObject({ pushCapable: true })
+    expect(vta.getState().wakeBlockedByRule).toBe(false)
+  })
+})
+
+describe('VtaClient: approval rules follow a key swap', () => {
+  const OLD = 'did:key:z6MkRetiredLinkingKey'
+  const CREATE = CONTEXTS_CREATE
+  const OLD_SET = `keyring-phone:${OLD}`
+  const NEW_SET = `keyring-phone:${PHONE}`
+  const rule = (set: string) => ({
+    taskType: CREATE,
+    requires: 'consent',
+    approverSet: set,
+    minApprovals: 1,
+    excludeRequester: false,
+  })
+  async function afterSwap(record: Partial<VtiManagerIdentity> = { approversFrom: OLD }) {
+    let held: VtiManagerIdentity = { ...linkedManager, ...record }
+    const store = {
+      getManager: jest.fn(async () => held),
+      setManager: jest.fn(async (m: VtiManagerIdentity) => void (held = m)),
+    }
+    const client = new VtaClient(agent, VTA, store as never, { connectDrainMs: 0 })
+    await client.connect()
+    mockVta.asked = []
+    return { client, record: () => held }
+  }
+  const seed = (version: number) => {
+    mockVta.policy = {
+      version,
+      module: 'before',
+      ext: { 'openvtc.approvals': [rule(OLD_SET)], 'openvtc.approver-sets': { [OLD_SET]: [OLD] } },
+    }
+  }
+
+  it('moves the rules onto the new key, written against the version read, then forgets the old key', async () => {
+    seed(3)
+    const { client, record } = await afterSwap()
+    expect(await client.carryApproversAcrossSwap()).toBe('moved')
+    expect(sentOf(POLICY_UPSERT)[0].payload).toMatchObject({ id: 'approvals', expectedVersion: 3 })
+    expect(mockVta.policy?.ext['openvtc.approvals']).toEqual([rule(NEW_SET)])
+    expect(mockVta.policy?.ext['openvtc.approver-sets']).toEqual({ [NEW_SET]: [PHONE] })
+    expect(record().approversFrom).toBeUndefined()
+    // Done once: the next session sends nothing.
+    mockVta.asked = []
+    expect(await client.carryApproversAcrossSwap()).toBe('none')
+    expect(sentOf(POLICY_UPSERT)).toEqual([])
+    await client.disconnect()
+  })
+
+  it('no rule names the old key: nothing is written, and the old key is forgotten', async () => {
+    const { client, record } = await afterSwap()
+    expect(await client.carryApproversAcrossSwap()).toBe('unchanged')
+    expect(sentOf(POLICY_UPSERT)).toEqual([])
+    expect(record().approversFrom).toBeUndefined()
+    await client.disconnect()
+  })
+
+  it('a phone that may not change the rules hears so once, and stops asking', async () => {
+    seed(2)
+    mockVta.whoami = { ...mockVta.whoami, scopes: ['some-context'] }
+    const { client, record } = await afterSwap()
+    expect(await client.carryApproversAcrossSwap()).toBe('notAllowed')
+    expect(mockVta.policy?.ext['openvtc.approvals']).toEqual([rule(OLD_SET)])
+    expect(record().approversFrom).toBeUndefined()
+    await client.disconnect()
+  })
+
+  it('no swap pending: asks nothing', async () => {
+    seed(1)
+    const { client } = await afterSwap({})
+    expect(await client.carryApproversAcrossSwap()).toBe('none')
+    expect(sentOf(POLICY_GET)).toEqual([])
+    await client.disconnect()
+  })
+})
+
+describe('"Ask me before…": the agent\'s approval rules', () => {
+  const CREATE = CONTEXTS_CREATE
+  const REVOKE_KEY = 'https://trusttasks.org/spec/keys/revoke/0.1'
+  const MINE = `keyring-phone:${PHONE}`
+  const rulesHeld = () => mockVta.policy?.ext['openvtc.approvals']
+
+  it('an agent with no rules yet: nothing on, and this phone may change them', async () => {
+    const { vta } = await linkedPhone()
+    const state = await vta.approvalRules(agent)
+    expect(state.canChange).toBe(true)
+    expect(state.model.version).toBe(0)
+    expect(state.view.offered.every((o) => !o.on)).toBe(true)
+  })
+
+  it('switching one on: the owner check, then the row written against the version read', async () => {
+    const { vta } = await linkedPhone()
+    const state = await vta.setApprovalRule(agent, CREATE, true)
+    expect(mockVta.log[0]).toBe('confirmOwner: Change what your agent asks you about')
+    const [upsert] = sentOf(POLICY_UPSERT)
+    expect(upsert.payload).toMatchObject({
+      id: 'approvals',
+      name: 'Declarative approvals',
+      priority: 200,
+      enabled: true,
+      expectedVersion: 0,
+    })
+    expect(rulesHeld()).toEqual([
+      { taskType: CREATE, requires: 'consent', approverSet: MINE, minApprovals: 1, excludeRequester: false },
+    ])
+    expect(mockVta.policy?.ext['openvtc.approver-sets']).toEqual({ [MINE]: [PHONE] })
+    expect(state.view.offered.find((o) => o.taskType === CREATE)?.on).toBe(true)
+    expect(state.model.version).toBe(1)
+  })
+
+  it('rules set elsewhere are kept, and a rule on a task this phone sends is flagged', async () => {
+    const SET_WAKE = 'https://trusttasks.org/spec/device/set-wake/0.2'
+    const others = [{ taskType: SET_WAKE, requires: 'consent', approverSet: 'ops', excludeRequester: true }]
+    mockVta.policy = {
+      version: 4,
+      module: 'elsewhere',
+      ext: { 'openvtc.approvals': others, 'openvtc.approver-sets': { ops: ['did:key:z6MkOps'] } },
+    }
+    const { vta } = await linkedPhone()
+    expect((await vta.approvalRules(agent)).view.elsewhere).toMatchObject([{ holdsThisPhone: true }])
+    await vta.setApprovalRule(agent, REVOKE_KEY, true)
+    expect(rulesHeld()).toEqual([others[0], expect.objectContaining({ taskType: REVOKE_KEY, approverSet: MINE })])
+    expect(mockVta.policy?.ext['openvtc.approver-sets']).toEqual({ ops: ['did:key:z6MkOps'], [MINE]: [PHONE] })
+    await vta.setApprovalRule(agent, REVOKE_KEY, false)
+    expect(rulesHeld()).toEqual(others)
+    expect(mockVta.policy?.ext['openvtc.approver-sets']).toEqual({ ops: ['did:key:z6MkOps'] })
+  })
+
+  it('a row changed in between is read again and the change applied to it', async () => {
+    const { vta } = await linkedPhone()
+    // Another device writes between this phone's read and its write.
+    mockVta.refuseNext.set(POLICY_UPSERT, {
+      code: 'taskFailed',
+      message: 'conflict: policy `approvals` is at version 1, not the expected 0',
+      details: { reason: 'conflict' },
+    })
+    await vta.setApprovalRule(agent, CREATE, true)
+    expect(sentOf(POLICY_GET)).toHaveLength(2)
+    expect(sentOf(POLICY_UPSERT)).toHaveLength(2)
+    expect(rulesHeld()).toHaveLength(1)
+  })
+
+  it('a scoped administrator is told only an administrator can change this, and nothing is sent', async () => {
+    mockVta.whoami = { roles: ['admin'], scopes: ['ctx:vetting'] }
+    const { vta } = await linkedPhone()
+    expect((await vta.approvalRules(agent)).canChange).toBe(false)
+  })
+
+  it('a row Keyring cannot read whole is never written back', async () => {
+    mockVta.policy = {
+      version: 2,
+      module: 'elsewhere',
+      ext: { 'openvtc.approvals': [{ taskType: CREATE, requires: 'consent', approverSet: 's', later: 1 }] },
+    }
+    const { vta } = await linkedPhone()
+    expect((await vta.approvalRules(agent)).canChange).toBe(false)
+    await expect(vta.setApprovalRule(agent, REVOKE_KEY, true)).rejects.toBeInstanceOf(DeviceActionRefused)
+    expect(sentOf(POLICY_UPSERT)).toEqual([])
+  })
+
+  it('a cancelled owner check changes nothing', async () => {
+    const confirmOwner = jest.fn(async () => ({ ok: false, reason: 'cancelled' }) as OwnerConfirmation)
+    const { vta } = await linkedPhone({ confirmOwner })
+    await expect(vta.setApprovalRule(agent, CREATE, true)).rejects.toMatchObject({ name: 'OwnerNotConfirmed' })
+    expect(sentOf(POLICY_GET)).toEqual([])
+    expect(sentOf(POLICY_UPSERT)).toEqual([])
+  })
+
+  it('the test request is held for consent and never re-submitted, so nothing is created', async () => {
+    mockClientOptions.consentWaitMs = 5000
+    mockVta.consentFor = new Set([CREATE])
+    const { vta } = await linkedPhone()
+    expect(await vta.sendTestRequest(agent)).toEqual({ kind: 'held' })
+    expect(sentOf(CREATE)).toHaveLength(1)
+    expect(mockVta.contexts.size).toBe(0)
+  })
+
+  it('an agent that enforces nothing lets the test through; the context is deleted again', async () => {
+    const { vta } = await linkedPhone()
+    expect(await vta.sendTestRequest(agent)).toEqual({ kind: 'letThrough', cleanedUp: true })
+    expect(sentOf(CREATE)[0].payload).toMatchObject({ name: 'Keyring test request' })
+    expect(sentOf(CONTEXTS_DELETE)[0].payload).toEqual({ id: sentOf(CREATE)[0].payload.id, force: true })
+    expect(mockVta.contexts.size).toBe(0)
   })
 })

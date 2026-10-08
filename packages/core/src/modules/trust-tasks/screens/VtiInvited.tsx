@@ -17,7 +17,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useIsFocused, useNavigation } from '@react-navigation/native'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -38,6 +38,7 @@ import { communityTarget } from '../module/vtiCommunityLink'
 import { openJoinRequestOf, vtiAgent } from '../module/vtiAgent'
 import { GenericRecordsTspPeerRevisionStore } from '../module/vtiTsp'
 import { ensurePersonaFor, joinCommunity, readJoinState } from '../module/vtiJoin'
+import { useAgentsHoldingIdentity } from './agentsHoldingIdentity'
 import { joinSeed } from '../module/vtiJoinSeed'
 import { communityLinkReturn } from '../module/vtiLinks'
 
@@ -53,6 +54,7 @@ import { useCommunityDid } from './useCommunity'
 import { asksFrom, type Asks } from './VtiJoin'
 import { useVtaDid } from './VtaStatus'
 import { useTakingLong } from './useTakingLong'
+import { useRoomAboveTabBar } from './aboveTabBar'
 
 type Step = 'intro' | 'share' | 'waiting' | 'joined' | 'deferred' | 'pending'
 
@@ -70,7 +72,10 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
   // What this phone has stored about the community: a member who comes back
   // (or remounts) sees that they joined, not the start of the invitation.
   const { journey } = useCommunityJourney(agent, communityDid)
-  const held = journey?.join
+  // Another agent's membership or request is not this agent's: the person is
+  // invited afresh, not shown "You're a member" a moment later (10-06).
+  const holding = useAgentsHoldingIdentity(communityDid)
+  const held = holding.onlyOthers ? undefined : journey?.join
   const mediatorDid = config?.mediatorDid
   const vtaDid = useVtaDid(config?.vtaDid)
 
@@ -107,14 +112,33 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
   const [copied, setCopied] = useState(false)
   const [showQr, setShowQr] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  // Another community brought here ("A different community"): what this screen
+  // did for the last one is not where the person stands with this one. Without
+  // this, a join just done showed "You're a member of" the new community.
+  const shownFor = useRef(communityDid)
+  useEffect(() => {
+    if (shownFor.current === communityDid) return
+    shownFor.current = communityDid
+    setStep('intro')
+    setNeeds([])
+    setLoaded(false)
+    setPersona(undefined)
+    setInvitation(undefined)
+    setError(undefined)
+    setErrorOpen(false)
+    setCopied(false)
+    setShowQr(false)
+    setDetailsOpen(false)
+  }, [communityDid])
   const joinAs = useJoinAsChoice(navigation)
+  const roomAboveTabBar = useRoomAboveTabBar()
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
     content: { flexGrow: 1, padding: 20, gap: 16 },
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 8 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    actions: { padding: 20, gap: 12 },
+    actions: { marginTop: 'auto', paddingTop: 4, gap: 12 },
     errorDetail: { maxHeight: 160 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     error: { color: ColorPalette.semantic.error },
@@ -434,7 +458,7 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
           {vetsEveryone ? (
             <ThemedText testID={testIdWithKey('InvitedVetsNote')}>
               {t('Invited.IntroVets', {
-                community: communityLabelStartOf(communityDid, t),
+                community: communityLabelOf(communityDid, t),
                 interpolation: { escapeValue: false },
               })}
             </ThemedText>
@@ -678,10 +702,31 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
       break
   }
 
+  // An invitation from another community is always in reach: once this phone
+  // had a community, the screen only ever showed that one, so a member invited
+  // somewhere else had no way to say so (233). The link brought back from the
+  // scanner returns here, for that community.
+  const different = (
+    <Button
+      title={t('Join.Different')}
+      buttonType={ButtonType.Tertiary}
+      onPress={() => {
+        communityLinkReturn.toInvited()
+        scan()
+      }}
+      testID={testIdWithKey('InvitedDifferentCommunity')}
+    />
+  )
+
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>{body}</ScrollView>
-      {actions ? <View style={styles.actions}>{actions}</View> : null}
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
+      {/* The buttons scroll with the page, after everything it says, clear of
+          the tab bar: none of it hides behind them (as on Join, 239). */}
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: 20 + roomAboveTabBar }]}>
+        {body}
+        {different}
+        {actions ? <View style={styles.actions}>{actions}</View> : null}
+      </ScrollView>
     </SafeAreaView>
   )
 }

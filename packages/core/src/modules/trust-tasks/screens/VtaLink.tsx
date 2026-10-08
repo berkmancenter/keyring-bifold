@@ -13,7 +13,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useHeaderHeight } from '@react-navigation/elements'
-import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
+import { useIsFocused, useNavigation } from '@react-navigation/native'
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -24,7 +24,6 @@ import {
   ScrollView,
   Share,
   StyleSheet,
-  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native'
@@ -39,14 +38,15 @@ import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { vtaAgent } from '../module/vtaAgent'
-import type { VtaLinkFailure } from '../module/vtaLinkMachine'
+import { resumableFailure, type VtaLinkFailure } from '../module/vtaLinkMachine'
 
 import { agentDisplayName, agentDisplayNameStart, withAgentName } from './agentName'
 import { DeviceNameField } from './DeviceNamePrompt'
+import { HostSetupSteps } from './HostSetupSteps'
 import { defaultNameOf } from './deviceWords'
 import { useMeasuredKeyboardOffset } from './keyboardOffset'
 import { openScanner } from './openScanner'
-import { plainError } from './plainError'
+import { linkFailureText } from './linkFailureWords'
 import { clearJustErased, ErasedNotice, RemovedPhoneCard } from './RemovedPhoneCard'
 import { shareableKey } from './shareableKey'
 
@@ -77,17 +77,14 @@ const VtaLink: React.FC = () => {
   const { t } = useTranslation()
   const { agent } = useAgent()
   const navigation = useNavigation()
-  const route = useRoute()
   const { ColorPalette, TextTheme } = useTheme()
   const { link: current, agentNames } = useSyncExternalStore(vtaAgent.subscribe, vtaAgent.getState)
   const link = withAgentName(current, agentNames)
-  // Form state only — what the person is typing before they ask for a key.
-  // Opening straight into the address field when the previous screen already
-  // asked: being asked the same question twice reads as not having been heard.
-  const askedWithoutQr = Boolean((route?.params as { withoutQr?: boolean } | undefined)?.withoutQr)
-  const [manualEntry, setManualEntry] = useState(askedWithoutQr)
-  const [agentAddress, setAgentAddress] = useState('')
   const [copied, setCopied] = useState(false)
+  // The code was handed out (Copy or Share): "I've been added" becomes the
+  // one main button; before that, handing it out is (IN-125).
+  const [shared, setShared] = useState(false)
+  const handedOut = copied || shared
   const [keyShown, setKeyShown] = useState(false)
   // #30: a phone showing its code to another phone checks by itself whether it
   // has been added — in view, in the foreground, inside the window.
@@ -143,25 +140,8 @@ const VtaLink: React.FC = () => {
     actions: { padding: 20, gap: 12 },
     error: { color: ColorPalette.semantic.error },
     muted: { color: ColorPalette.grayscale.mediumGrey },
-    input: {
-      ...TextTheme.normal,
-      borderWidth: 1,
-      borderColor: ColorPalette.grayscale.mediumGrey,
-      borderRadius: 6,
-      padding: 12,
-      minHeight: 48,
-    },
     key: { ...TextTheme.normal, fontFamily: 'Menlo', fontSize: 13 },
   })
-
-  const addressLooksRight = /^did:[a-z0-9]+:.+/.test(agentAddress.trim())
-
-  const onShowMyCode = useCallback(() => {
-    const vtaDid = agentAddress.trim()
-    if (!agent || !/^did:[a-z0-9]+:.+/.test(vtaDid)) return
-    setCopied(false)
-    void vtaAgent.startManualLink(agent, vtaDid, vtaDid)
-  }, [agent, agentAddress])
 
   const onCheckGrant = useCallback(() => {
     if (agent) void vtaAgent.checkManualGrant(agent)
@@ -175,6 +155,20 @@ const VtaLink: React.FC = () => {
     vtaAgent.cancelLink()
     navigation.goBack()
   }, [navigation])
+
+  // Adding another agent, and leaving this screen by the header's back or a
+  // swipe before it is linked: given up, as Cancel is. "Add" leaves the
+  // current agent so the link can run, and only a cancel goes back to it;
+  // without this, "Your agent" read "Link your agent" until the app was
+  // restarted (239, iPhone). Opening the scanner does not leave this screen.
+  useEffect(
+    () =>
+      navigation.addListener?.('beforeRemove', () => {
+        const { addingAgent, link: now } = vtaAgent.getState()
+        if (addingAgent && now.kind !== 'linked') vtaAgent.cancelLink()
+      }),
+    [navigation]
+  )
 
   const onScanAgain = useCallback(() => {
     vtaAgent.relink()
@@ -207,24 +201,24 @@ const VtaLink: React.FC = () => {
     stack.reset({ index: 0, routes: [{ name: Screens.VtaNewPhoneOffer }] })
   }, [agent, deviceName, defaultName, navigation])
 
-  const failureText = (failure?: VtaLinkFailure) => {
-    // An agent host's automatic connection says why in its own terms.
-    if (failure?.hostReason) return t(`VtaLink.Host.Failed.${failure.hostReason}`)
-    switch (failure?.reason) {
-      case 'expired':
-        return t('VtaLink.FailedExpired')
-      case 'refused':
-        return t('VtaLink.FailedRefused')
-      case 'unreachable':
-        return t('VtaLink.FailedUnreachable')
-      default:
-        // Say what was caught, in words, rather than "something went wrong":
-        // an iOS link that authenticated but never opened its mediator socket
-        // showed only that, and the cause took a mediator log to find
-        // (2026-09-25, lab).
-        return failure?.detail ? t(plainError(failure.detail).line) : t('VtaLink.FailedOther')
+  const failureText = (failure?: VtaLinkFailure) => linkFailureText(failure, t)
+
+  // A failed attempt that can be tried again with the key this phone still
+  // holds for its agent: not a refusal, and not a dead host code (IN-135).
+  const retryable = resumableFailure(link.kind === 'notLinked' ? link.lastError : undefined, { manual: true })
+  const [retryKeyFor, setRetryKeyFor] = useState<string | undefined>()
+  useEffect(() => {
+    setRetryKeyFor(undefined)
+    if (!agent || !retryable) return
+    let live = true
+    void vtaAgent
+      .pendingLinkKey(agent, retryable)
+      .then((key) => live && setRetryKeyFor(key ? retryable : undefined))
+      .catch(() => undefined)
+    return () => {
+      live = false
     }
-  }
+  }, [agent, retryable])
 
   const host = 'vtaDid' in link ? (agentHost(link.vtaDid) ?? '') : ''
   let body: React.ReactNode
@@ -316,12 +310,18 @@ const VtaLink: React.FC = () => {
               {t('VtaLink.Host.SettingUpTitle')}
             </ThemedText>
             <ThemedText>{t('VtaLink.Host.SettingUpBody')}</ThemedText>
-            <View style={styles.row}>
-              <ActivityIndicator color={ColorPalette.brand.primary} />
-              <ThemedText style={{ flex: 1 }} testID={testIdWithKey('VtaLinkState')}>
-                {t('VtaLink.Host.SettingUpWaiting')}
-              </ThemedText>
-            </View>
+            {/* Named steps once the phone knows where the host has got to
+                (HostSetupSteps); the one sentence only until then. */}
+            {link.stage ? (
+              <HostSetupSteps stage={link.stage} />
+            ) : (
+              <View style={styles.row}>
+                <ActivityIndicator color={ColorPalette.brand.primary} />
+                <ThemedText style={{ flex: 1 }} testID={testIdWithKey('VtaLinkState')}>
+                  {t('VtaLink.Host.SettingUpWaiting')}
+                </ThemedText>
+              </View>
+            )}
           </View>
         )
         actions = (
@@ -472,6 +472,13 @@ const VtaLink: React.FC = () => {
           <ThemedText>
             {t('VtaLink.GiveKeyBody', { label: agentDisplayName(link, t), interpolation: { escapeValue: false } })}
           </ThemedText>
+          {/* Picked back up after a sleep, a lock or a restart: the same key,
+              which the agent may already hold (IN-135). */}
+          {link.resumed ? (
+            <ThemedText variant="bold" testID={testIdWithKey('VtaLinkResumed')}>
+              {t('VtaLink.ResumedHint')}
+            </ThemedText>
+          ) : null}
           {/* The two things to DO come first and fit on the screen. The code
               itself is a ~350-character did:peer, and putting it here pushed
               Share, Copy and "I've been added" below the fold — a tester had
@@ -482,9 +489,11 @@ const VtaLink: React.FC = () => {
           </ThemedText>
           <Button
             title={t('VtaLink.ShareKey')}
-            buttonType={ButtonType.Primary}
+            buttonType={handedOut ? ButtonType.Secondary : ButtonType.Primary}
             onPress={() =>
-              void Share.share(shareableKey(t, agentDisplayName(link, t), link.did)).catch(() => undefined)
+              void Share.share(shareableKey(t, agentDisplayName(link, t), link.did))
+                .then(() => setShared(true))
+                .catch(() => undefined)
             }
             testID={testIdWithKey('VtaLinkShareKey')}
           />
@@ -544,7 +553,9 @@ const VtaLink: React.FC = () => {
           ) : null}
           <Button
             title={link.checking ? t('VtaLink.Checking') : link.noAnswer ? t('VtaLink.TryAgain') : t('VtaLink.ImAdded')}
-            buttonType={ButtonType.Primary}
+            buttonType={
+              handedOut || link.checking || link.notYet || link.noAnswer ? ButtonType.Primary : ButtonType.Secondary
+            }
             onPress={onCheckGrant}
             disabled={link.checking}
             testID={testIdWithKey('VtaLinkCheckGrant')}
@@ -622,6 +633,13 @@ const VtaLink: React.FC = () => {
                 {failureText(link.lastError)}
               </ThemedText>
             ) : null}
+            {/* The key this phone was granted stays on that agent's list: a VTA
+                refuses a self-delete, so its admin is the one to remove it. */}
+            {link.lastError?.reason === 'communityAgent' ? (
+              <ThemedText testID={testIdWithKey('VtaLinkCommunityAgentCleanup')}>
+                {t('VtaLink.FailedCommunityAgentCleanup')}
+              </ThemedText>
+            ) : null}
             {/* The original text, as Join and Invited keep it: for whoever reads
                 a report, one tap away and never on its own. */}
             {link.lastError?.detail ? (
@@ -642,59 +660,42 @@ const VtaLink: React.FC = () => {
               </>
             ) : null}
           </View>
-          {manualEntry ? (
-            <View style={styles.card} testID={testIdWithKey('VtaLinkManualEntry')}>
-              <ThemedText variant="labelTitle">{t('VtaLink.AgentAddress')}</ThemedText>
-              <ThemedText>{t('VtaLink.AgentAddressHint')}</ThemedText>
-              <TextInput
-                style={styles.input}
-                value={agentAddress}
-                onChangeText={setAgentAddress}
-                placeholder="did:webvh:…"
-                placeholderTextColor={ColorPalette.grayscale.mediumGrey}
-                autoCapitalize="none"
-                autoCorrect={false}
-                accessibilityLabel={t('VtaLink.AgentAddress')}
-                testID={testIdWithKey('VtaLinkAgentAddress')}
-                // The keyboard's own key submits, so it never has to be
-                // dismissed to reach the button it covers.
-                returnKeyType="go"
-                onSubmitEditing={onShowMyCode}
-                submitBehavior="blurAndSubmit"
-              />
-            </View>
-          ) : null}
         </>
       )
-      actions = manualEntry ? (
+      // One way without a code (Alberto, 239): the address path that sets up
+      // an agent, which also links one a host has made. This screen's own
+      // address field asked the same thing a second way.
+      actions = (
         <>
-          <Button
-            title={t('VtaLink.ShowMyCode')}
-            buttonType={ButtonType.Primary}
-            onPress={onShowMyCode}
-            disabled={!addressLooksRight}
-            testID={testIdWithKey('VtaLinkShowMyCode')}
-          />
-          <Button
-            title={t('VtaLink.ScanInstead')}
-            buttonType={ButtonType.Secondary}
-            onPress={() => setManualEntry(false)}
-            testID={testIdWithKey('VtaLinkScanInstead')}
-          />
-        </>
-      ) : (
-        <>
+          {/* A failure that was not a refusal, for an agent whose key this
+              phone still holds: try again with that key (IN-135). A dead host
+              code still says to make a new one. */}
+          {retryKeyFor ? (
+            <Button
+              title={t('VtaLink.TryAgainSameKey')}
+              buttonType={ButtonType.Primary}
+              onPress={() => {
+                if (agent) void vtaAgent.resumeLink(agent, retryKeyFor)
+              }}
+              testID={testIdWithKey('VtaLinkTryAgain')}
+            />
+          ) : null}
           <Button
             title={t('VtaLink.ScanAgain')}
-            buttonType={ButtonType.Primary}
+            buttonType={retryKeyFor ? ButtonType.Secondary : ButtonType.Primary}
             onPress={onScanAgain}
             testID={testIdWithKey('VtaLinkScanAgain')}
           />
           <Button
-            title={t('VtaLink.WithoutQr')}
+            title={t('VtaLink.UseAgentAddress')}
             buttonType={ButtonType.Secondary}
-            onPress={() => setManualEntry(true)}
-            testID={testIdWithKey('VtaLinkWithoutQr')}
+            onPress={() =>
+              (navigation as unknown as { navigate: (screen: string, params?: object) => void }).navigate(
+                Screens.VtaCreateAgent,
+                { byAddress: true }
+              )
+            }
+            testID={testIdWithKey('VtaLinkByAddress')}
           />
         </>
       )

@@ -33,6 +33,7 @@ import { DeviceRow } from './DeviceRow'
 import { LostPhoneCard, type RotationSupport } from './LostPhoneCard'
 import { deviceViewOf } from './deviceWords'
 import { didHashKey } from './testIdKey'
+import { useRoomAboveTabBar } from './aboveTabBar'
 
 /**
  * A row's handle for tests: {@link didHashKey} of the device's whole DID. Not
@@ -46,7 +47,10 @@ export { deviceNameKey } from './deviceWords'
  * A device action's refusal in words: a cancelled Face ID says nothing, no
  * screen lock says how to set one, and the agent's refusals by reason.
  */
-export const deviceErrorWords = (e: unknown, t: (key: string) => string): string | undefined => {
+export const deviceErrorWords = (
+  e: unknown,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string | undefined => {
   if (e instanceof Error && e.name === 'OwnerNotConfirmed') {
     const reason = (e as { reason?: string }).reason
     return reason === 'cancelled'
@@ -55,7 +59,8 @@ export const deviceErrorWords = (e: unknown, t: (key: string) => string): string
         ? t(Platform.OS === 'ios' ? 'CreateAgent.NeedsScreenLockIos' : 'CreateAgent.NeedsScreenLockAndroid')
         : t('CreateAgent.NotConfirmed')
   }
-  return t(`CreateAgent.Device.${deviceRefusalOf(e).reason}`)
+  const refusal = deviceRefusalOf(e)
+  return t(`CreateAgent.Device.${refusal.reason}`, { code: refusal.code ?? '' })
 }
 
 /** This phone first; the rest in the agent's order. */
@@ -65,6 +70,8 @@ const thisPhoneFirst = (devices: AgentDevice[]): AgentDevice[] => [
 ]
 
 const VtaDevices: React.FC = () => {
+  // The tab bar draws over the page: the last line scrolls clear of it.
+  const roomAboveTabBar = useRoomAboveTabBar()
   const { t } = useTranslation()
   const { agent } = useAgent()
   const { ColorPalette } = useTheme()
@@ -72,28 +79,35 @@ const VtaDevices: React.FC = () => {
   const [error, setError] = useState<string | undefined>()
   const [removed, setRemoved] = useState<string | undefined>()
   const [busy, setBusy] = useState<string | undefined>()
-  const [renaming, setRenaming] = useState(false)
+  /** Whose name is being changed: this phone (its own record) or another device (its label). */
+  const [renaming, setRenaming] = useState<AgentDevice | undefined>()
   const [rotation, setRotation] = useState<RotationSupport | undefined>()
   const navigation = useNavigation()
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
-    content: { padding: 20, gap: 16 },
+    content: { padding: 20, paddingBottom: 20 + roomAboveTabBar, gap: 16 },
     error: { color: ColorPalette.semantic.error },
     muted: { color: ColorPalette.grayscale.mediumGrey },
   })
 
   const wordsFor = useCallback((e: unknown) => deviceErrorWords(e, t), [t])
 
+  // The list's own failure, apart from an act's: it is what Try again re-reads.
+  const [listFailed, setListFailed] = useState(false)
   const load = useCallback(async () => {
     if (!agent) return
     setError(undefined)
+    setListFailed(false)
     try {
       setDevices(thisPhoneFirst(await vtaAgent.agentDevices(agent)))
     } catch (e) {
-      setError(wordsFor(e))
+      setListFailed(true)
+      // An agent that didn't answer in time is said plainly, with Try again
+      // (IN-124), as Restore cards says it.
+      setError(deviceRefusalOf(e).reason === 'noAnswer' ? t('Devices.ListNoAnswer') : wordsFor(e))
     }
-  }, [agent, wordsFor])
+  }, [agent, wordsFor, t])
 
   useFocusEffect(
     useCallback(() => {
@@ -146,16 +160,17 @@ const VtaDevices: React.FC = () => {
   }
 
   const onRename = async (name: string) => {
-    if (!agent) return
+    if (!agent || !renaming) return
     setError(undefined)
     setBusy('rename')
     try {
-      await vtaAgent.renameThisDevice(agent, name)
+      if (renaming.isThisPhone) await vtaAgent.renameThisDevice(agent, name)
+      else await vtaAgent.renameAgentDevice(agent, renaming.did, name)
       // Busy until the list read back shows it: closing first showed the old
       // name for a moment (226 gate). A failed read closes it all the same —
       // the name is saved, and load() says why the list is not there.
       await load()
-      setRenaming(false)
+      setRenaming(undefined)
     } catch (e) {
       setError(wordsFor(e))
     } finally {
@@ -163,10 +178,8 @@ const VtaDevices: React.FC = () => {
     }
   }
 
-  const here = devices?.find((d) => d.isThisPhone)
-
   return (
-    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey('AgentDeviceList')}>
         <ThemedText>{t('Devices.Intro')}</ThemedText>
         <Button
@@ -185,12 +198,22 @@ const VtaDevices: React.FC = () => {
             {error}
           </ThemedText>
         ) : null}
+        {listFailed && devices === undefined ? (
+          <Button
+            title={t('VtaLink.TryAgain')}
+            buttonType={ButtonType.Secondary}
+            onPress={() => void load()}
+            testID={testIdWithKey('AgentDeviceListTryAgain')}
+          />
+        ) : null}
         {devices === undefined && !error ? <ActivityIndicator color={ColorPalette.brand.primary} /> : null}
-        {renaming && here ? (
+        {renaming ? (
           <DeviceNamePrompt
-            initial={deviceViewOf(here, t).name}
+            key={renaming.did}
+            initial={deviceViewOf(renaming, t).name}
             onSave={(name) => void onRename(name)}
             busy={busy === 'rename'}
+            other={!renaming.isThisPhone}
           />
         ) : null}
         {devices?.map((device) => (
@@ -198,7 +221,7 @@ const VtaDevices: React.FC = () => {
             key={device.did}
             device={deviceViewOf(device, t)}
             onRemove={() => void onRemove(device)}
-            onRename={() => setRenaming(true)}
+            onRename={() => setRenaming(device)}
             busy={busy === device.did}
             disabled={busy !== undefined}
           />

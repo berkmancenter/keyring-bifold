@@ -16,6 +16,9 @@ import {
   type AgentDevicePort,
 } from '../module/vtaDevices'
 import { VtiRefusal } from '../module/vtiAgent'
+import { forgetAllVersions } from '../module/taskVersions'
+
+beforeEach(() => forgetAllVersions())
 
 const ME = 'did:peer:2.this-phone'
 const OLD_PHONE = 'did:peer:2.old-phone'
@@ -47,7 +50,18 @@ const bindings = [
   },
 ]
 
-/** An agent that answers the device and ACL tasks from the arrays above. */
+/**
+ * What a vta-service v0.52.0 agent answers a version it does not serve
+ * (trust_tasks/helpers.rs `method_not_found`): `unsupportedVersion`, naming the
+ * full type URIs it does serve.
+ */
+const unsupported = (type: string, served: string) =>
+  new VtiRefusal('unsupportedVersion', `unsupported version: ${type} — this VTA serves ${served}`, {
+    requestedType: type,
+    servedVersions: [served],
+  })
+
+/** An agent that answers the device and ACL tasks from the arrays above (acl/* at 0.1 only, as v0.52.0 does). */
 function fakeAgent(overrides: Partial<Record<string, (payload: Record<string, unknown>) => unknown>> = {}) {
   const sent: { type: string; payload: Record<string, unknown> }[] = []
   const port: AgentDevicePort = {
@@ -56,6 +70,8 @@ function fakeAgent(overrides: Partial<Record<string, (payload: Record<string, un
       sent.push({ type, payload })
       const answer = overrides[type]
       if (answer) return answer(payload) as T
+      if (type === AGENT_DEVICE_TASK.aclList02) throw unsupported(type, AGENT_DEVICE_TASK.aclList)
+      if (type === AGENT_DEVICE_TASK.aclRevoke02) throw unsupported(type, AGENT_DEVICE_TASK.aclRevoke)
       if (type === AGENT_DEVICE_TASK.aclList) return { entries: acl, truncated: false } as T
       if (type === AGENT_DEVICE_TASK.list) return { devices: bindings } as T
       return {} as T
@@ -106,7 +122,9 @@ describe('removing one', () => {
     const { port, sent } = fakeAgent()
     const [, old] = await listAgentDevices(port)
     await expect(removeAgentDevice(port, old)).resolves.toEqual({ mode: 'wiped' })
-    const types = sent.map((s) => s.type).filter((t) => t === AGENT_DEVICE_TASK.wipe || t === AGENT_DEVICE_TASK.aclRevoke)
+    const types = sent
+      .map((s) => s.type)
+      .filter((t) => t === AGENT_DEVICE_TASK.wipe || t === AGENT_DEVICE_TASK.aclRevoke)
     expect(types).toEqual([AGENT_DEVICE_TASK.wipe, AGENT_DEVICE_TASK.aclRevoke])
     const wipe = sent.find((s) => s.type === AGENT_DEVICE_TASK.wipe)
     expect(wipe?.payload).toMatchObject({ deviceId: 'dev-old', scope: 'cacheAndKeys' })
@@ -255,7 +273,7 @@ describe('another phone acting as the same agent', () => {
 // with camelCase enum values on the wire: wipe's scope is `cacheAndKeys`.
 // acl/list and acl/revoke are not deprecated and stay at 0.1.
 describe('the device tasks this phone speaks', () => {
-  it('are the 0.2 versions, and the access-list tasks stay at 0.1', () => {
+  it('are the 0.2 versions, the access-list tasks at 0.2 with 0.1 beside them', () => {
     expect(AGENT_DEVICE_TASK).toEqual({
       register: 'https://trusttasks.org/spec/device/register/0.2',
       heartbeat: 'https://trusttasks.org/spec/device/heartbeat/0.2',
@@ -264,6 +282,50 @@ describe('the device tasks this phone speaks', () => {
       setWake: 'https://trusttasks.org/spec/device/set-wake/0.2',
       aclList: 'https://trusttasks.org/spec/acl/list/0.1',
       aclRevoke: 'https://trusttasks.org/spec/acl/revoke/0.1',
+      aclList02: 'https://trusttasks.org/spec/acl/list/0.2',
+      aclRevoke02: 'https://trusttasks.org/spec/acl/revoke/0.2',
     })
+  })
+})
+
+// vta-service 0.53.1 and 0.54.0 serve acl/list and acl/revoke only at 0.1, and
+// a refused 0.2 never reached the phone over TSP (al-phone, 10-05): 0.1 first.
+describe('the access-list tasks, asked in the version agents serve', () => {
+  it('asks acl/list in 0.1 first, in one message each time', async () => {
+    const { port, sent } = fakeAgent()
+    await listAgentDevices(port)
+    await listAgentDevices(port)
+    const acl = sent.map((s) => s.type).filter((t) => t.includes('/acl/'))
+    expect(acl).toEqual([AGENT_DEVICE_TASK.aclList, AGENT_DEVICE_TASK.aclList])
+  })
+
+  it('an agent that refuses 0.1 as unsupported is asked in 0.2, and removes with its explicit full removal', async () => {
+    const { port, sent } = fakeAgent({
+      [AGENT_DEVICE_TASK.aclList]: () => {
+        throw unsupported(AGENT_DEVICE_TASK.aclList, AGENT_DEVICE_TASK.aclList02)
+      },
+      [AGENT_DEVICE_TASK.aclList02]: () => ({ entries: acl, truncated: false }),
+      [AGENT_DEVICE_TASK.aclRevoke]: () => {
+        throw unsupported(AGENT_DEVICE_TASK.aclRevoke, AGENT_DEVICE_TASK.aclRevoke02)
+      },
+      [AGENT_DEVICE_TASK.aclRevoke02]: () => ({ entry: null }),
+    })
+    const devices = await listAgentDevices(port)
+    const plugin = devices.find((d) => d.did === PLUGIN)!
+    await removeAgentDevice(port, plugin)
+    expect(sent.find((s) => s.type === AGENT_DEVICE_TASK.aclRevoke02)?.payload).toEqual({
+      subject: PLUGIN,
+      revocation: { kind: 'entry' },
+    })
+  })
+
+  it('does not ask again in 0.2 when the agent refuses 0.1 for any other reason', async () => {
+    const { port, sent } = fakeAgent({
+      [AGENT_DEVICE_TASK.aclList]: () => {
+        throw new VtiRefusal('permissionDenied', 'not allowed')
+      },
+    })
+    await expect(listAgentDevices(port)).rejects.toThrow('not allowed')
+    expect(sent.some((s) => s.type === AGENT_DEVICE_TASK.aclList02)).toBe(false)
   })
 })

@@ -5,13 +5,15 @@
  * vetting desk once, and says "your identity for X" once. The journey strip
  * wraps without an orphan '›', and its "Joined" never reads as unconfirmed.
  */
-import { act, render, within } from '@testing-library/react-native'
+import { useNavigation } from '@react-navigation/native'
+import { act, fireEvent, render, within } from '@testing-library/react-native'
 import type { TFunction } from 'i18next'
 import React from 'react'
 
 import { useAgent } from '@bifold/react-hooks'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
+import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { vtaAgent } from '../module/vtaAgent'
 import { communityTarget } from '../module/vtiCommunityLink'
@@ -136,8 +138,8 @@ describe('what your agent holds, card by card', () => {
     const tree = await renderHome([persona(A), membership(A, linkedAt), persona(B), membership(B, linkedAt)])
     const a = tree.getByTestId(testIdWithKey(`AgentCommunityName_${keyOf(A)}`))
     const b = tree.getByTestId(testIdWithKey(`AgentCommunityName_${keyOf(B)}`))
-    expect(a).toHaveTextContent('keyring-test-vtc')
-    expect(b).toHaveTextContent('first-vtc')
+    expect(a).toHaveTextContent('Community.UnnamedRef(ref=keyring-test-vtc)')
+    expect(b).toHaveTextContent('Community.UnnamedRef(ref=first-vtc)')
     expect(tree.getByTestId(testIdWithKey('AgentHolds'))).not.toHaveTextContent(/vtc\.example\.org/)
   })
 
@@ -160,19 +162,25 @@ describe('what your agent holds, card by card', () => {
     expect(tree.queryByTestId(testIdWithKey(`AgentMemberBeforeLink_${keyOf(B)}`))).toBeNull()
   })
 
-  it("a vetter's page offers the vetting desk once, on the community's card", async () => {
+  it("a vetter's page offers the vetting desk once, at the top, not again on the community's card", async () => {
     mockGrantState.mockResolvedValue({ state: 'active', statusChecked: true })
     const tree = await renderHome([persona(A), membership(A, linkedAt), grant(A)])
+    const top = within(tree.getByTestId(testIdWithKey('AgentVetterCard')))
     expect(tree.getByTestId(testIdWithKey('AgentVetterCard'))).toHaveTextContent(/VtaLink\.YouCanVet/)
+    expect(top.getByTestId(testIdWithKey('AgentOpenDesk'))).toHaveTextContent('VtaLink.OpenDesk')
     expect(tree.queryByTestId(testIdWithKey('AgentVetOthers'))).toBeNull()
-    expect(tree.getByTestId(testIdWithKey(`AgentCommunityPrimary_${keyOf(A)}`))).toHaveTextContent('VtaLink.OpenDesk')
+    expect(tree.queryByTestId(testIdWithKey(`AgentCommunityPrimary_${keyOf(A)}`))).toBeNull()
     expect(tree.getAllByText('VtaLink.OpenDesk')).toHaveLength(1)
+    // It opens the desk on that community.
+    fireEvent.press(top.getByTestId(testIdWithKey('AgentOpenDesk')))
+    expect(useNavigation().navigate).toHaveBeenCalledWith(Screens.VtiVetting)
   })
 
-  it("a vetter who holds no membership yet still has the desk on the card, not 'continue vetting'", async () => {
+  it("a vetter who holds no membership yet still has the desk at the top, and no 'continue vetting'", async () => {
     mockGrantState.mockResolvedValue({ state: 'active', statusChecked: true })
     const tree = await renderHome([persona(A), grant(A)])
-    expect(tree.getByTestId(testIdWithKey(`AgentCommunityPrimary_${keyOf(A)}`))).toHaveTextContent('VtaLink.OpenDesk')
+    expect(tree.getByTestId(testIdWithKey('AgentOpenDesk'))).toHaveTextContent('VtaLink.OpenDesk')
+    expect(tree.queryByText('VtaLink.ContinueVetting')).toBeNull()
   })
 
   it('an applicant\'s card says "your identity for" the community once', async () => {
@@ -185,24 +193,72 @@ describe('what your agent holds, card by card', () => {
   })
 
   it("the journey's chevrons travel with the stop after them, so none is left alone at a line's end", async () => {
-    const tree = await renderHome([persona(A), membership(A, linkedAt)])
+    const tree = await renderHome([persona(A)])
     const row = tree.getByTestId(testIdWithKey('AgentJourneyRow'))
     // Every child of the strip is a stop group; no bare chevron between them.
     for (const child of row.children as { props: { testID?: string } }[]) {
       expect(child.props.testID).toMatch(/AgentJourneyStop_/)
     }
-    for (const key of ['Joined', 'Member']) {
+    for (const key of ['Join', 'Member']) {
       const group = tree.getByTestId(testIdWithKey(`AgentJourneyStop_${key}`))
       expect(within(group).UNSAFE_getByProps({ name: 'chevron-right' })).toBeTruthy()
       expect(within(group).getByTestId(testIdWithKey(`AgentJourney${key}`))).toBeTruthy()
     }
   })
 
-  it('"Joined" names a community known only from a link without "(not confirmed …)"', async () => {
+  // 233: the step bar teaches the first setup; after the first membership a
+  // status line says where the agent stands, and a card says what needs the person.
+  it('after the first membership: no step bar, one status line for one community or several', async () => {
+    const one = await renderHome([persona(A), membership(A, linkedAt)])
+    expect(one.queryByTestId(testIdWithKey('AgentJourney'))).toBeNull()
+    expect(one.getByTestId(testIdWithKey('AgentJourneyJoined'))).toHaveTextContent(
+      /VtaLink\.StatusMemberOf\(community=/
+    )
+    const two = await renderHome([persona(A), membership(A, linkedAt), persona(B), membership(B, linkedAt)])
+    expect(two.getByTestId(testIdWithKey('AgentJourneyJoined'))).toHaveTextContent(
+      'VtaLink.StatusMemberOfMany(count=2)'
+    )
+  })
+
+  it('a member with a vetting under way elsewhere is shown it as the next step, for that community', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const tree = await renderHome([persona(A), membership(A, linkedAt), persona(B)])
+    expect(tree.getByTestId(testIdWithKey('AgentNextStepText'))).toHaveTextContent(
+      /VtaLink\.NextVetting\(community=.*first-vtc/
+    )
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentContinueVetting')))
+    expect(communityTarget.getChosen()?.communityDid).toBe(B)
+    expect(navigate).toHaveBeenCalledWith(Screens.VtiVetting)
+  })
+
+  it('a waiting invitation is the next step, before a vetting', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const invitation: Rec = {
+      tags: { recordType: 'keyring/vti-community', kind: 'invitation', key: 'i1' },
+      content: { id: 'i1', communityDid: B, subjectDid: `${B}:p`, status: 'pending' },
+    }
+    const tree = await renderHome([persona(A), persona(B), invitation])
+    expect(tree.getByTestId(testIdWithKey('AgentNextStepText'))).toHaveTextContent(
+      /VtaLink\.InvitationWaiting\(community=.*first-vtc/
+    )
+    expect(tree.queryByTestId(testIdWithKey('AgentContinueVetting'))).toBeNull()
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentNextInvitation')))
+    expect(communityTarget.getChosen()?.communityDid).toBe(B)
+    expect(navigate).toHaveBeenCalledWith(Screens.VtiInvited)
+  })
+
+  it('no next-step card when nothing needs the person', async () => {
+    const tree = await renderHome([persona(A), membership(A, linkedAt)])
+    expect(tree.queryByTestId(testIdWithKey('AgentNextStep'))).toBeNull()
+  })
+
+  it('the status line names a community known only from a link without "(not confirmed …)"', async () => {
     communityTarget.set({ communityDid: A, name: 'Lab Community' })
     const tree = await renderHome([persona(A), membership(A, linkedAt)])
     const joined = tree.getByTestId(testIdWithKey('AgentJourneyJoined'))
-    expect(joined).toHaveTextContent(/VtaLink\.JourneyJoined\(community=Lab Community\)/)
+    expect(joined).toHaveTextContent(/VtaLink\.StatusMemberOf\(community=Lab Community\)/)
     expect(joined).not.toHaveTextContent(/ClaimedName/)
     // The member's status line is about the membership too, so it is plain as well;
     // the card's heading still says where the name came from.
@@ -229,8 +285,9 @@ describe('a community heading, where several stand side by side', () => {
     expect(didPathName('did:peer:2.Ez6LSabc')).toBeUndefined()
   })
 
-  it('prefers a published name, then a claimed one, then the path', () => {
-    expect(communityHeadingOf(A, t)).toBe('keyring-test-vtc')
+  it('prefers a published name, then a claimed one, then says it is unnamed, with its path', () => {
+    // A bare path as a card's title read as the community's name (#12, IN-26).
+    expect(communityHeadingOf(A, t)).toBe('Community.UnnamedRef(ref=keyring-test-vtc)')
     communityTarget.set({ communityDid: A, name: 'Claimed' })
     expect(communityHeadingOf(A, t)).toBe('Community.ClaimedName(name=Claimed)')
     expect(communityHeadingOf(A, t, { claim: 'plain' })).toBe('Claimed')
@@ -241,8 +298,8 @@ describe('a community heading, where several stand side by side', () => {
   it('with no path, tells communities apart by the end of the SCID — not the host', () => {
     const one = communityHeadingOf('did:webvh:QmFirstOne111:vtc.example.org', t)
     const two = communityHeadingOf('did:webvh:QmSecondTwo222:vtc.example.org', t)
-    expect(one).toBe('Community.UnnamedRef(ref=One111)')
-    expect(two).toBe('Community.UnnamedRef(ref=Two222)')
+    expect(one).toBe('Community.UnnamedRef(ref=…One111)')
+    expect(two).toBe('Community.UnnamedRef(ref=…Two222)')
     expect(one).not.toContain('example')
   })
 })

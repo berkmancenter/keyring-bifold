@@ -20,7 +20,8 @@
  */
 
 import type { Agent } from '@credo-ts/core'
-import { getKeyed, listKeyed, putKeyed } from './keyedRecords'
+import { currentAgentDid } from './currentAgent'
+import { getKeyed, listKeyed, putKeyed, withKeyLock } from './keyedRecords'
 
 export interface VtiManagerIdentity {
   /** The VTA this identity manages. */
@@ -44,6 +45,13 @@ export interface VtiManagerIdentity {
    * Absent on every record written before this existed, and once settled.
    */
   pendingNext?: { did: string; createdAt: string }
+  /**
+   * The key a completed swap retired, until the agent's approval rules have
+   * been moved onto `did` (`VtaClient.carryApproversAcrossSwap`). Set when a
+   * swap is seen to complete; cleared once the rules no longer name it, or
+   * when this phone may not change them.
+   */
+  approversFrom?: string
 }
 
 export interface VtiPersona {
@@ -81,11 +89,18 @@ export interface VtiIdentityStore {
    * own entry (VTI-Q23). Optional: a store without it keeps the record.
    */
   forgetManager?(vtaDid: string): Promise<void>
-  getPersona(communityDid: string): Promise<VtiPersona | undefined>
+  /** Every agent's manager identity this phone holds. */
+  listManagers?(): Promise<VtiManagerIdentity[]>
+  /**
+   * This community's identity under an agent: `vtaDid`, else the agent this
+   * phone acts with now (`currentAgentDid`). Identities are kept per agent and
+   * community, so a second agent's identity for the same community is its own.
+   */
+  getPersona(communityDid: string, vtaDid?: string): Promise<VtiPersona | undefined>
   listPersonas(): Promise<VtiPersona[]>
   setPersona(persona: VtiPersona): Promise<void>
   /** Drop the persona record for a community (the VTA still holds the keys). */
-  forgetPersona(communityDid: string): Promise<void>
+  forgetPersona(communityDid: string, vtaDid?: string): Promise<void>
   /**
    * The idempotency key of a persona mint that has not yet been recorded as a
    * persona — kept so a retry (even after a restart) re-asks with the same key
@@ -106,6 +121,10 @@ export interface VtiIdentityStore {
 }
 
 const RECORD_TYPE = 'keyring/vti-identity'
+
+/** A record key per agent and community; the community alone when no agent is known. */
+export const agentScoped = (vtaDid: string | undefined, communityDid: string): string =>
+  vtaDid ? `${vtaDid}|${communityDid}` : communityDid
 
 /**
  * Credo generic records as the store: each identity is one record, tagged by
@@ -132,6 +151,10 @@ export class GenericRecordsIdentityStore implements VtiIdentityStore {
     return this.put('manager', identity.vtaDid, { ...identity })
   }
 
+  listManagers() {
+    return listKeyed<VtiManagerIdentity>(this.agent, RECORD_TYPE, 'manager')
+  }
+
   async forgetManager(vtaDid: string) {
     const records = await this.agent.genericRecords.findAllByQuery({
       recordType: RECORD_TYPE,
@@ -141,45 +164,71 @@ export class GenericRecordsIdentityStore implements VtiIdentityStore {
     for (const record of records) await this.agent.genericRecords.deleteById(record.id)
   }
 
-  getPersona(communityDid: string) {
-    return this.find<VtiPersona>('persona', communityDid)
+  /**
+   * Records whose content passes `which`, kept under (kind, key): removed under
+   * the key's lock, so a write in progress is not undone.
+   */
+  private removeWhere(kind: string, key: string, which: (content: Record<string, unknown>) => boolean) {
+    return withKeyLock(`${RECORD_TYPE}|${kind}|${key}`, async () => {
+      const records = await this.agent.genericRecords.findAllByQuery({ recordType: RECORD_TYPE, kind, key })
+      for (const record of records) {
+        if (which((record.content ?? {}) as Record<string, unknown>)) await this.agent.genericRecords.delete(record)
+      }
+    })
+  }
+
+  async getPersona(communityDid: string, vtaDid: string | undefined = currentAgentDid()) {
+    if (vtaDid) {
+      const own = await this.find<VtiPersona>('persona', agentScoped(vtaDid, communityDid))
+      if (own) return own
+    }
+    // Kept by community alone, before identities were kept per agent: this
+    // agent's, or any one when no agent is known. Moved under its agent at the
+    // next write (setPersona).
+    const kept = await this.find<VtiPersona>('persona', communityDid)
+    return kept && (!vtaDid || kept.vtaDid === vtaDid) ? kept : undefined
   }
 
   async listPersonas() {
     return listKeyed<VtiPersona>(this.agent, RECORD_TYPE, 'persona')
   }
 
-  setPersona(persona: VtiPersona) {
-    return this.put('persona', persona.communityDid, { ...persona })
+  async setPersona(persona: VtiPersona) {
+    await this.put('persona', agentScoped(persona.vtaDid, persona.communityDid), { ...persona })
+    // The same identity kept by community alone is now kept under its agent:
+    // not listed twice.
+    if (persona.vtaDid) await this.removeWhere('persona', persona.communityDid, (c) => c.vtaDid === persona.vtaDid)
   }
 
-  async forgetPersona(communityDid: string) {
-    const records = await this.agent.genericRecords.findAllByQuery({
-      recordType: RECORD_TYPE,
-      kind: 'persona',
-      key: communityDid,
-    })
-    for (const record of records) await this.agent.genericRecords.delete(record)
+  async forgetPersona(communityDid: string, vtaDid: string | undefined = currentAgentDid()) {
+    if (vtaDid) await this.removeWhere('persona', agentScoped(vtaDid, communityDid), () => true)
+    await this.removeWhere('persona', communityDid, (c) => !vtaDid || c.vtaDid === vtaDid)
+  }
+
+  /** A mint is asked of the agent this phone acts with now, so its key is kept under that agent. */
+  private async mintRecord(communityDid: string) {
+    const vtaDid = currentAgentDid()
+    const own = vtaDid
+      ? await this.find<{ key?: string; request?: VtiMintRequest }>('mint-key', agentScoped(vtaDid, communityDid))
+      : undefined
+    return own ?? (await this.find<{ key?: string; request?: VtiMintRequest }>('mint-key', communityDid))
   }
 
   async getMintKey(communityDid: string) {
-    return (await this.find<{ key?: string }>('mint-key', communityDid))?.key
+    return (await this.mintRecord(communityDid))?.key
   }
 
   setMintKey(communityDid: string, key: string, request?: VtiMintRequest) {
-    return this.put('mint-key', communityDid, { key, ...(request ? { request } : {}) })
+    return this.put('mint-key', agentScoped(currentAgentDid(), communityDid), { key, ...(request ? { request } : {}) })
   }
 
   async getMintRequest(communityDid: string) {
-    return (await this.find<{ request?: VtiMintRequest }>('mint-key', communityDid))?.request
+    return (await this.mintRecord(communityDid))?.request
   }
 
   async clearMintKey(communityDid: string) {
-    const records = await this.agent.genericRecords.findAllByQuery({
-      recordType: RECORD_TYPE,
-      kind: 'mint-key',
-      key: communityDid,
-    })
-    for (const record of records) await this.agent.genericRecords.delete(record)
+    const vtaDid = currentAgentDid()
+    if (vtaDid) await this.removeWhere('mint-key', agentScoped(vtaDid, communityDid), () => true)
+    await this.removeWhere('mint-key', communityDid, () => true)
   }
 }

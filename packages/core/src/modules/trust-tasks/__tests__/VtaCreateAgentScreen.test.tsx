@@ -9,7 +9,7 @@ import { useNavigation, useRoute } from '@react-navigation/native'
 import type { TFunction } from 'i18next'
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
-import { Share } from 'react-native'
+import { AppState, Share } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import QRCode from 'react-native-qrcode-svg'
 
@@ -23,8 +23,9 @@ import enCopy from '../../../localization/en/en.json'
 import frCopy from '../../../localization/fr/fr.json'
 import ptBrCopy from '../../../localization/pt-br/pt-br.json'
 import { agentAddressScan } from '../module/agentAddressScan'
+import { VtiRefusal } from '../module/vtiAgent'
 import { deviceCodeScan } from '../module/deviceCodeScan'
-import { vtaAgent } from '../module/vtaAgent'
+import { AgentAlreadyOnPhone, vtaAgent } from '../module/vtaAgent'
 import { DeviceActionRefused, DeviceCannotOwn } from '../module/vtaOwner'
 import VtaCreateAgent, { GRANT_POLL_EVERY_MS, GRANT_POLL_WINDOW_MS, readyNameOf } from '../screens/VtaCreateAgent'
 
@@ -50,13 +51,98 @@ const show = () =>
   )
 
 beforeEach(() => {
-  (useAgent as jest.Mock).mockReturnValue({ agent: {} })
+  ;(useAgent as jest.Mock).mockReturnValue({ agent: {} })
   controller.set({ link: { kind: 'notLinked' } })
   jest.restoreAllMocks()
   ;(confirmOwner as jest.Mock).mockReset()
 })
 
+// Alberto, 10-05: "block it". The grant check refuses a community's own
+// agent (CommunityAgentRefused); this screen says so, back on the address.
+describe("create my agent: a community's own agent", () => {
+  test('is said in words on the address step, where another address can be given', async () => {
+    controller.set({
+      link: { kind: 'showingKey', vtaDid: VTA, label: 'agents.example', did: 'did:key:z6MkOwner', checking: false },
+    })
+    jest.spyOn(vtaAgent, 'checkManualGrant').mockResolvedValue(undefined)
+    const tree = show()
+    await act(async () => {
+      controller.set({ link: { kind: 'notLinked', lastError: { reason: 'communityAgent' } } })
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent(
+      'VtaLink.FailedCommunityAgent VtaLink.FailedCommunityAgentCleanup'
+    )
+    expect(tree.getByTestId(id('AgentCreateAddressInput'))).toBeTruthy()
+  })
+})
+
+// The one way to link by address (Alberto, 239): every failure of its own
+// attempt is said, in the link screen's words, the original under Details.
+describe('create my agent: a link that fails is said', () => {
+  test('a key swap the agent refused, back on the address, with its own words under Details', async () => {
+    controller.set({
+      link: { kind: 'linking', vtaDid: VTA, label: VTA, step: 'rotating' },
+    })
+    const tree = show()
+    await act(async () => {
+      controller.set({
+        link: { kind: 'notLinked', lastError: { reason: 'failed', swap: 'refused', detail: 'acl/update refused' } },
+      })
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent('VtaLink.SwapFailed.refused')
+    expect(tree.getByTestId(id('AgentCreateAddressInput'))).toBeTruthy()
+    fireEvent.press(tree.getByTestId(id('AgentCreateErrorDetailsToggle')))
+    expect(tree.getByTestId(id('AgentCreateErrorDetail'))).toHaveTextContent('acl/update refused')
+  })
+
+  test('an agent that refused the code says so', async () => {
+    controller.set({
+      link: { kind: 'showingKey', vtaDid: VTA, label: VTA, did: 'did:key:z6MkOwner', checking: false },
+    })
+    const tree = show()
+    await act(async () => {
+      controller.set({ link: { kind: 'notLinked', lastError: { reason: 'refused' } } })
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent('VtaLink.FailedRefused')
+  })
+
+  test('an older failure, from before this screen, is not said on opening it', () => {
+    controller.set({ link: { kind: 'notLinked', lastError: { reason: 'refused' } } })
+    const tree = show()
+    expect(tree.queryByTestId(id('AgentCreateError'))).toBeNull()
+  })
+})
+
 describe('create my agent: the address comes first', () => {
+  // IN-132: an agent this phone already has, entered by its address: said,
+  // with a switch to it, and nothing made.
+  test('an agent this phone already has is said so, with a switch to it', async () => {
+    jest.spyOn(vtaAgent, 'startCreateAgent').mockRejectedValue(new AgentAlreadyOnPhone(VTA))
+    const toIt = jest.spyOn(vtaAgent, 'switchToExisting').mockResolvedValue(undefined)
+    const nav = useNavigation() as unknown as { reset: jest.Mock }
+    nav.reset.mockClear()
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentCreateContinue')))
+    fireEvent.changeText(tree.getByTestId(id('AgentCreateAddressInput')), VTA)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentCreateAddressContinue')))
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent('VtaLink.AlreadyOnPhone')
+    fireEvent.press(tree.getByTestId(id('AgentCreateSwitchToExisting')))
+    expect(toIt).toHaveBeenCalledWith(expect.anything(), VTA)
+    expect(nav.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: Screens.VtaAgent }] })
+  })
+
+  // "No code? Use your agent's address" (Alberto, 239): straight to the
+  // address, without the introduction's Continue first.
+  test('opened for an address, it starts at the address', () => {
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { byAddress: true } })
+    const tree = show()
+    expect(tree.queryByTestId(id('AgentCreateContinue'))).toBeNull()
+    expect(tree.getByTestId(id('AgentCreateAddressInput'))).toBeTruthy()
+    ;(useRoute as jest.Mock).mockReturnValue({ params: {} })
+  })
+
   test('something that is not an agent address is refused in words, and nothing is made', async () => {
     const start = jest.spyOn(vtaAgent, 'startCreateAgent').mockResolvedValue(undefined)
     const tree = show()
@@ -101,15 +187,26 @@ describe('create my agent: the address comes first', () => {
     expect(within(avoiding!).getByTestId(id('AgentCreateAddressContinue'))).toBeTruthy()
   })
 
-  test('a phone with no screen lock is told how to protect its agent first', async () => {
+  // One way to link by address (Alberto, 239): a phone with no screen lock
+  // cannot own the agent, so it is linked as a device, as an admin adds any
+  // other, and is told why. No Face ID is asked: there is none to ask.
+  test('a phone with no screen lock is linked as a device, told why, and asked for no Face ID', async () => {
     jest.spyOn(vtaAgent, 'startCreateAgent').mockRejectedValue(new DeviceCannotOwn())
+    const manual = jest.spyOn(vtaAgent, 'startManualLink').mockImplementation(async () => {
+      controller.set({
+        link: { kind: 'showingKey', vtaDid: VTA, label: VTA, did: 'did:key:z6MkDevice', checking: false },
+      })
+    })
     const tree = show()
     fireEvent.press(tree.getByTestId(id('AgentCreateContinue')))
     fireEvent.changeText(tree.getByTestId(id('AgentCreateAddressInput')), VTA)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id('AgentCreateAddressContinue')))
     })
-    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent(/CreateAgent\.NeedsScreenLock(Ios|Android)/)
+    expect(manual).toHaveBeenCalledWith(expect.anything(), VTA, VTA)
+    expect(tree.queryByTestId(id('AgentCreateError'))).toBeNull()
+    expect(tree.getByTestId(id('AgentCreateAsDevice'))).toHaveTextContent('CreateAgent.AsDeviceBody')
+    expect(tree.queryByTestId(id('AgentCreateOwnerBody'))).toBeNull()
   })
 })
 
@@ -121,16 +218,19 @@ describe('create my agent: the address comes first', () => {
 describe('create my agent: the address can be scanned', () => {
   afterEach(() => agentAddressScan.cancel())
 
-  test('Scan opens the scanner for an address; a scanned address fills the field', () => {
+  // IN-125: a scan that reads the address goes straight on, with no Continue to press.
+  test('Scan opens the scanner for an address; a scanned address fills the field and goes straight on', async () => {
     mockOpenScanner.mockClear()
+    const start = jest.spyOn(vtaAgent, 'startCreateAgent').mockResolvedValue(undefined)
     const tree = show()
     fireEvent.press(tree.getByTestId(id('AgentCreateContinue')))
     fireEvent.press(tree.getByTestId(id('AgentCreateScanAddress')))
     expect(mockOpenScanner).toHaveBeenCalled()
-    act(() => {
+    await act(async () => {
       expect(agentAddressScan.claim(VTA)).toEqual({ taken: true })
     })
     expect(tree.getByTestId(id('AgentCreateAddressInput')).props.value).toBe(VTA)
+    expect(start).toHaveBeenCalledWith({}, VTA, VTA)
   })
 
   test('the step says the address can be scanned as well as pasted, in every language', () => {
@@ -140,6 +240,20 @@ describe('create my agent: the address can be scanned', () => {
       [ptBrCopy, /escaneie/i],
     ] as const) {
       expect(words.CreateAgent.AddressBody).toMatch(scan)
+    }
+  })
+
+  // The host's page shows a code to scan (its connection QR) as well as the
+  // address: a person holding only the code met "It starts with did:webvh:".
+  test('the step says the hosting service shows a code or the address, naming no provider', () => {
+    for (const [words, code] of [
+      [enCopy, /\bcode\b/i],
+      [frCopy, /\bcode\b/i],
+      [ptBrCopy, /código/i],
+    ] as const) {
+      expect(words.CreateAgent.AddressBody).toMatch(code)
+      expect(words.CreateAgent.AddressBody).toContain('did:webvh:')
+      expect(words.CreateAgent.AddressBody).not.toMatch(/farm/i)
     }
   })
 
@@ -271,6 +385,32 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     expect(tree.getByTestId(id('AgentBackupNone'))).toHaveTextContent('CreateAgent.BackupLater')
   })
 
+  // 238 gate, Android: Done popped back to the panel, which swapped itself for
+  // the agent's page while the pop still animated, and the app was gone. Done
+  // sets the stack to the agent's page instead, in one step.
+  test("Done sets the stack to the agent's page, rather than going back", () => {
+    linked()
+    const nav = useNavigation() as unknown as { goBack: jest.Mock; reset: jest.Mock }
+    nav.goBack.mockClear()
+    nav.reset.mockClear()
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentCreateDone')))
+    expect(nav.reset).toHaveBeenCalledWith({ index: 0, routes: [{ name: Screens.VtaAgent }] })
+    expect(nav.goBack).not.toHaveBeenCalled()
+  })
+
+  // IN-123: a computer or another app (pnm) does not scan the agent's code;
+  // the way to enter its code is said on the first step, not found after Next.
+  test('a computer or another app: said on the first step, with "Enter its code" straight to the code', () => {
+    linked()
+    asAddDevice()
+    const tree = show()
+    expect(tree.getByTestId(id('AgentBackupOtherKinds'))).toHaveTextContent('CreateAgent.BackupOtherKinds')
+    fireEvent.press(tree.getByTestId(id('AgentBackupEnterCode')))
+    expect(tree.getByTestId(id('AgentBackupScanCode'))).toHaveTextContent(/CreateAgent\.BackupNowScanBody/)
+    expect(tree.getByTestId(id('AgentBackupCodeInput'))).toBeTruthy()
+  })
+
   const toBackupCode = async () => {
     const tree = show()
     expect(tree.getByTestId(id('AgentBackupAddressQr'))).toBeTruthy()
@@ -279,22 +419,55 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     return tree
   }
 
-  // #30: the other phone now shows its code as a QR; this phone scans it.
-  test('Scan its code: the scanned code fills the field, and adding it becomes the main button', () => {
+  // al-phone, 10-05: an add the agent refused (422) read as "didn't answer". A
+  // refusal that arrives is said as one, with its code and its own words behind Details.
+  test('a refusal from the agent is said as one, with its code and its words behind Details', async () => {
     linked()
     asAddDevice()
     jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    jest
+      .spyOn(vtaAgent, 'addBackupDevice')
+      .mockRejectedValue(new VtiRefusal('validationFailed', 'payload member "authority" is not allowed'))
+    const tree = await toBackupCode()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentBackupAdd')))
+    })
+    expect(tree.getByTestId(id('AgentCreateError'))).toHaveTextContent('CreateAgent.Device.refused')
+    fireEvent.press(tree.getByTestId(id('AgentCreateErrorDetailsToggle')))
+    expect(tree.getByTestId(id('AgentCreateErrorDetail'))).toHaveTextContent(/authority/)
+  })
+
+  // #30: the other phone now shows its code as a QR; this phone scans it.
+  // IN-125: a scanned code is added straight away; the owner check (inside
+  // addBackupDevice) is the only stop, with no Add to press.
+  test('Scan its code: the scanned code is added straight away, named by its kind', async () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const add = jest
+      .spyOn(vtaAgent, 'addBackupDevice')
+      .mockResolvedValue({ did: 'did:key:z6MkNewPhone', role: 'admin', label: 'Computer', thisPhone: false })
     mockOpenScanner.mockClear()
     const tree = show()
     fireEvent.press(tree.getByTestId(id('AgentBackupNext')))
     fireEvent.press(tree.getByTestId(id('AgentBackupScanButton')))
     expect(mockOpenScanner).toHaveBeenCalled()
-    act(() => {
+    await act(async () => {
       deviceCodeScan.claim('did:key:z6MkNewPhone')
     })
-    expect(tree.getByTestId(id('AgentBackupCodeInput')).props.value).toBe('did:key:z6MkNewPhone')
-    expect(tree.getByTestId(id('AgentBackupAdd'))).toHaveTextContent('CreateAgent.AddThisPhone')
+    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkNewPhone', 'Devices.ShortComputer')
     deviceCodeScan.cancel()
+  })
+
+  // IN-126: one tap hands the agent's address to a computer (Universal Clipboard, AirDrop).
+  test("the agent's address can be copied or shared from the first step", () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const tree = show()
+    fireEvent.press(tree.getByTestId(id('AgentBackupCopyAddress')))
+    expect(tree.getByTestId(id('AgentBackupCopyAddress'))).toHaveTextContent('VtaLink.KeyCopied')
+    expect(tree.getByTestId(id('AgentBackupShareAddress'))).toBeTruthy()
   })
 
   test("the agent's code can be shown as text, for an app with no camera", () => {
@@ -320,8 +493,27 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     await act(async () => {
       fireEvent.press(tree.getByTestId(id('AgentBackupAdd')))
     })
-    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'CreateAgent.BackupLabel')
+    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'Devices.ShortComputer')
     expect(navigation.goBack).toHaveBeenCalled()
+  })
+
+  // IN-123: named when added, as My devices will show it: a plain default by
+  // the kind of code, or the person's own name.
+  test('the name typed for the device is the one the agent keeps', async () => {
+    linked()
+    asAddDevice()
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(VTA)
+    const add = jest
+      .spyOn(vtaAgent, 'addBackupDevice')
+      .mockResolvedValue({ did: 'did:key:z6MkBackup', role: 'admin', label: 'Work laptop', thisPhone: false })
+    const tree = await toBackupCode()
+    // The field shows the default for a computer's code before anything is typed.
+    expect(tree.getByTestId(id('DeviceNameInput')).props.value).toBe('Devices.ShortComputer')
+    fireEvent.changeText(tree.getByTestId(id('DeviceNameInput')), 'Work laptop (pnm)')
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentBackupAdd')))
+    })
+    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'Work laptop (pnm)')
   })
 
   // IN-52: the other phone's Share sends a sentence with the code on its own
@@ -342,7 +534,7 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     await act(async () => {
       fireEvent.press(tree.getByTestId(id('AgentBackupAdd')))
     })
-    expect(add).toHaveBeenCalledWith({}, 'did:peer:2.Vz6MkOther', 'CreateAgent.BackupLabel')
+    expect(add).toHaveBeenCalledWith({}, 'did:peer:2.Vz6MkOther', 'Devices.ShortPhone')
   })
 
   test('return on the code field adds the device: the button may be under the keyboard', async () => {
@@ -356,7 +548,7 @@ describe('setup ends at Ready; another device is added from My devices', () => {
     await act(async () => {
       fireEvent(tree.getByTestId(id('AgentBackupCodeInput')), 'submitEditing')
     })
-    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'CreateAgent.BackupLabel')
+    expect(add).toHaveBeenCalledWith({}, 'did:key:z6MkBackup', 'Devices.ShortComputer')
   })
 
   test('adding a device is titled "Add a device", not "Claim your agent"', () => {
@@ -404,6 +596,7 @@ describe('setup ends at Ready; another device is added from My devices', () => {
       'noAnswer',
       'unreachable',
       'failed',
+      'refused',
     ]) {
       expect(typeof copy.CreateAgent.Device[reason]).toBe('string')
     }
@@ -447,6 +640,40 @@ describe('the phone waits for the agent to admit the code, on its own', () => {
       controller.set({ link: { kind: 'linking', step: 'rotating', vtaDid: VTA, label: 'a' } })
     })
     expect(tree.getByTestId(id('AgentCreateProgress'))).toBeTruthy()
+  })
+
+  // IN-135: the window counts time in Keyring, not time asleep. A phone that
+  // slept through a slow setup comes back still waiting, with what was left.
+  test('time with the app in the background does not count against the window', async () => {
+    showingKey()
+    ;(confirmOwner as jest.Mock).mockResolvedValue({ ok: true })
+    jest.spyOn(vtaAgent, 'checkManualGrant').mockResolvedValue(undefined)
+    const changes: ((next: string) => void)[] = []
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: (next: string) => void) => {
+      changes.push(handler)
+      return { remove: () => undefined }
+    }) as never)
+    const tree = show()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('AgentCreateCopyCode')))
+    })
+    await act(async () => {
+      jest.advanceTimersByTime(4 * 60 * 1000)
+    })
+    await act(async () => changes.forEach((c) => c('background')))
+    await act(async () => {
+      jest.advanceTimersByTime(30 * 60 * 1000)
+    })
+    await act(async () => changes.forEach((c) => c('active')))
+    await act(async () => {
+      jest.advanceTimersByTime(4 * 60 * 1000)
+    })
+    // Eight minutes in the app: still waiting.
+    expect(tree.getByTestId(id('AgentCreateWaiting'))).toBeTruthy()
+    await act(async () => {
+      jest.advanceTimersByTime(3 * 60 * 1000)
+    })
+    expect(tree.queryByTestId(id('AgentCreateWaiting'))).toBeNull()
   })
 
   test('after 10 minutes it stops and offers Check again, which waits another window', async () => {

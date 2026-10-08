@@ -19,7 +19,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import Clipboard from '@react-native-clipboard/clipboard'
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
-import React, { useEffect, useState, useSyncExternalStore } from 'react'
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import {
@@ -46,14 +46,16 @@ import { testIdWithKey } from '../../../utils/testable'
 import QRRenderer from '../../../components/misc/QRRenderer'
 import { confirmOwner, ownerLockKind, type OwnerConfirmFailure, type OwnerLockKind } from '../module/ownerConfirm'
 import type { AgentLabel } from '../module/agentLabel'
-import { vtaAgent } from '../module/vtaAgent'
+import { AgentAlreadyOnPhone, vtaAgent } from '../module/vtaAgent'
 import { agentAddressScan, type ScannedAgent } from '../module/agentAddressScan'
 import { deviceCodeScan } from '../module/deviceCodeScan'
 import { DeviceCannotOwn, deviceCodeIn, deviceRefusalOf, type DeviceRefusalReason } from '../module/vtaOwner'
 
+import { DeviceNameField } from './DeviceNamePrompt'
 import { openScanner } from './openScanner'
 import { useSafeHeaderHeight } from './VtaLink'
 import { useMeasuredKeyboardOffset } from './keyboardOffset'
+import { linkFailureText } from './linkFailureWords'
 
 /**
  * A known agent host's website, to open from the intro. Never named on screen:
@@ -105,7 +107,11 @@ const VtaCreateAgent: React.FC = () => {
   const navigation = useNavigation()
   // "Add another device" from My devices opens this screen at the backup
   // step: setup itself no longer offers a backup (decided 2026-09-25).
-  const addDevice = Boolean((useRoute().params as { addDevice?: boolean } | undefined)?.addDevice)
+  const params = useRoute().params as { addDevice?: boolean; byAddress?: boolean } | undefined
+  const addDevice = Boolean(params?.addDevice)
+  // "No code? Use your agent's address" (Alberto, 239): straight to the
+  // address, without the introduction's Continue first.
+  const byAddress = Boolean(params?.byAddress)
   // The stack titles this screen "Claim your agent"; adding a device is not
   // claiming one, and its two steps said so under the wrong title (225 gate).
   useEffect(() => {
@@ -117,13 +123,19 @@ const VtaCreateAgent: React.FC = () => {
   const keyboard = useMeasuredKeyboardOffset(headerHeight)
   const readyName = readyNameOf(link.kind === 'linked' ? link.vtaDid : undefined, agentNames, t)
 
-  const [step, setStep] = useState<LocalStep>(addDevice ? 'backupAddress' : 'intro')
+  const [step, setStep] = useState<LocalStep>(addDevice ? 'backupAddress' : byAddress ? 'address' : 'intro')
   const [address, setAddress] = useState('')
   const [error, setError] = useState<string | undefined>()
   const [codeShown, setCodeShown] = useState(false)
   const [howShown, setHowShown] = useState(false)
   // Face ID is asked once, when the code is handed out; checks after that are quiet.
   const [ownerConfirmed, setOwnerConfirmed] = useState(false)
+  // A phone with no screen lock cannot own the agent, and has no Face ID or
+  // passcode to ask for: it is added as a device instead, as an admin adds
+  // any other (Alberto, 239: one way to link by address, not two).
+  const [asDevice, setAsDevice] = useState(false)
+  // The agent named is one this phone already has: offered as a switch.
+  const [existingAgent, setExistingAgent] = useState<string | undefined>()
   const [pollUntil, setPollUntil] = useState<number | undefined>()
   const [pollExpired, setPollExpired] = useState(false)
   // Paused only when the app is known to be away; an unknown state keeps waiting.
@@ -197,26 +209,45 @@ const VtaCreateAgent: React.FC = () => {
         ? needsScreenLock()
         : t('CreateAgent.NotConfirmed')
 
-  const refusalLine = (reason: DeviceRefusalReason) => t(`CreateAgent.Device.${reason}`)
+  const refusalLine = (reason: DeviceRefusalReason, code?: string) =>
+    t(`CreateAgent.Device.${reason}`, { code: code ?? '' })
 
   /** Backup, last turn: this phone approves the other phone's code (plan §4). */
-  const onAddBackup = async () => {
+  // The other device's name on this agent (IN-123): a plain default by the
+  // kind of code until the person types their own.
+  const [deviceName, setDeviceName] = useState<string | undefined>()
+  const [addressCopied, setAddressCopied] = useState(false)
+  const [errorDetail, setErrorDetail] = useState<string | undefined>()
+  const [errorDetailOpen, setErrorDetailOpen] = useState(false)
+  const defaultDeviceName = (code: string) =>
+    deviceCodeIn(code)?.startsWith('did:key:') || code.trim().startsWith('did:key:')
+      ? t('Devices.ShortComputer')
+      : t('Devices.ShortPhone')
+  const nameForCode = deviceName ?? defaultDeviceName(backupCode)
+
+  /** `scanned`: a code the scanner just read, added straight away (IN-125); Face ID still asks first. */
+  const onAddBackup = async (scanned?: string) => {
     if (!agent) return
     setError(undefined)
+    setErrorDetail(undefined)
+    setErrorDetailOpen(false)
     setBusy(true)
     try {
-      const code = deviceCodeIn(backupCode) ?? backupCode.trim()
-      const device = await vtaAgent.addBackupDevice(agent, code, t('CreateAgent.BackupLabel'))
-      setBackupAdded(device.label ?? t('CreateAgent.BackupLabel'))
+      const raw = scanned ?? backupCode
+      const code = deviceCodeIn(raw) ?? raw.trim()
+      const label = (deviceName ?? defaultDeviceName(raw)).trim() || t('CreateAgent.BackupLabel')
+      const device = await vtaAgent.addBackupDevice(agent, code, label)
+      setBackupAdded(device.label ?? label)
       // Back to My devices, which reads the list again on focus.
       if (addDevice) navigation.goBack()
       else setStep('ready')
     } catch (e) {
       const refusal = deviceRefusalOf(e)
+      setErrorDetail(refusal.reason === 'refused' ? refusal.detail : undefined)
       setError(
         e instanceof Error && e.name === 'OwnerNotConfirmed'
           ? ownerFailureLine((e as { reason?: OwnerConfirmFailure }).reason)
-          : refusalLine(refusal.reason)
+          : refusalLine(refusal.reason, refusal.code)
       )
     } finally {
       setBusy(false)
@@ -230,7 +261,9 @@ const VtaCreateAgent: React.FC = () => {
    */
   const onAddressScanned = (scanned: ScannedAgent) => {
     if (scanned.kind === 'address') {
+      // Read: on to the next step straight away, with no Continue to press (IN-125).
       setAddress(scanned.vtaDid)
+      void onAddressContinue(scanned.vtaDid)
       return
     }
     vtaAgent.scanHostOffer(scanned.offer)
@@ -238,9 +271,10 @@ const VtaCreateAgent: React.FC = () => {
   }
 
   /** Step 2 → 3: resolve the agent and make this phone's key (it names the agent's mediator). */
-  const onAddressContinue = async () => {
+  const onAddressContinue = async (scanned?: string) => {
     setError(undefined)
-    const did = address.trim()
+    setExistingAgent(undefined)
+    const did = (scanned ?? address).trim()
     if (!looksLikeAgentAddress(did)) {
       setError(t('CreateAgent.NotAnAddress'))
       return
@@ -248,15 +282,49 @@ const VtaCreateAgent: React.FC = () => {
     if (!agent) return
     setBusy(true)
     try {
+      setAsDevice(false)
       await vtaAgent.startCreateAgent(agent, did, did)
     } catch (e) {
-      setError(e instanceof DeviceCannotOwn ? needsScreenLock() : t('CreateAgent.NotConfirmed'))
-      return
+      // An agent this phone already has (IN-132): said, with a switch to it.
+      if (e instanceof AgentAlreadyOnPhone) {
+        setError(t('VtaLink.AlreadyOnPhone'))
+        setExistingAgent(e.vtaDid)
+        return
+      }
+      if (!(e instanceof DeviceCannotOwn)) {
+        setError(t('CreateAgent.NotConfirmed'))
+        return
+      }
+      setAsDevice(true)
+      await vtaAgent.startManualLink(agent, did, did)
     } finally {
       setBusy(false)
     }
     if (vtaAgent.getState().link.kind === 'notLinked') setError(t('CreateAgent.NoAgentThere'))
   }
+
+  // A link that fails once its code is out (the agent refused it, it serves a
+  // community, the key swap was refused…) is said here, back on the address,
+  // since this screen has no failed step: in the link screen's words, the
+  // original text under Details. Since this is the one way to link by
+  // address (Alberto, 239), none of them may end in silence. Only a failure
+  // of this screen's own attempt: an older one is not this person's news.
+  const attempting = link.kind === 'showingKey' || link.kind === 'linking'
+  const wasAttempting = useRef(false)
+  useEffect(() => {
+    const failure = link.kind === 'notLinked' ? link.lastError : undefined
+    if (wasAttempting.current && failure) {
+      setStep('address')
+      setError(
+        failure.reason === 'communityAgent'
+          ? `${linkFailureText(failure, t)} ${t('VtaLink.FailedCommunityAgentCleanup')}`
+          : linkFailureText(failure, t)
+      )
+      setErrorDetail(failure.detail)
+      setErrorDetailOpen(false)
+    }
+    wasAttempting.current = attempting
+  }, [attempting, link, t])
 
   const ownerKey = link.kind === 'showingKey' ? link.did : undefined
 
@@ -269,7 +337,7 @@ const VtaCreateAgent: React.FC = () => {
   const handOut = async (how: 'copy' | 'share') => {
     if (!ownerKey) return
     setError(undefined)
-    if (!ownerConfirmed) {
+    if (!ownerConfirmed && !asDevice) {
       const confirmed = await confirmOwner(t('CreateAgent.ConfirmReason'))
       if (!confirmed.ok) {
         setError(ownerFailureLine(confirmed.reason))
@@ -293,7 +361,7 @@ const VtaCreateAgent: React.FC = () => {
   const onConnect = async () => {
     if (!agent) return
     setError(undefined)
-    if (!ownerConfirmed) {
+    if (!ownerConfirmed && !asDevice) {
       const confirmed = await confirmOwner(t('CreateAgent.ConfirmReason'))
       if (!confirmed.ok) {
         setError(ownerFailureLine(confirmed.reason))
@@ -314,6 +382,23 @@ const VtaCreateAgent: React.FC = () => {
   // inside the window. checkManualGrant skips while one is already in flight.
   const showingCode = link.kind === 'showingKey'
   const waiting = showingCode && pollUntil !== undefined && !pollExpired
+  // The window counts time in Keyring, not time asleep (IN-135): leaving the
+  // app keeps what was left of it, and coming back starts that again. A
+  // phone that slept through a slow setup came back to "Check again" with
+  // the window spent.
+  const pollLeft = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (pollUntil === undefined || pollExpired) return
+    if (!appActive) {
+      if (pollLeft.current === undefined) pollLeft.current = Math.max(0, pollUntil - Date.now())
+      return
+    }
+    if (pollLeft.current !== undefined) {
+      const left = pollLeft.current
+      pollLeft.current = undefined
+      setPollUntil(Date.now() + left)
+    }
+  }, [appActive, pollUntil, pollExpired])
   useEffect(() => {
     if (!waiting || !focused || !appActive || !agent || pollUntil === undefined) return
     const timer = setInterval(() => {
@@ -342,9 +427,29 @@ const VtaCreateAgent: React.FC = () => {
 
   const errorLine = (key: string) =>
     error ? (
-      <ThemedText style={styles.error} testID={testIdWithKey(key)}>
-        {error}
-      </ThemedText>
+      <>
+        <ThemedText style={styles.error} testID={testIdWithKey(key)}>
+          {error}
+        </ThemedText>
+        {/* A refusal's own words, for whoever reads the report (al-phone, 10-05). */}
+        {errorDetail ? (
+          <>
+            <Pressable
+              onPress={() => setErrorDetailOpen(!errorDetailOpen)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: errorDetailOpen }}
+              testID={testIdWithKey(`${key}DetailsToggle`)}
+            >
+              <ThemedText style={styles.muted}>{t('Errors.ShowDetails')}</ThemedText>
+            </Pressable>
+            {errorDetailOpen ? (
+              <ThemedText style={styles.muted} selectable testID={testIdWithKey(`${key}Detail`)}>
+                {errorDetail}
+              </ThemedText>
+            ) : null}
+          </>
+        ) : null}
+      </>
     ) : null
 
   let body: React.ReactNode
@@ -403,6 +508,24 @@ const VtaCreateAgent: React.FC = () => {
     actions = (
       <>
         {errorLine('AgentCreateError')}
+        {existingAgent && agent ? (
+          <Button
+            title={t('VtaLink.SwitchToIt')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              const target = existingAgent
+              setExistingAgent(undefined)
+              void vtaAgent.switchToExisting(agent, target)
+              ;(
+                navigation as unknown as { reset: (state: { index: number; routes: { name: string }[] }) => void }
+              ).reset({
+                index: 0,
+                routes: [{ name: Screens.VtaAgent }],
+              })
+            }}
+            testID={testIdWithKey('AgentCreateSwitchToExisting')}
+          />
+        ) : null}
         {/* The host's page shows the agent's address as a QR, or its
             automatic-connection QR: Scan takes either (228). */}
         <Button
@@ -424,7 +547,7 @@ const VtaCreateAgent: React.FC = () => {
         <Button
           title={t('Global.Continue')}
           buttonType={ButtonType.Primary}
-          onPress={onAddressContinue}
+          onPress={() => void onAddressContinue()}
           disabled={busy || !address.trim()}
           testID={testIdWithKey('AgentCreateAddressContinue')}
         >
@@ -436,13 +559,19 @@ const VtaCreateAgent: React.FC = () => {
     body = (
       <View style={styles.card} testID={testIdWithKey('AgentCreateOwnerCode')}>
         <ThemedText style={styles.muted}>{t('CreateAgent.Step', { n: 2, of: 2 })}</ThemedText>
-        <ThemedText variant="headingThree">{t('CreateAgent.OwnerTitle')}</ThemedText>
-        <ThemedText testID={testIdWithKey('AgentCreateOwnerBody')}>
-          {t('CreateAgent.OwnerBody', {
-            method: t(`CreateAgent.Lock.${lockKind}`),
-            interpolation: { escapeValue: false },
-          })}
+        <ThemedText variant="headingThree">
+          {asDevice ? t('CreateAgent.AsDeviceTitle') : t('CreateAgent.OwnerTitle')}
         </ThemedText>
+        {asDevice ? (
+          <ThemedText testID={testIdWithKey('AgentCreateAsDevice')}>{t('CreateAgent.AsDeviceBody')}</ThemedText>
+        ) : (
+          <ThemedText testID={testIdWithKey('AgentCreateOwnerBody')}>
+            {t('CreateAgent.OwnerBody', {
+              method: t(`CreateAgent.Lock.${lockKind}`),
+              interpolation: { escapeValue: false },
+            })}
+          </ThemedText>
+        )}
         <ThemedText>{t('CreateAgent.OwnerWhereToPaste')}</ThemedText>
         <Pressable
           onPress={() => setHowShown(!howShown)}
@@ -574,15 +703,50 @@ const VtaCreateAgent: React.FC = () => {
             {agentDid}
           </ThemedText>
         ) : null}
+        {/* One tap to hand the address to a computer (Universal Clipboard,
+            AirDrop) rather than reading it off the QR (IN-126). */}
+        {agentDid ? (
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button
+              title={addressCopied ? t('VtaLink.KeyCopied') : t('VtaLink.CopyKey')}
+              buttonType={ButtonType.Secondary}
+              onPress={() => {
+                Clipboard.setString(agentDid)
+                setAddressCopied(true)
+              }}
+              testID={testIdWithKey('AgentBackupCopyAddress')}
+            />
+            <Button
+              title={t('VtaLink.ShareKey')}
+              buttonType={ButtonType.Secondary}
+              onPress={() => void Share.share({ message: agentDid }).catch(() => undefined)}
+              testID={testIdWithKey('AgentBackupShareAddress')}
+            />
+          </View>
+        ) : null}
       </View>
     )
     actions = (
-      <Button
-        title={t('Global.Next')}
-        buttonType={ButtonType.Primary}
-        onPress={() => setStep('backupCode')}
-        testID={testIdWithKey('AgentBackupNext')}
-      />
+      <>
+        {/* A computer or another app (pnm, the browser plugin) does not scan
+            this: it shows its own code to enter, so that way is said here
+            rather than found only after Next (IN-123). */}
+        <ThemedText style={styles.muted} testID={testIdWithKey('AgentBackupOtherKinds')}>
+          {t('CreateAgent.BackupOtherKinds')}
+        </ThemedText>
+        <Button
+          title={t('Global.Next')}
+          buttonType={ButtonType.Primary}
+          onPress={() => setStep('backupCode')}
+          testID={testIdWithKey('AgentBackupNext')}
+        />
+        <Button
+          title={t('CreateAgent.BackupEnterCode')}
+          buttonType={ButtonType.Secondary}
+          onPress={() => setStep('backupCode')}
+          testID={testIdWithKey('AgentBackupEnterCode')}
+        />
+      </>
     )
   } else if (screen === 'backupCode') {
     body = (
@@ -602,6 +766,8 @@ const VtaCreateAgent: React.FC = () => {
           }}
           testID={testIdWithKey('AgentBackupCodeInput')}
         />
+        {/* Its name, as My devices will show it; renamed later beside Remove. */}
+        {backupCode.trim() ? <DeviceNameField value={nameForCode} onChange={setDeviceName} other /> : null}
       </View>
     )
     actions = (
@@ -613,7 +779,11 @@ const VtaCreateAgent: React.FC = () => {
           buttonType={backupCode.trim() ? ButtonType.Secondary : ButtonType.Primary}
           onPress={() => {
             setError(undefined)
-            deviceCodeScan.request((code) => setBackupCode(code))
+            // Read: added straight away (IN-125); the owner check is the only stop.
+            deviceCodeScan.request((code) => {
+              setBackupCode(code)
+              void onAddBackup(code)
+            })
             openScanner(navigation)
           }}
           disabled={busy}
@@ -632,7 +802,7 @@ const VtaCreateAgent: React.FC = () => {
           <Button
             title={t('CreateAgent.AddThisPhone')}
             buttonType={ButtonType.Primary}
-            onPress={onAddBackup}
+            onPress={() => void onAddBackup()}
             disabled={busy}
             testID={testIdWithKey('AgentBackupAdd')}
           >
@@ -666,7 +836,17 @@ const VtaCreateAgent: React.FC = () => {
         <Button
           title={t('Global.Done')}
           buttonType={ButtonType.Secondary}
-          onPress={() => navigation.goBack()}
+          // The stack is set to the agent's page, not popped back to the
+          // panel this began on: that panel, linked now, swapped itself for
+          // the agent's page while the pop was still animating, and on
+          // Android that left the app gone (238 gate). The agent's page plays
+          // the first-link introduction.
+          onPress={() =>
+            (navigation as unknown as { reset: (state: { index: number; routes: { name: string }[] }) => void }).reset({
+              index: 0,
+              routes: [{ name: Screens.VtaAgent }],
+            })
+          }
           testID={testIdWithKey('AgentCreateDone')}
         />
       </>

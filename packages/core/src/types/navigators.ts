@@ -84,6 +84,9 @@ export enum Screens {
   VtaDevices = 'Your devices',
   VtaNewPhoneOffer = 'Your other phones',
   VtaAgent = 'Your agent',
+  VtaRequests = 'Requests',
+  VtaAskMe = 'Ask me before',
+  VtaAgentSettings = 'Agent settings',
   VtiInvited = 'Invited',
   VtiJoin = 'Join',
 }
@@ -145,13 +148,14 @@ export type MyAgentStackParams = {
   [Screens.MyAgent]: undefined
   [Screens.VtiCommunity]: { communityDid: string }
   [Screens.VtiVetting]: undefined
-  // `withoutQr`: the person already chose "Link without a QR code" on the
-  // screen before, so this one opens at the address field instead of asking
-  // the same question again (report #24).
-  [Screens.VtaLink]: { withoutQr?: boolean } | undefined
-  [Screens.VtaAgent]: undefined
+  [Screens.VtaLink]: undefined
+  // `highlightCommunity`: a community just joined, picked out on its card for a moment (238).
+  [Screens.VtaAgent]: { highlightCommunity?: string } | undefined
+  [Screens.VtaRequests]: undefined
+  [Screens.VtaAskMe]: undefined
+  [Screens.VtaAgentSettings]: { unlink?: boolean } | undefined
   [Screens.VtiInvited]: undefined
-  [Screens.VtaCreateAgent]: { addDevice?: boolean } | undefined
+  [Screens.VtaCreateAgent]: { addDevice?: boolean; byAddress?: boolean } | undefined
   [Screens.VtaDevices]: undefined
   [Screens.VtaNewPhoneOffer]: undefined
   [Screens.VtiJoin]: undefined
