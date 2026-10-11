@@ -1898,6 +1898,7 @@
     "NothingOpen": "Você não tem nenhum pedido em aberto com esta comunidade.",
     "NotAwaitingEvidence": "A comunidade já tem o que precisa e está decidindo. Nada mais a enviar por enquanto.",
     "NoAnswer": "Seu agente não respondeu. Toque em Continuar para tentar de novo — normalmente funciona na segunda vez.",
+    "CommunityNoAnswer": "A comunidade não respondeu. Ela pode estar fora do ar por um momento. Toque em Continuar para tentar de novo daqui a pouco.",
     "SentNoAnswer": "Sua solicitação foi enviada, e a comunidade ainda não respondeu. Ela pode ainda estar decidindo — não é preciso enviá-la de novo.",
     "NotAllowed": "Seu agente não permitiu isso. Pergunte ao administrador dele se este telefone ainda tem acesso.",
     "NoDidHost": "Seu agente não tem onde publicar uma nova identidade. Peça ao administrador dele para registrar um host de DID, depois tente de novo.",

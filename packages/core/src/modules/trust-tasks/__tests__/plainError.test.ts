@@ -51,6 +51,15 @@ describe('what a person is told when something fails', () => {
   it('takes a thrown non-Error too, since not everything thrown is one', () => {
     expect(plainError('the VTA did not answer').line).toBe('Errors.NoAnswer')
   })
+
+  // UX-240-c: the community's silence is said as the community's.
+  it('a no-answer from a step that talks to the community names the community', () => {
+    expect(plainError(new Error('the request timed out'), { from: 'community' })).toMatchObject({
+      line: 'Errors.CommunityNoAnswer',
+      retry: true,
+    })
+    expect(plainError(new Error('the request timed out')).line).toBe('Errors.NoAnswer')
+  })
 })
 
 // 237 gate: a link failed with "doesn't know why" while other phones hit the

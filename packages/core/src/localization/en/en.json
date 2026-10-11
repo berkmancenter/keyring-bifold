@@ -2056,6 +2056,7 @@
     "NothingOpen": "You have no open request with this community.",
     "NotAwaitingEvidence": "The community already has what it needs and is deciding. Nothing more to send for now.",
     "NoAnswer": "Your agent didn't answer. Tap Continue to try again — this usually works the second time.",
+    "CommunityNoAnswer": "The community didn't answer. It may be offline for a moment. Tap Continue to try again in a little while.",
     "SentNoAnswer": "Your request was sent, and the community hasn't answered yet. It may still be deciding — you don't need to send it again.",
     "NotAllowed": "Your agent wouldn't allow that. Ask its admin whether this phone still has access.",
     "NoDidHost": "Your agent has nowhere to publish a new identity. Ask its admin to register a DID host with it, then try again.",

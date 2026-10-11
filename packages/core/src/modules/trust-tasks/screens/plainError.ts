@@ -88,7 +88,13 @@ const BUSY =
 /** Nothing to reach: a wrong address, a service that is down, no network. */
 const UNREACHABLE = /network|fetch failed|ECONN|ENOTFOUND|unreachable|could not resolve|did not resolve/i
 
-export function plainError(error: unknown): PlainError {
+/**
+ * `from`: which side the failed step was talking to, when the caller knows. A
+ * request that timed out while the phone spoke to the community is the
+ * community's silence, not the agent's (UX-240-c: with only the community's
+ * mediator cut, Join said "Your agent didn't answer").
+ */
+export function plainError(error: unknown, options: { from?: 'community' } = {}): PlainError {
   const detail = error instanceof Error ? error.message : String(error)
   const bare = withoutOurJargon(detail)
   const code = String((error as { code?: unknown } | undefined)?.code ?? '')
@@ -102,7 +108,9 @@ export function plainError(error: unknown): PlainError {
   if (NOT_ALLOWED.test(bare)) return { line: 'Errors.NotAllowed', detail, retry: false }
   if (NO_DID_HOST.test(bare)) return { line: 'Errors.NoDidHost', detail, retry: false }
   if (BUSY.test(bare)) return { line: 'Errors.AgentBusy', detail, retry: true }
-  if (NO_ANSWER.test(bare)) return { line: 'Errors.NoAnswer', detail, retry: true }
+  if (NO_ANSWER.test(bare)) {
+    return { line: options.from === 'community' ? 'Errors.CommunityNoAnswer' : 'Errors.NoAnswer', detail, retry: true }
+  }
   if (UNREACHABLE.test(bare)) return { line: 'Errors.Unreachable', detail, retry: true }
   // Something we have not met. Say that honestly rather than showing the raw
   // text and calling it an explanation; the text is still one tap away.

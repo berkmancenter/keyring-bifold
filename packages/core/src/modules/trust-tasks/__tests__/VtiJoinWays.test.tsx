@@ -159,6 +159,26 @@ describe('Join, at manifest 0.3', () => {
     expect(navigation.navigate).not.toHaveBeenCalledWith(Screens.VtiVetting)
   })
 
+  // UX-240-c: with only the community's mediator cut, Join said "Your agent
+  // didn't answer". A request that times out once it talks to the community
+  // names the community; one that times out before, the agent.
+  it.each([
+    ['manifest', 'Errors.CommunityNoAnswer'],
+    ['submitting', 'Errors.CommunityNoAnswer'],
+    ['persona', 'Errors.NoAnswer'],
+    ['connecting', 'Errors.NoAnswer'],
+  ])('a request that times out at the %s step says %s', async (step, line) => {
+    mockJoinCommunity.mockImplementationOnce(async (...args: unknown[]) => {
+      const deps = args[0] as { onStep?: (s: string) => void }
+      deps.onStep?.(step)
+      throw new Error('[VTI] the request timed out')
+    })
+    const tree = await toAsks(defaults)
+    await act(async () => fireEvent.press(tree.getByTestId(id('JoinStart'))))
+    await act(async () => fireEvent.press(tree.getByTestId(id('JoinAsContinue'))))
+    expect(tree.getByTestId(id('JoinError'))).toHaveTextContent(line)
+  })
+
   it('once asked under review: says an administrator will review it, not that the community "is deciding"', async () => {
     const tree = await toAsks(defaults)
     mockReadJoinState.mockImplementation(async () => ({ kind: 'pending', submission: { withInvitation: false } }))
