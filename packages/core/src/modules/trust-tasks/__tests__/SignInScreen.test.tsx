@@ -163,6 +163,34 @@ describe('1. confirm, before anything is sent', () => {
     expect(steps.claim).not.toHaveBeenCalled()
   })
 
+  // An agent from before sign-in signing used to be found out at identify,
+  // after the person had typed the website's number. It is now asked on
+  // Continue, beside the claim, and a claim already made is let go.
+  test('an agent that needs an update says so before the number, and the claim is let go', async () => {
+    const steps = fakeSteps({
+      prepare: jest.fn(async () => {
+        throw new SignInError('agentNeedsUpdate', 'the agent does not serve vault/sign-trust-task/0.2')
+      }),
+    })
+    const tree = await show(steps)
+    await press(tree, SignInIds.continue)
+    expect(steps.prepare).toHaveBeenCalledWith(VTC)
+    expect(message(tree)).toHaveTextContent('SignIn.Failure.agentNeedsUpdate')
+    expect(tree.queryByTestId(id(SignInIds.number))).toBeNull()
+    expect(steps.identifyAndProve).not.toHaveBeenCalled()
+    expect(steps.cancel).toHaveBeenCalledWith(claimed)
+  })
+
+  test('an agent that can sign: the number comes as before', async () => {
+    const steps = fakeSteps({ prepare: jest.fn(async () => undefined) })
+    const tree = await show(steps)
+    await press(tree, SignInIds.continue)
+    expect(steps.prepare).toHaveBeenCalledWith(VTC)
+    expect(steps.claim).toHaveBeenCalledWith(LINK)
+    expect(tree.getByTestId(id(SignInIds.number))).toBeTruthy()
+    expect(steps.cancel).not.toHaveBeenCalled()
+  })
+
   test('with no code held, it says to scan again', async () => {
     const steps = fakeSteps()
     const tree = await show(steps, null)

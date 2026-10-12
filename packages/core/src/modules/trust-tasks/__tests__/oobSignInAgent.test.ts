@@ -35,6 +35,10 @@ import {
   signInFailureFromAgent,
   type SignInAgentDeps,
   type SignInVta,
+  checkAgentSignsIn,
+  servesSignInSigning,
+  SIGN_IN_PROBE_ENTRY,
+  SIGN_TRUST_TASK_02,
 } from '../module/oobSignInAgent'
 import { UvKeyError } from '../module/uvKey'
 import type { VtaVaultEntry } from '../module/VtaClient'
@@ -752,5 +756,54 @@ describe("enrolling the phone's UV key", () => {
       throw new VtiRefusal('forbidden', 'device/heartbeat:deviceDisabled — disabled')
     })
     expect((await failureOf(enrolUvKey({ vta, uvDid: async () => UV_DID }))).reason).toBe('agentRefused')
+  })
+})
+
+describe('asking the agent, before the number, whether it can sign a sign-in', () => {
+  it('asks vault/sign-trust-task/0.2 directly, with an entry no vault holds', async () => {
+    const task = jest.fn(async () => {
+      throw new VtiRefusal('taskFailed', 'vault/sign-trust-task:notFound', { code: 'notFound' })
+    })
+    await expect(servesSignInSigning(task)).resolves.toBe(true)
+    expect(task).toHaveBeenCalledTimes(1)
+    expect(task).toHaveBeenCalledWith(SIGN_TRUST_TASK_02, { entryId: SIGN_IN_PROBE_ENTRY, unsignedEnvelope: {} })
+  })
+
+  it('an agent from before sign-in signing (serves only 0.1) cannot', async () => {
+    const old = jest.fn(async () => {
+      throw new VtiRefusal('unsupportedVersion', 'not served', {
+        servedVersions: ['https://trusttasks.org/spec/vault/sign-trust-task/0.1'],
+      })
+    })
+    await expect(servesSignInSigning(old)).resolves.toBe(false)
+    await expect(
+      servesSignInSigning(async () => {
+        throw new VtiRefusal('unsupportedType', 'no vault signing at all')
+      })
+    ).resolves.toBe(false)
+  })
+
+  it('an agent it cannot reach is not taken to be out of date', async () => {
+    await expect(
+      servesSignInSigning(async () => {
+        throw new Error('socket closed')
+      })
+    ).rejects.toThrow('socket closed')
+  })
+
+  it('says "agent needs an update" for one that cannot, and nothing for one that can', async () => {
+    await expect(checkAgentSignsIn({ servesSignInSigning: async () => false })).rejects.toMatchObject({
+      reason: 'agentNeedsUpdate',
+    })
+    await expect(checkAgentSignsIn({ servesSignInSigning: async () => true })).resolves.toBeUndefined()
+    // A port that cannot tell: the sign-in finds out at identify, as before.
+    await expect(checkAgentSignsIn({})).resolves.toBeUndefined()
+    await expect(
+      checkAgentSignsIn({
+        servesSignInSigning: async () => {
+          throw new Error('offline')
+        },
+      })
+    ).rejects.toMatchObject({ reason: 'agentUnreachable' })
   })
 })

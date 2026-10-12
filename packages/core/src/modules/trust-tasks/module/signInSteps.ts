@@ -24,6 +24,7 @@ import {
 } from './oobSignIn'
 import {
   approveSignIn,
+  checkAgentSignsIn,
   enrolUvKey,
   ensureSignInVaultEntry,
   identifyAndProve,
@@ -46,6 +47,12 @@ export type SignInEndReason = SignInFailure
 export type SignInSteps = {
   /** Local only: membership and the recorded name. Never reaches the network. */
   community: (vtcDid: string) => Promise<{ member: boolean; name?: string }>
+  /**
+   * On Continue, beside the claim: the member's agent, signed in, its persona
+   * and vault entry ready, and whether it can sign a sign-in at all — so an
+   * agent that needs an update says so before the number, not after it.
+   */
+  prepare?: (vtcDid: string) => Promise<void>
   claim: (link: string) => Promise<ClaimedSignIn>
   identifyAndProve: (claimed: ClaimedSignIn, enteredNumber: string) => Promise<ProvedSignIn>
   approve: (proved: ProvedSignIn) => Promise<{ status: 'approved' }>
@@ -95,6 +102,8 @@ async function memberAgent(
   if (!session.persona)
     throw new SignInError('notAMember', 'this phone holds no persona for the community on its agent')
   const deps = signInAgentDeps(agent, session.client, { platform: Platform.OS })
+  // Before anything is made on the agent: one that cannot sign a sign-in says so now.
+  await checkAgentSignsIn(deps.vta)
   const { did, contextId } = session.persona
   // The key as the persona's DID document names it: the form the live entry was proven with (findings G-section).
   const entryId = await ensureSignInVaultEntry(vtcDid, { did, contextId, signingKeyId: `${did}#key-0` }, deps)
@@ -108,18 +117,23 @@ export function agentSignInSteps(agent: Agent): SignInSteps {
     post: httpsPost,
     isKnownCommunity: async (vtcDid) => (await recordedCommunity(agent, vtcDid)).member,
   }
-  let member: { vtcDid: string; deps: SignInAgentDeps } | undefined
+  let member: { vtcDid: string; deps: SignInAgentDeps; persona: { did: string; entryId: string } } | undefined
+  const memberFor = async (vtcDid: string) => {
+    if (member?.vtcDid !== vtcDid) member = { vtcDid, ...(await memberAgent(agent, vtcDid)) }
+    return member
+  }
   return {
     community: (vtcDid) => recordedCommunity(agent, vtcDid),
+    prepare: async (vtcDid) => {
+      await memberFor(vtcDid)
+    },
     claim: (link) => claimSignIn(link, claimDeps),
     identifyAndProve: async (claimed, enteredNumber) => {
-      const { deps, persona } = await memberAgent(agent, claimed.vtcDid)
-      member = { vtcDid: claimed.vtcDid, deps }
+      const { deps, persona } = await memberFor(claimed.vtcDid)
       return identifyAndProve(claimed, enteredNumber, { ...deps, persona })
     },
     approve: async (proved) => {
-      const deps =
-        member?.vtcDid === proved.claimed.vtcDid ? member.deps : (await memberAgent(agent, proved.claimed.vtcDid)).deps
+      const { deps } = await memberFor(proved.claimed.vtcDid)
       await enrolUvKey(deps)
       return approveSignIn(proved, deps)
     },

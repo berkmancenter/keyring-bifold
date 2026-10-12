@@ -205,9 +205,22 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
 
   const onContinue = async () => {
     if (!link) return
+    const vtcDid = step.kind === 'confirm' ? step.vtcDid : undefined
     setStep({ kind: 'claiming' })
     try {
-      const claimed = await steps.claim(link)
+      // The member's agent is readied beside the claim, so an agent that needs
+      // an update says so here, before the number — and a claim already made
+      // is let go rather than left to time out on the website.
+      const [prepared, claim] = await Promise.allSettled([
+        vtcDid && steps.prepare ? steps.prepare(vtcDid) : Promise.resolve(),
+        steps.claim(link),
+      ])
+      if (prepared.status === 'rejected') {
+        if (claim.status === 'fulfilled') steps.cancel(claim.value).catch(() => undefined)
+        throw prepared.reason
+      }
+      if (claim.status === 'rejected') throw claim.reason
+      const claimed = claim.value
       claimedRef.current = claimed
       setDeadline(claimed.decisionDeadline)
       setClock(now())

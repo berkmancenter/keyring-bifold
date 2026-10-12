@@ -47,6 +47,7 @@ import {
 } from './oobSignIn'
 import type { VtaClient, VtaSealedSecret, VtaVaultEntry } from './VtaClient'
 import { AGENT_DEVICE_TASK, defaultDeviceName, registerThisDevice } from './vtaDevices'
+import { isUnsupportedVersionRefusal } from './taskVersions'
 import { VtiRefusal } from './vtiAgent'
 import { didKeyVerificationMethod, getUvDid, uvSign, UvKeyError } from './uvKey'
 
@@ -75,6 +76,13 @@ export interface SignInVta {
     unsignedEnvelope: Record<string, unknown>
     ext?: Record<string, unknown>
   }): Promise<Record<string, unknown>>
+  /**
+   * Whether the agent serves sign-in signing (`vault/sign-trust-task/0.2`,
+   * VTI #1997), asked before the person types the number. Absent in a port
+   * that cannot tell: the check is then skipped and the sign-in finds out at
+   * identify, as before.
+   */
+  servesSignInSigning?(): Promise<boolean>
   /** `vault/list`: entry metadata. */
   vaultList(filters: Record<string, unknown>): Promise<VtaVaultEntry[]>
   /** `vault/upsert`: the created or updated entry. */
@@ -194,6 +202,49 @@ export function signInFailureFromAgent(error: unknown, options: { responded?: bo
     return new SignInError(AGENT_REFUSALS[code] ?? 'agentRefused', code, options)
   }
   return new SignInError('agentUnreachable', error instanceof Error ? error.message : String(error), options)
+}
+
+/** Sign-in signing: the version that carries the UV decision and signs for a persona (VTI #1997). */
+export const SIGN_TRUST_TASK_02 = 'https://trusttasks.org/spec/vault/sign-trust-task/0.2'
+
+/** An entry id no vault holds: asking `sign-trust-task/0.2` with it signs nothing. */
+export const SIGN_IN_PROBE_ENTRY = 'keyring-sign-in-probe'
+
+/**
+ * Whether an agent serves `vault/sign-trust-task/0.2`, asked directly — never
+ * through the version step-down, which would quietly retry 0.1 and hide an
+ * agent from before sign-in signing. With an entry id no vault holds, an agent
+ * that serves 0.2 refuses the entry (`notFound`) and signs nothing; one that
+ * does not answers `unsupportedVersion` or `unsupportedType`. Any other
+ * refusal is still an answer in 0.2; a failure to reach the agent is thrown.
+ */
+export async function servesSignInSigning(
+  task: (type: string, payload: Record<string, unknown>) => Promise<unknown>
+): Promise<boolean> {
+  try {
+    await task(SIGN_TRUST_TASK_02, { entryId: SIGN_IN_PROBE_ENTRY, unsignedEnvelope: {} })
+    return true
+  } catch (error) {
+    if (isUnsupportedVersionRefusal(error)) return false
+    if (error instanceof VtiRefusal) return true
+    throw error
+  }
+}
+
+/**
+ * Before the number: an agent that cannot sign a sign-in says so now —
+ * "Your agent needs an update" — rather than after the person has typed the
+ * number the website shows.
+ */
+export async function checkAgentSignsIn(vta: Pick<SignInVta, 'servesSignInSigning'>): Promise<void> {
+  if (!vta.servesSignInSigning) return
+  let serves: boolean
+  try {
+    serves = await vta.servesSignInSigning()
+  } catch (error) {
+    throw signInFailureFromAgent(error)
+  }
+  if (!serves) throw new SignInError('agentNeedsUpdate', 'the agent does not serve vault/sign-trust-task/0.2')
 }
 
 async function resolveOrUnreachable(deps: Pick<SignInDeps, 'resolveDid'>, did: string): Promise<SignInDidDocument> {
@@ -532,6 +583,10 @@ export function vtaSignInPort(client: VtaClient, device: { platform: string; now
   return {
     did: client.vtaDid,
     signTrustTask: (request) => client.signTrustTask(request),
+    servesSignInSigning: () =>
+      servesSignInSigning((type, payload) =>
+        client.task(type, payload, 15000, {}, undefined, { waitForConsent: false })
+      ),
     vaultList: (filters) => client.vaultList(filters),
     vaultUpsert: (payload) => client.vaultUpsert(payload),
     sealVaultSecret: (secret) => client.sealVaultSecret(secret),
