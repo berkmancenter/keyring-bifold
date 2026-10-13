@@ -2,10 +2,11 @@ import { renderHook, act } from '@testing-library/react-native'
 
 import {
   useVrcFlowInProgress,
+  witnessOutcomeNoteKey,
   FLOW_TIMEOUT_MS_NON_WITNESSED,
   FLOW_TIMEOUT_MS_WITNESSED,
 } from '../../src/hooks/chat-messages'
-import { vrcFlowStore } from '../../src/modules/vrc/witnessStatusStore'
+import { vrcFlowStore, type WitnessOutcome } from '../../src/modules/vrc/witnessStatusStore'
 
 describe('useVrcFlowInProgress - timeout behavior', () => {
   beforeEach(() => {
@@ -455,5 +456,92 @@ describe('useVrcFlowInProgress - success confirmation beat', () => {
 
     expect(result.current.timedOut).toBe(true)
     expect(result.current.confirmed).toBe(false)
+  })
+})
+
+describe('useVrcFlowInProgress - how the witness step ended (IN-128)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    vrcFlowStore.clearFlow('conn-1')
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  const witnessedExchange = (result: { current: { statusText: string } }, outcome?: WitnessOutcome) => {
+    act(() => {
+      vrcFlowStore.setDialect('conn-1', 'trust-tasks')
+      vrcFlowStore.setStatus('conn-1', 'witness-active')
+    })
+    act(() => {
+      if (outcome) vrcFlowStore.setWitnessOutcome('conn-1', outcome)
+      vrcFlowStore.setStatus('conn-1', 'preparing-offer', true)
+    })
+    return result.current.statusText
+  }
+  const complete = () =>
+    act(() => {
+      vrcFlowStore.markRcardReceiveComplete('conn-1')
+      vrcFlowStore.setStatus('conn-1', 'offer-received', true)
+    })
+
+  it('a failed witness ceremony no longer reads "Witness verified"', () => {
+    const { result } = renderHook(() => useVrcFlowInProgress('conn-1'))
+    expect(witnessedExchange(result, { kind: 'unwitnessed' })).toBe('VrcWitness.ContinuingWithoutWitness')
+    complete()
+    expect(result.current.confirmed).toBe(true)
+    expect(result.current.witnessNoteKey).toBe('VrcWitness.NoteUnwitnessed')
+  })
+
+  it('witnessed, locality not confirmed for want of a permission: says so, and what to allow', () => {
+    const { result } = renderHook(() => useVrcFlowInProgress('conn-1'))
+    expect(witnessedExchange(result, { kind: 'nearbyNotConfirmed', permissionMissing: true })).toBe(
+      'Witness verified. Sending your relationship credential...'
+    )
+    complete()
+    expect(result.current.witnessNoteKey).toBe('VrcWitness.NoteNotNearbyPermission')
+  })
+
+  it('a verified witness adds nothing to the confirmation, and dismissing clears the note', () => {
+    const { result } = renderHook(() => useVrcFlowInProgress('conn-1'))
+    witnessedExchange(result, { kind: 'verified' })
+    complete()
+    expect(result.current.confirmed).toBe(true)
+    expect(result.current.witnessNoteKey).toBeUndefined()
+    act(() => {
+      result.current.onDismissConfirmation()
+    })
+    expect(vrcFlowStore.getWitnessOutcome('conn-1')).toBeUndefined()
+  })
+})
+
+describe('witnessOutcomeNoteKey', () => {
+  it('says nothing for a verified witness or none at all', () => {
+    expect(witnessOutcomeNoteKey({ kind: 'verified' })).toBeUndefined()
+    expect(witnessOutcomeNoteKey(undefined)).toBeUndefined()
+  })
+
+  it('without a permission problem, names only the missing nearby confirmation', () => {
+    expect(witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: false })).toBe(
+      'VrcWitness.NoteNotNearby'
+    )
+  })
+
+  it('every key it names exists in en, fr and pt-br', () => {
+    const keys = [
+      'VrcWitness.ContinuingWithoutWitness',
+      witnessOutcomeNoteKey({ kind: 'unwitnessed' }),
+      witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: true }),
+      witnessOutcomeNoteKey({ kind: 'nearbyNotConfirmed', permissionMissing: false }),
+    ]
+    for (const lang of ['en', 'fr', 'pt-br']) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const strings = require(`../../src/localization/${lang}/${lang}.json`) as Record<string, Record<string, string>>
+      for (const key of keys) {
+        const [section, name] = String(key).split('.')
+        expect(typeof strings[section]?.[name]).toBe('string')
+      }
+    }
   })
 })

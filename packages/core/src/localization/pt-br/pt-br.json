@@ -86,6 +86,12 @@
     "MinutesAgo": "{{ count }} minutos atrás",
     "JustNow": "Agora"
   },
+  "VrcWitness": {
+    "ContinuingWithoutWitness": "Continuando sem testemunha. Enviando sua credencial de relacionamento...",
+    "NoteUnwitnessed": "Sua testemunha não conseguiu verificar esta troca, então ela foi concluída sem testemunha.",
+    "NoteNotNearbyPermission": "Sua testemunha verificou esta troca, mas não conseguiu confirmar que vocês dois estavam perto um do outro: o Keyring não tem permissão para usar \"Dispositivos por perto\". Permita isso nas Configurações antes da sua próxima troca.",
+    "NoteNotNearby": "Sua testemunha verificou esta troca, mas não conseguiu confirmar que vocês dois estavam perto um do outro."
+  },
   "Language": {
     "code_en": "Inglês",
     "code_fr": "Francês",

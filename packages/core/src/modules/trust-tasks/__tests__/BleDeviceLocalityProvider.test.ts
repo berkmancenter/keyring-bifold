@@ -188,6 +188,46 @@ describe('BleDeviceLocalityProvider (design sketch — locality-plan.md §10.3 i
 
 const FAKE_AGENT = {} as import('@credo-ts/core').Agent
 
+describe('BleDeviceLocalityProvider: a permission the OS has not granted (IN-128)', () => {
+  test('never asks the native module, resolves null, and says what is missing', async () => {
+    const { bridge, respondToSensor } = makeBridge()
+    const provider = new BleDeviceLocalityProvider(
+      bridge,
+      async () => 'verified',
+      async () => ['android.permission.BLUETOOTH_CONNECT']
+    )
+    await expect(
+      provider.respondToSensor({ taskDigestMultibase: 'sha256:deadbeef', challenge: 'c', directive: DIRECTIVE })
+    ).resolves.toBeNull()
+    expect(respondToSensor).not.toHaveBeenCalled()
+    expect(provider.lastFailure).toEqual({
+      reason: 'permissionMissing',
+      detail: 'not granted: android.permission.BLUETOOTH_CONNECT',
+    })
+  })
+
+  test('the reason is cleared once a later radio phase runs', async () => {
+    const { bridge, respondToSensor } = makeBridge()
+    respondToSensor.mockResolvedValue({
+      sensorNonceHex: 'aa'.repeat(32),
+      devicePublicKeyBase64: 'ZmFrZQ',
+      signatureBase64Url: 'ZmFrZQ',
+    })
+    let missing = ['android.permission.BLUETOOTH_CONNECT']
+    const provider = new BleDeviceLocalityProvider(
+      bridge,
+      async () => 'verified',
+      async () => missing
+    )
+    const run = () =>
+      provider.respondToSensor({ taskDigestMultibase: 'sha256:deadbeef', challenge: 'c', directive: DIRECTIVE })
+    await run()
+    missing = []
+    await expect(run()).resolves.not.toBeNull()
+    expect(provider.lastFailure).toBeUndefined()
+  })
+})
+
 describe('determineHardwareAttestationState', () => {
   beforeEach(() => jest.clearAllMocks())
 

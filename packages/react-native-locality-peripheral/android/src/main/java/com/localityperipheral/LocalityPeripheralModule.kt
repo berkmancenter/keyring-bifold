@@ -201,7 +201,10 @@ class LocalityPeripheralModule : LocalityPeripheralSpec {
     if (!hasBluetoothPeripheralPermissions()) {
       // Not granted is a normal, expected state until a pre-flight UX asks
       // for it (item 8) — §7.1's declinedByHolder/windowLost territory,
-      // not an implementation error.
+      // not an implementation error. But say so: resolving null silently
+      // made a missing BLUETOOTH_CONNECT take a device investigation to find
+      // (a tester's report, IN-128).
+      Log.w(TAG, "Not advertising: BLUETOOTH_ADVERTISE and BLUETOOTH_CONNECT are both needed, and not both are granted")
       promise.resolve(null)
       return
     }

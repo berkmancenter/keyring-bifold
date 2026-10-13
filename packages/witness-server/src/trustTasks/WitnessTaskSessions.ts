@@ -64,6 +64,7 @@ import {
   LocalityTranscript,
   LOCALITY_EXT_NAMESPACE,
   assertionFromObservation,
+  observationForSubmit,
   transcriptDigestMultibase,
   transcriptKeyMatchesVrcSigner,
   verifyTranscript,
@@ -518,7 +519,19 @@ export class WitnessTaskSessions {
               reason: 'declinedByHolder',
             }
           } else {
-            const result = await session.localityObservation
+            // The phone submits only after its radio phase ended: with no
+            // transcript in the submit, nothing more is coming over the air.
+            const deviceSentTranscript = Boolean(
+              (doc.payload as { ext?: Record<string, { locality?: { transcript?: unknown } }> } | undefined)?.ext?.[
+                LOCALITY_EXT_NAMESPACE
+              ]?.locality?.transcript
+            )
+            const result = await observationForSubmit(session.localityObservation, deviceSentTranscript)
+            if (!result && !deviceSentTranscript) {
+              console.warn(
+                `[${this.host.name}] Task session ${sessionId}: the device's radio phase produced no transcript — not waiting out the locality window`
+              )
+            }
             if (!result) {
               // §5.5: the sensor's own window elapsed with no matching
               // advert — the app backgrounded, locked, or the ceremony

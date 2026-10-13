@@ -62,7 +62,7 @@ import type { CarriageDocumentHandler } from '@bifold/trust-tasks'
 import { LOCALITY_EXT_NAMESPACE } from './deviceLocality'
 import { createDeviceLocalityProvider } from './BleDeviceLocalityProvider'
 import { digestMultibase, signDocumentProof, verifyDocumentProof } from './documentProof'
-import { resolveWitnessResponse, runWitnessSession } from './witnessCeremony'
+import { resolveWitnessResponse, runWitnessSession, witnessOutcomeOf } from './witnessCeremony'
 import * as witnessShare from './witnessShareSpec'
 import type { VwcPresentationBundle } from './outcomeEvidence'
 import { createDidCommV1Carriage } from './module/DidCommV1Carriage'
@@ -957,6 +957,7 @@ async function deliverVrcViaTrustTaskForExchangeInner(
         deviceLocalityProvider: createDeviceLocalityProvider(agent),
       })
       logger.info(`${LOG_PREFIX} witness session complete — VWC bound and stored (exchange ${exchangeId})`)
+      vrcFlowStore.setWitnessOutcome(connectionId, witnessOutcomeOf(witnessOutcome))
 
       // Assemble the presentation bundle (step 5's assembly), self-verify it,
       // and — on a passing verdict — SHARE it with the counterparty (step 7):
@@ -997,6 +998,9 @@ async function deliverVrcViaTrustTaskForExchangeInner(
       }
     } catch (e) {
       logger.warn(`${LOG_PREFIX} witness ceremony failed — continuing unwitnessed: ${(e as Error).message}`)
+      // Said to the person, not only logged (IN-128): the dialog otherwise
+      // went on to say "Witness verified".
+      vrcFlowStore.setWitnessOutcome(connectionId, { kind: 'unwitnessed' })
     }
     vrcFlowStore.setStatus(connectionId, 'preparing-offer', true)
   }

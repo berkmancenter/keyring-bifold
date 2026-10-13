@@ -33,6 +33,7 @@ import * as session from '@openvtc/trust-tasks/witness/session/0.1/payload'
 import {
   DeviceLocalityProvider,
   LOCALITY_EXT_NAMESPACE,
+  LocalityRadioFailure,
   LocalitySensorDirective,
   LocalityTranscript,
   transcriptDigestMultibase,
@@ -45,6 +46,7 @@ import {
   verifyDocumentProof,
 } from './documentProof'
 import { taskCitationOf } from './taskCitation'
+import type { WitnessOutcome } from '../vrc/witnessStatusStore'
 
 const LOG_PREFIX = '[TrustTasks:Witness]'
 
@@ -54,7 +56,15 @@ export interface WitnessSessionOutcome {
   /** The issued Verifiable Witness Credential, as delivered. */
   vwc: Record<string, unknown>
   /** Present only when this session actually ran the locality leg (offered + a sensor directive arrived). */
-  locality?: { transcriptProduced: boolean }
+  locality?: {
+    transcriptProduced: boolean
+    /** Whether the witness's VWC confirms locality — what the person is told. */
+    confirmed: boolean
+    /** The witness's reason when it did not confirm (`windowLost`, …). */
+    reason?: string
+    /** Why this device's radio phase produced nothing, when it knows (IN-128). */
+    radioFailure?: LocalityRadioFailure
+  }
 }
 
 /**
@@ -197,9 +207,18 @@ export async function runWitnessSession(
       challenge: challengePayload.challenge,
       directive,
     })
-    logger.info(
-      `${LOG_PREFIX} locality radio phase ${transcript ? 'produced a transcript' : 'did not complete'} (session ${sessionId})`
-    )
+    if (transcript) {
+      logger.info(`${LOG_PREFIX} locality radio phase produced a transcript (session ${sessionId})`)
+    } else {
+      // Say why when the device knows (IN-128: a missing permission read only
+      // "did not complete", and took a device investigation to find).
+      const failure = options.deviceLocalityProvider.lastFailure
+      logger.warn(
+        `${LOG_PREFIX} locality radio phase did not complete (session ${sessionId})${
+          failure ? `: ${failure.reason} — ${failure.detail}` : ''
+        }`
+      )
+    }
   }
 
   // ---- submit the presentation bound to {challenge, domain} ---------------
@@ -302,7 +321,33 @@ export async function runWitnessSession(
   })
   logger.info(`${LOG_PREFIX} VWC stored — taskContext bound to session ${sessionId} (outcome evidence retained)`)
 
-  return { sessionId, vwc, locality: directive ? { transcriptProduced: transcript !== null } : undefined }
+  const radioFailure = transcript ? undefined : options.deviceLocalityProvider?.lastFailure
+  return {
+    sessionId,
+    vwc,
+    locality: directive
+      ? {
+          transcriptProduced: transcript !== null,
+          confirmed: observation?.confirmed === true,
+          ...(observation?.reason ? { reason: observation.reason } : {}),
+          ...(radioFailure ? { radioFailure } : {}),
+        }
+      : undefined,
+  }
+}
+
+/**
+ * How a completed witness session ended, for what the person is told: a
+ * locality leg that ran and was not confirmed is said, with whether a missing
+ * Bluetooth permission is why (IN-128). A failed session is `unwitnessed`,
+ * set by the caller that catches it.
+ */
+export function witnessOutcomeOf(outcome: Pick<WitnessSessionOutcome, 'locality'>): WitnessOutcome {
+  const locality = outcome.locality
+  if (locality && !locality.confirmed) {
+    return { kind: 'nearbyNotConfirmed', permissionMissing: locality.radioFailure?.reason === 'permissionMissing' }
+  }
+  return { kind: 'verified' }
 }
 
 /** Test seam: the number of ceremonies still awaiting a witness response. */

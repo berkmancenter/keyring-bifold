@@ -14,12 +14,13 @@ jest.mock('react-native-permissions', () => ({
   PERMISSIONS: {
     ANDROID: {
       BLUETOOTH_ADVERTISE: 'android.permission.BLUETOOTH_ADVERTISE',
-      BLUETOOTH_SCAN: 'android.permission.BLUETOOTH_SCAN',
+      BLUETOOTH_CONNECT: 'android.permission.BLUETOOTH_CONNECT',
     },
     IOS: { BLUETOOTH: 'ios.permission.BLUETOOTH' },
   },
   RESULTS: { GRANTED: 'granted', DENIED: 'denied' },
   request: (...args: unknown[]) => mockRequest(...args),
+  check: jest.fn(),
 }))
 
 jest.spyOn(Linking, 'openSettings').mockImplementation(() => Promise.resolve())
@@ -45,8 +46,10 @@ function withPreflight(overrides?: { eventName?: string; required?: boolean }) {
 
 describe('LocalityPreflightModal', () => {
   const originalPlatformOs = Platform.OS
+  const originalPlatformVersion = Platform.Version
   afterEach(() => {
     Platform.OS = originalPlatformOs
+    Object.defineProperty(Platform, 'Version', { get: () => originalPlatformVersion, configurable: true })
   })
 
   beforeEach(() => {
@@ -78,8 +81,10 @@ describe('LocalityPreflightModal', () => {
     expect(getByText("Allow Bluetooth to confirm you're at e2e-witness?")).toBeTruthy()
   })
 
-  it('Allow on Android requests both BLE permissions and resolves with allow:true', async () => {
+  it('Allow on Android requests ADVERTISE and CONNECT (never SCAN) and resolves with allow:true', async () => {
+    // IN-128: the peripheral needs CONNECT too, and never scans.
     Platform.OS = 'android'
+    Object.defineProperty(Platform, 'Version', { get: () => 34, configurable: true })
     const { resolveLocalityPreflight } = withPreflight()
 
     const { getByLabelText } = render(<LocalityPreflightModal />)
@@ -87,7 +92,8 @@ describe('LocalityPreflightModal', () => {
 
     await waitFor(() => expect(resolveLocalityPreflight).toHaveBeenCalledWith(true))
     expect(mockRequest).toHaveBeenCalledWith('android.permission.BLUETOOTH_ADVERTISE')
-    expect(mockRequest).toHaveBeenCalledWith('android.permission.BLUETOOTH_SCAN')
+    expect(mockRequest).toHaveBeenCalledWith('android.permission.BLUETOOTH_CONNECT')
+    expect(mockRequest).toHaveBeenCalledTimes(2)
   })
 
   it('Allow on iOS requests the single Bluetooth authorization and resolves with allow:true', async () => {
