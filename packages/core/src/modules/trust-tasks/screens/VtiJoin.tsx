@@ -34,7 +34,13 @@ import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
 import { isUnsupportedJoinVersion, joinRequestRefusal, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { communityTarget } from '../module/vtiCommunityLink'
 import { useCommunityChanged, VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
-import { ensurePersonaFor, joinCommunity, readJoinState, type CommunityJoinState } from '../module/vtiJoin'
+import {
+  ensurePersonaFor,
+  joinCommunity,
+  readJoinState,
+  type CommunityJoinState,
+  type VtiJoinStep,
+} from '../module/vtiJoin'
 import { joinSeed } from '../module/vtiJoinSeed'
 
 import { CardStatusNotice } from './cardStatusNotice'
@@ -134,6 +140,9 @@ export function asksFrom(manifest: VtiManifest): Asks {
 export interface VtiJoinProps {
   config?: { mediatorDid?: string; communityDid?: string; vtaDid?: string }
 }
+
+/** The join steps that talk to the community rather than to this phone's agent or mediator. */
+const COMMUNITY_STEPS: readonly VtiJoinStep[] = ['manifest', 'submitting', 'verdict']
 
 const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
   // The tab bar draws over the page: the last line scrolls clear of it.
@@ -328,6 +337,9 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
     })
     if (!confirmed.success) return
     setBusy(true)
+    // How far the join got: a request that times out once it is talking to
+    // the community is the community's silence, not the agent's (UX-240-c).
+    let reached: VtiJoinStep | undefined
     try {
       if (plainRequest) {
         // The way the phone meets asks for nothing more: make the identity and
@@ -343,6 +355,9 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
             vtaDid,
             mediatorDid: config?.mediatorDid,
             communityDid,
+            onStep: (step) => {
+              reached = step
+            },
           },
           undefined,
           { freshPersona: again }
@@ -379,7 +394,7 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
         setStanding(await readJoinState(agent, communityDid, { mediatorDid: config?.mediatorDid }))
         setStep('asks')
       } else {
-        setError(plainError(e))
+        setError(plainError(e, reached && COMMUNITY_STEPS.includes(reached) ? { from: 'community' } : {}))
       }
     } finally {
       setBusy(false)
