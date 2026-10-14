@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "e8cd34c73fdf592bd892ce768dfb829318f12c06",
+  "generatedFrom": "48539e25a3ba294cc5d32b0ff02bc5517629ac99",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -89,6 +89,7 @@
     "AgentGetAgentToggle": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "AgentGetCards": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsButton": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
+    "AgentGetCardsCommunities": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsHint": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsProgress": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsResult": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
