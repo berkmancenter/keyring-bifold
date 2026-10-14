@@ -1,8 +1,9 @@
 /**
  * Manage → "Get your cards from your agent" (226): every identity on this
  * phone asks its agent for the cards it keeps; the person sees a running
- * count, then what came back and, in words, what did not. A phone with no
- * identity (a new phone, before adoption) is not offered it.
+ * count, then what came back and, in words, what did not. Since 242 it first
+ * takes on the agent's identities this phone lacks, so a new phone is offered
+ * it too and gets its communities and their cards back.
  */
 import type { Agent } from '@credo-ts/core'
 import { act, fireEvent, render } from '@testing-library/react-native'
@@ -12,7 +13,12 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { persona } from '../../../../__tests__/helpers/cardVault'
 import { testIdWithKey } from '../../../utils/testable'
 import type { VtiPersona } from '../module/VtiIdentityStore'
-import { GetCardsFromAgent, getCardsFromAgent, type GetCardsDeps } from '../screens/GetCardsFromAgent'
+import {
+  bringBackFromAgent,
+  GetCardsFromAgent,
+  getCardsFromAgent,
+  type GetCardsDeps,
+} from '../screens/GetCardsFromAgent'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 jest.mock('react-i18next', () => {
@@ -40,8 +46,10 @@ const deps = (
   answers: Record<
     string,
     'down' | { found: number; restored: string[]; refused: { reason: 'failedCheck' | 'notOurs' | 'unreadable' }[] }
-  >
+  >,
+  adopt: GetCardsDeps['adopt'] = async () => []
 ): GetCardsDeps => ({
+  adopt,
   store: () => ({}) as never,
   taskFor: async (_a, p) => {
     if (answers[p.did] === 'down') throw new Error('no answer')
@@ -93,16 +101,73 @@ describe('getting the cards back, identity by identity', () => {
 })
 
 describe('the Manage row', () => {
-  const renderRow = (personas: VtiPersona[], d: GetCardsDeps) =>
+  const renderRow = (personas: VtiPersona[], d: GetCardsDeps, vtaDid?: string) =>
     render(
       <BasicAppContext>
-        <GetCardsFromAgent agent={agent} personas={personas} deps={d} />
+        <GetCardsFromAgent agent={agent} personas={personas} vtaDid={vtaDid} deps={d} />
       </BasicAppContext>
     )
 
-  it('is not offered on a phone with no identity', () => {
+  it('is not offered with no agent linked and no identity', () => {
     const tree = renderRow([], deps({}))
     expect(tree.queryByTestId(testIdWithKey('AgentGetCards'))).toBeNull()
+  })
+
+  // 240 gate (cards-back-new-install): a new install held no identity, so it
+  // was not offered this at all, and neither card came back.
+  it('a new phone with its agent linked: offered, and it brings the communities back, then their cards', async () => {
+    const adopt = jest.fn(async () => [persona])
+    const d = deps({ [persona.did]: { found: 2, restored: ['m', 'r'], refused: [] } }, adopt)
+    const recover = jest.spyOn(d, 'recover')
+    const tree = renderRow([], d, persona.vtaDid)
+    expect(tree.getByTestId(testIdWithKey('AgentGetCardsButton'))).toBeTruthy()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
+    })
+    expect(adopt).toHaveBeenCalledWith(agent, persona.vtaDid)
+    expect(recover.mock.calls.map((c) => (c[2] as VtiPersona).did)).toEqual([persona.did])
+    expect(tree.getByTestId(testIdWithKey('AgentGetCardsCommunities'))).toHaveTextContent(
+      'VtaLink.CommunitiesBack(count=1)'
+    )
+    expect(tree.getByTestId(testIdWithKey('AgentGetCardsResult'))).toHaveTextContent(/VtaLink\.CardsBack\(count=2\)/)
+  })
+
+  it('a second tap asks again for the cards of the identities the first one took on', async () => {
+    let first = true
+    const adopt = jest.fn(async () => (first ? ((first = false), [persona]) : []))
+    const d = deps({ [persona.did]: { found: 1, restored: ['m'], refused: [] } }, adopt)
+    const recover = jest.spyOn(d, 'recover')
+    const tree = renderRow([], d, persona.vtaDid)
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
+      })
+    }
+    expect(recover).toHaveBeenCalledTimes(2)
+    expect(tree.getByTestId(testIdWithKey('AgentGetCardsResult'))).toHaveTextContent(/VtaLink\.CardsBack\(count=1\)/)
+  })
+
+  it('a new phone whose agent does not answer is told so, not that there are no cards', async () => {
+    const tree = renderRow(
+      [],
+      deps({}, async () => {
+        throw new Error('no answer')
+      }),
+      persona.vtaDid
+    )
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentGetCardsResult'))).toHaveTextContent('VtaLink.CardsBackUnreachable')
+    expect(tree.queryByTestId(testIdWithKey('AgentGetCardsCommunities'))).toBeNull()
+  })
+
+  it('an identity already here is asked once, even when the agent names it again', async () => {
+    const d = deps({ [persona.did]: { found: 1, restored: ['m'], refused: [] } }, async () => [persona])
+    const recover = jest.spyOn(d, 'recover')
+    const got = await bringBackFromAgent(agent, persona.vtaDid, [persona], () => undefined, d)
+    expect(recover).toHaveBeenCalledTimes(1)
+    expect(got).toMatchObject({ restored: 1, adopted: 0, asked: 1 })
   })
 
   // K7 (Alberto, 10-04): "Get your cards" did not say what it was for. It

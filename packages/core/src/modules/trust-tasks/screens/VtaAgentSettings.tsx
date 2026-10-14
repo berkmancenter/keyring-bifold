@@ -264,7 +264,7 @@ const VtaAgentSettings: React.FC = () => {
         {agent && personas ? (
           <>
             <SectionRule />
-            <GetCardsFromAgent agent={agent} personas={personas} />
+            <GetCardsFromAgent agent={agent} personas={personas} vtaDid={linkedDid} />
           </>
         ) : null}
 
