@@ -1,12 +1,12 @@
 /**
- * Manage → "Get your cards from your agent" (226, agent-kept cards): fetch the
- * community cards the person's agent keeps and keep them on this phone again,
- * after a reinstall that kept the phone's identities, or any time a card went
- * missing here.
+ * Manage → "Bring back your communities and cards from your agent" (226,
+ * agent-kept cards; 242): first take on the agent's community identities this
+ * phone does not hold yet (vtiAdoptIdentities), then fetch the cards the agent
+ * keeps for every identity and keep them on this phone again — after a
+ * reinstall, on a new phone, or any time a card went missing here.
  *
- * Only for communities this phone holds an identity in. A new phone holds none
- * until it adopts its agent's identities, which is later work: it joins its
- * communities again, and so it is not offered this.
+ * Offered whenever an agent is linked, a new phone with no identity included.
+ * Identities are taken on only here, when the person asks: never at link.
  *
  * @module trust-tasks/screens/GetCardsFromAgent
  */
@@ -22,9 +22,10 @@ import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { emitCommunityChanged } from '../module/communityChanged'
 import { vtaAgent } from '../module/vtaAgent'
+import { adoptAgentIdentities } from '../module/vtiAdoptIdentities'
 import { recoverCardsFromAgent, type RecoveredRefusal, type VaultTask } from '../module/vtiCardVault'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from '../module/VtiCommunityStore'
-import type { VtiPersona } from '../module/VtiIdentityStore'
+import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 
 export interface CardsBack {
   found: number
@@ -32,6 +33,12 @@ export interface CardsBack {
   refused: RecoveredRefusal[]
   /** Identities whose agent did not answer. */
   unreachable: number
+  /** Communities whose identity this phone took on from its agent first. */
+  adopted?: number
+  /** Identities asked, those taken on included. */
+  asked?: number
+  /** The identities taken on, for the next run to ask again without taking them on twice. */
+  taken?: VtiPersona[]
 }
 
 export interface GetCardsDeps {
@@ -39,6 +46,8 @@ export interface GetCardsDeps {
   store: (agent: Agent) => VtiCommunityStore
   /** The persona's agent, connected, as a task sender. */
   taskFor: (agent: Agent, persona: VtiPersona) => Promise<VaultTask>
+  /** Take on the agent's identities this phone does not hold yet; those taken on. */
+  adopt: (agent: Agent, vtaDid: string) => Promise<VtiPersona[]>
 }
 
 const defaultDeps: GetCardsDeps = {
@@ -49,6 +58,46 @@ const defaultDeps: GetCardsDeps = {
     const client = vtaAgent.client(agent, persona.vtaDid)
     return <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload)
   },
+  adopt: async (agent, vtaDid) => {
+    await vtaAgent.connect(agent, vtaDid)
+    const client = vtaAgent.client(agent, vtaDid)
+    return adoptAgentIdentities({
+      identities: new GenericRecordsIdentityStore(agent),
+      vtaDid,
+      task: <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload),
+      listDids: () => client.listDids(),
+    })
+  },
+}
+
+/**
+ * The whole of "Bring back": the agent's identities this phone lacks are taken
+ * on first (an agent that does not answer takes nothing on, and the cards of
+ * the identities already here are still fetched), then every identity's cards.
+ */
+export async function bringBackFromAgent(
+  agent: Agent,
+  vtaDid: string | undefined,
+  personas: VtiPersona[],
+  onProgress: (p: { found: number; restored: number }) => void,
+  deps: GetCardsDeps = defaultDeps
+): Promise<CardsBack> {
+  let silent = false
+  const adopted = vtaDid
+    ? await deps.adopt(agent, vtaDid).catch(() => {
+        silent = true
+        return [] as VtiPersona[]
+      })
+    : []
+  const held = new Set(personas.map((p) => `${p.vtaDid}|${p.communityDid}`))
+  const fresh = adopted.filter((p) => !held.has(`${p.vtaDid}|${p.communityDid}`))
+  const all = [...personas, ...fresh]
+  // Nothing on this phone, and the agent did not answer: said as unreachable, not "no cards".
+  if (silent && all.length === 0)
+    return { found: 0, restored: 0, refused: [], unreachable: 1, adopted: 0, asked: 1, taken: [] }
+  for (const p of fresh) emitCommunityChanged(p.communityDid, 'membership')
+  const got = await getCardsFromAgent(agent, all, onProgress, deps)
+  return { ...got, adopted: fresh.length, asked: all.length, taken: fresh }
 }
 
 /**
@@ -89,30 +138,37 @@ export const REFUSED_WORDS: Record<RecoveredRefusal['reason'], string> = {
   unreadable: 'VtaLink.CardsBackUnreadable',
 }
 
-export const GetCardsFromAgent: React.FC<{ agent: Agent; personas: VtiPersona[]; deps?: GetCardsDeps }> = ({
-  agent,
-  personas,
-  deps,
-}) => {
+export const GetCardsFromAgent: React.FC<{
+  agent: Agent
+  personas: VtiPersona[]
+  /** The linked agent: offered with it even on a phone that holds no identity yet. */
+  vtaDid?: string
+  deps?: GetCardsDeps
+}> = ({ agent, personas, vtaDid, deps }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const [progress, setProgress] = useState<{ found: number; restored: number }>()
   const [result, setResult] = useState<CardsBack>()
+  // Identities taken on by an earlier tap: the screen's list was read before them.
+  const [taken, setTaken] = useState<VtiPersona[]>([])
   const running = progress !== undefined && result === undefined
   const styles = StyleSheet.create({
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 8 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
   })
-  if (personas.length === 0) return null
+  if (personas.length === 0 && !vtaDid) return null
 
   const start = async () => {
     setResult(undefined)
     setProgress({ found: 0, restored: 0 })
-    setResult(await getCardsFromAgent(agent, personas, setProgress, deps))
+    const got = await bringBackFromAgent(agent, vtaDid, [...personas, ...taken], setProgress, deps)
+    if (got.taken?.length) setTaken((before) => [...before, ...(got.taken ?? [])])
+    setResult(got)
   }
 
-  const refusedBy = (reason: RecoveredRefusal['reason']) => result?.refused.filter((r) => r.reason === reason).length ?? 0
+  const refusedBy = (reason: RecoveredRefusal['reason']) =>
+    result?.refused.filter((r) => r.reason === reason).length ?? 0
 
   return (
     <View style={styles.card} testID={testIdWithKey('AgentGetCards')}>
@@ -128,12 +184,17 @@ export const GetCardsFromAgent: React.FC<{ agent: Agent; personas: VtiPersona[];
       ) : null}
       {result ? (
         <View testID={testIdWithKey('AgentGetCardsResult')}>
+          {result.adopted ? (
+            <ThemedText testID={testIdWithKey('AgentGetCardsCommunities')}>
+              {t('VtaLink.CommunitiesBack', { count: result.adopted })}
+            </ThemedText>
+          ) : null}
           <ThemedText>
             {result.restored > 0
               ? t('VtaLink.CardsBack', { count: result.restored })
               : result.found > 0
                 ? t('VtaLink.CardsBackNoneKept')
-                : result.unreachable === personas.length
+                : result.unreachable === (result.asked ?? personas.length)
                   ? t('VtaLink.CardsBackUnreachable')
                   : t('VtaLink.CardsBackNone')}
           </ThemedText>
@@ -144,7 +205,7 @@ export const GetCardsFromAgent: React.FC<{ agent: Agent; personas: VtiPersona[];
                 {t(REFUSED_WORDS[reason], { count: refusedBy(reason) })}
               </ThemedText>
             ))}
-          {result.unreachable > 0 && result.unreachable < personas.length ? (
+          {result.unreachable > 0 && result.unreachable < (result.asked ?? personas.length) ? (
             <ThemedText style={styles.muted}>{t('VtaLink.CardsBackSomeUnreachable')}</ThemedText>
           ) : null}
         </View>
