@@ -15,16 +15,6 @@ import EditRCard from '../modules/vrc/screens/EditRCard'
 import VtaAgentHome, { type AgentHomePart } from '../modules/trust-tasks/screens/VtaAgentHome'
 import PreviewAiAccess from '../modules/trust-tasks/preview/PreviewAiAccess'
 import PreviewRoom from '../modules/trust-tasks/preview/PreviewRoom'
-import PreviewSettingsGroup, { settingsGroupTitle } from '../modules/trust-tasks/preview/PreviewSettingsGroup'
-import AutoLock from '../screens/AutoLock'
-import ExportWallet from '../screens/ExportWallet'
-import ImportWallet from '../screens/ImportWallet'
-import Language from '../screens/Language'
-import PINChange from '../screens/PINChange'
-import ToggleHardwareAttestation from '../screens/ToggleHardwareAttestation'
-import ToggleLocalityConfirmation from '../screens/ToggleLocalityConfirmation'
-import TogglePushNotifications from '../screens/TogglePushNotifications'
-import ToggleWitnessReporting from '../screens/ToggleWitnessReporting'
 import VtaRequests from '../modules/trust-tasks/screens/VtaRequests'
 import VtaCreateAgent from '../modules/trust-tasks/screens/VtaCreateAgent'
 import VtaDevices from '../modules/trust-tasks/screens/VtaDevices'
@@ -52,12 +42,6 @@ interface MyAgentStackProps {
    */
   part?: AgentHomePart
   preview?: boolean
-}
-
-/** The app's biometrics screen, which the container supplies, for the preview's You stack. */
-const PreviewToggleBiometry: React.FC = () => {
-  const [ToggleBiometry] = useServices([TOKENS.SCREEN_TOGGLE_BIOMETRY])
-  return <ToggleBiometry />
 }
 
 const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation, part, preview = false }) => {
@@ -224,50 +208,6 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation, part, pr
           <Stack.Screen name={Screens.PreviewYourAgent} options={{ title: t('Preview.YourAgent') }}>
             {() => <VtaAgentHome part="agent" />}
           </Stack.Screen>
-          <Stack.Screen
-            name={Screens.PreviewSettingsGroup}
-            component={PreviewSettingsGroup}
-            options={({ route }) => ({ title: t(settingsGroupTitle(route.params.group)) })}
-          />
-          {/* Today's setting screens, unchanged, so Back from one returns to You. */}
-          <Stack.Screen
-            name={Screens.ToggleBiometry}
-            component={PreviewToggleBiometry}
-            options={{ title: t('Screens.Biometry') }}
-          />
-          <Stack.Screen name={Screens.ChangePIN} component={PINChange} options={{ title: t('Screens.ChangePIN') }} />
-          <Stack.Screen name={Screens.AutoLock} component={AutoLock} options={{ title: t('Settings.AutoLockTime') }} />
-          <Stack.Screen
-            name={Screens.ToggleHardwareAttestation}
-            component={ToggleHardwareAttestation}
-            options={{ title: t('Settings.HardwareAttestation') }}
-          />
-          <Stack.Screen
-            name={Screens.ToggleLocalityConfirmation}
-            component={ToggleLocalityConfirmation}
-            options={{ title: t('Settings.LocalityConfirmation') }}
-          />
-          <Stack.Screen
-            name={Screens.ToggleWitnessReporting}
-            component={ToggleWitnessReporting}
-            options={{ title: t('Settings.WitnessReporting') }}
-          />
-          <Stack.Screen
-            name={Screens.TogglePushNotifications}
-            component={TogglePushNotifications}
-            options={{ title: t('Screens.PushNotifications') }}
-          />
-          <Stack.Screen name={Screens.Language} component={Language} options={{ title: t('Screens.Language') }} />
-          <Stack.Screen
-            name={Screens.ExportWallet}
-            component={ExportWallet}
-            options={{ title: t('Settings.ExportWallet') }}
-          />
-          <Stack.Screen
-            name={Screens.ImportWallet}
-            component={ImportWallet}
-            options={{ title: t('Settings.ImportWallet') }}
-          />
         </>
       ) : null}
     </Stack.Navigator>

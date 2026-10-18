@@ -5,8 +5,9 @@
  * - Communities: the vetting desk as one row with its badge, one compact row
  *   per community, a next step when there is one, Your rooms, and Join a
  *   community; with no membership, a plain empty state.
- * - You: Requests, one compact "Your agent" card that opens the agent's page,
- *   and Settings as a short list of groups.
+ * - You: Profiles (R-Card profiles and each community's identity), Requests,
+ *   and one compact "Your agent" card that opens the agent's page; the app's
+ *   settings behind a gear in the header.
  * Rendered only by VtaAgentHome's preview parts, which only the preview passes.
  *
  * @module trust-tasks/preview/PreviewParts
@@ -15,16 +16,19 @@ import { useAgent } from '@bifold/react-hooks'
 import { useNavigation } from '@react-navigation/native'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Pressable, View } from 'react-native'
+import { Image, Pressable, View } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { ThemedText } from '../../../components/texts/ThemedText'
+import { hitSlop } from '../../../constants'
 import { TOKENS, useServices } from '../../../container-api'
+import { useStore } from '../../../contexts/store'
 import { useTheme } from '../../../contexts/theme'
 import { Screens, TabStacks } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 
 import type { EmptyListProps } from '../../../components/misc/EmptyList'
+import { formInputFromTemplate } from '../../vrc/types/rcard'
 import { communityTarget } from '../module/vtiCommunityLink'
 
 import { useDeskWaitingCount } from './deskWaiting'
@@ -234,58 +238,88 @@ export const AgentPageRows: React.FC<{ onAgentSettings: () => void }> = ({ onAge
   )
 }
 
-export type SettingsGroupKey = 'security' | 'exchanges' | 'general'
+/**
+ * The gear at the top right of You's header: the app's full settings, today's
+ * Menu (Alberto, 10-18), reachable linked or not. Sized as the agent page's gear.
+ */
+export const AppSettingsButton: React.FC = () => {
+  const { t } = useTranslation()
+  const { ColorPalette } = useTheme()
+  const navigation = useNavigation() as unknown as Nav
+  return (
+    <Pressable
+      onPress={() => navigation.navigate(TabStacks.SettingStack)}
+      style={{ marginRight: 15, paddingVertical: 8 }}
+      hitSlop={hitSlop}
+      accessibilityRole="button"
+      accessibilityLabel={t('Preview.Settings')}
+      testID={testIdWithKey('PreviewYouSettingsGear')}
+    >
+      <Icon name="cog-outline" size={26} color={ColorPalette.brand.headerIcon} />
+    </Pressable>
+  )
+}
+
+export interface CommunityIdentity {
+  communityDid: string
+  community: string
+  identity: string
+}
 
 /**
- * Settings on You, as groups: each opens a short list of today's setting
- * screens. "All settings" is today's Menu, where log-out, Developer settings
- * (and the preview's own switch) and the rest stay. Reachable in every state,
- * linked or not.
+ * Profiles, first on You: the person's R-Card profiles (read from the store,
+ * nothing written; each opens today's profile editor) and, with an agent,
+ * the identity they use in each community (each opens the community).
  */
-export const YouSettingsSection: React.FC = () => {
+export const ProfilesSection: React.FC<{
+  identities: CommunityIdentity[]
+  onOpenCommunity: (communityDid: string) => void
+}> = ({ identities, onOpenCommunity }) => {
   const { t } = useTranslation()
+  const [store] = useStore()
+  const { ColorPalette } = useTheme()
   const navigation = useNavigation() as unknown as Nav
-  const [{ enablePushNotifications }] = useServices([TOKENS.CONFIG])
-  const group = (key: SettingsGroupKey) => () => navigation.navigate(Screens.PreviewSettingsGroup, { group: key })
+  const { profiles, activeProfileId } = store.rCard
   return (
-    <Group title={t('Preview.Settings')} testID="PreviewYouSettings">
-      <ListRow
-        icon="lock-outline"
-        title={t('Preview.SettingsSecurity')}
-        subtitle={t('Preview.SettingsSecurityLine')}
-        onPress={group('security')}
-        testID="PreviewSettingsSecurity"
-      />
-      <ListRow
-        icon="swap-horizontal"
-        title={t('Preview.SettingsExchanges')}
-        subtitle={t('Preview.SettingsExchangesLine')}
-        onPress={group('exchanges')}
-        testID="PreviewSettingsExchanges"
-      />
-      {enablePushNotifications ? (
+    <Group title={t('Preview.Profiles')} testID="PreviewProfiles">
+      {profiles.map((profile, i) => {
+        const { firstName, lastName, photo } = formInputFromTemplate(profile)
+        const name = [firstName, lastName].filter(Boolean).join(' ') || profile.label
+        return (
+          <ListRow
+            key={profile.id}
+            title={name}
+            subtitle={profile.id === activeProfileId ? t('Preview.ProfileActive') : profile.label}
+            end={
+              photo ? (
+                <Image source={{ uri: photo }} style={{ width: 32, height: 32, borderRadius: 16 }} />
+              ) : (
+                <Icon name="account-circle-outline" size={32} color={ColorPalette.grayscale.mediumGrey} />
+              )
+            }
+            onPress={() => navigation.navigate(Screens.EditRCard, { profileId: profile.id })}
+            testID={`PreviewProfile_${i}`}
+          />
+        )
+      })}
+      {profiles.length === 0 ? (
         <ListRow
-          icon="bell-outline"
-          title={t('Settings.Notifications')}
-          onPress={() => navigation.navigate(Screens.TogglePushNotifications)}
-          testID="PreviewSettingsNotifications"
+          icon="account-plus-outline"
+          title={t('Preview.ProfileCreate')}
+          onPress={() => navigation.navigate(Screens.EditRCard)}
+          testID="PreviewProfileCreate"
         />
       ) : null}
-      <ListRow
-        icon="translate"
-        title={t('Preview.SettingsGeneral')}
-        subtitle={t('Preview.SettingsGeneralLine')}
-        onPress={group('general')}
-        testID="PreviewSettingsGeneral"
-      />
-      {/* Today's Menu, unchanged: log out, Developer settings and the rest. */}
-      <ListRow
-        icon="tune-variant"
-        title={t('Preview.SettingsAll')}
-        subtitle={t('Preview.SettingsAllLine')}
-        onPress={() => navigation.navigate(TabStacks.SettingStack)}
-        testID="PreviewAppSettingsRow"
-      />
+      {identities.map((item, i) => (
+        <ListRow
+          key={item.communityDid}
+          icon="account-group-outline"
+          title={item.community}
+          subtitle={t('Preview.IdentityAs', { identity: item.identity, interpolation: { escapeValue: false } })}
+          onPress={() => onOpenCommunity(item.communityDid)}
+          testID={`PreviewIdentity_${i}`}
+        />
+      ))}
     </Group>
   )
 }

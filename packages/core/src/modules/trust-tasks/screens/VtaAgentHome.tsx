@@ -45,19 +45,20 @@ import { AgentSettingsButton } from './AgentHeaderButtons'
 import { SectionRule } from './SectionRule'
 import { RequestsSection } from './RequestsSection'
 import type { CommunityCardPrimary } from './communityCardModel'
-import { communityHeadingOf, communityLabelOf } from './communityName'
+import { communityHeadingOf, communityLabelOf, shortDid } from './communityName'
 import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
 import {
   AgentPageRows,
+  AppSettingsButton,
   CommunitiesEmpty,
   CommunityRows,
   DeskRow,
   JoinCommunityRow,
   NextStepRow,
-  YouSettingsSection,
+  ProfilesSection,
   YourAgentCard,
 } from '../preview/PreviewParts'
 import { joinAfterLink } from '../preview/joinAfterLink'
@@ -325,6 +326,13 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   useLayoutEffect(() => {
     const setOptions = (navigation as unknown as { setOptions?: (options: object) => void }).setOptions
     if (!setOptions) return
+    // The preview (Alberto, 10-18): You keeps the app's settings behind a gear,
+    // in every state; the agent's own page keeps the stack's Back to You.
+    if (part === 'you') {
+      setOptions({ headerLeft: () => null, headerRight: () => <AppSettingsButton /> })
+      return
+    }
+    if (part === 'agent') return
     if (!withCorners) {
       setOptions({ headerLeft: () => null, headerRight: () => null })
       return
@@ -337,7 +345,7 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     })
     // `go` is a fresh closure each render over the same navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigation, withCorners])
+  }, [navigation, withCorners, part])
 
   // The preview's Communities: "Join a community" pressed with no agent linked
   // opens the link screen over this one (joinAfterLink). Linked on that visit:
@@ -365,14 +373,13 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
       </SafeAreaView>
     )
   }
-  // The preview's You ends with the app's settings in every state, linked or not:
-  // Menu is no longer a tab of its own there.
-  const youRows = part === 'you' ? <YouSettingsSection /> : null
+  // The preview's You leads with Profiles in every state; with no agent, only
+  // the R-Card profiles, which the phone keeps itself.
   const unlinkedBody = (children: React.ReactNode) =>
     part === 'you' ? (
       <ScrollView contentContainerStyle={styles.content}>
+        <ProfilesSection identities={[]} onOpenCommunity={goToCommunity} />
         {children}
-        {youRows}
       </ScrollView>
     ) : (
       <View style={styles.content}>{children}</View>
@@ -460,14 +467,7 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     )
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right']}>
-        {part === 'you' ? (
-          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-            {intro}
-            <View style={{ padding: 20 }}>{youRows}</View>
-          </ScrollView>
-        ) : (
-          intro
-        )}
+        {intro}
       </SafeAreaView>
     )
   }
@@ -1041,15 +1041,23 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
             </>
           )
         ) : part === 'you' ? (
-          // Option C3: Requests, one card for the agent, then Settings.
+          // Profiles, Requests, then one card for the agent (Alberto, 10-18);
+          // the app's settings are the header's gear.
           <>
+            <ProfilesSection
+              identities={(holdings?.personas ?? []).map((p) => ({
+                communityDid: p.communityDid,
+                community: communityHeadingOf(p.communityDid, t),
+                identity: p.label ?? shortDid(p.did),
+              }))}
+              onOpenCommunity={goToCommunity}
+            />
             {requestsSection}
             <YourAgentCard
               name={nameOf(link.vtaDid)}
               status={<VtaStatusLine connection={link.connection} now={now} />}
             />
             {addedCard}
-            {youRows}
           </>
         ) : part === 'agent' ? (
           // R3: the agent itself: switcher and status, requests, devices, AI-agent access, settings.
