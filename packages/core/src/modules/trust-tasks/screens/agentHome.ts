@@ -26,7 +26,7 @@ export function agentHomeScreen(
  * the app's settings.
  */
 export function stackLandsOn(
-  part: 'all' | 'communities' | 'you' | undefined,
+  part: 'all' | 'communities' | 'you' | 'agent' | undefined,
   link: Pick<VtaLinkState, 'kind'> = vtaAgent.getState().link
 ): Screens.VtaAgent | Screens.MyAgent {
   return part && part !== 'all' ? Screens.VtaAgent : agentHomeScreen(link)

@@ -10,6 +10,7 @@
  *
  * @module navigators/PreviewTabNavigator
  */
+import { useAgent } from '@bifold/react-hooks'
 import type { BottomTabNavigationOptions, createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
@@ -17,6 +18,7 @@ import { Text, useWindowDimensions, View, type StyleProp, type TextStyle, type V
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { useTheme } from '../contexts/theme'
+import { useDeskWaitingCount } from '../modules/trust-tasks/preview/deskWaiting'
 import { TabStackParams, TabStacks } from '../types/navigators'
 import { testIdWithKey } from '../utils/testable'
 
@@ -64,6 +66,10 @@ export const PreviewTabNavigator: React.FC<PreviewTabNavigatorProps> = ({
 }) => {
   const { t } = useTranslation()
   const { TabTheme, Assets } = useTheme()
+  // Vetting requests waiting on this phone's desks badge Communities (R1).
+  // Room offers would add to it; they are sample data here, so they do not.
+  const { agent } = useAgent()
+  const deskWaiting = useDeskWaitingCount(agent)
   // Each label is one line in its tab's own width. "Communities" is wider than
   // a fifth of a 375-pt phone even in regular weight (78.5 pt at 14 pt), and
   // bold wrapped it on an iPhone 16; so one weight for both states, the active
@@ -160,10 +166,14 @@ export const PreviewTabNavigator: React.FC<PreviewTabNavigatorProps> = ({
         name={TabStacks.CommunitiesStack}
         component={CommunitiesStack}
         options={{
+          tabBarBadge: deskWaiting > 0 ? deskWaiting : undefined,
           tabBarIcon: tabIcon(t('TabStack.Communities'), (color, focused) => (
             <Icon name={focused ? 'account-group' : 'account-group-outline'} size={24} color={color} />
           )),
-          tabBarAccessibilityLabel: t('TabStack.Communities'),
+          tabBarAccessibilityLabel:
+            deskWaiting > 0
+              ? `${t('TabStack.Communities')}, ${t('Preview.DeskRequests', { count: deskWaiting })}`
+              : t('TabStack.Communities'),
           tabBarTestID: testIdWithKey('PreviewTabCommunities'),
         }}
       />

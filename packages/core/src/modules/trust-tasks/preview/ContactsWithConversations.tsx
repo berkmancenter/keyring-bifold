@@ -1,8 +1,8 @@
 /**
  * Contacts with a Conversations segment, for the Contacts tab of the
- * developer preview of the new navigation: today's contact list and today's
- * Messages screen, unchanged, one above the other's place. Passed to
- * ContactStack only by the preview.
+ * developer preview of the new navigation (option C1): Conversations
+ * (today's Messages screen) first and open, then All contacts (today's
+ * contact list). Passed to ContactStack only by the preview.
  *
  * @module trust-tasks/preview/ContactsWithConversations
  */
@@ -23,7 +23,7 @@ const ContactsWithConversations: React.FC<{ navigation: unknown }> = ({ navigati
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const { totalUnread } = useUnreadMessages()
-  const [segment, setSegment] = useState<Segment>('contacts')
+  const [segment, setSegment] = useState<Segment>('conversations')
   const styles = StyleSheet.create({
     bar: {
       flexDirection: 'row',
@@ -53,11 +53,11 @@ const ContactsWithConversations: React.FC<{ navigation: unknown }> = ({ navigati
   return (
     <View style={{ flex: 1 }}>
       <View style={styles.bar} accessibilityRole="tablist">
-        {tab('contacts', t('Preview.SegmentContacts'))}
         {tab(
           'conversations',
           totalUnread > 0 ? `${t('Preview.SegmentConversations')} (${totalUnread})` : t('Preview.SegmentConversations')
         )}
+        {tab('contacts', t('Preview.SegmentContacts'))}
       </View>
       <View style={{ flex: 1 }}>
         {segment === 'contacts' ? (

@@ -150,10 +150,11 @@ export const RoomOfferCard: React.FC = () => {
   const { t } = useTranslation()
   const styles = usePreviewStyles()
   const { ColorPalette } = useTheme()
-  const [open, setOpen] = useState(false)
   const [answered, setAnswered] = useState(false)
   const o = SAMPLE_OFFER
   const until = sampleDate(o.until)
+  const access = t(o.write ? 'Preview.AccessReadWrite' : 'Preview.AccessRead')
+  // As R2 draws it: the offer, who joins, and Decline / Accept, with no step before.
   return (
     <View
       style={[styles.card, { borderLeftWidth: 4, borderLeftColor: ColorPalette.brand.primary }]}
@@ -166,57 +167,37 @@ export const RoomOfferCard: React.FC = () => {
           {t('Preview.OfferBadge')}
         </ThemedText>
       </View>
-      <ThemedText>
-        {t('Preview.OfferTitle', { community: o.community, room: o.room, interpolation: { escapeValue: false } })}
+      <ThemedText testID={testIdWithKey('PreviewRoomOfferDetails')}>
+        {t('Preview.OfferLine', { community: o.community, access, until, interpolation: { escapeValue: false } })}
       </ThemedText>
-      {!open ? (
-        <Button
-          title={t('Preview.SeeOffer')}
-          buttonType={ButtonType.Secondary}
-          onPress={() => setOpen(true)}
-          testID={testIdWithKey('PreviewRoomOfferOpen')}
-        />
+      <ThemedText style={styles.muted}>
+        {t('Preview.JoiningAsLine', { persona: o.persona, interpolation: { escapeValue: false } })}
+      </ThemedText>
+      <ThemedText variant="caption" style={styles.muted}>
+        {t('Preview.OfferEnds', { until, community: o.community, interpolation: { escapeValue: false } })}
+      </ThemedText>
+      {answered ? (
+        <ThemedText variant="bold" testID={testIdWithKey('PreviewNothingSent')}>
+          {t('Preview.NothingSent')}
+        </ThemedText>
       ) : (
-        <View style={{ gap: 8 }} testID={testIdWithKey('PreviewRoomOfferDetails')}>
-          <ThemedText variant="caption" style={styles.muted}>
-            {t('Preview.OfferYouCould')}
-          </ThemedText>
-          <ThemedText>{o.write ? `${t('Preview.Read')} · ${t('Preview.Write')}` : t('Preview.Read')}</ThemedText>
-          <ThemedText variant="caption" style={styles.muted}>
-            {t('Preview.ValidUntil')}
-          </ThemedText>
-          <ThemedText>
-            {t('Preview.UntilDays', { until, count: o.days, interpolation: { escapeValue: false } })}
-          </ThemedText>
-          <ThemedText variant="caption" style={styles.muted}>
-            {t('Preview.JoiningAs')}
-          </ThemedText>
-          <ThemedText>
-            {o.persona} · {t('Preview.IdentityFor', { community: o.community, interpolation: { escapeValue: false } })}
-          </ThemedText>
-          <ThemedText style={styles.muted}>
-            {t('Preview.OfferEnds', { until, community: o.community, interpolation: { escapeValue: false } })}
-          </ThemedText>
-          {answered ? (
-            <ThemedText variant="bold" testID={testIdWithKey('PreviewNothingSent')}>
-              {t('Preview.NothingSent')}
-            </ThemedText>
-          ) : (
-            <>
-              <Button
-                title={t('Preview.Accept')}
-                buttonType={ButtonType.Primary}
-                onPress={() => setAnswered(true)}
-                testID={testIdWithKey('PreviewRoomOfferAccept')}
-              />
-              <Button
-                title={t('Preview.Decline')}
-                buttonType={ButtonType.Secondary}
-                onPress={() => setAnswered(true)}
-                testID={testIdWithKey('PreviewRoomOfferDecline')}
-              />
-            </>
-          )}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Button
+              title={t('Preview.Decline')}
+              buttonType={ButtonType.Secondary}
+              onPress={() => setAnswered(true)}
+              testID={testIdWithKey('PreviewRoomOfferDecline')}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button
+              title={t('Preview.Accept')}
+              buttonType={ButtonType.Primary}
+              onPress={() => setAnswered(true)}
+              testID={testIdWithKey('PreviewRoomOfferAccept')}
+            />
+          </View>
         </View>
       )}
     </View>
@@ -257,6 +238,13 @@ export const AiAccessRow: React.FC = () => {
       <Icon name="robot-outline" size={24} color={ColorPalette.brand.primary} />
       <View style={{ flex: 1, gap: 2 }}>
         <ThemedText variant="bold">{t('Preview.AiAccess')}</ThemedText>
+        <ThemedText variant="caption" style={styles.muted}>
+          {`${t('Preview.AiAgentName')} · ${t('Preview.AiAgentLine', {
+            room: SAMPLE_ROOMS[0].name,
+            left: '3 h 40 min',
+            interpolation: { escapeValue: false },
+          })}`}
+        </ThemedText>
         <PreviewNotConnected testID="PreviewAiAccessRowNotConnected" />
       </View>
       <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} />

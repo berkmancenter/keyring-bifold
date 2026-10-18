@@ -50,7 +50,16 @@ import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
-import { CommunitiesUnlinked, DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
+import {
+  AgentPageRows,
+  CommunitiesEmpty,
+  CommunityRows,
+  DeskRow,
+  JoinCommunityRow,
+  NextStepRow,
+  YouSettingsSection,
+  YourAgentCard,
+} from '../preview/PreviewParts'
 import { YourRoomsSection } from '../preview/RoomsPreview'
 
 interface Holdings {
@@ -118,11 +127,12 @@ export const forgetAgentHoldings = () => {
 }
 
 /**
- * `all`: the agent's page as it is. `communities` and `you`: its parts on the
- * Communities and You tabs of the preview of the new navigation (Developer
- * settings, off by default), which only that preview passes.
+ * `all`: the agent's page as it is. `communities`, `you` and `agent`: the
+ * preview of the new navigation (Developer settings, off by default), which
+ * only that preview passes: the Communities tab, the You tab, and the agent's
+ * own page that You's "Your agent" card opens.
  */
-export type AgentHomePart = 'all' | 'communities' | 'you'
+export type AgentHomePart = 'all' | 'communities' | 'you' | 'agent'
 
 const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   // The tab bar draws over the page: the last line scrolls clear of it.
@@ -309,8 +319,8 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   // introduction is done. The Join menu that sat in the other corner said
   // again what the page's cards say (Alberto, 239): a member joins another
   // community from a row at the page's end.
-  // Communities in the preview has no agent settings: they are on You.
-  const withCorners = link.kind === 'linked' && state.introSeen && part !== 'communities'
+  // The preview's parts have no gear: agent settings is a row on the agent's own page.
+  const withCorners = link.kind === 'linked' && state.introSeen && part === 'all'
   useLayoutEffect(() => {
     const setOptions = (navigation as unknown as { setOptions?: (options: object) => void }).setOptions
     if (!setOptions) return
@@ -333,17 +343,14 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right']}>
         <ScrollView contentContainerStyle={styles.content}>
-          <CommunitiesUnlinked />
+          <CommunitiesEmpty />
         </ScrollView>
       </SafeAreaView>
     )
   }
   // The preview's You ends with the app's settings in every state, linked or not:
   // Menu is no longer a tab of its own there.
-  const youRows =
-    part === 'you' ? (
-      <YouSettingsRows linked={link.kind === 'linked'} onAgentSettings={() => go(Screens.VtaAgentSettings)} />
-    ) : null
+  const youRows = part === 'you' ? <YouSettingsSection /> : null
   const unlinkedBody = (children: React.ReactNode) =>
     part === 'you' ? (
       <ScrollView contentContainerStyle={styles.content}>
@@ -950,27 +957,84 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
         testID={testIdWithKey(VtaAgentHomeIds.home)}
       >
         {part === 'communities' ? (
-          <>
-            {isVetter ? <DeskWaitingRow /> : null}
-            {vetterCards}
-            <View style={styles.card}>{standingLines}</View>
-            {lapsedCard}
-            {nextStepCard}
-            {doorsBlock}
-            {holdsBlock}
-            <SectionRule />
-            <YourRoomsSection />
-            {joinAnotherBlock}
-          </>
+          // Option C2 / R1: the desk, one row per community, a next step, Your
+          // rooms, Join; with no membership, a plain empty state (Alberto, 10-18).
+          !holdings ? (
+            <ActivityIndicator color={ColorPalette.brand.primary} />
+          ) : memberOf.length === 0 && !isVetter ? (
+            <CommunitiesEmpty />
+          ) : (
+            <>
+              {isVetter ? (
+                <DeskRow
+                  vetterFor={holdings.vetterFor}
+                  nameOf={(did) => communityHeadingOf(did, t)}
+                  onOpen={(did) => {
+                    // The vetting screen works on the chosen community.
+                    communityTarget.choose(did)
+                    go(Screens.VtiVetting)
+                  }}
+                />
+              ) : null}
+              {memberOf.length ? (
+                <CommunityRows
+                  items={memberOf.map((did) => ({
+                    communityDid: did,
+                    name: communityHeadingOf(did, t),
+                    vetter: holdings.vetterFor.includes(did),
+                  }))}
+                  onOpen={goToCommunity}
+                />
+              ) : null}
+              {nextStep ? (
+                <NextStepRow
+                  text={
+                    nextStep.kind === 'invitation'
+                      ? t('VtaLink.InvitationWaiting', {
+                          community: communityHeadingOf(nextStep.communityDid, t),
+                          interpolation: { escapeValue: false },
+                        })
+                      : t('VtaLink.NextVetting', {
+                          community: communityHeadingOf(nextStep.communityDid, t),
+                          interpolation: { escapeValue: false },
+                        })
+                  }
+                  onPress={() => {
+                    communityTarget.choose(nextStep.communityDid)
+                    go(nextStep.kind === 'invitation' ? Screens.VtiInvited : Screens.VtiVetting)
+                  }}
+                  testID="PreviewNextStep"
+                />
+              ) : null}
+              <YourRoomsSection />
+              <JoinCommunityRow
+                onPress={() => {
+                  // From the beginning: which community, not the last one a link opened.
+                  communityTarget.clearViewing()
+                  go(Screens.VtiJoin)
+                }}
+              />
+            </>
+          )
         ) : part === 'you' ? (
+          // Option C3: Requests, one card for the agent, then Settings.
           <>
             {requestsSection}
-            <SectionRule />
+            <YourAgentCard
+              name={nameOf(link.vtaDid)}
+              status={<VtaStatusLine connection={link.connection} now={now} />}
+            />
+            {addedCard}
+            {youRows}
+          </>
+        ) : part === 'agent' ? (
+          // R3: the agent itself: switcher and status, requests, devices, AI-agent access, settings.
+          <>
             <View style={styles.card}>{agentLines}</View>
             {addedCard}
+            {requestsSection}
             {devicesBlock}
-            <SectionRule />
-            {youRows}
+            <AgentPageRows onAgentSettings={() => go(Screens.VtaAgentSettings)} />
           </>
         ) : (
           <>

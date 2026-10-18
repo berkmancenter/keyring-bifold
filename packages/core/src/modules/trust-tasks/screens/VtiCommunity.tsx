@@ -11,7 +11,7 @@
 import type { RouteProp } from '@react-navigation/native'
 import { useAgent } from '@bifold/react-hooks'
 import { useNavigation, useRoute } from '@react-navigation/native'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -41,6 +41,7 @@ import { localDate } from './localTime'
 import { useToastAboveTabBar, useRoomAboveTabBar } from './aboveTabBar'
 import { PrivateVettingBadge } from './PrivateVettingBadge'
 import { VtiCommunityIds } from './VtiCommunity.ids'
+import { Group, ListRow } from '../preview/PreviewParts'
 import { CommunityRoomsSection } from '../preview/RoomsPreview'
 
 /** The raw text behind a plain line, for Details: a framework code, else the message. */
@@ -69,6 +70,13 @@ const VtiCommunity: React.FC<{ roomsPreview?: boolean }> = ({ roomsPreview = fal
   const [showDetails, setShowDetails] = useState(false)
   const { agent } = useAgent()
   const navigation = useNavigation()
+  // The preview names the screen after the community, as the mockups do (R2).
+  useLayoutEffect(() => {
+    if (!roomsPreview) return
+    ;(navigation as unknown as { setOptions?: (o: object) => void }).setOptions?.({
+      title: called.name ?? t('Join.Unnamed'),
+    })
+  }, [roomsPreview, navigation, called.name, t])
   // Where this phone stands with the community: a member is not asked to apply.
   const { journey } = useCommunityJourney(agent, communityDid)
   // What the phone knows here may be another agent's: its identity, its
@@ -218,36 +226,42 @@ const VtiCommunity: React.FC<{ roomsPreview?: boolean }> = ({ roomsPreview = fal
     ;(navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiJoin)
   }, [communityDid, navigation])
 
+  const nameCard = (
+    <>
+      {/* What it is called, not what it is keyed by. The DID was the
+            headline here; it is the only checkable thing on the screen, so it
+            stays — one tap away, in the same place as every other detail. */}
+      <View style={styles.card}>
+        <Text style={styles.label}>{t('MyAgent.Community')}</Text>
+        <Text style={styles.value} testID={testIdWithKey(VtiCommunityIds.name)}>
+          {called.name ?? t('Join.Unnamed')}
+        </Text>
+        {called.name && called.claimed ? (
+          <Text style={styles.label} testID={testIdWithKey(VtiCommunityIds.nameClaimed)}>
+            {t('Join.NameFromLink')}
+          </Text>
+        ) : null}
+        <Pressable
+          onPress={() => setShowDetails(!showDetails)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: showDetails }}
+          testID={testIdWithKey(VtiCommunityIds.detailsToggle)}
+        >
+          <Text style={[styles.label, { textDecorationLine: 'underline' }]}>{t('VtaLink.Details')}</Text>
+        </Pressable>
+        {showDetails ? (
+          <Text style={styles.value} selectable testID={testIdWithKey(VtiCommunityIds.did)}>
+            {communityDid}
+          </Text>
+        ) : null}
+      </View>
+    </>
+  )
+
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey(VtiCommunityIds.scroll)}>
-        {/* What it is called, not what it is keyed by. The DID was the
-            headline here; it is the only checkable thing on the screen, so it
-            stays — one tap away, in the same place as every other detail. */}
-        <View style={styles.card}>
-          <Text style={styles.label}>{t('MyAgent.Community')}</Text>
-          <Text style={styles.value} testID={testIdWithKey(VtiCommunityIds.name)}>
-            {called.name ?? t('Join.Unnamed')}
-          </Text>
-          {called.name && called.claimed ? (
-            <Text style={styles.label} testID={testIdWithKey(VtiCommunityIds.nameClaimed)}>
-              {t('Join.NameFromLink')}
-            </Text>
-          ) : null}
-          <Pressable
-            onPress={() => setShowDetails(!showDetails)}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: showDetails }}
-            testID={testIdWithKey(VtiCommunityIds.detailsToggle)}
-          >
-            <Text style={[styles.label, { textDecorationLine: 'underline' }]}>{t('VtaLink.Details')}</Text>
-          </Pressable>
-          {showDetails ? (
-            <Text style={styles.value} selectable testID={testIdWithKey(VtiCommunityIds.did)}>
-              {communityDid}
-            </Text>
-          ) : null}
-        </View>
+        {roomsPreview ? null : nameCard}
 
         {heldElsewhere ? (
           <HeldByAnotherAgent
@@ -274,7 +288,7 @@ const VtiCommunity: React.FC<{ roomsPreview?: boolean }> = ({ roomsPreview = fal
             {(membership as { privateVetting?: boolean }).privateVetting ? (
               <PrivateVettingBadge label={t('Vetting.Private.Joined')} testIdStem="CommunityJoinedPrivately" />
             ) : null}
-            {vetsHere ? (
+            {vetsHere && !roomsPreview ? (
               <Pressable
                 style={styles.button}
                 testID={testIdWithKey(VtiCommunityIds.openDesk)}
@@ -290,7 +304,34 @@ const VtiCommunity: React.FC<{ roomsPreview?: boolean }> = ({ roomsPreview = fal
           </View>
         ) : null}
 
-        {roomsPreview && membership ? <CommunityRoomsSection /> : null}
+        {/* R2: Rooms, Vetting and Cards beside the membership; the name and DID under Details. */}
+        {roomsPreview && membership ? (
+          <>
+            <CommunityRoomsSection />
+            {vetsHere ? (
+              <Group title={t('Preview.CommunityVetting')}>
+                <ListRow
+                  icon="clipboard-check-outline"
+                  title={t('Preview.CommunityVetsHere')}
+                  subtitle={t('Vetting.OpenDesk')}
+                  onPress={() => {
+                    communityTarget.choose(communityDid)
+                    ;(navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiVetting)
+                  }}
+                  testID="PreviewCommunityOpenDesk"
+                />
+              </Group>
+            ) : null}
+            <Group title={t('Preview.CommunityCards')}>
+              <ListRow
+                icon="card-account-details-outline"
+                title={t('Preview.CommunityMembershipCard')}
+                testID="PreviewCommunityCard"
+              />
+            </Group>
+          </>
+        ) : null}
+        {roomsPreview ? nameCard : null}
         {membership || heldElsewhere ? null : (
           <Text style={{ ...TextTheme.headingFour, color: TextTheme.normal.color }}>{t('MyAgent.WhatIsAsked')}</Text>
         )}

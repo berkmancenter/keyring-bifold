@@ -1,8 +1,11 @@
 /**
  * The agent's page with no part is today's page, section for section, in
- * today's order; the preview of the new navigation shows it in two parts
- * (Communities, You). And a light render of each preview screen: rooms with
- * sample data marked "Preview, not connected", whose buttons send nothing.
+ * today's order. The preview of the new navigation shapes its parts to the
+ * mockups' option C and R1–R3: Communities (desk row, community rows, Your
+ * rooms, Join; a plain empty state with no membership), You (Requests, Your
+ * agent, Settings) and the agent's own page. And a light render of each
+ * preview screen: rooms with sample data marked "Preview, not connected",
+ * whose buttons send nothing.
  */
 import { useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
@@ -18,7 +21,8 @@ import { GenericRecordsVettingStore, type VettingDeskRequest } from '../module/v
 import ContactsWithConversations from '../preview/ContactsWithConversations'
 import { deskWaiting } from '../preview/deskWaiting'
 import PreviewAiAccess from '../preview/PreviewAiAccess'
-import { DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
+import { DeskRow, YouSettingsSection } from '../preview/PreviewParts'
+import PreviewSettingsGroup from '../preview/PreviewSettingsGroup'
 import PreviewRoom from '../preview/PreviewRoom'
 import { CommunityRoomsSection, YourRoomsSection } from '../preview/RoomsPreview'
 import { stackLandsOn } from '../screens/agentHome'
@@ -29,8 +33,9 @@ jest.mock('@react-navigation/native', () => ({
   ...jest.requireActual('../../../../__mocks__/@react-navigation/native'),
   useIsFocused: jest.fn(() => true),
 }))
+const mockGrantState = jest.fn(async () => ({ state: 'active', statusChecked: true }))
 jest.mock('../module/vtiGrantState', () => ({
-  ownVetterGrantState: async () => ({ state: 'active', statusChecked: true }),
+  ownVetterGrantState: () => mockGrantState(),
 }))
 jest.mock('../../vrc/screens/ListContacts', () => {
   const { Text } = jest.requireActual('react-native')
@@ -76,11 +81,11 @@ const records: Rec[] = [
     },
   },
 ]
-const fakeAgent = () => ({
+const fakeAgent = (held: Rec[] = records) => ({
   agent: {
     genericRecords: {
       findAllByQuery: async (query: Record<string, string>) =>
-        records.filter((r) => Object.entries(query).every(([k, v]) => r.tags[k] === v)).map((r) => ({ ...r, id: 'r' })),
+        held.filter((r) => Object.entries(query).every(([k, v]) => r.tags[k] === v)).map((r) => ({ ...r, id: 'r' })),
     },
     config: { logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() } },
   },
@@ -91,24 +96,30 @@ const SECTIONS = [
   'AgentHomeTitle',
   'AgentSeat',
   'AgentJourneyJoined',
+  'AgentJourney',
   'WhatIsMyAgent',
+  'AgentDoors',
   'PreviewDeskRow',
   'AgentVetterCard',
   'AgentRequestsRow',
   'AgentHolds',
+  'PreviewCommunityRows',
   'AgentDevices',
   'PreviewYourRooms',
   'AgentJoinAnother',
-  'PreviewAgentSettingsRow',
+  'PreviewJoinCommunity',
+  'PreviewYourAgentCard',
   'PreviewAiAccessRow',
-  'PreviewAppSettingsRow',
+  'PreviewAgentSettingsRow',
+  'PreviewYouSettings',
+  'PreviewCommunitiesEmpty',
 ]
 const ANY_SECTION = new RegExp(`^com\\.ariesbifold:id/(${SECTIONS.join('|')})$`)
 const sectionsOf = (tree: ReturnType<typeof render>) =>
   Array.from(new Set(tree.getAllByTestId(ANY_SECTION).map((n) => String(n.props.testID).split('/')[1])))
 
-const renderHome = async (part?: AgentHomePart) => {
-  ;(useAgent as jest.Mock).mockReturnValue(fakeAgent())
+const renderHome = async (part?: AgentHomePart, held: Rec[] = records) => {
+  ;(useAgent as jest.Mock).mockReturnValue(fakeAgent(held))
   const tree = render(<BasicAppContext>{part ? <VtaAgentHome part={part} /> : <VtaAgentHome />}</BasicAppContext>)
   await act(async () => {
     jest.advanceTimersByTime(10)
@@ -116,7 +127,7 @@ const renderHome = async (part?: AgentHomePart) => {
   return tree
 }
 
-describe('the agent’s page and its two parts', () => {
+describe('the agent’s page and the preview’s parts', () => {
   beforeEach(() => {
     jest.useFakeTimers()
     jest.setSystemTime(new Date('2026-09-23T04:00:00Z'))
@@ -162,29 +173,59 @@ describe('the agent’s page and its two parts', () => {
     expect(GenericRecordsVettingStore.prototype.listDesk).not.toHaveBeenCalled()
   })
 
-  it('Communities: the vetter desk on top, then where this phone stands, the communities, and Your rooms', async () => {
+  it('Communities (C2, R1): the desk row, one row per community, Your rooms, Join a community; none of My Agent’s cards', async () => {
     const tree = await renderHome('communities')
     expect(sectionsOf(tree)).toEqual([
       'PreviewDeskRow',
-      'AgentVetterCard',
-      'AgentSeat',
-      'AgentJourneyJoined',
-      'WhatIsMyAgent',
-      'AgentHolds',
+      'PreviewCommunityRows',
       'PreviewYourRooms',
-      'AgentJoinAnother',
+      'PreviewJoinCommunity',
     ])
+    expect(tree.getByTestId(id('PreviewCommunityRow_0'))).toHaveTextContent(/Preview\.RoleVetter/)
   })
 
-  it('You: requests first, then the agent and its devices, then settings, AI-agent access and the app’s settings', async () => {
+  it('Communities, linked with no membership: a plain empty state, with no link, join or journey', async () => {
+    // A persona applying somewhere, with no membership and no grant.
+    mockGrantState.mockResolvedValueOnce({ state: 'none' } as never)
+    const tree = await renderHome('communities', records.slice(0, 1))
+    expect(sectionsOf(tree)).toEqual(['PreviewCommunitiesEmpty'])
+    expect(tree.getByTestId(id('PreviewCommunitiesEmpty'))).toHaveTextContent(/Preview\.CommunitiesEmpty/)
+    for (const gone of [
+      'AgentHomeLink',
+      'AgentInvited',
+      'AgentJoinCommunity',
+      'AgentJourney',
+      'PreviewJoinCommunity',
+    ]) {
+      expect(tree.queryByTestId(id(gone))).toBeNull()
+    }
+  })
+
+  it('a community row opens the community; the desk row opens the desk', async () => {
+    const tree = await renderHome('communities')
+    const nav = (
+      jest.requireMock('@react-navigation/native') as { useNavigation: () => { navigate: jest.Mock } }
+    ).useNavigation().navigate
+    nav.mockClear()
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunityRow_0'))))
+    expect(nav).toHaveBeenCalledWith(Screens.VtiCommunity, expect.objectContaining({ communityDid }))
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewDeskOpen'))))
+    expect(nav).toHaveBeenCalledWith(Screens.VtiVetting)
+  })
+
+  it('You (C3): Requests, one Your agent card, then Settings', async () => {
     const tree = await renderHome('you')
+    expect(sectionsOf(tree)).toEqual(['AgentRequestsRow', 'PreviewYourAgentCard', 'PreviewYouSettings'])
+  })
+
+  it('the agent’s own page (R3): switcher and status, requests, devices, AI-agent access, agent settings', async () => {
+    const tree = await renderHome('agent')
     expect(sectionsOf(tree)).toEqual([
-      'AgentRequestsRow',
       'AgentHomeTitle',
+      'AgentRequestsRow',
       'AgentDevices',
-      'PreviewAgentSettingsRow',
       'PreviewAiAccessRow',
-      'PreviewAppSettingsRow',
+      'PreviewAgentSettingsRow',
     ])
   })
 })
@@ -220,19 +261,13 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
     jest.restoreAllMocks()
   })
 
-  it.each(['notLinked', 'revoked', 'introUnseen'])(
-    'You, %s: the app’s settings are there; agent settings only once an agent is linked',
-    async (name) => {
-      controller.set({ activity: [], approvals: [], ...states[name] })
-      const tree = await renderHome('you')
-      expect(tree.getByTestId(id('PreviewYouSettings'))).toBeTruthy()
-      expect(tree.getByTestId(id('PreviewAppSettingsRow'))).toBeTruthy()
-      const agentRow = tree.queryByTestId(id('PreviewAgentSettingsRow'))
-      if (name === 'introUnseen') expect(agentRow).toBeTruthy()
-      else expect(agentRow).toBeNull()
-      expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
-    }
-  )
+  it.each(['notLinked', 'revoked', 'introUnseen'])('You, %s: the Settings are there', async (name) => {
+    controller.set({ activity: [], approvals: [], ...states[name] })
+    const tree = await renderHome('you')
+    expect(tree.getByTestId(id('PreviewYouSettings'))).toBeTruthy()
+    expect(tree.getByTestId(id('PreviewAppSettingsRow'))).toBeTruthy()
+    expect(tree.queryByTestId(id('PreviewCommunitiesEmpty'))).toBeNull()
+  })
 
   it('You, not linked: the link card as today, then the settings', async () => {
     controller.set({ activity: [], approvals: [], ...states.notLinked })
@@ -241,17 +276,15 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
   })
 
   it.each(['notLinked', 'revoked'])(
-    'Communities, %s: its own empty state, not the link card; Connect goes to You’s link flow',
+    'Communities, %s: the plain empty state, with no link card, Connect or invitation',
     async (name) => {
       controller.set({ activity: [], approvals: [], ...states[name] })
       const tree = await renderHome('communities')
-      expect(tree.getByTestId(id('PreviewCommunitiesUnlinked'))).toBeTruthy()
-      expect(tree.queryByTestId(id('AgentHomeLink'))).toBeNull()
-      expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
-      await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesConnect'))))
-      expect(navigate()).toHaveBeenCalledWith(TabStacks.YouStack, { screen: Screens.VtaLink, initial: false })
-      await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesInvited'))))
-      expect(navigate()).toHaveBeenCalledWith(Screens.VtiInvited)
+      expect(tree.getByTestId(id('PreviewCommunitiesEmpty'))).toBeTruthy()
+      for (const gone of ['AgentHomeLink', 'PreviewYouSettings', 'AgentInvited', 'PreviewJoinCommunity']) {
+        expect(tree.queryByTestId(id(gone))).toBeNull()
+      }
+      expect(navigate()).not.toHaveBeenCalled()
     }
   )
 
@@ -259,12 +292,15 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
     controller.set({ activity: [], approvals: [], ...states.introUnseen })
     const tree = await renderHome('communities')
     expect(tree.queryByTestId(id('AgentIntro'))).toBeNull()
-    expect(tree.getByTestId(id('AgentHolds'))).toBeTruthy()
+    expect(tree.getByTestId(id('PreviewCommunityRows'))).toBeTruthy()
   })
 
   // The snapshots were written from the page before the preview's unlinked
   // renders (a88c7054) and must match it: today's page is the same, not only
-  // free of the preview.
+  // free of the preview. Never regenerate them from this branch (`jest -u`):
+  // they would then only say the change matches itself. To check or rewrite
+  // them, put a88c7054's VtaAgentHome.tsx in place, run this file with
+  // `--ci -t "as it was"`, and restore the file.
   it.each([
     ['notLinked', 'AgentHomeLink'],
     ['revoked', 'RemovedPhone'],
@@ -274,7 +310,7 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
     for (const tree of [await renderHome(), await renderHome('all')]) {
       expect(tree.getByTestId(id(shown))).toBeTruthy()
       expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
-      expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
+      expect(tree.queryByTestId(id('PreviewCommunitiesEmpty'))).toBeNull()
       expect(tree.toJSON()).toMatchSnapshot()
     }
   })
@@ -310,11 +346,12 @@ describe('the vetter desk’s badge', () => {
     const spy = jest
       .spyOn(GenericRecordsVettingStore.prototype, 'listDesk')
       .mockResolvedValue([{ status: 'accepted' }, { status: 'attested' }] as VettingDeskRequest[])
-    const tree = render(<DeskWaitingRow />)
+    const desk = <DeskRow vetterFor={[communityDid]} nameOf={() => 'Test VTC'} onOpen={jest.fn()} />
+    const tree = render(desk)
     await act(async () => undefined)
     expect(tree.getByTestId(id('PreviewDeskBadge'))).toHaveTextContent('1')
     spy.mockResolvedValue([])
-    const none = render(<DeskWaitingRow />)
+    const none = render(desk)
     await act(async () => undefined)
     expect(none.queryByTestId(id('PreviewDeskBadge'))).toBeNull()
   })
@@ -334,11 +371,10 @@ describe('the preview screens', () => {
     expect(navigate()).toHaveBeenCalledWith(Screens.PreviewRoom, { roomId: 'kernel-notes' })
   })
 
-  it('a community’s Rooms section: the offer opens, and answering it sends nothing', async () => {
+  it('a community’s Rooms section (R2): the offer shown in full, and answering it sends nothing', async () => {
     const tree = render(<CommunityRoomsSection />)
     expect(tree.getByTestId(id('PreviewNotConnected'))).toBeTruthy()
-    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewRoomOfferOpen'))))
-    expect(tree.getByTestId(id('PreviewRoomOfferDetails'))).toBeTruthy()
+    expect(tree.getByTestId(id('PreviewRoomOfferDetails'))).toHaveTextContent(/Preview\.OfferLine/)
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewRoomOfferAccept'))))
     expect(tree.getByTestId(id('PreviewNothingSent'))).toHaveTextContent('Preview.NothingSent')
     expect(navigate()).not.toHaveBeenCalled()
@@ -369,21 +405,33 @@ describe('the preview screens', () => {
     expect(tree.getByTestId(id('PreviewNothingSent'))).toBeTruthy()
   })
 
-  it('You’s rows: agent settings, AI-agent access, and the app’s settings and backup', async () => {
-    const onAgentSettings = jest.fn()
-    const tree = render(<YouSettingsRows linked onAgentSettings={onAgentSettings} />)
-    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewAgentSettingsRow'))))
-    expect(onAgentSettings).toHaveBeenCalled()
-    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewAiAccessRow'))))
-    expect(navigate()).toHaveBeenCalledWith(Screens.PreviewAiAccess, undefined)
+  it('You’s Settings (C3): groups open their lists; All settings is today’s Menu', async () => {
+    const tree = render(
+      <BasicAppContext>
+        <YouSettingsSection />
+      </BasicAppContext>
+    )
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewSettingsSecurity'))))
+    expect(navigate()).toHaveBeenCalledWith(Screens.PreviewSettingsGroup, { group: 'security' })
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewSettingsGeneral'))))
+    expect(navigate()).toHaveBeenCalledWith(Screens.PreviewSettingsGroup, { group: 'general' })
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewAppSettingsRow'))))
     expect(navigate()).toHaveBeenCalledWith(TabStacks.SettingStack)
   })
 
-  it('Contacts with Conversations: today’s contacts, and today’s Messages a tap away', async () => {
+  it('a settings group lists today’s setting screens and opens them', async () => {
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { group: 'security' } })
+    const tree = render(<PreviewSettingsGroup />)
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewSettingsEntry_ToggleBiometry'))))
+    expect(navigate()).toHaveBeenCalledWith(Screens.ToggleBiometry)
+    expect(tree.getByTestId(id('PreviewSettingsEntry_ChangePIN'))).toBeTruthy()
+    expect(tree.getByTestId(id('PreviewSettingsEntry_AutoLock'))).toBeTruthy()
+  })
+
+  it('Contacts (C1): Conversations first and open, All contacts a tap away', async () => {
     const tree = render(<ContactsWithConversations navigation={{}} />)
-    expect(tree.getByText('ListContacts')).toBeTruthy()
-    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewSegmentConversations'))))
     expect(tree.getByText('Messages')).toBeTruthy()
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewSegmentContacts'))))
+    expect(tree.getByText('ListContacts')).toBeTruthy()
   })
 })

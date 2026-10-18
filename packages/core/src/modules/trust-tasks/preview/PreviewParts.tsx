@@ -1,152 +1,303 @@
 /**
- * Rows the developer preview of the new navigation adds around the agent's
- * page parts: the vetter desk's heading with the waiting-requests badge on
- * Communities, and on You the way to agent settings, AI-agent room access and
- * the app's own settings and backup (today's Menu). Rendered only by
- * VtaAgentHome's `communities` and `you` parts, which only the preview passes.
+ * The pieces of the developer preview of the new navigation, shaped to the
+ * navigation mockups' option C (C2 Communities, C3 You) and the recommended
+ * frames R1–R3:
+ * - Communities: the vetting desk as one row with its badge, one compact row
+ *   per community, a next step when there is one, Your rooms, and Join a
+ *   community; with no membership, a plain empty state.
+ * - You: Requests, one compact "Your agent" card that opens the agent's page,
+ *   and Settings as a short list of groups.
+ * Rendered only by VtaAgentHome's preview parts, which only the preview passes.
  *
  * @module trust-tasks/preview/PreviewParts
  */
 import { useAgent } from '@bifold/react-hooks'
 import { useNavigation } from '@react-navigation/native'
-import React from 'react'
+import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pressable, View } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { ThemedText } from '../../../components/texts/ThemedText'
+import { TOKENS, useServices } from '../../../container-api'
 import { useTheme } from '../../../contexts/theme'
-import Button, { ButtonType } from '../../../components/buttons/Button'
 import { Screens, TabStacks } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 
 import { useDeskWaitingCount } from './deskWaiting'
 import { AiAccessRow, usePreviewStyles } from './RoomsPreview'
 
-/** "Vetting desk", with how many requests wait on it, as the top row of Communities. */
-export const DeskWaitingRow: React.FC = () => {
-  const { t } = useTranslation()
-  const { agent } = useAgent()
-  const styles = usePreviewStyles()
-  const { ColorPalette } = useTheme()
-  const waiting = useDeskWaitingCount(agent)
-  return (
-    <View
-      style={[styles.row, { paddingHorizontal: 4 }]}
-      accessible
-      accessibilityLabel={
-        waiting > 0 ? (t('Preview.DeskWaiting', { count: waiting }) as string) : (t('Preview.Desk') as string)
-      }
-      testID={testIdWithKey('PreviewDeskRow')}
-    >
-      <Icon name="clipboard-check-outline" size={22} color={ColorPalette.brand.primary} />
-      <ThemedText variant="labelTitle" style={{ flex: 1 }}>
-        {t('Preview.Desk')}
-      </ThemedText>
-      {waiting > 0 ? (
-        <View style={styles.badge} testID={testIdWithKey('PreviewDeskBadge')}>
-          <ThemedText style={styles.badgeText}>{waiting}</ThemedText>
-        </View>
-      ) : null}
-    </View>
-  )
-}
+type Nav = { navigate: (name: string, params?: object) => void }
 
-const Row: React.FC<{ icon: string; label: string; onPress: () => void; testID: string }> = ({
-  icon,
-  label,
-  onPress,
-  testID,
-}) => {
+/** One row of a grouped list: an icon, a title, a quieter line, and what sits at its end. */
+export const ListRow: React.FC<{
+  icon?: string
+  title: string
+  subtitle?: string
+  end?: React.ReactNode
+  onPress?: () => void
+  testID: string
+}> = ({ icon, title, subtitle, end, onPress, testID }) => {
   const styles = usePreviewStyles()
   const { ColorPalette } = useTheme()
   return (
     <Pressable
-      style={[styles.card, styles.row]}
+      style={styles.row}
       onPress={onPress}
-      accessibilityRole="button"
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
       testID={testIdWithKey(testID)}
     >
-      <Icon name={icon} size={24} color={ColorPalette.brand.primary} />
-      <ThemedText variant="bold" style={{ flex: 1 }}>
-        {label}
-      </ThemedText>
-      <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} />
+      {icon ? <Icon name={icon} size={22} color={ColorPalette.brand.primary} /> : null}
+      <View style={{ flex: 1, gap: 2 }}>
+        <ThemedText variant="bold">{title}</ThemedText>
+        {subtitle ? (
+          <ThemedText variant="caption" style={styles.muted}>
+            {subtitle}
+          </ThemedText>
+        ) : null}
+      </View>
+      {end}
+      {onPress ? <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} /> : null}
     </Pressable>
   )
 }
 
-/**
- * On You, after the agent and its devices: agent settings, AI-agent access,
- * then the app's settings and backup. With no agent linked, only the app's
- * settings: they are reachable in every state.
- */
-export const YouSettingsRows: React.FC<{ onAgentSettings: () => void; linked: boolean }> = ({
-  onAgentSettings,
-  linked,
+/** A titled group of rows, as the mockups draw Requests, Your agent and Settings. */
+export const Group: React.FC<{ title?: string; testID?: string; children: React.ReactNode }> = ({
+  title,
+  testID,
+  children,
 }) => {
-  const { t } = useTranslation()
-  const navigation = useNavigation()
+  const styles = usePreviewStyles()
   return (
-    <View style={{ gap: 12 }} testID={testIdWithKey('PreviewYouSettings')}>
-      {linked ? (
-        <>
-          <Row
-            icon="cog-outline"
-            label={t('Preview.AgentSettings')}
-            onPress={onAgentSettings}
-            testID="PreviewAgentSettingsRow"
-          />
-          <AiAccessRow />
-        </>
+    <View style={{ gap: 6 }} testID={testID ? testIdWithKey(testID) : undefined}>
+      {title ? (
+        <ThemedText variant="labelTitle" style={styles.muted} accessibilityRole="header">
+          {title}
+        </ThemedText>
       ) : null}
-      {/* Today's Menu, unchanged: app settings and wallet backup. */}
-      <Row
-        icon="tune-variant"
-        label={t('Preview.AppSettings')}
-        onPress={() => (navigation as unknown as { navigate: (name: string) => void }).navigate(TabStacks.SettingStack)}
-        testID="PreviewAppSettingsRow"
-      />
+      <View style={[styles.card, { gap: 0, paddingVertical: 4 }]}>{children}</View>
+    </View>
+  )
+}
+
+const Badge: React.FC<{ count: number; testID: string }> = ({ count, testID }) => {
+  const styles = usePreviewStyles()
+  return (
+    <View style={styles.badge} testID={testIdWithKey(testID)}>
+      <ThemedText style={styles.badgeText}>{count}</ThemedText>
     </View>
   )
 }
 
 /**
- * Communities with no agent linked: its own empty state. Joining and vetting
- * go through the agent, so the way on is You's link flow, plus "I was
- * invited" for a person who came with an invitation.
+ * "Vetting desk", one row at the top of Communities, with how many requests
+ * wait on it. With one community it opens that desk; with several it lists them.
  */
-export const CommunitiesUnlinked: React.FC = () => {
+export const DeskRow: React.FC<{
+  vetterFor: string[]
+  nameOf: (communityDid: string) => string
+  onOpen: (communityDid: string) => void
+}> = ({ vetterFor, nameOf, onOpen }) => {
   const { t } = useTranslation()
-  const navigation = useNavigation()
-  const styles = usePreviewStyles()
-  const { ColorPalette } = useTheme()
-  const nav = navigation as unknown as { navigate: (name: string, params?: object) => void }
+  const { agent } = useAgent()
+  const waiting = useDeskWaitingCount(agent)
+  const [open, setOpen] = useState(false)
+  const names = vetterFor.map(nameOf)
+  const youVet =
+    names.length > 1
+      ? t('Preview.YouVetForMany', {
+          first: names.slice(0, -1).join(', '),
+          last: names[names.length - 1],
+          interpolation: { escapeValue: false },
+        })
+      : t('Preview.YouVetFor', { community: names[0], interpolation: { escapeValue: false } })
   return (
-    <View style={{ gap: 16 }} testID={testIdWithKey('PreviewCommunitiesUnlinked')}>
+    <Group testID="PreviewDeskRow">
+      <ListRow
+        icon="clipboard-check-outline"
+        title={t('Preview.Desk')}
+        subtitle={`${waiting > 0 ? t('Preview.DeskRequests', { count: waiting }) : t('Preview.DeskNone')} · ${youVet}`}
+        end={waiting > 0 ? <Badge count={waiting} testID="PreviewDeskBadge" /> : null}
+        onPress={() => (vetterFor.length === 1 ? onOpen(vetterFor[0]) : setOpen(!open))}
+        testID="PreviewDeskOpen"
+      />
+      {open
+        ? vetterFor.map((did, i) => (
+            <ListRow key={did} title={names[i]} onPress={() => onOpen(did)} testID={`PreviewDeskOpen_${i}`} />
+          ))
+        : null}
+    </Group>
+  )
+}
+
+export interface CommunityRowItem {
+  communityDid: string
+  name: string
+  vetter: boolean
+}
+
+/** One compact row per community the person belongs to, each opening the community. */
+export const CommunityRows: React.FC<{ items: CommunityRowItem[]; onOpen: (communityDid: string) => void }> = ({
+  items,
+  onOpen,
+}) => {
+  const { t } = useTranslation()
+  return (
+    <Group testID="PreviewCommunityRows">
+      {items.map((item, i) => (
+        <ListRow
+          key={item.communityDid}
+          icon="account-group-outline"
+          title={item.name}
+          subtitle={t(item.vetter ? 'Preview.RoleVetter' : 'Preview.RoleMember')}
+          onPress={() => onOpen(item.communityDid)}
+          testID={`PreviewCommunityRow_${i}`}
+        />
+      ))}
+    </Group>
+  )
+}
+
+/** Communities with no membership, linked or not: said plainly, with nothing to tap (Alberto, 10-18). */
+export const CommunitiesEmpty: React.FC = () => {
+  const { t } = useTranslation()
+  const styles = usePreviewStyles()
+  return (
+    <View style={{ gap: 8, paddingVertical: 24 }} testID={testIdWithKey('PreviewCommunitiesEmpty')}>
       <ThemedText variant="headingThree" accessibilityRole="header">
         {t('Preview.CommunitiesTitle')}
       </ThemedText>
-      <ThemedText>{t('Preview.CommunitiesUnlinkedBody')}</ThemedText>
-      <Button
-        title={t('Preview.ConnectAgent')}
-        buttonType={ButtonType.Primary}
-        onPress={() => nav.navigate(TabStacks.YouStack, { screen: Screens.VtaLink, initial: false })}
-        testID={testIdWithKey('PreviewCommunitiesConnect')}
-      />
-      <Pressable
-        style={[styles.card, styles.row]}
-        onPress={() => nav.navigate(Screens.VtiInvited)}
-        accessibilityRole="button"
-        testID={testIdWithKey('PreviewCommunitiesInvited')}
-      >
-        <Icon name="email-open-outline" size={24} color={ColorPalette.brand.primary} />
-        <View style={{ flex: 1 }}>
-          <ThemedText variant="bold">{t('VtaLink.IWasInvited')}</ThemedText>
-          <ThemedText style={styles.muted}>{t('VtaLink.IWasInvitedHint')}</ThemedText>
-        </View>
-        <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} />
-      </Pressable>
+      <ThemedText style={styles.muted}>{t('Preview.CommunitiesEmpty')}</ThemedText>
     </View>
+  )
+}
+
+/** On You: one compact card for the agent, opening its page (switcher, devices, settings). */
+export const YourAgentCard: React.FC<{ name: string; status: React.ReactNode }> = ({ name, status }) => {
+  const { t } = useTranslation()
+  const navigation = useNavigation() as unknown as Nav
+  return (
+    <Group title={t('Preview.YourAgent')} testID="PreviewYourAgentCard">
+      <ListRow
+        icon="shield-account-outline"
+        title={name}
+        subtitle={t('Preview.YourAgentLine')}
+        onPress={() => navigation.navigate(Screens.PreviewYourAgent)}
+        testID="PreviewYourAgentOpen"
+      />
+      <View style={{ paddingHorizontal: 34, paddingBottom: 8 }}>{status}</View>
+    </Group>
+  )
+}
+
+/** On the agent's own page, after its devices: AI-agent room access and agent settings. */
+export const AgentPageRows: React.FC<{ onAgentSettings: () => void }> = ({ onAgentSettings }) => {
+  const { t } = useTranslation()
+  return (
+    <View style={{ gap: 12 }}>
+      <AiAccessRow />
+      <Group>
+        <ListRow
+          icon="cog-outline"
+          title={t('Preview.AgentSettings')}
+          subtitle={t('Preview.AgentSettingsLine')}
+          onPress={onAgentSettings}
+          testID="PreviewAgentSettingsRow"
+        />
+      </Group>
+    </View>
+  )
+}
+
+export type SettingsGroupKey = 'security' | 'exchanges' | 'general'
+
+/**
+ * Settings on You, as groups: each opens a short list of today's setting
+ * screens. "All settings" is today's Menu, where log-out, Developer settings
+ * (and the preview's own switch) and the rest stay. Reachable in every state,
+ * linked or not.
+ */
+export const YouSettingsSection: React.FC = () => {
+  const { t } = useTranslation()
+  const navigation = useNavigation() as unknown as Nav
+  const [{ enablePushNotifications }] = useServices([TOKENS.CONFIG])
+  const group = (key: SettingsGroupKey) => () => navigation.navigate(Screens.PreviewSettingsGroup, { group: key })
+  return (
+    <Group title={t('Preview.Settings')} testID="PreviewYouSettings">
+      <ListRow
+        icon="lock-outline"
+        title={t('Preview.SettingsSecurity')}
+        subtitle={t('Preview.SettingsSecurityLine')}
+        onPress={group('security')}
+        testID="PreviewSettingsSecurity"
+      />
+      <ListRow
+        icon="swap-horizontal"
+        title={t('Preview.SettingsExchanges')}
+        subtitle={t('Preview.SettingsExchangesLine')}
+        onPress={group('exchanges')}
+        testID="PreviewSettingsExchanges"
+      />
+      {enablePushNotifications ? (
+        <ListRow
+          icon="bell-outline"
+          title={t('Settings.Notifications')}
+          onPress={() => navigation.navigate(Screens.TogglePushNotifications)}
+          testID="PreviewSettingsNotifications"
+        />
+      ) : null}
+      <ListRow
+        icon="translate"
+        title={t('Preview.SettingsGeneral')}
+        subtitle={t('Preview.SettingsGeneralLine')}
+        onPress={group('general')}
+        testID="PreviewSettingsGeneral"
+      />
+      {/* Today's Menu, unchanged: log out, Developer settings and the rest. */}
+      <ListRow
+        icon="tune-variant"
+        title={t('Preview.SettingsAll')}
+        subtitle={t('Preview.SettingsAllLine')}
+        onPress={() => navigation.navigate(TabStacks.SettingStack)}
+        testID="PreviewAppSettingsRow"
+      />
+    </Group>
+  )
+}
+
+/** A next step, as one row: an invitation to accept or a vetting to continue. */
+export const NextStepRow: React.FC<{ text: string; onPress: () => void; testID: string }> = ({
+  text,
+  onPress,
+  testID,
+}) => {
+  const { t } = useTranslation()
+  return (
+    <Group>
+      <ListRow
+        icon="arrow-right-circle-outline"
+        title={t('VtaLink.NextStep')}
+        subtitle={text}
+        onPress={onPress}
+        testID={testID}
+      />
+    </Group>
+  )
+}
+
+/** "Join a community", the last row of Communities. */
+export const JoinCommunityRow: React.FC<{ onPress: () => void }> = ({ onPress }) => {
+  const { t } = useTranslation()
+  return (
+    <Group>
+      <ListRow
+        icon="plus-circle-outline"
+        title={t('Preview.JoinCommunity')}
+        onPress={onPress}
+        testID="PreviewJoinCommunity"
+      />
+    </Group>
   )
 }

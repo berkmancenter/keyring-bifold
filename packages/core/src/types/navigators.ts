@@ -96,6 +96,8 @@ export enum Screens {
   // Developer preview of the new navigation only (Preview: new navigation).
   PreviewRoom = 'Preview Room',
   PreviewAiAccess = 'Preview AI Agent Access',
+  PreviewYourAgent = 'Preview Your Agent',
+  PreviewSettingsGroup = 'Preview Settings Group',
 }
 
 export enum Stacks {
@@ -182,6 +184,19 @@ export type MyAgentStackParams = {
   [Screens.VtaClaim]: undefined
   [Screens.PreviewRoom]: { roomId: string }
   [Screens.PreviewAiAccess]: undefined
+  [Screens.PreviewYourAgent]: undefined
+  [Screens.PreviewSettingsGroup]: { group: 'security' | 'exchanges' | 'general' }
+  // Today's setting screens, which the preview's You stack also opens.
+  [Screens.ToggleBiometry]: undefined
+  [Screens.ChangePIN]: undefined
+  [Screens.AutoLock]: undefined
+  [Screens.ToggleHardwareAttestation]: undefined
+  [Screens.ToggleLocalityConfirmation]: undefined
+  [Screens.ToggleWitnessReporting]: undefined
+  [Screens.TogglePushNotifications]: undefined
+  [Screens.Language]: undefined
+  [Screens.ExportWallet]: undefined
+  [Screens.ImportWallet]: undefined
   [Screens.EditRCard]: { profileId: string } | undefined
 }
 
