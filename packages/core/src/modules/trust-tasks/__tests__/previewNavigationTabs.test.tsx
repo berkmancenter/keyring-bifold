@@ -10,6 +10,7 @@ import { NavigationContainer } from '@react-navigation/native'
 import { createStackNavigator } from '@react-navigation/stack'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'
+import { StyleSheet } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
@@ -73,6 +74,11 @@ jest.mock('../../../hooks/useUnreadMessages', () => ({
   useUnreadMessages: () => ({ totalUnread: 2, unreadByConnection: {} }),
 }))
 jest.mock('../../../components/InAppMessageNotifier', () => ({ __esModule: true, default: () => null }))
+// A 375-pt phone at the default text size, so the tab labels show.
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => ({ width: 375, height: 812, scale: 2, fontScale: 1 }),
+}))
 jest.mock('../../vrc/components/QRCodeExchangeSlider', () => ({ __esModule: true, default: () => null }))
 
 type Setter = { set(next: Record<string, unknown>): void }
@@ -146,6 +152,21 @@ describe('Preview: new navigation, off', () => {
 })
 
 describe('Preview: new navigation, on', () => {
+  // Alberto's iPhone 16: the active "Communities" label in bold wrapped to "Communitie / s".
+  it('each label is one line in its tab’s width, shrinking rather than wrapping, the same weight active or not', async () => {
+    const tree = await renderTabs({ previewNavigation: true })
+    // The tab bar draws each icon twice, active and inactive, and fades between them.
+    const labels = tree.getAllByText('TabStack.Communities')
+    expect(labels.length).toBeGreaterThan(1)
+    for (const label of labels) {
+      expect(label.props.numberOfLines).toBe(1)
+      expect(label.props.adjustsFontSizeToFit).toBe(true)
+      expect(label.props.minimumFontScale).toBeGreaterThan(0)
+      expect(StyleSheet.flatten(label.props.style).width).toBe(Math.floor(375 / 5) - 4)
+    }
+    expect(new Set(labels.map((l) => StyleSheet.flatten(l.props.style).fontWeight)).size).toBe(1)
+  })
+
   it('Wallet · Contacts · QR · Communities · You, and none of today’s tab buttons', async () => {
     const tree = await renderTabs({ previewNavigation: true })
     expect(tabIds(tree)).toEqual(PREVIEW)

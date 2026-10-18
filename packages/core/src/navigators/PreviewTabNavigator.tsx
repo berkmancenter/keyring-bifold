@@ -13,7 +13,7 @@
 import type { BottomTabNavigationOptions, createBottomTabNavigator } from '@react-navigation/bottom-tabs'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Text, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native'
+import { Text, useWindowDimensions, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { useTheme } from '../contexts/theme'
@@ -27,6 +27,15 @@ import MyAgentStack from './MyAgentStack'
 import SettingStack from './SettingStack'
 
 type Tab = ReturnType<typeof createBottomTabNavigator<TabStackParams>>
+
+/** The tabs that show a button: Wallet, Contacts, QR, Communities, You. */
+export const PREVIEW_VISIBLE_TABS = 5
+/**
+ * The smallest a tab's label shrinks to, relative to its Dynamic Type size.
+ * Labels show only below 18 pt scaled (TabStack's showLabels), and at that
+ * size "Communautés" needs 0.64 of it on a 375-pt phone (about 11.5 pt).
+ */
+export const TAB_LABEL_MIN_SCALE = 0.6
 
 const hidden: BottomTabNavigationOptions = { tabBarButton: () => null, tabBarItemStyle: { display: 'none' } }
 
@@ -54,7 +63,13 @@ export const PreviewTabNavigator: React.FC<PreviewTabNavigatorProps> = ({
   onQrPress,
 }) => {
   const { t } = useTranslation()
-  const { TabTheme, TextTheme, Assets } = useTheme()
+  const { TabTheme, Assets } = useTheme()
+  // Each label is one line in its tab's own width. "Communities" is wider than
+  // a fifth of a 375-pt phone even in regular weight (78.5 pt at 14 pt), and
+  // bold wrapped it on an iPhone 16; so one weight for both states, the active
+  // tab told by its colour, and the label shrinks to fit rather than wrap.
+  const { width } = useWindowDimensions()
+  const labelWidth = Math.floor(width / PREVIEW_VISIBLE_TABS) - 4
   const tabIcon =
     (label: string, icon: (color: string, focused: boolean) => React.ReactNode) =>
     // eslint-disable-next-line react/display-name
@@ -63,10 +78,14 @@ export const PreviewTabNavigator: React.FC<PreviewTabNavigatorProps> = ({
         {icon(color, focused)}
         {showLabels && (
           <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={TAB_LABEL_MIN_SCALE}
             style={{
               ...TabTheme.tabBarTextStyle,
               color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-              fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+              width: labelWidth,
+              textAlign: 'center',
             }}
           >
             {label}
