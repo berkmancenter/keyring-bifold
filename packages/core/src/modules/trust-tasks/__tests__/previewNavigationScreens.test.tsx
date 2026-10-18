@@ -188,6 +188,87 @@ describe('the agent’s page and its two parts', () => {
   })
 })
 
+describe('no agent linked, or not yet introduced: each part its own', () => {
+  const linked = {
+    kind: 'linked',
+    vtaDid: 'did:webvh:example:vta',
+    label: 'bob',
+    linkedAt: '2026-09-22T00:00:00Z',
+    connection: { kind: 'online', since: 0 },
+  }
+  const states: Record<string, Record<string, unknown>> = {
+    notLinked: { introSeen: true, link: { kind: 'notLinked' } },
+    revoked: {
+      introSeen: true,
+      link: { kind: 'revoked', vtaDid: 'did:webvh:example:vta', label: 'bob', reason: 'not in ACL', cause: 'notInAcl' },
+    },
+    introUnseen: { introSeen: false, link: linked },
+  }
+  const navigate = () =>
+    (jest.requireMock('@react-navigation/native') as { useNavigation: () => { navigate: jest.Mock } }).useNavigation()
+      .navigate
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-09-23T04:00:00Z'))
+    forgetAgentHoldings()
+    jest.spyOn(GenericRecordsVettingStore.prototype, 'listDesk').mockResolvedValue([])
+    navigate().mockClear()
+  })
+  afterEach(() => {
+    jest.useRealTimers()
+    jest.restoreAllMocks()
+  })
+
+  it.each(['notLinked', 'revoked', 'introUnseen'])(
+    'You, %s: the app’s settings are there; agent settings only once an agent is linked',
+    async (name) => {
+      controller.set({ activity: [], approvals: [], ...states[name] })
+      const tree = await renderHome('you')
+      expect(tree.getByTestId(id('PreviewYouSettings'))).toBeTruthy()
+      expect(tree.getByTestId(id('PreviewAppSettingsRow'))).toBeTruthy()
+      const agentRow = tree.queryByTestId(id('PreviewAgentSettingsRow'))
+      if (name === 'introUnseen') expect(agentRow).toBeTruthy()
+      else expect(agentRow).toBeNull()
+      expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
+    }
+  )
+
+  it('You, not linked: the link card as today, then the settings', async () => {
+    controller.set({ activity: [], approvals: [], ...states.notLinked })
+    const tree = await renderHome('you')
+    expect(tree.getByTestId(id('AgentHomeLink'))).toBeTruthy()
+  })
+
+  it.each(['notLinked', 'revoked'])(
+    'Communities, %s: its own empty state, not the link card; Connect goes to You’s link flow',
+    async (name) => {
+      controller.set({ activity: [], approvals: [], ...states[name] })
+      const tree = await renderHome('communities')
+      expect(tree.getByTestId(id('PreviewCommunitiesUnlinked'))).toBeTruthy()
+      expect(tree.queryByTestId(id('AgentHomeLink'))).toBeNull()
+      expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
+      await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesConnect'))))
+      expect(navigate()).toHaveBeenCalledWith(TabStacks.YouStack, { screen: Screens.VtaLink, initial: false })
+      await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesInvited'))))
+      expect(navigate()).toHaveBeenCalledWith(Screens.VtiInvited)
+    }
+  )
+
+  it('Communities, linked but not yet introduced: its content, not the introduction', async () => {
+    controller.set({ activity: [], approvals: [], ...states.introUnseen })
+    const tree = await renderHome('communities')
+    expect(tree.queryByTestId(id('AgentIntro'))).toBeNull()
+    expect(tree.getByTestId(id('AgentHolds'))).toBeTruthy()
+  })
+
+  it.each(['notLinked', 'revoked', 'introUnseen'])('today’s page, %s: nothing of the preview', async (name) => {
+    controller.set({ activity: [], approvals: [], ...states[name] })
+    const tree = await renderHome()
+    expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
+    expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
+  })
+})
+
 describe('the vetter desk’s badge', () => {
   afterEach(() => jest.restoreAllMocks())
 
@@ -264,7 +345,7 @@ describe('the preview screens', () => {
 
   it('You’s rows: agent settings, AI-agent access, and the app’s settings and backup', async () => {
     const onAgentSettings = jest.fn()
-    const tree = render(<YouSettingsRows onAgentSettings={onAgentSettings} />)
+    const tree = render(<YouSettingsRows linked onAgentSettings={onAgentSettings} />)
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewAgentSettingsRow'))))
     expect(onAgentSettings).toHaveBeenCalled()
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewAiAccessRow'))))

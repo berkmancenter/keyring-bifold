@@ -75,7 +75,12 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation, part, pr
   const [ScreenOptionsDictionary, config] = useServices([TOKENS.OBJECT_SCREEN_CONFIG, TOKENS.CONFIG])
 
   return (
-    <Stack.Navigator initialRouteName={landsOn} screenOptions={{ ...defaultStackOptions }}>
+    // The preview's Communities and You always land on the agent's page, which
+    // has its own render for each part with no agent linked.
+    <Stack.Navigator
+      initialRouteName={part && part !== 'all' ? Screens.VtaAgent : landsOn}
+      screenOptions={{ ...defaultStackOptions }}
+    >
       <Stack.Screen
         name={Screens.MyAgent}
         options={{ title: t('Screens.MyAgent'), ...ScreenOptionsDictionary[Screens.MyAgent] }}

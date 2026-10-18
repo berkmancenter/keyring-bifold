@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "e22b9993f6d91b7bec4b4ee7609442816b93cb93",
+  "generatedFrom": "a88c705493e9987bfcb94665a08c67bb98332d3b",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -688,6 +688,9 @@
     "PreviewAiGive": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
     "PreviewAiGiveConfirm": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
     "PreviewAiWithdraw": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewCommunitiesConnect": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewCommunitiesInvited": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewCommunitiesUnlinked": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewCommunityRooms": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "PreviewDeskBadge": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewDeskRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
@@ -718,6 +721,7 @@
     "PreviewWriteSheet": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
     "PreviewWriteSummary": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
     "PreviewWriteTitle": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewYouSettings": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewYourRooms": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "Primary": ["src/components/modals/AppGuideModal.tsx"],
     "ProfileCard": ["src/screens/Settings.tsx"],

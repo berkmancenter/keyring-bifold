@@ -940,6 +940,9 @@
   },
   "Preview": {
     "NotConnected": "Aperçu, non connecté",
+    "CommunitiesTitle": "Communautés",
+    "CommunitiesUnlinkedBody": "L’adhésion et la vérification passent par votre agent. Connectez-le d’abord.",
+    "ConnectAgent": "Connecter votre agent",
     "NothingSent": "Aperçu : rien n’a été envoyé.",
     "SegmentContacts": "Contacts",
     "SegmentConversations": "Conversations",

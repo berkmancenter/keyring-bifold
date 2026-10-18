@@ -867,6 +867,9 @@
   },
   "Preview": {
     "NotConnected": "Prévia, não conectada",
+    "CommunitiesTitle": "Comunidades",
+    "CommunitiesUnlinkedBody": "Entrar e ser verificado passam pelo seu agente. Conecte-o primeiro.",
+    "ConnectAgent": "Conectar seu agente",
     "NothingSent": "Prévia: nada foi enviado.",
     "SegmentContacts": "Contatos",
     "SegmentConversations": "Conversas",

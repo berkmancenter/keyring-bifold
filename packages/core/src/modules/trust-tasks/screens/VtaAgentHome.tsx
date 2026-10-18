@@ -50,7 +50,7 @@ import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
-import { DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
+import { CommunitiesUnlinked, DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
 import { YourRoomsSection } from '../preview/RoomsPreview'
 
 interface Holdings {
@@ -328,13 +328,37 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, withCorners])
 
+  // The preview's Communities with no agent: its own empty state, not the link card again.
+  if (part === 'communities' && link.kind !== 'linked') {
+    return (
+      <SafeAreaView style={styles.container} edges={['left', 'right']}>
+        <ScrollView contentContainerStyle={styles.content}>
+          <CommunitiesUnlinked />
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
+  // The preview's You ends with the app's settings in every state, linked or not:
+  // Menu is no longer a tab of its own there.
+  const youRows =
+    part === 'you' ? (
+      <YouSettingsRows linked={link.kind === 'linked'} onAgentSettings={() => go(Screens.VtaAgentSettings)} />
+    ) : null
+  const unlinkedBody = (children: React.ReactNode) =>
+    part === 'you' ? (
+      <ScrollView contentContainerStyle={styles.content}>
+        {children}
+        {youRows}
+      </ScrollView>
+    ) : (
+      <View style={styles.content}>{children}</View>
+    )
+
   // A removed phone is told so here, where it lands, not only behind "Link your agent".
   if (link.kind === 'revoked') {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-        <View style={styles.content}>
-          <RemovedPhoneCard link={link} />
-        </View>
+        {unlinkedBody(<RemovedPhoneCard link={link} />)}
       </SafeAreaView>
     )
   }
@@ -352,62 +376,74 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   if (link.kind !== 'linked') {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-        <View style={styles.content}>
-          <ErasedNotice />
-          <ThemedText>{t('VtaLink.NothingToLink')}</ThemedText>
-          <Button
-            title={t('VtaLink.LinkYourAgent')}
-            buttonType={ButtonType.Primary}
-            onPress={() => go(Screens.VtaLink)}
-            testID={testIdWithKey(VtaAgentHomeIds.homeLink)}
-          />
-        </View>
+        {unlinkedBody(
+          <>
+            <ErasedNotice />
+            <ThemedText>{t('VtaLink.NothingToLink')}</ThemedText>
+            <Button
+              title={t('VtaLink.LinkYourAgent')}
+              buttonType={ButtonType.Primary}
+              onPress={() => go(Screens.VtaLink)}
+              testID={testIdWithKey(VtaAgentHomeIds.homeLink)}
+            />
+          </>
+        )}
       </SafeAreaView>
     )
   }
 
-  // The first-link introduction: three short panels, once.
-  if (!state.introSeen) {
+  // The first-link introduction: three short panels, once. On You in the
+  // preview, with the settings under it; Communities goes straight to its content.
+  if (!state.introSeen && part !== 'communities') {
     const last = introPanel === INTRO_PANELS.length - 1
+    // The words and their buttons, centred together between the header and
+    // the tab bar. The tab bar sits below the screen, not over it, so no room
+    // is kept for it here; with that room the panel sat high (238, iPhone).
+    const intro = (
+      <View
+        style={{ flex: 1, justifyContent: 'center', padding: 20, gap: 16 }}
+        testID={testIdWithKey(VtaAgentHomeIds.intro)}
+      >
+        <ThemedText variant="headingTwo" accessibilityRole="header">
+          {t(`VtaLink.${INTRO_PANELS[introPanel]}Title`)}
+        </ThemedText>
+        <ThemedText>{t(`VtaLink.${INTRO_PANELS[introPanel]}Body`)}</ThemedText>
+        <ThemedText style={styles.muted}>
+          {t('VtaLink.IntroStep', { n: introPanel + 1, of: INTRO_PANELS.length })}
+        </ThemedText>
+        <View style={{ gap: 16, marginTop: 8 }} testID={testIdWithKey(VtaAgentHomeIds.introButtons)}>
+          <Button
+            title={last ? t('VtaLink.IntroDone') : t('VtaLink.IntroNext')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              if (last && agent) {
+                setIntroPanel(0)
+                void vtaAgent.markIntroSeen(agent)
+              } else setIntroPanel(introPanel + 1)
+            }}
+            testID={testIdWithKey(VtaAgentHomeIds.introNext)}
+          />
+          {!last ? (
+            <Button
+              title={t('VtaLink.IntroSkip')}
+              buttonType={ButtonType.Tertiary}
+              onPress={() => agent && void vtaAgent.markIntroSeen(agent)}
+              testID={testIdWithKey(VtaAgentHomeIds.introSkip)}
+            />
+          ) : null}
+        </View>
+      </View>
+    )
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right']}>
-        {/* The words and their buttons, centred together between the header
-            and the tab bar. The tab bar sits below the screen, not over it,
-            so no room is kept for it here; with that room the panel sat
-            high (238, iPhone). */}
-        <View
-          style={{ flex: 1, justifyContent: 'center', padding: 20, gap: 16 }}
-          testID={testIdWithKey(VtaAgentHomeIds.intro)}
-        >
-          <ThemedText variant="headingTwo" accessibilityRole="header">
-            {t(`VtaLink.${INTRO_PANELS[introPanel]}Title`)}
-          </ThemedText>
-          <ThemedText>{t(`VtaLink.${INTRO_PANELS[introPanel]}Body`)}</ThemedText>
-          <ThemedText style={styles.muted}>
-            {t('VtaLink.IntroStep', { n: introPanel + 1, of: INTRO_PANELS.length })}
-          </ThemedText>
-          <View style={{ gap: 16, marginTop: 8 }} testID={testIdWithKey(VtaAgentHomeIds.introButtons)}>
-            <Button
-              title={last ? t('VtaLink.IntroDone') : t('VtaLink.IntroNext')}
-              buttonType={ButtonType.Primary}
-              onPress={() => {
-                if (last && agent) {
-                  setIntroPanel(0)
-                  void vtaAgent.markIntroSeen(agent)
-                } else setIntroPanel(introPanel + 1)
-              }}
-              testID={testIdWithKey(VtaAgentHomeIds.introNext)}
-            />
-            {!last ? (
-              <Button
-                title={t('VtaLink.IntroSkip')}
-                buttonType={ButtonType.Tertiary}
-                onPress={() => agent && void vtaAgent.markIntroSeen(agent)}
-                testID={testIdWithKey(VtaAgentHomeIds.introSkip)}
-              />
-            ) : null}
-          </View>
-        </View>
+        {part === 'you' ? (
+          <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
+            {intro}
+            <View style={{ padding: 20 }}>{youRows}</View>
+          </ScrollView>
+        ) : (
+          intro
+        )}
       </SafeAreaView>
     )
   }
@@ -934,7 +970,7 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
             {addedCard}
             {devicesBlock}
             <SectionRule />
-            <YouSettingsRows onAgentSettings={() => go(Screens.VtaAgentSettings)} />
+            {youRows}
           </>
         ) : (
           <>

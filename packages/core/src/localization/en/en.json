@@ -1009,6 +1009,9 @@
   },
   "Preview": {
     "NotConnected": "Preview, not connected",
+    "CommunitiesTitle": "Communities",
+    "CommunitiesUnlinkedBody": "Joining and vetting go through your agent. Connect it first.",
+    "ConnectAgent": "Connect your agent",
     "NothingSent": "Preview: nothing was sent.",
     "SegmentContacts": "Contacts",
     "SegmentConversations": "Conversations",
