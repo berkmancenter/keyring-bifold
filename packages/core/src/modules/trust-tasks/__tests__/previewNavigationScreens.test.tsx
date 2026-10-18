@@ -7,7 +7,7 @@
  * preview screen: rooms with sample data marked "Preview, not connected",
  * whose buttons send nothing.
  */
-import { useRoute } from '@react-navigation/native'
+import { useIsFocused, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'
 
@@ -304,6 +304,40 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
       expect(navigate()).toHaveBeenCalledWith(Screens.VtiJoin)
     }
   )
+
+  it('Communities: back from the link screen without linking ends the intent; a later link does not open Join', async () => {
+    controller.set({ activity: [], approvals: [], ...states.notLinked })
+    const tree = await renderHome('communities')
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesJoin'))))
+    expect(navigate()).toHaveBeenCalledWith(Screens.VtaLink)
+    const focus = useIsFocused as jest.Mock
+    const again = () =>
+      tree.rerender(
+        <BasicAppContext>
+          <VtaAgentHome part="communities" />
+        </BasicAppContext>
+      )
+    // Away on the link screen, then back here, still unlinked.
+    focus.mockReturnValue(false)
+    await act(async () => again())
+    focus.mockReturnValue(true)
+    await act(async () => again())
+    await act(async () => {
+      controller.set({ link: linked })
+      jest.advanceTimersByTime(10)
+    })
+    expect(navigate()).not.toHaveBeenCalledWith(Screens.VtiJoin)
+  })
+
+  it('Communities: leaving the tab without linking ends the intent too', async () => {
+    controller.set({ activity: [], approvals: [], ...states.notLinked })
+    const tree = await renderHome('communities')
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesJoin'))))
+    tree.unmount()
+    controller.set({ link: linked })
+    await renderHome('communities')
+    expect(navigate()).not.toHaveBeenCalledWith(Screens.VtiJoin)
+  })
 
   it('Communities: linking for another reason does not open Join', async () => {
     controller.set({ activity: [], approvals: [], ...states.notLinked })

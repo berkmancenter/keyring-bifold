@@ -340,14 +340,20 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   }, [navigation, withCorners])
 
   // The preview's Communities: "Join a community" pressed with no agent linked
-  // linked one first; once it is linked, on to Join (joinAfterLink).
+  // opens the link screen over this one (joinAfterLink). Linked on that visit:
+  // on to Join. Back here unlinked (back, cancel), or this screen gone (another
+  // tab): the intent ends, so a later link by another route never opens Join.
   useEffect(() => {
-    if (part !== 'communities' || link.kind !== 'linked' || !joinAfterLink.take()) return
-    communityTarget.clearViewing()
-    go(Screens.VtiJoin)
+    if (part !== 'communities') return
+    if (link.kind === 'linked') {
+      if (!joinAfterLink.take()) return
+      communityTarget.clearViewing()
+      go(Screens.VtiJoin)
+    } else if (isFocused) joinAfterLink.drop()
     // `go` is a fresh closure each render over the same navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [part, link.kind])
+  }, [part, link.kind, isFocused])
+  useEffect(() => (part === 'communities' ? () => joinAfterLink.drop() : undefined), [part])
 
   // The preview's Communities with no agent: its own empty state, not the link card again.
   if (part === 'communities' && link.kind !== 'linked') {

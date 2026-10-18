@@ -1,8 +1,9 @@
 /**
  * "Join a community" pressed on the preview's Communities with no agent
  * linked: the link comes first, and once it is made, Communities goes on to
- * Join by itself. Kept here, not in the link flow, so the link screens are
- * unchanged; nothing sets it while the preview is off.
+ * Join by itself, but only on that visit: leaving the link screen unlinked,
+ * or leaving Communities, drops it. Kept here, not in the link flow, so the
+ * link screens are unchanged; nothing sets it while the preview is off.
  *
  * @module trust-tasks/preview/joinAfterLink
  */
@@ -12,6 +13,10 @@ export const joinAfterLink = {
   /** The person asked to join before an agent was linked. */
   ask(): void {
     asked = true
+  },
+  /** They left without linking: the intent ends. */
+  drop(): void {
+    asked = false
   },
   /** Whether they did, once: reading it clears it. */
   take(): boolean {
