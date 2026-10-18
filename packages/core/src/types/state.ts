@@ -33,6 +33,11 @@ export interface Preferences {
   useHardwareAttestation: boolean
   disableDataRetentionOption?: boolean
   preventAutoLock: boolean
+  /**
+   * Developer preview of the new navigation (Communities and You tabs).
+   * Absent or false: today's app exactly. Set only from Developer settings.
+   */
+  previewNavigation?: boolean
   enableShareableLink: boolean
   alternateContactNames: Record<string, string>
   autoLockTime?: number

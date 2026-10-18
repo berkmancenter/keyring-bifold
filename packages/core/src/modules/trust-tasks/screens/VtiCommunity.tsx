@@ -41,6 +41,7 @@ import { localDate } from './localTime'
 import { useToastAboveTabBar, useRoomAboveTabBar } from './aboveTabBar'
 import { PrivateVettingBadge } from './PrivateVettingBadge'
 import { VtiCommunityIds } from './VtiCommunity.ids'
+import { CommunityRoomsSection } from '../preview/RoomsPreview'
 
 /** The raw text behind a plain line, for Details: a framework code, else the message. */
 const detailOf = (err: unknown): string => {
@@ -48,7 +49,8 @@ const detailOf = (err: unknown): string => {
   return typeof code === 'string' && code ? code : err instanceof Error ? err.message : String(err)
 }
 
-const VtiCommunity: React.FC = () => {
+/** `roomsPreview`: only the preview of the new navigation (Developer settings) passes it. */
+const VtiCommunity: React.FC<{ roomsPreview?: boolean }> = ({ roomsPreview = false }) => {
   // The tab bar draws over the page: the last line scrolls clear of it.
   const roomAboveTabBar = useRoomAboveTabBar()
   const { t } = useTranslation()
@@ -288,6 +290,7 @@ const VtiCommunity: React.FC = () => {
           </View>
         ) : null}
 
+        {roomsPreview && membership ? <CommunityRoomsSection /> : null}
         {membership || heldElsewhere ? null : (
           <Text style={{ ...TextTheme.headingFour, color: TextTheme.normal.color }}>{t('MyAgent.WhatIsAsked')}</Text>
         )}

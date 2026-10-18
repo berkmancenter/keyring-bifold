@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "9f40add7e0753631d075c0357ec2a600d36342a0",
+  "generatedFrom": "e22b9993f6d91b7bec4b4ee7609442816b93cb93",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -82,7 +82,8 @@
     "AgentDeviceRename": ["src/modules/trust-tasks/screens/DeviceRow.tsx"],
     "AgentDevices": [
       "src/modules/trust-tasks/screens/DevicesCard.tsx",
-      "src/modules/trust-tasks/screens/MyAgent.ids.ts"
+      "src/modules/trust-tasks/screens/MyAgent.ids.ts",
+      "src/modules/trust-tasks/screens/VtaAgentHome.tsx"
     ],
     "AgentDoors": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentGaveUp": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
@@ -681,6 +682,43 @@
       "src/modules/trust-tasks/screens/VtiJoin.ids.ts"
     ],
     "PreventAutoLockSwitchElement": ["src/screens/Developer.tsx"],
+    "PreviewAiAccess": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewAiAccessRow": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewAiAgentActive": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewAiGive": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewAiGiveConfirm": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewAiWithdraw": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewCommunityRooms": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewDeskBadge": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewDeskRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewNavigationSwitchElement": ["src/screens/Developer.tsx"],
+    "PreviewNewNote": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewNothingSent": [
+      "src/modules/trust-tasks/preview/PreviewAiAccess.tsx",
+      "src/modules/trust-tasks/preview/PreviewRoom.tsx",
+      "src/modules/trust-tasks/preview/RoomsPreview.tsx"
+    ],
+    "PreviewRoom": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewRoomAccess": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewRoomOffer": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewRoomOfferAccept": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewRoomOfferDecline": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewRoomOfferDetails": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewRoomOfferOpen": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewSegmentContacts": ["src/modules/trust-tasks/preview/ContactsWithConversations.tsx"],
+    "PreviewSegmentConversations": ["src/modules/trust-tasks/preview/ContactsWithConversations.tsx"],
+    "PreviewTabCommunities": ["src/navigators/PreviewTabNavigator.tsx"],
+    "PreviewTabContacts": ["src/navigators/PreviewTabNavigator.tsx"],
+    "PreviewTabQR": ["src/navigators/PreviewTabNavigator.tsx"],
+    "PreviewTabWallet": ["src/navigators/PreviewTabNavigator.tsx"],
+    "PreviewTabYou": ["src/navigators/PreviewTabNavigator.tsx"],
+    "PreviewWriteBody": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewWriteCancel": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewWriteConfirm": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewWriteSheet": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewWriteSummary": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewWriteTitle": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewYourRooms": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "Primary": ["src/components/modals/AppGuideModal.tsx"],
     "ProfileCard": ["src/screens/Settings.tsx"],
     "ProofDetails": ["src/screens/ProofRequestUsageHistory.tsx"],
@@ -847,6 +885,7 @@
     "ToggleHardwareAttestation": ["src/screens/ToggleHardwareAttestation.tsx"],
     "ToggleLocalityConfirmation": ["src/screens/ToggleLocalityConfirmation.tsx"],
     "TogglePreventAutoLockSwitch": ["src/screens/Developer.tsx"],
+    "TogglePreviewNavigationSwitch": ["src/screens/Developer.tsx"],
     "ToggleUseShareableLink": ["src/screens/Developer.tsx"],
     "ToggleVerifierCapability": ["src/screens/Developer.tsx"],
     "ToggleWitnessReporting": ["src/screens/ToggleWitnessReporting.tsx"],
@@ -1113,6 +1152,10 @@
     "OfferDevice_": ["src/modules/trust-tasks/screens/NewPhoneOffer.tsx"],
     "OfferKeep_": ["src/modules/trust-tasks/screens/NewPhoneOffer.tsx"],
     "OfferRemove_": ["src/modules/trust-tasks/screens/NewPhoneOffer.tsx"],
+    "PreviewAiDuration_": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
+    "PreviewNoteBody_": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewNote_": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
+    "PreviewRoomRow_": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "RequestNotTaken_": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "RequestsOther_": ["src/modules/trust-tasks/screens/OtherAgentsRequests.tsx"],
     "RequestsSwitch_": ["src/modules/trust-tasks/screens/OtherAgentsRequests.tsx"],
@@ -1138,6 +1181,10 @@
       "src/modules/vrc/screens/ContactDetails.tsx"
     ],
     "MyQRIdentityCode": ["src/components/misc/QRScanner.tsx"],
+    "PreviewAgentSettingsRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewAiAccessRowNotConnected": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
+    "PreviewAppSettingsRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewWriteSheetNotConnected": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
     "SecureExchangeBadge": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "VetterHeaderBackground": ["src/components/views/VetterHeaderBackground.tsx"],
     "WitnessRecord": ["src/modules/vrc/screens/ContactDetails.tsx"],
@@ -1169,6 +1216,15 @@
     },
     {
       "src/components/texts/Link.tsx": "testIdForAccessabilityLabel(linkText)"
+    },
+    {
+      "src/modules/trust-tasks/preview/PreviewAiAccess.tsx": "key"
+    },
+    {
+      "src/modules/trust-tasks/preview/PreviewParts.tsx": "testID"
+    },
+    {
+      "src/modules/trust-tasks/preview/RoomsPreview.tsx": "testID"
     },
     {
       "src/modules/trust-tasks/screens/DidDetails.tsx": "`${testIdStem}Copy`"

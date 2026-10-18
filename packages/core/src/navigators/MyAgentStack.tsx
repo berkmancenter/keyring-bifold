@@ -12,7 +12,9 @@ import VtiCommunity from '../modules/trust-tasks/screens/VtiCommunity'
 import VtiInvited from '../modules/trust-tasks/screens/VtiInvited'
 import VtiJoin from '../modules/trust-tasks/screens/VtiJoin'
 import EditRCard from '../modules/vrc/screens/EditRCard'
-import VtaAgentHome from '../modules/trust-tasks/screens/VtaAgentHome'
+import VtaAgentHome, { type AgentHomePart } from '../modules/trust-tasks/screens/VtaAgentHome'
+import PreviewAiAccess from '../modules/trust-tasks/preview/PreviewAiAccess'
+import PreviewRoom from '../modules/trust-tasks/preview/PreviewRoom'
 import VtaRequests from '../modules/trust-tasks/screens/VtaRequests'
 import VtaCreateAgent from '../modules/trust-tasks/screens/VtaCreateAgent'
 import VtaDevices from '../modules/trust-tasks/screens/VtaDevices'
@@ -32,9 +34,17 @@ import { useDefaultStackOptions } from './defaultStackOptions'
 interface MyAgentStackProps {
   route?: RouteProp<ParamListBase>
   navigation?: StackNavigationProp<ParamListBase>
+  /**
+   * Only the preview of the new navigation (Developer settings, off by
+   * default) passes these: `part` is which part of the agent's page this
+   * stack lands on, `preview` adds the rooms screens and a community's Rooms
+   * section. Without them the stack is today's.
+   */
+  part?: AgentHomePart
+  preview?: boolean
 }
 
-const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
+const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation, part, preview = false }) => {
   const Stack = createStackNavigator<MyAgentStackParams>()
   // A link reaches this stack as the tab route's `{ screen: … }`. React
   // Navigation keeps that param on the tab, and a later tab press (which
@@ -72,11 +82,20 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
       >
         {() => <MyAgent config={config.vti} />}
       </Stack.Screen>
-      <Stack.Screen
-        name={Screens.VtiCommunity}
-        component={VtiCommunity}
-        options={{ title: t('Screens.Community'), ...ScreenOptionsDictionary[Screens.VtiCommunity] }}
-      />
+      {preview ? (
+        <Stack.Screen
+          name={Screens.VtiCommunity}
+          options={{ title: t('Screens.Community'), ...ScreenOptionsDictionary[Screens.VtiCommunity] }}
+        >
+          {() => <VtiCommunity roomsPreview />}
+        </Stack.Screen>
+      ) : (
+        <Stack.Screen
+          name={Screens.VtiCommunity}
+          component={VtiCommunity}
+          options={{ title: t('Screens.Community'), ...ScreenOptionsDictionary[Screens.VtiCommunity] }}
+        />
+      )}
       <Stack.Screen
         name={Screens.VtiVetting}
         options={{ title: t('Screens.Vetting'), ...ScreenOptionsDictionary[Screens.VtiVetting] }}
@@ -131,11 +150,23 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
       >
         {() => <VtiInvited config={config.vti} />}
       </Stack.Screen>
-      <Stack.Screen
-        name={Screens.VtaAgent}
-        component={VtaAgentHome}
-        options={{ title: t('Screens.VtaAgent'), ...ScreenOptionsDictionary[Screens.VtaAgent] }}
-      />
+      {part && part !== 'all' ? (
+        <Stack.Screen
+          name={Screens.VtaAgent}
+          options={{
+            title: t(part === 'communities' ? 'TabStack.Communities' : 'TabStack.You'),
+            ...ScreenOptionsDictionary[Screens.VtaAgent],
+          }}
+        >
+          {() => <VtaAgentHome part={part} />}
+        </Stack.Screen>
+      ) : (
+        <Stack.Screen
+          name={Screens.VtaAgent}
+          component={VtaAgentHome}
+          options={{ title: t('Screens.VtaAgent'), ...ScreenOptionsDictionary[Screens.VtaAgent] }}
+        />
+      )}
       {/* What waits for the person's decision: opened by a notification, the banner and Manage. */}
       <Stack.Screen
         name={Screens.VtaRequests}
@@ -164,6 +195,16 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
         component={VtaClaim as React.FC}
         options={{ title: t('Screens.VtaClaim'), ...ScreenOptionsDictionary[Screens.VtaClaim] }}
       />
+      {preview ? (
+        <>
+          <Stack.Screen name={Screens.PreviewRoom} component={PreviewRoom} options={{ title: t('Preview.Room') }} />
+          <Stack.Screen
+            name={Screens.PreviewAiAccess}
+            component={PreviewAiAccess}
+            options={{ title: t('Preview.AiAccess') }}
+          />
+        </>
+      ) : null}
     </Stack.Navigator>
   )
 }

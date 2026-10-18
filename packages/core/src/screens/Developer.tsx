@@ -29,6 +29,7 @@ const Developer: React.FC = () => {
   const [enableWalletNaming, setEnableWalletNaming] = useState(!!store.preferences.enableWalletNaming)
   const [enableShareableLink, setEnableShareableLink] = useState(!!store.preferences.enableShareableLink)
   const [preventAutoLock, setPreventAutoLock] = useState(!!store.preferences.preventAutoLock)
+  const [previewNavigation, setPreviewNavigation] = useState(!!store.preferences.previewNavigation)
   const [isSeedingContacts, setIsSeedingContacts] = useState(false)
   const [isClearingContacts, setIsClearingContacts] = useState(false)
   // The clocks in force in this build, for the e2e rows to read (gate efficiency
@@ -156,6 +157,14 @@ const Developer: React.FC = () => {
       payload: [!enableWalletNaming],
     })
     setEnableWalletNaming((previousState) => !previousState)
+  }
+
+  const togglePreviewNavigationSwitch = () => {
+    dispatch({
+      type: DispatchAction.PREVIEW_NAVIGATION,
+      payload: [!previewNavigation],
+    })
+    setPreviewNavigation((previousState) => !previousState)
   }
 
   const togglePreventAutoLockSwitch = () => {
@@ -368,6 +377,28 @@ const Developer: React.FC = () => {
             </Pressable>
           </View>
         )}
+        <View style={styles.settingContainer}>
+          <View style={{ flex: 1 }}>
+            <ThemedText variant="bold" style={styles.settingLabelText}>
+              {t('Settings.PreviewNavigation')}
+            </ThemedText>
+          </View>
+          <Pressable
+            style={styles.settingSwitchContainer}
+            accessibilityLabel={t('Settings.TogglePreviewNavigation')}
+            accessibilityRole={'switch'}
+            testID={testIdWithKey('TogglePreviewNavigationSwitch')}
+          >
+            <Switch
+              trackColor={{ false: ColorPalette.grayscale.lightGrey, true: ColorPalette.brand.primaryDisabled }}
+              thumbColor={previewNavigation ? ColorPalette.brand.primary : ColorPalette.grayscale.mediumGrey}
+              ios_backgroundColor={ColorPalette.grayscale.lightGrey}
+              onValueChange={togglePreviewNavigationSwitch}
+              testID={testIdWithKey('PreviewNavigationSwitchElement')}
+              value={previewNavigation}
+            />
+          </Pressable>
+        </View>
         <View style={styles.settingContainer}>
           <View style={{ flex: 1 }}>
             <ThemedText variant="bold" style={styles.settingLabelText}>

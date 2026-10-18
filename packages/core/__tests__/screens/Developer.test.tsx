@@ -51,6 +51,15 @@ describe('Developer Screen', () => {
     }
   })
 
+  test('Preview: new navigation is off until switched on, and the switch is the only way on', async () => {
+    const { findByTestId } = render(<Developer />)
+
+    const toggle = await findByTestId(testIdWithKey('PreviewNavigationSwitchElement'))
+    expect(toggle.props.value).toBe(false)
+    await act(async () => fireEvent(toggle, 'valueChange', true))
+    expect((await findByTestId(testIdWithKey('PreviewNavigationSwitchElement'))).props.value).toBe(true)
+  })
+
   test('pressables exist', async () => {
     const { findByTestId } = render(<Developer />)
 

@@ -54,6 +54,7 @@ import ContactStack from './ContactStack'
 import CredentialStack from './CredentialStack'
 import MessageStack from './MessageStack'
 import MyAgentStack from './MyAgentStack'
+import { PreviewTabNavigator } from './PreviewTabNavigator'
 import SettingStack from './SettingStack'
 import { BaseTourID } from '../types/tour'
 import QRCodeExchangeSlider from '../modules/vrc/components/QRCodeExchangeSlider'
@@ -143,7 +144,10 @@ const TabStack: React.FC = () => {
   const [showQRCodeBottomSheet, setShowQRCodeBottomSheet] = React.useState(false)
   const { totalUnread } = useUnreadMessages()
   // Requests waiting for this phone's decision: said on the tab, wherever the person is.
-  const myAgentBadge = myAgentTabBadge(useWaitingRequestsCount(), t)
+  const waitingRequestsCount = useWaitingRequestsCount()
+  const myAgentBadge = myAgentTabBadge(waitingRequestsCount, t)
+  // Developer settings, "Preview: new navigation": absent or off is today's tabs.
+  const previewNavigation = store.preferences.previewNavigation === true
   const styles = StyleSheet.create({
     tabBarIcon: {
       flex: 1,
@@ -296,133 +300,41 @@ const TabStack: React.FC = () => {
       <SiblingNoticeHost />
       {/* The agent asks to be sure it is the person before a task (a step-up, #200). */}
       <StepUpAskHost />
-      <Tab.Navigator
-        initialRouteName={TabStacks.ContactStack}
-        screenOptions={{
-          unmountOnBlur: true,
-          tabBarStyle: {
-            ...TabTheme.tabBarStyle,
-          },
-          tabBarActiveTintColor: TabTheme.tabBarActiveTintColor,
-          tabBarInactiveTintColor: TabTheme.tabBarInactiveTintColor,
-          header: () => null,
-        }}
-      >
-        <Tab.Screen
-          name={TabStacks.ContactStack}
-          component={ContactStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
-                {focused ? (
-                  <Assets.svg.contactsIconFocused height={20} width={20} fill={color} />
-                ) : (
-                  <Assets.svg.contactsIconOutline height={20} width={20} fill={color} />
-                )}
-                {showLabels && (
-                  <Text
-                    style={{
-                      ...TabTheme.tabBarTextStyle,
-                      color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-                      fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
-                    }}
-                  >
-                    {t('TabStack.Contacts')}
-                  </Text>
-                )}
-              </View>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel: t('TabStack.Contacts'),
-            tabBarTestID: testIdWithKey('Contacts'),
+      {previewNavigation ? (
+        <PreviewTabNavigator
+          Tab={Tab}
+          showLabels={showLabels}
+          styles={styles}
+          totalUnread={totalUnread}
+          waitingRequests={waitingRequestsCount}
+          onQrPress={() => {
+            if (assertNetworkConnected()) setShowQRCodeBottomSheet(true)
           }}
         />
-        <Tab.Screen
-          name={TabStacks.MessageStack}
-          component={MessageStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
-            tabBarBadgeStyle: styles.tabBarBadge,
-            tabBarIcon: ({ color, focused }) => (
-              <AttachTourStep tourID={BaseTourID.HomeTour} index={0}>
-                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
-                  {focused ? (
-                    <Assets.svg.tabFourFocusedIcon height={20} width={20} fill={color} />
-                  ) : (
-                    <Assets.svg.tabFourIcon height={20} width={20} fill={color} />
-                  )}
-                  {showLabels && (
-                    <Text
-                      style={{
-                        ...TabTheme.tabBarTextStyle,
-                        color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-                        fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
-                      }}
-                    >
-                      {t('TabStack.Messages')}
-                    </Text>
-                  )}
-                </View>
-              </AttachTourStep>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel:
-              totalUnread > 0 ? `${t('TabStack.Messages')}, ${totalUnread} unread` : t('TabStack.Messages'),
-            tabBarTestID: testIdWithKey('Message'),
-          }}
-        />
-        <Tab.Screen
-          name={TabStacks.ConnectStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarIcon: ({ color, focused }) => (
-              <AttachTourStep tourID={BaseTourID.HomeTour} index={2}>
-                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
-                  <Assets.svg.tabTwoIcon height={20} width={20} fill={color} />
-                  {showLabels && (
-                    <Text
-                      style={{
-                        ...TabTheme.tabBarTextStyle,
-                        color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-                        fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
-                      }}
-                    >
-                      {t('TabStack.QRCode')}
-                    </Text>
-                  )}
-                </View>
-              </AttachTourStep>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel: t('TabStack.QRCode'),
-            tabBarTestID: testIdWithKey('QR Code'),
-          }}
-          listeners={() => ({
-            tabPress: (e) => {
-              e.preventDefault()
-              if (!assertNetworkConnected()) {
-                return
-              }
-              setShowQRCodeBottomSheet(true)
+      ) : (
+        <Tab.Navigator
+          initialRouteName={TabStacks.ContactStack}
+          screenOptions={{
+            unmountOnBlur: true,
+            tabBarStyle: {
+              ...TabTheme.tabBarStyle,
             },
-          })}
+            tabBarActiveTintColor: TabTheme.tabBarActiveTintColor,
+            tabBarInactiveTintColor: TabTheme.tabBarInactiveTintColor,
+            header: () => null,
+          }}
         >
-          {() => <View />}
-        </Tab.Screen>
-        <Tab.Screen
-          name={TabStacks.CredentialStack}
-          component={CredentialStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarIcon: ({ color, focused }) => (
-              <AttachTourStep tourID={BaseTourID.HomeTour} index={1}>
+          <Tab.Screen
+            name={TabStacks.ContactStack}
+            component={ContactStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarIcon: ({ color, focused }) => (
                 <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
                   {focused ? (
-                    <Assets.svg.tabThreeFocusedIcon height={20} width={20} fill={color} />
+                    <Assets.svg.contactsIconFocused height={20} width={20} fill={color} />
                   ) : (
-                    <Assets.svg.tabThreeIcon height={20} width={20} fill={color} />
+                    <Assets.svg.contactsIconOutline height={20} width={20} fill={color} />
                   )}
                   {showLabels && (
                     <Text
@@ -432,75 +344,186 @@ const TabStack: React.FC = () => {
                         fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                       }}
                     >
-                      {t('TabStack.Wallet')}
+                      {t('TabStack.Contacts')}
                     </Text>
                   )}
                 </View>
-              </AttachTourStep>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel: t('TabStack.Wallet'),
-            tabBarTestID: testIdWithKey('Wallet'),
-          }}
-        />
-        <Tab.Screen
-          name={TabStacks.MyAgentStack}
-          component={MyAgentStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarBadge: myAgentBadge.badge,
-            tabBarBadgeStyle: styles.tabBarBadge,
-            tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
-                <Icon name={focused ? 'shield-account' : 'shield-account-outline'} size={24} color={color} />
-                {showLabels && (
-                  <Text
-                    style={{
-                      ...TabTheme.tabBarTextStyle,
-                      color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-                      fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
-                    }}
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel: t('TabStack.Contacts'),
+              tabBarTestID: testIdWithKey('Contacts'),
+            }}
+          />
+          <Tab.Screen
+            name={TabStacks.MessageStack}
+            component={MessageStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarBadge: totalUnread > 0 ? totalUnread : undefined,
+              tabBarBadgeStyle: styles.tabBarBadge,
+              tabBarIcon: ({ color, focused }) => (
+                <AttachTourStep tourID={BaseTourID.HomeTour} index={0}>
+                  <View
+                    style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}
                   >
-                    {t('TabStack.MyAgent')}
-                  </Text>
-                )}
-              </View>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel: myAgentBadge.label,
-            // A literal key, not the translated label: the tabs that pass a
-            // translated string into testIdWithKey have locale-dependent
-            // testIDs, which the e2e harness already works around.
-            tabBarTestID: testIdWithKey('MyAgent'),
-          }}
-        />
-        <Tab.Screen
-          name={TabStacks.SettingStack}
-          component={SettingStack}
-          options={{
-            tabBarIconStyle: styles.tabBarIcon,
-            tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
-                <Icon name={focused ? 'account-circle' : 'account-circle-outline'} size={26} color={color} />
-                {showLabels && (
-                  <Text
-                    style={{
-                      ...TabTheme.tabBarTextStyle,
-                      color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
-                      fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
-                    }}
+                    {focused ? (
+                      <Assets.svg.tabFourFocusedIcon height={20} width={20} fill={color} />
+                    ) : (
+                      <Assets.svg.tabFourIcon height={20} width={20} fill={color} />
+                    )}
+                    {showLabels && (
+                      <Text
+                        style={{
+                          ...TabTheme.tabBarTextStyle,
+                          color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                          fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                        }}
+                      >
+                        {t('TabStack.Messages')}
+                      </Text>
+                    )}
+                  </View>
+                </AttachTourStep>
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel:
+                totalUnread > 0 ? `${t('TabStack.Messages')}, ${totalUnread} unread` : t('TabStack.Messages'),
+              tabBarTestID: testIdWithKey('Message'),
+            }}
+          />
+          <Tab.Screen
+            name={TabStacks.ConnectStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarIcon: ({ color, focused }) => (
+                <AttachTourStep tourID={BaseTourID.HomeTour} index={2}>
+                  <View
+                    style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}
                   >
-                    {t('Screens.Settings')}
-                  </Text>
-                )}
-              </View>
-            ),
-            tabBarShowLabel: false,
-            tabBarAccessibilityLabel: t('Screens.Settings'),
-            tabBarTestID: testIdWithKey('Settings'),
-          }}
-        />
-      </Tab.Navigator>
+                    <Assets.svg.tabTwoIcon height={20} width={20} fill={color} />
+                    {showLabels && (
+                      <Text
+                        style={{
+                          ...TabTheme.tabBarTextStyle,
+                          color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                          fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                        }}
+                      >
+                        {t('TabStack.QRCode')}
+                      </Text>
+                    )}
+                  </View>
+                </AttachTourStep>
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel: t('TabStack.QRCode'),
+              tabBarTestID: testIdWithKey('QR Code'),
+            }}
+            listeners={() => ({
+              tabPress: (e) => {
+                e.preventDefault()
+                if (!assertNetworkConnected()) {
+                  return
+                }
+                setShowQRCodeBottomSheet(true)
+              },
+            })}
+          >
+            {() => <View />}
+          </Tab.Screen>
+          <Tab.Screen
+            name={TabStacks.CredentialStack}
+            component={CredentialStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarIcon: ({ color, focused }) => (
+                <AttachTourStep tourID={BaseTourID.HomeTour} index={1}>
+                  <View
+                    style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}
+                  >
+                    {focused ? (
+                      <Assets.svg.tabThreeFocusedIcon height={20} width={20} fill={color} />
+                    ) : (
+                      <Assets.svg.tabThreeIcon height={20} width={20} fill={color} />
+                    )}
+                    {showLabels && (
+                      <Text
+                        style={{
+                          ...TabTheme.tabBarTextStyle,
+                          color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                          fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                        }}
+                      >
+                        {t('TabStack.Wallet')}
+                      </Text>
+                    )}
+                  </View>
+                </AttachTourStep>
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel: t('TabStack.Wallet'),
+              tabBarTestID: testIdWithKey('Wallet'),
+            }}
+          />
+          <Tab.Screen
+            name={TabStacks.MyAgentStack}
+            component={MyAgentStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarBadge: myAgentBadge.badge,
+              tabBarBadgeStyle: styles.tabBarBadge,
+              tabBarIcon: ({ color, focused }) => (
+                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                  <Icon name={focused ? 'shield-account' : 'shield-account-outline'} size={24} color={color} />
+                  {showLabels && (
+                    <Text
+                      style={{
+                        ...TabTheme.tabBarTextStyle,
+                        color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                        fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                      }}
+                    >
+                      {t('TabStack.MyAgent')}
+                    </Text>
+                  )}
+                </View>
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel: myAgentBadge.label,
+              // A literal key, not the translated label: the tabs that pass a
+              // translated string into testIdWithKey have locale-dependent
+              // testIDs, which the e2e harness already works around.
+              tabBarTestID: testIdWithKey('MyAgent'),
+            }}
+          />
+          <Tab.Screen
+            name={TabStacks.SettingStack}
+            component={SettingStack}
+            options={{
+              tabBarIconStyle: styles.tabBarIcon,
+              tabBarIcon: ({ color, focused }) => (
+                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                  <Icon name={focused ? 'account-circle' : 'account-circle-outline'} size={26} color={color} />
+                  {showLabels && (
+                    <Text
+                      style={{
+                        ...TabTheme.tabBarTextStyle,
+                        color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
+                        fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
+                      }}
+                    >
+                      {t('Screens.Settings')}
+                    </Text>
+                  )}
+                </View>
+              ),
+              tabBarShowLabel: false,
+              tabBarAccessibilityLabel: t('Screens.Settings'),
+              tabBarTestID: testIdWithKey('Settings'),
+            }}
+          />
+        </Tab.Navigator>
+      )}
       <SafeAreaView style={{ backgroundColor: TabTheme.tabBarSecondaryBackgroundColor }} edges={['bottom']} />
       <QRCodeExchangeSlider
         visible={showQRCodeBottomSheet}

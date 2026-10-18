@@ -61,6 +61,7 @@ enum PreferencesDispatchAction {
   USE_DATA_RETENTION = 'preferences/useDataRetention',
   USE_HARDWARE_ATTESTATION = 'preferences/useHardwareAttestation',
   PREVENT_AUTO_LOCK = 'preferences/preventAutoLock',
+  PREVIEW_NAVIGATION = 'preferences/previewNavigation',
   USE_SHAREABLE_LINK = 'preferences/useShareableLink',
   UPDATE_ALTERNATE_CONTACT_NAMES = 'preferences/updateAlternateContactNames',
   AUTO_LOCK_TIME = 'preferences/autoLockTime',
@@ -516,6 +517,17 @@ export const reducer = <S extends State>(state: S, action: ReducerAction<Dispatc
       PersistentStorage.storeValueForKey(LocalStorageKeys.Preferences, preferences)
 
       return newState
+    }
+    case PreferencesDispatchAction.PREVIEW_NAVIGATION: {
+      const choice = (action?.payload ?? []).pop() ?? false
+      const preferences = { ...state.preferences, previewNavigation: choice }
+
+      PersistentStorage.storeValueForKey(LocalStorageKeys.Preferences, preferences)
+
+      return {
+        ...state,
+        preferences,
+      }
     }
     case PreferencesDispatchAction.PREVENT_AUTO_LOCK: {
       const choice = (action?.payload ?? []).pop() ?? false

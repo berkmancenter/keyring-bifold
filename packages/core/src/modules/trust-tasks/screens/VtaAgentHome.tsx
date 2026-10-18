@@ -50,6 +50,8 @@ import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
+import { DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
+import { YourRoomsSection } from '../preview/RoomsPreview'
 
 interface Holdings {
   personas: VtiPersona[]
@@ -115,7 +117,14 @@ export const forgetAgentHoldings = () => {
   lastHoldings.clear()
 }
 
-const VtaAgentHome: React.FC = () => {
+/**
+ * `all`: the agent's page as it is. `communities` and `you`: its parts on the
+ * Communities and You tabs of the preview of the new navigation (Developer
+ * settings, off by default), which only that preview passes.
+ */
+export type AgentHomePart = 'all' | 'communities' | 'you'
+
+const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   // The tab bar draws over the page: the last line scrolls clear of it.
   const roomAboveTabBar = useRoomAboveTabBar()
   const { t } = useTranslation()
@@ -300,7 +309,8 @@ const VtaAgentHome: React.FC = () => {
   // introduction is done. The Join menu that sat in the other corner said
   // again what the page's cards say (Alberto, 239): a member joins another
   // community from a row at the page's end.
-  const withCorners = link.kind === 'linked' && state.introSeen
+  // Communities in the preview has no agent settings: they are on You.
+  const withCorners = link.kind === 'linked' && state.introSeen && part !== 'communities'
   useLayoutEffect(() => {
     const setOptions = (navigation as unknown as { setOptions?: (options: object) => void }).setOptions
     if (!setOptions) return
@@ -519,6 +529,379 @@ const VtaAgentHome: React.FC = () => {
     }
   })
 
+  // The page's parts, so the preview of the new navigation (Developer
+  // settings) can show them on Communities and on You; `all` is the page as it is.
+  const agentLines = (
+    <>
+      {/* The header says "Your agent"; this card says which, and switches. */}
+      <ThemedText
+        variant="labelTitle"
+        style={styles.muted}
+        accessibilityRole="header"
+        testID={testIdWithKey(VtaAgentHomeIds.homeTitle)}
+      >
+        {t('VtaLink.SwitcherTitle')}
+      </ThemedText>
+      <AgentChips
+        agents={chips}
+        inset={PAGE_PADDING + CARD_PADDING}
+        switchingTo={state.switchingTo}
+        switchingText={
+          state.switchingTo
+            ? (t('VtaLink.Switching', {
+                agent: nameOf(state.switchingTo),
+                interpolation: { escapeValue: false },
+              }) as string)
+            : undefined
+        }
+        onUse={(vtaDid) => {
+          if (agent) void vtaAgent.useAgent(agent, vtaDid)
+        }}
+        onAdd={() => {
+          setLeavingToAdd(true)
+          void vtaAgent.startAddingAgent().then(() => go(Screens.VtaLink))
+        }}
+      />
+      <VtaStatusLine connection={link.connection} now={now} />
+      {/* Replies have stopped reaching this phone (VtaClient's breaker): it is
+              catching up, and asks wait a few minutes rather than fail one by one. */}
+      {state.repliesStalled && link.connection.kind !== 'gone' ? (
+        <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.catchingUp)}>
+          {t('VtaLink.CatchingUp')}
+        </ThemedText>
+      ) : null}
+      {link.connection.kind === 'gone' ? (
+        // Gone for good (agentGone.ts): said plainly, with the way on — a new agent.
+        // Unlinking is still confirmed, in Agent settings, with words for an agent that is gone.
+        <View style={{ gap: 8 }} testID={testIdWithKey(VtaAgentHomeIds.gone)}>
+          <ThemedText variant="bold" style={{ color: ColorPalette.semantic.error }}>
+            {t('VtaLink.AgentGoneTitle')}
+          </ThemedText>
+          <ThemedText testID={testIdWithKey(VtaAgentHomeIds.goneWhy)}>
+            {t(link.connection.why === 'notFound' ? 'VtaLink.AgentGoneNotFound' : 'VtaLink.AgentGoneUnreachable')}
+          </ThemedText>
+          <Button
+            title={t('VtaLink.AgentGoneLinkNew')}
+            buttonType={ButtonType.Primary}
+            onPress={() =>
+              (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(
+                Screens.VtaAgentSettings,
+                { unlink: true }
+              )
+            }
+            testID={testIdWithKey(VtaAgentHomeIds.goneLinkNew)}
+          />
+          <Button
+            title={t('VtaLink.TryAgainNow')}
+            buttonType={ButtonType.Secondary}
+            onPress={() => {
+              if (agent) void vtaAgent.tryAgainNow(agent)
+            }}
+            testID={testIdWithKey(VtaAgentHomeIds.goneTryAgain)}
+          />
+        </View>
+      ) : state.reconnectGaveUp ? (
+        // Reconnecting stopped after its tries: said, with the way on, never a silent loop.
+        <View style={{ gap: 8 }} testID={testIdWithKey(VtaAgentHomeIds.gaveUp)}>
+          <ThemedText style={{ color: ColorPalette.semantic.error }}>{t('VtaLink.AgentDidNotAnswer')}</ThemedText>
+          <Button
+            title={t('VtaLink.TryAgainNow')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              if (agent) void vtaAgent.tryAgainNow(agent)
+            }}
+            testID={testIdWithKey(VtaAgentHomeIds.tryAgain)}
+          />
+        </View>
+      ) : null}
+    </>
+  )
+  const standingLines = (
+    <>
+      {/* What this phone is here, in one line and one place: member,
+              vetter, applicant, or none of those yet. Only once what the agent
+              holds has been read, so a reader can trust the cards below. */}
+      {holdings ? (
+        <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.seat)}>
+          {removedBy
+            ? t('VtaLink.SeatRemoved', {
+                community: communityLabelOf(removedBy.communityDid, t),
+                interpolation: { escapeValue: false },
+              })
+            : t(
+                holdings.vetterFor.length
+                  ? 'VtaLink.SeatVetter'
+                  : isMember
+                    ? 'VtaLink.SeatMember'
+                    : isApplicant
+                      ? 'VtaLink.SeatApplicant'
+                      : 'VtaLink.SeatNone'
+              )}
+        </ThemedText>
+      ) : null}
+      {/* The step bar teaches the first setup, so it shows only until the
+              first membership; after that a status line says where this agent
+              stands (233). */}
+      {holdings && everMemberOf.size > 0 ? (
+        isMember ? (
+          // The id the vetting e2e has always read as "this phone is a member".
+          <ThemedText variant="bold" testID={testIdWithKey(VtaAgentHomeIds.journeyJoined)}>
+            {memberOf.length === 1
+              ? t('VtaLink.StatusMemberOf', {
+                  community: communityHeadingOf(memberOf[0], t, { claim: 'plain' }),
+                  interpolation: { escapeValue: false },
+                })
+              : t('VtaLink.StatusMemberOfMany', { count: memberOf.length })}
+          </ThemedText>
+        ) : null
+      ) : (
+        <View testID={testIdWithKey(VtaAgentHomeIds.journey)} accessibilityRole="summary">
+          <View style={styles.strip} testID={testIdWithKey(VtaAgentHomeIds.journeyRow)}>
+            {[
+              { key: 'Linked', label: t('VtaLink.JourneyLinked'), done: true, now: false },
+              { key: 'Join', label: t('VtaLink.JourneyJoin'), done: false, now: true },
+              { key: 'Member', label: t('VtaLink.JourneyMember'), done: false, now: false },
+            ].map((stop, i) => (
+              <View key={stop.key} style={styles.stopGroup} testID={testIdWithKey(`AgentJourneyStop_${stop.key}`)}>
+                {i > 0 ? <Icon name="chevron-right" size={16} color={ColorPalette.grayscale.mediumGrey} /> : null}
+                <View
+                  style={[styles.stop, stop.now ? styles.stopNow : undefined]}
+                  accessibilityState={{ selected: stop.now }}
+                  testID={testIdWithKey(`AgentJourney${stop.key}`)}
+                >
+                  <ThemedText style={stop.done ? styles.stopDone : stop.now ? styles.stopNowText : styles.muted}>
+                    {stop.done ? '✓ ' : ''}
+                    {stop.label}
+                  </ThemedText>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+      <Pressable
+        onPress={() => vtaAgent.showIntro()}
+        accessibilityRole="link"
+        testID={testIdWithKey(VtaAgentHomeIds.whatIsMyAgent)}
+      >
+        <ThemedText style={styles.link}>{t('VtaLink.WhatIsMyAgent')}</ThemedText>
+      </Pressable>
+    </>
+  )
+  const addedCard = (
+    <>
+      {/* An agent was just added: it is current now; keep it, or go back. */}
+      {state.addedAgent && state.addedAgent.added === link.vtaDid ? (
+        <View style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.addedCard)}>
+          <ThemedText variant="bold">
+            {t('VtaLink.AddedLinked', {
+              agent: nameOf(state.addedAgent.added),
+              interpolation: { escapeValue: false },
+            })}
+          </ThemedText>
+          <Button
+            title={t('VtaLink.AddedUseNow')}
+            buttonType={ButtonType.Primary}
+            onPress={() => vtaAgent.acknowledgeAdded()}
+            testID={testIdWithKey(VtaAgentHomeIds.addedUse)}
+          />
+          <Button
+            title={t('VtaLink.AddedKeep', {
+              agent: nameOf(state.addedAgent.from),
+              interpolation: { escapeValue: false },
+            })}
+            buttonType={ButtonType.Secondary}
+            onPress={() => agent && state.addedAgent && void vtaAgent.useAgent(agent, state.addedAgent.from)}
+            testID={testIdWithKey(VtaAgentHomeIds.addedKeep)}
+          />
+        </View>
+      ) : null}
+    </>
+  )
+  const vetterCards = (
+    <>
+      {/* A vetter's desk, at the top, one tap away: it sat in a community's
+            card further down, under a scroll (Alberto, 10-06). */}
+      {holdings?.vetterFor.map((communityDid) => (
+        <View key={communityDid} style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.vetterCard)}>
+          <ThemedText variant="bold">
+            {t('VtaLink.YouCanVet', {
+              community: communityHeadingOf(communityDid, t),
+              interpolation: { escapeValue: false },
+            })}
+          </ThemedText>
+          <ThemedText style={styles.muted}>{t('VtaLink.YouCanVetBody')}</ThemedText>
+          <Button
+            title={t('VtaLink.OpenDesk')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              // The vetting screen works on the chosen community.
+              communityTarget.choose(communityDid)
+              go(Screens.VtiVetting)
+            }}
+            testID={testIdWithKey(
+              holdings.vetterFor.length > 1 ? `AgentOpenDesk_${communityKeyOf(communityDid)}` : VtaAgentHomeIds.openDesk
+            )}
+          />
+        </View>
+      ))}
+    </>
+  )
+  const lapsedCard = (
+    <>
+      {!isVetter && lapsed.length > 0 ? (
+        <View style={styles.card}>
+          {lapsed.map(({ communityDid, grant }) => (
+            <ThemedText key={communityDid} style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.vetterLapsed)}>
+              {lapsedText(communityDid, grant)}
+            </ThemedText>
+          ))}
+        </View>
+      ) : null}
+    </>
+  )
+  const nextStepCard = (
+    <>
+      {/* One next step, only when there is one: an invitation waiting, else
+            a vetting to continue. */}
+      {nextStep ? (
+        <View style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.nextStep)}>
+          <ThemedText variant="labelTitle" style={styles.muted}>
+            {t('VtaLink.NextStep')}
+          </ThemedText>
+          <ThemedText variant="bold" testID={testIdWithKey(VtaAgentHomeIds.nextStepText)}>
+            {nextStep.kind === 'invitation'
+              ? t('VtaLink.InvitationWaiting', {
+                  community: communityHeadingOf(nextStep.communityDid, t),
+                  interpolation: { escapeValue: false },
+                })
+              : t('VtaLink.NextVetting', {
+                  community: communityHeadingOf(nextStep.communityDid, t),
+                  interpolation: { escapeValue: false },
+                })}
+          </ThemedText>
+          <Button
+            title={t(nextStep.kind === 'invitation' ? 'VtaLink.NextInvitationAction' : 'VtaLink.ContinueVetting')}
+            buttonType={ButtonType.Primary}
+            onPress={() => {
+              // The invitation and vetting screens work on the chosen community.
+              communityTarget.choose(nextStep.communityDid)
+              go(nextStep.kind === 'invitation' ? Screens.VtiInvited : Screens.VtiVetting)
+            }}
+            testID={testIdWithKey(
+              nextStep.kind === 'invitation' ? VtaAgentHomeIds.nextInvitation : VtaAgentHomeIds.continueVetting
+            )}
+          />
+        </View>
+      ) : null}
+    </>
+  )
+  const doorsBlock = (
+    <>
+      {/* Before joining, the two ways in lead; after, one row at the page's end. */}
+      {!isMember ? (
+        <>
+          <SectionRule />
+          {doorsCard}
+        </>
+      ) : null}
+    </>
+  )
+  const requestsSection = (
+    <RequestsSection waiting={waiting} onOpen={() => go(Screens.VtaRequests)} onAskMe={() => go(Screens.VtaAskMe)} />
+  )
+  const requestsBlock = (
+    <>
+      {/* What waits for this person's decision, on this agent: always here,
+            after the ways in (Alberto, 239). */}
+      <SectionRule />
+      {requestsSection}
+    </>
+  )
+  const holdsBlock = (
+    <>
+      <SectionRule />
+      <View style={styles.card} testID={testIdWithKey(VtaAgentHomeIds.holds)}>
+        <ThemedText variant="labelTitle" accessibilityRole="header">
+          {t('VtaLink.Holds')}
+        </ThemedText>
+        {!holdings ? (
+          <ActivityIndicator color={ColorPalette.brand.primary} />
+        ) : communitiesHeld(holdings).length === 0 ? (
+          <ThemedText style={styles.muted}>{t('VtaLink.HoldsNothing')}</ThemedText>
+        ) : (
+          // One card per community, with what the agent holds for it under
+          // it and at most one next step (IN-20c).
+          communitiesHeld(holdings).map((communityDid) => (
+            <View
+              key={communityDid}
+              style={communityDid === highlighted ? styles.highlight : undefined}
+              testID={communityDid === highlighted ? testIdWithKey(VtaAgentHomeIds.communityHighlighted) : undefined}
+            >
+              <CommunityCard
+                agent={agent}
+                communityDid={communityDid}
+                persona={holdings.personas.find((p) => p.communityDid === communityDid)}
+                membership={holdings.memberships.find((m) => m.communityDid === communityDid)}
+                invited={holdings.invited.includes(communityDid)}
+                vetter={holdings.vetterFor.includes(communityDid)}
+                deskShownAbove={holdings.vetterFor.includes(communityDid)}
+                linkedAt={link.linkedAt}
+                onOpen={goToCommunity}
+                onNextStep={onCardStep}
+                onPrimary={(action, did) => {
+                  // The vetting and invitation screens work on the chosen community.
+                  communityTarget.choose(did)
+                  go(action === 'acceptInvitation' ? Screens.VtiInvited : Screens.VtiVetting)
+                }}
+              />
+            </View>
+          ))
+        )}
+        {holdingsError ? (
+          <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.holdsStale)}>
+            {t('VtaLink.HoldsStale')}
+          </ThemedText>
+        ) : null}
+      </View>
+    </>
+  )
+  const devicesBlock = (
+    <>
+      <SectionRule />
+      {/* Its own default testID, said here: the part is no longer inside the page's tagged ScrollView. */}
+      <DevicesCard onPress={() => go(Screens.VtaDevices)} testID={testIdWithKey('AgentDevices')} />
+    </>
+  )
+  const joinAnotherBlock = (
+    <>
+      {/* A member joins another community from here: one row, not the two
+            cards again (Alberto, 239). Join takes a community's link or an
+            invitation's. */}
+      {isMember ? (
+        <>
+          <SectionRule />
+          <Pressable
+            style={[styles.row, { paddingHorizontal: 16 }]}
+            onPress={() => {
+              // From the beginning: which community, not the last one a link opened.
+              communityTarget.clearViewing()
+              go(Screens.VtiJoin)
+            }}
+            accessibilityRole="button"
+            testID={testIdWithKey(VtaAgentHomeIds.joinAnother)}
+          >
+            <Icon name="account-group-outline" size={24} color={ColorPalette.brand.primary} />
+            <ThemedText variant="bold" style={{ flex: 1 }}>
+              {t('VtaLink.JoinAnother')}
+            </ThemedText>
+            <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} />
+          </Pressable>
+        </>
+      ) : null}
+    </>
+  )
+
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView
@@ -530,344 +913,46 @@ const VtaAgentHome: React.FC = () => {
         // reads again on focus, and a community card has its own Check now.
         testID={testIdWithKey(VtaAgentHomeIds.home)}
       >
-        <View style={styles.card}>
-          {/* The header says "Your agent"; this card says which, and switches. */}
-          <ThemedText
-            variant="labelTitle"
-            style={styles.muted}
-            accessibilityRole="header"
-            testID={testIdWithKey(VtaAgentHomeIds.homeTitle)}
-          >
-            {t('VtaLink.SwitcherTitle')}
-          </ThemedText>
-          <AgentChips
-            agents={chips}
-            inset={PAGE_PADDING + CARD_PADDING}
-            switchingTo={state.switchingTo}
-            switchingText={
-              state.switchingTo
-                ? (t('VtaLink.Switching', {
-                    agent: nameOf(state.switchingTo),
-                    interpolation: { escapeValue: false },
-                  }) as string)
-                : undefined
-            }
-            onUse={(vtaDid) => {
-              if (agent) void vtaAgent.useAgent(agent, vtaDid)
-            }}
-            onAdd={() => {
-              setLeavingToAdd(true)
-              void vtaAgent.startAddingAgent().then(() => go(Screens.VtaLink))
-            }}
-          />
-          <VtaStatusLine connection={link.connection} now={now} />
-          {/* Replies have stopped reaching this phone (VtaClient's breaker): it is
-              catching up, and asks wait a few minutes rather than fail one by one. */}
-          {state.repliesStalled && link.connection.kind !== 'gone' ? (
-            <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.catchingUp)}>
-              {t('VtaLink.CatchingUp')}
-            </ThemedText>
-          ) : null}
-          {link.connection.kind === 'gone' ? (
-            // Gone for good (agentGone.ts): said plainly, with the way on — a new agent.
-            // Unlinking is still confirmed, in Agent settings, with words for an agent that is gone.
-            <View style={{ gap: 8 }} testID={testIdWithKey(VtaAgentHomeIds.gone)}>
-              <ThemedText variant="bold" style={{ color: ColorPalette.semantic.error }}>
-                {t('VtaLink.AgentGoneTitle')}
-              </ThemedText>
-              <ThemedText testID={testIdWithKey(VtaAgentHomeIds.goneWhy)}>
-                {t(link.connection.why === 'notFound' ? 'VtaLink.AgentGoneNotFound' : 'VtaLink.AgentGoneUnreachable')}
-              </ThemedText>
-              <Button
-                title={t('VtaLink.AgentGoneLinkNew')}
-                buttonType={ButtonType.Primary}
-                onPress={() =>
-                  (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(
-                    Screens.VtaAgentSettings,
-                    { unlink: true }
-                  )
-                }
-                testID={testIdWithKey(VtaAgentHomeIds.goneLinkNew)}
-              />
-              <Button
-                title={t('VtaLink.TryAgainNow')}
-                buttonType={ButtonType.Secondary}
-                onPress={() => {
-                  if (agent) void vtaAgent.tryAgainNow(agent)
-                }}
-                testID={testIdWithKey(VtaAgentHomeIds.goneTryAgain)}
-              />
-            </View>
-          ) : state.reconnectGaveUp ? (
-            // Reconnecting stopped after its tries: said, with the way on, never a silent loop.
-            <View style={{ gap: 8 }} testID={testIdWithKey(VtaAgentHomeIds.gaveUp)}>
-              <ThemedText style={{ color: ColorPalette.semantic.error }}>{t('VtaLink.AgentDidNotAnswer')}</ThemedText>
-              <Button
-                title={t('VtaLink.TryAgainNow')}
-                buttonType={ButtonType.Primary}
-                onPress={() => {
-                  if (agent) void vtaAgent.tryAgainNow(agent)
-                }}
-                testID={testIdWithKey(VtaAgentHomeIds.tryAgain)}
-              />
-            </View>
-          ) : null}
-          {/* What this phone is here, in one line and one place: member,
-              vetter, applicant, or none of those yet. Only once what the agent
-              holds has been read, so a reader can trust the cards below. */}
-          {holdings ? (
-            <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.seat)}>
-              {removedBy
-                ? t('VtaLink.SeatRemoved', {
-                    community: communityLabelOf(removedBy.communityDid, t),
-                    interpolation: { escapeValue: false },
-                  })
-                : t(
-                    holdings.vetterFor.length
-                      ? 'VtaLink.SeatVetter'
-                      : isMember
-                        ? 'VtaLink.SeatMember'
-                        : isApplicant
-                          ? 'VtaLink.SeatApplicant'
-                          : 'VtaLink.SeatNone'
-                  )}
-            </ThemedText>
-          ) : null}
-          {/* The step bar teaches the first setup, so it shows only until the
-              first membership; after that a status line says where this agent
-              stands (233). */}
-          {holdings && everMemberOf.size > 0 ? (
-            isMember ? (
-              // The id the vetting e2e has always read as "this phone is a member".
-              <ThemedText variant="bold" testID={testIdWithKey(VtaAgentHomeIds.journeyJoined)}>
-                {memberOf.length === 1
-                  ? t('VtaLink.StatusMemberOf', {
-                      community: communityHeadingOf(memberOf[0], t, { claim: 'plain' }),
-                      interpolation: { escapeValue: false },
-                    })
-                  : t('VtaLink.StatusMemberOfMany', { count: memberOf.length })}
-              </ThemedText>
-            ) : null
-          ) : (
-            <View testID={testIdWithKey(VtaAgentHomeIds.journey)} accessibilityRole="summary">
-              <View style={styles.strip} testID={testIdWithKey(VtaAgentHomeIds.journeyRow)}>
-                {[
-                  { key: 'Linked', label: t('VtaLink.JourneyLinked'), done: true, now: false },
-                  { key: 'Join', label: t('VtaLink.JourneyJoin'), done: false, now: true },
-                  { key: 'Member', label: t('VtaLink.JourneyMember'), done: false, now: false },
-                ].map((stop, i) => (
-                  <View key={stop.key} style={styles.stopGroup} testID={testIdWithKey(`AgentJourneyStop_${stop.key}`)}>
-                    {i > 0 ? <Icon name="chevron-right" size={16} color={ColorPalette.grayscale.mediumGrey} /> : null}
-                    <View
-                      style={[styles.stop, stop.now ? styles.stopNow : undefined]}
-                      accessibilityState={{ selected: stop.now }}
-                      testID={testIdWithKey(`AgentJourney${stop.key}`)}
-                    >
-                      <ThemedText style={stop.done ? styles.stopDone : stop.now ? styles.stopNowText : styles.muted}>
-                        {stop.done ? '✓ ' : ''}
-                        {stop.label}
-                      </ThemedText>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-          <Pressable
-            onPress={() => vtaAgent.showIntro()}
-            accessibilityRole="link"
-            testID={testIdWithKey(VtaAgentHomeIds.whatIsMyAgent)}
-          >
-            <ThemedText style={styles.link}>{t('VtaLink.WhatIsMyAgent')}</ThemedText>
-          </Pressable>
-        </View>
-
-        {/* An agent was just added: it is current now; keep it, or go back. */}
-        {state.addedAgent && state.addedAgent.added === link.vtaDid ? (
-          <View style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.addedCard)}>
-            <ThemedText variant="bold">
-              {t('VtaLink.AddedLinked', {
-                agent: nameOf(state.addedAgent.added),
-                interpolation: { escapeValue: false },
-              })}
-            </ThemedText>
-            <Button
-              title={t('VtaLink.AddedUseNow')}
-              buttonType={ButtonType.Primary}
-              onPress={() => vtaAgent.acknowledgeAdded()}
-              testID={testIdWithKey(VtaAgentHomeIds.addedUse)}
-            />
-            <Button
-              title={t('VtaLink.AddedKeep', {
-                agent: nameOf(state.addedAgent.from),
-                interpolation: { escapeValue: false },
-              })}
-              buttonType={ButtonType.Secondary}
-              onPress={() => agent && state.addedAgent && void vtaAgent.useAgent(agent, state.addedAgent.from)}
-              testID={testIdWithKey(VtaAgentHomeIds.addedKeep)}
-            />
-          </View>
-        ) : null}
-
-        {/* A vetter's desk, at the top, one tap away: it sat in a community's
-            card further down, under a scroll (Alberto, 10-06). */}
-        {holdings?.vetterFor.map((communityDid) => (
-          <View key={communityDid} style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.vetterCard)}>
-            <ThemedText variant="bold">
-              {t('VtaLink.YouCanVet', {
-                community: communityHeadingOf(communityDid, t),
-                interpolation: { escapeValue: false },
-              })}
-            </ThemedText>
-            <ThemedText style={styles.muted}>{t('VtaLink.YouCanVetBody')}</ThemedText>
-            <Button
-              title={t('VtaLink.OpenDesk')}
-              buttonType={ButtonType.Primary}
-              onPress={() => {
-                // The vetting screen works on the chosen community.
-                communityTarget.choose(communityDid)
-                go(Screens.VtiVetting)
-              }}
-              testID={testIdWithKey(
-                holdings.vetterFor.length > 1
-                  ? `AgentOpenDesk_${communityKeyOf(communityDid)}`
-                  : VtaAgentHomeIds.openDesk
-              )}
-            />
-          </View>
-        ))}
-        {!isVetter && lapsed.length > 0 ? (
-          <View style={styles.card}>
-            {lapsed.map(({ communityDid, grant }) => (
-              <ThemedText key={communityDid} style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.vetterLapsed)}>
-                {lapsedText(communityDid, grant)}
-              </ThemedText>
-            ))}
-          </View>
-        ) : null}
-
-        {/* One next step, only when there is one: an invitation waiting, else
-            a vetting to continue. */}
-        {nextStep ? (
-          <View style={[styles.card, styles.tip]} testID={testIdWithKey(VtaAgentHomeIds.nextStep)}>
-            <ThemedText variant="labelTitle" style={styles.muted}>
-              {t('VtaLink.NextStep')}
-            </ThemedText>
-            <ThemedText variant="bold" testID={testIdWithKey(VtaAgentHomeIds.nextStepText)}>
-              {nextStep.kind === 'invitation'
-                ? t('VtaLink.InvitationWaiting', {
-                    community: communityHeadingOf(nextStep.communityDid, t),
-                    interpolation: { escapeValue: false },
-                  })
-                : t('VtaLink.NextVetting', {
-                    community: communityHeadingOf(nextStep.communityDid, t),
-                    interpolation: { escapeValue: false },
-                  })}
-            </ThemedText>
-            <Button
-              title={t(nextStep.kind === 'invitation' ? 'VtaLink.NextInvitationAction' : 'VtaLink.ContinueVetting')}
-              buttonType={ButtonType.Primary}
-              onPress={() => {
-                // The invitation and vetting screens work on the chosen community.
-                communityTarget.choose(nextStep.communityDid)
-                go(nextStep.kind === 'invitation' ? Screens.VtiInvited : Screens.VtiVetting)
-              }}
-              testID={testIdWithKey(
-                nextStep.kind === 'invitation' ? VtaAgentHomeIds.nextInvitation : VtaAgentHomeIds.continueVetting
-              )}
-            />
-          </View>
-        ) : null}
-
-        {/* Before joining, the two ways in lead; after, one row at the page's end. */}
-        {!isMember ? (
+        {part === 'communities' ? (
           <>
+            {isVetter ? <DeskWaitingRow /> : null}
+            {vetterCards}
+            <View style={styles.card}>{standingLines}</View>
+            {lapsedCard}
+            {nextStepCard}
+            {doorsBlock}
+            {holdsBlock}
             <SectionRule />
-            {doorsCard}
+            <YourRoomsSection />
+            {joinAnotherBlock}
           </>
-        ) : null}
-
-        {/* What waits for this person's decision, on this agent: always here,
-            after the ways in (Alberto, 239). */}
-        <SectionRule />
-        <RequestsSection
-          waiting={waiting}
-          onOpen={() => go(Screens.VtaRequests)}
-          onAskMe={() => go(Screens.VtaAskMe)}
-        />
-
-        <SectionRule />
-        <View style={styles.card} testID={testIdWithKey(VtaAgentHomeIds.holds)}>
-          <ThemedText variant="labelTitle" accessibilityRole="header">
-            {t('VtaLink.Holds')}
-          </ThemedText>
-          {!holdings ? (
-            <ActivityIndicator color={ColorPalette.brand.primary} />
-          ) : communitiesHeld(holdings).length === 0 ? (
-            <ThemedText style={styles.muted}>{t('VtaLink.HoldsNothing')}</ThemedText>
-          ) : (
-            // One card per community, with what the agent holds for it under
-            // it and at most one next step (IN-20c).
-            communitiesHeld(holdings).map((communityDid) => (
-              <View
-                key={communityDid}
-                style={communityDid === highlighted ? styles.highlight : undefined}
-                testID={communityDid === highlighted ? testIdWithKey(VtaAgentHomeIds.communityHighlighted) : undefined}
-              >
-                <CommunityCard
-                  agent={agent}
-                  communityDid={communityDid}
-                  persona={holdings.personas.find((p) => p.communityDid === communityDid)}
-                  membership={holdings.memberships.find((m) => m.communityDid === communityDid)}
-                  invited={holdings.invited.includes(communityDid)}
-                  vetter={holdings.vetterFor.includes(communityDid)}
-                  deskShownAbove={holdings.vetterFor.includes(communityDid)}
-                  linkedAt={link.linkedAt}
-                  onOpen={goToCommunity}
-                  onNextStep={onCardStep}
-                  onPrimary={(action, did) => {
-                    // The vetting and invitation screens work on the chosen community.
-                    communityTarget.choose(did)
-                    go(action === 'acceptInvitation' ? Screens.VtiInvited : Screens.VtiVetting)
-                  }}
-                />
-              </View>
-            ))
-          )}
-          {holdingsError ? (
-            <ThemedText style={styles.muted} testID={testIdWithKey(VtaAgentHomeIds.holdsStale)}>
-              {t('VtaLink.HoldsStale')}
-            </ThemedText>
-          ) : null}
-        </View>
-
-        <SectionRule />
-        <DevicesCard onPress={() => go(Screens.VtaDevices)} />
-
-        {/* A member joins another community from here: one row, not the two
-            cards again (Alberto, 239). Join takes a community's link or an
-            invitation's. */}
-        {isMember ? (
+        ) : part === 'you' ? (
           <>
+            {requestsSection}
             <SectionRule />
-            <Pressable
-              style={[styles.row, { paddingHorizontal: 16 }]}
-              onPress={() => {
-                // From the beginning: which community, not the last one a link opened.
-                communityTarget.clearViewing()
-                go(Screens.VtiJoin)
-              }}
-              accessibilityRole="button"
-              testID={testIdWithKey(VtaAgentHomeIds.joinAnother)}
-            >
-              <Icon name="account-group-outline" size={24} color={ColorPalette.brand.primary} />
-              <ThemedText variant="bold" style={{ flex: 1 }}>
-                {t('VtaLink.JoinAnother')}
-              </ThemedText>
-              <Icon name="chevron-right" size={22} color={ColorPalette.grayscale.mediumGrey} />
-            </Pressable>
+            <View style={styles.card}>{agentLines}</View>
+            {addedCard}
+            {devicesBlock}
+            <SectionRule />
+            <YouSettingsRows onAgentSettings={() => go(Screens.VtaAgentSettings)} />
           </>
-        ) : null}
+        ) : (
+          <>
+            <View style={styles.card}>
+              {agentLines}
+              {standingLines}
+            </View>
+            {addedCard}
+            {vetterCards}
+            {lapsedCard}
+            {nextStepCard}
+            {doorsBlock}
+            {requestsBlock}
+            {holdsBlock}
+            {devicesBlock}
+            {joinAnotherBlock}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   )

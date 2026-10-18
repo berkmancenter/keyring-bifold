@@ -93,6 +93,9 @@ export enum Screens {
   VtiJoin = 'Join',
   SignIn = 'Sign in to a community',
   VtaClaim = 'Set up your agent',
+  // Developer preview of the new navigation only (Preview: new navigation).
+  PreviewRoom = 'Preview Room',
+  PreviewAiAccess = 'Preview AI Agent Access',
 }
 
 export enum Stacks {
@@ -118,6 +121,9 @@ export enum TabStacks {
   CredentialStack = 'Tab Credential Stack',
   MyAgentStack = 'Tab My Agent Stack',
   SettingStack = 'Tab Setting Stack',
+  // Developer preview of the new navigation only (Preview: new navigation).
+  CommunitiesStack = 'Tab Communities Stack',
+  YouStack = 'Tab You Stack',
 }
 
 export type RootStackParams = {
@@ -145,6 +151,8 @@ export type TabStackParams = {
   [TabStacks.CredentialStack]: NavigatorScreenParams<CredentialStackParams>
   [TabStacks.MyAgentStack]: NavigatorScreenParams<MyAgentStackParams>
   [TabStacks.SettingStack]: NavigatorScreenParams<SettingStackParams>
+  [TabStacks.CommunitiesStack]: NavigatorScreenParams<MyAgentStackParams>
+  [TabStacks.YouStack]: NavigatorScreenParams<MyAgentStackParams>
 }
 
 /** My Agent: the wallet's VTI agent, the communities it reaches, applications. */
@@ -172,6 +180,8 @@ export type MyAgentStackParams = {
   [Screens.VtiJoin]: undefined
   [Screens.SignIn]: undefined
   [Screens.VtaClaim]: undefined
+  [Screens.PreviewRoom]: { roomId: string }
+  [Screens.PreviewAiAccess]: undefined
   [Screens.EditRCard]: { profileId: string } | undefined
 }
 

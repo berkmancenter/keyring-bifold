@@ -10,6 +10,7 @@ import ContactDetails from '../modules/vrc/screens/ContactDetails'
 import WitnessHeaderButton from '../modules/vrc/components/WitnessHeaderButton'
 import CredentialDetails from '../screens/CredentialDetails'
 import ListContacts from '../modules/vrc/screens/ListContacts'
+import ContactsWithConversations from '../modules/trust-tasks/preview/ContactsWithConversations'
 import ProofDetails from '../screens/ProofDetails'
 import RenameContact from '../screens/RenameContact'
 import JSONDetails from '../screens/JSONDetails'
@@ -23,7 +24,8 @@ import { ContactStackParams, Screens } from '../types/navigators'
 import { useDefaultStackOptions } from './defaultStackOptions'
 import { TOKENS, useServices } from '../container-api'
 
-const ContactStack: React.FC = () => {
+/** `conversations`: only the preview of the new navigation (Developer settings) passes it. */
+const ContactStack: React.FC<{ conversations?: boolean }> = ({ conversations = false }) => {
   const Stack = createStackNavigator<ContactStackParams>()
   const theme = useTheme()
   const { t } = useTranslation()
@@ -34,7 +36,7 @@ const ContactStack: React.FC = () => {
     <Stack.Navigator screenOptions={{ ...defaultStackOptions }}>
       <Stack.Screen
         name={Screens.Contacts}
-        component={ListContacts}
+        component={conversations ? (ContactsWithConversations as React.FC) : ListContacts}
         options={{
           title: t('Screens.Contacts'),
           headerRight: () => (
