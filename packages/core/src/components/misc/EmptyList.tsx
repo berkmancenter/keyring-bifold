@@ -4,13 +4,33 @@ import { View } from 'react-native'
 
 import { useTheme } from '../../contexts/theme'
 import { testIdWithKey } from '../../utils/testable'
+import Button, { ButtonType } from '../buttons/Button'
 import { ThemedText } from '../texts/ThemedText'
 
 export interface EmptyListProps {
   message?: string
+  /**
+   * For an empty state other than the Wallet's (the preview of the new
+   * navigation's Communities): its own icon, a line under the message, one
+   * button, and testIDs. Without them the list reads as it always has.
+   */
+  icon?: React.ReactNode
+  description?: string
+  actionTitle?: string
+  onAction?: () => void
+  actionTestID?: string
+  testID?: string
 }
 
-const EmptyList: React.FC<EmptyListProps> = ({ message }) => {
+const EmptyList: React.FC<EmptyListProps> = ({
+  message,
+  icon,
+  description,
+  actionTitle,
+  onAction,
+  actionTestID,
+  testID,
+}) => {
   const { t } = useTranslation()
   const { ListItems, Assets, ColorPalette } = useTheme()
 
@@ -25,11 +45,24 @@ const EmptyList: React.FC<EmptyListProps> = ({ message }) => {
         alignItems: 'center',
         backgroundColor: ColorPalette.brand.primaryBackground,
       }}
+      testID={testID ? testIdWithKey(testID) : undefined}
     >
-      <Assets.svg.emptyWallet fill={ListItems.emptyList.color} height={100} />
+      {icon ?? <Assets.svg.emptyWallet fill={ListItems.emptyList.color} height={100} />}
       <ThemedText style={[ListItems.emptyList, { textAlign: 'center' }]} testID={testIdWithKey('NoneYet')}>
         {message || t('Global.NoneYet!')}
       </ThemedText>
+      {description ? <ThemedText style={{ textAlign: 'center', marginTop: 8 }}>{description}</ThemedText> : null}
+      {actionTitle && onAction ? (
+        <View style={{ marginTop: 24, width: '75%' }}>
+          <Button
+            title={actionTitle}
+            accessibilityLabel={actionTitle}
+            buttonType={ButtonType.Primary}
+            onPress={onAction}
+            testID={actionTestID ? testIdWithKey(actionTestID) : undefined}
+          />
+        </View>
+      ) : null}
     </View>
   )
 }

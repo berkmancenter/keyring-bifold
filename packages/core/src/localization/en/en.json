@@ -1009,7 +1009,6 @@
   },
   "Preview": {
     "NotConnected": "Preview, not connected",
-    "CommunitiesTitle": "Communities",
     "NothingSent": "Preview: nothing was sent.",
     "SegmentContacts": "All contacts",
     "SegmentConversations": "Conversations",
@@ -1059,7 +1058,7 @@
     "AiGiveHint": "One room, only what you tick, and it ends by itself. You can withdraw it sooner here.",
     "AiGiveConfirm": "Give access",
     "AgentSettings": "Agent settings",
-    "CommunitiesEmpty": "You haven't joined a community yet.",
+    "CommunitiesEmpty": "Communities you join will appear here. Start by scanning an invitation or asking to join.",
     "DeskRequests_one": "1 request",
     "DeskRequests_other": "{{count}} requests",
     "DeskNone": "No requests waiting",
@@ -1085,7 +1084,8 @@
     "CommunityCards": "Cards",
     "CommunityMembershipCard": "Membership card · kept by your agent",
     "OfferLine": "{{community}} offers you a place: {{access}}, until {{until}}",
-    "JoiningAsLine": "Joining as {{persona}}"
+    "JoiningAsLine": "Joining as {{persona}}",
+    "CommunitiesEmptyTitle": "No communities yet"
   },
   "RootStack": {
     "Contacts": "Contacts",

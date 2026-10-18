@@ -60,6 +60,7 @@ import {
   YouSettingsSection,
   YourAgentCard,
 } from '../preview/PreviewParts'
+import { joinAfterLink } from '../preview/joinAfterLink'
 import { YourRoomsSection } from '../preview/RoomsPreview'
 
 interface Holdings {
@@ -338,13 +339,21 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, withCorners])
 
+  // The preview's Communities: "Join a community" pressed with no agent linked
+  // linked one first; once it is linked, on to Join (joinAfterLink).
+  useEffect(() => {
+    if (part !== 'communities' || link.kind !== 'linked' || !joinAfterLink.take()) return
+    communityTarget.clearViewing()
+    go(Screens.VtiJoin)
+    // `go` is a fresh closure each render over the same navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [part, link.kind])
+
   // The preview's Communities with no agent: its own empty state, not the link card again.
   if (part === 'communities' && link.kind !== 'linked') {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right']}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <CommunitiesEmpty />
-        </ScrollView>
+        <CommunitiesEmpty linked={false} />
       </SafeAreaView>
     )
   }
@@ -945,6 +954,15 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
     </>
   )
 
+  // The preview's Communities with no membership: the empty state fills the screen.
+  if (part === 'communities' && holdings && memberOf.length === 0 && !isVetter) {
+    return (
+      <SafeAreaView style={styles.container} edges={['left', 'right']}>
+        <CommunitiesEmpty linked />
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView
@@ -961,8 +979,6 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
           // rooms, Join; with no membership, a plain empty state (Alberto, 10-18).
           !holdings ? (
             <ActivityIndicator color={ColorPalette.brand.primary} />
-          ) : memberOf.length === 0 && !isVetter ? (
-            <CommunitiesEmpty />
           ) : (
             <>
               {isVetter ? (

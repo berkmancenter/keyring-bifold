@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "ad34beaabd607b7fb0fdf57449f21bce41b2e337",
+  "generatedFrom": "88ea63f7a469ec1a886db85fd1b99e35ced311f8",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -688,7 +688,6 @@
     "PreviewAiGive": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
     "PreviewAiGiveConfirm": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
     "PreviewAiWithdraw": ["src/modules/trust-tasks/preview/PreviewAiAccess.tsx"],
-    "PreviewCommunitiesEmpty": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewCommunityRooms": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "PreviewNavigationSwitchElement": ["src/screens/Developer.tsx"],
     "PreviewNewNote": ["src/modules/trust-tasks/preview/PreviewRoom.tsx"],
@@ -1183,6 +1182,7 @@
     "PreviewAgentSettingsRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewAiAccessRowNotConnected": ["src/modules/trust-tasks/preview/RoomsPreview.tsx"],
     "PreviewAppSettingsRow": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
+    "PreviewCommunitiesEmpty": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
     "PreviewCommunityCard": ["src/modules/trust-tasks/screens/VtiCommunity.tsx"],
     "PreviewCommunityOpenDesk": ["src/modules/trust-tasks/screens/VtiCommunity.tsx"],
     "PreviewCommunityRows": ["src/modules/trust-tasks/preview/PreviewParts.tsx"],
@@ -1212,6 +1212,12 @@
     },
     {
       "src/components/misc/CredentialCard11ActionFooter.tsx": "testID"
+    },
+    {
+      "src/components/misc/EmptyList.tsx": "actionTestID"
+    },
+    {
+      "src/components/misc/EmptyList.tsx": "testID"
     },
     {
       "src/components/misc/InfoBox.tsx": "onCallToActionLabel"

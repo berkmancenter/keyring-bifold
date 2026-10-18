@@ -184,12 +184,20 @@ describe('the agent’s page and the preview’s parts', () => {
     expect(tree.getByTestId(id('PreviewCommunityRow_0'))).toHaveTextContent(/Preview\.RoleVetter/)
   })
 
-  it('Communities, linked with no membership: a plain empty state, with no link, join or journey', async () => {
+  it('Communities, linked with no membership: the Wallet’s empty state with one button, Join a community', async () => {
     // A persona applying somewhere, with no membership and no grant.
     mockGrantState.mockResolvedValueOnce({ state: 'none' } as never)
     const tree = await renderHome('communities', records.slice(0, 1))
     expect(sectionsOf(tree)).toEqual(['PreviewCommunitiesEmpty'])
-    expect(tree.getByTestId(id('PreviewCommunitiesEmpty'))).toHaveTextContent(/Preview\.CommunitiesEmpty/)
+    const empty = tree.getByTestId(id('PreviewCommunitiesEmpty'))
+    expect(empty).toHaveTextContent(/Preview\.CommunitiesEmptyTitle/)
+    expect(empty).toHaveTextContent(/Preview\.CommunitiesEmpty(?!Title)/)
+    const nav = (
+      jest.requireMock('@react-navigation/native') as { useNavigation: () => { navigate: jest.Mock } }
+    ).useNavigation().navigate
+    nav.mockClear()
+    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesJoin'))))
+    expect(nav).toHaveBeenCalledWith(Screens.VtiJoin)
     for (const gone of [
       'AgentHomeLink',
       'AgentInvited',
@@ -285,8 +293,27 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
         expect(tree.queryByTestId(id(gone))).toBeNull()
       }
       expect(navigate()).not.toHaveBeenCalled()
+      // Join with no agent: the link first, and once linked, on to Join.
+      await act(async () => fireEvent.press(tree.getByTestId(id('PreviewCommunitiesJoin'))))
+      expect(navigate()).toHaveBeenCalledWith(Screens.VtaLink)
+      expect(navigate()).not.toHaveBeenCalledWith(Screens.VtiJoin)
+      await act(async () => {
+        controller.set({ link: linked })
+        jest.advanceTimersByTime(10)
+      })
+      expect(navigate()).toHaveBeenCalledWith(Screens.VtiJoin)
     }
   )
+
+  it('Communities: linking for another reason does not open Join', async () => {
+    controller.set({ activity: [], approvals: [], ...states.notLinked })
+    await renderHome('communities')
+    await act(async () => {
+      controller.set({ link: linked })
+      jest.advanceTimersByTime(10)
+    })
+    expect(navigate()).not.toHaveBeenCalledWith(Screens.VtiJoin)
+  })
 
   it('Communities, linked but not yet introduced: its content, not the introduction', async () => {
     controller.set({ activity: [], approvals: [], ...states.introUnseen })

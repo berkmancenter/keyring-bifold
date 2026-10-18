@@ -867,7 +867,6 @@
   },
   "Preview": {
     "NotConnected": "Prévia, não conectada",
-    "CommunitiesTitle": "Comunidades",
     "NothingSent": "Prévia: nada foi enviado.",
     "SegmentContacts": "Todos os contatos",
     "SegmentConversations": "Conversas",
@@ -917,7 +916,7 @@
     "AiGiveHint": "Uma sala, só o que você marcar, e o acesso termina sozinho. Você pode retirá-lo antes aqui.",
     "AiGiveConfirm": "Dar acesso",
     "AgentSettings": "Configurações do agente",
-    "CommunitiesEmpty": "Você ainda não entrou em uma comunidade.",
+    "CommunitiesEmpty": "As comunidades em que você entrar aparecerão aqui. Comece escaneando um convite ou pedindo para entrar.",
     "DeskRequests_one": "1 pedido",
     "DeskRequests_other": "{{count}} pedidos",
     "DeskNone": "Nenhum pedido aguardando",
@@ -943,7 +942,8 @@
     "CommunityCards": "Cartões",
     "CommunityMembershipCard": "Cartão de membro · guardado pelo seu agente",
     "OfferLine": "{{community}} oferece a você um lugar: {{access}}, até {{until}}",
-    "JoiningAsLine": "Entrando como {{persona}}"
+    "JoiningAsLine": "Entrando como {{persona}}",
+    "CommunitiesEmptyTitle": "Nenhuma comunidade ainda"
   },
   "RootStack": {
     "Contacts": "Contatos",

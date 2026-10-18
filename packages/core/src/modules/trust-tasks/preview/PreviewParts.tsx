@@ -24,7 +24,11 @@ import { useTheme } from '../../../contexts/theme'
 import { Screens, TabStacks } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 
+import type { EmptyListProps } from '../../../components/misc/EmptyList'
+import { communityTarget } from '../module/vtiCommunityLink'
+
 import { useDeskWaitingCount } from './deskWaiting'
+import { joinAfterLink } from './joinAfterLink'
 import { AiAccessRow, usePreviewStyles } from './RoomsPreview'
 
 type Nav = { navigate: (name: string, params?: object) => void }
@@ -160,17 +164,36 @@ export const CommunityRows: React.FC<{ items: CommunityRowItem[]; onOpen: (commu
   )
 }
 
-/** Communities with no membership, linked or not: said plainly, with nothing to tap (Alberto, 10-18). */
-export const CommunitiesEmpty: React.FC = () => {
+/**
+ * Communities with no membership, linked or not: the Wallet's own empty
+ * state, from the container, with the Communities icon and one button, Join
+ * a community (Alberto, 10-18). With no agent linked, the button links one
+ * first, then goes on to Join.
+ */
+export const CommunitiesEmpty: React.FC<{ linked: boolean }> = ({ linked }) => {
   const { t } = useTranslation()
-  const styles = usePreviewStyles()
+  const navigation = useNavigation() as unknown as Nav
+  const [EmptyState] = useServices([TOKENS.COMPONENT_CRED_EMPTY_LIST])
+  const Empty = EmptyState as React.FC<EmptyListProps>
   return (
-    <View style={{ gap: 8, paddingVertical: 24 }} testID={testIdWithKey('PreviewCommunitiesEmpty')}>
-      <ThemedText variant="headingThree" accessibilityRole="header">
-        {t('Preview.CommunitiesTitle')}
-      </ThemedText>
-      <ThemedText style={styles.muted}>{t('Preview.CommunitiesEmpty')}</ThemedText>
-    </View>
+    <Empty
+      icon={<Icon name="account-group" size={80} color="#000000" />}
+      message={t('Preview.CommunitiesEmptyTitle')}
+      description={t('Preview.CommunitiesEmpty')}
+      actionTitle={t('Preview.JoinCommunity')}
+      onAction={() => {
+        if (linked) {
+          // From the beginning: which community, not the last one a link opened.
+          communityTarget.clearViewing()
+          navigation.navigate(Screens.VtiJoin)
+        } else {
+          joinAfterLink.ask()
+          navigation.navigate(Screens.VtaLink)
+        }
+      }}
+      actionTestID="PreviewCommunitiesJoin"
+      testID="PreviewCommunitiesEmpty"
+    />
   )
 }
 
