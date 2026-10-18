@@ -1011,8 +1011,7 @@
     "CommunitiesEmptyTitle": "Aucune communauté pour l’instant",
     "Profiles": "Profils",
     "ProfileActive": "Partagé quand vous vous connectez",
-    "ProfileCreate": "Créer votre profil",
-    "IdentityAs": "En tant que {{identity}}"
+    "ProfileCreate": "Créer votre profil"
   },
   "RootStack": {
     "Contacts": "Contacts",

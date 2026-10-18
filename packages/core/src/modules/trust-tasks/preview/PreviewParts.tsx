@@ -5,7 +5,7 @@
  * - Communities: the vetting desk as one row with its badge, one compact row
  *   per community, a next step when there is one, Your rooms, and Join a
  *   community; with no membership, a plain empty state.
- * - You: Profiles (R-Card profiles and each community's identity), Requests,
+ * - You: Profiles (the R-Card profiles), Requests,
  *   and one compact "Your agent" card that opens the agent's page; the app's
  *   settings behind a gear in the header.
  * Rendered only by VtaAgentHome's preview parts, which only the preview passes.
@@ -260,21 +260,13 @@ export const AppSettingsButton: React.FC = () => {
   )
 }
 
-export interface CommunityIdentity {
-  communityDid: string
-  community: string
-  identity: string
-}
-
 /**
- * Profiles, first on You: the person's R-Card profiles (read from the store,
- * nothing written; each opens today's profile editor) and, with an agent,
- * the identity they use in each community (each opens the community).
+ * Profiles, first on You (Alberto, 10-18): the person's R-Card profiles,
+ * read from the store (nothing written), each with its name, photo and
+ * organisation and opening today's profile editor; with none, a row to
+ * create one. Community identities stay on each community's screen.
  */
-export const ProfilesSection: React.FC<{
-  identities: CommunityIdentity[]
-  onOpenCommunity: (communityDid: string) => void
-}> = ({ identities, onOpenCommunity }) => {
+export const ProfilesSection: React.FC = () => {
   const { t } = useTranslation()
   const [store] = useStore()
   const { ColorPalette } = useTheme()
@@ -283,13 +275,16 @@ export const ProfilesSection: React.FC<{
   return (
     <Group title={t('Preview.Profiles')} testID="PreviewProfiles">
       {profiles.map((profile, i) => {
-        const { firstName, lastName, photo } = formInputFromTemplate(profile)
+        const { firstName, lastName, organization, photo } = formInputFromTemplate(profile)
         const name = [firstName, lastName].filter(Boolean).join(' ') || profile.label
+        const line = [organization, profile.id === activeProfileId ? t('Preview.ProfileActive') : undefined]
+          .filter(Boolean)
+          .join(' · ')
         return (
           <ListRow
             key={profile.id}
             title={name}
-            subtitle={profile.id === activeProfileId ? t('Preview.ProfileActive') : profile.label}
+            subtitle={line || profile.label}
             end={
               photo ? (
                 <Image source={{ uri: photo }} style={{ width: 32, height: 32, borderRadius: 16 }} />
@@ -310,16 +305,6 @@ export const ProfilesSection: React.FC<{
           testID="PreviewProfileCreate"
         />
       ) : null}
-      {identities.map((item, i) => (
-        <ListRow
-          key={item.communityDid}
-          icon="account-group-outline"
-          title={item.community}
-          subtitle={t('Preview.IdentityAs', { identity: item.identity, interpolation: { escapeValue: false } })}
-          onPress={() => onOpenCommunity(item.communityDid)}
-          testID={`PreviewIdentity_${i}`}
-        />
-      ))}
     </Group>
   )
 }

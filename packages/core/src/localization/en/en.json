@@ -1080,8 +1080,7 @@
     "CommunitiesEmptyTitle": "No communities yet",
     "Profiles": "Profiles",
     "ProfileActive": "Shared when you connect",
-    "ProfileCreate": "Create your profile",
-    "IdentityAs": "As {{identity}}"
+    "ProfileCreate": "Create your profile"
   },
   "RootStack": {
     "Contacts": "Contacts",

@@ -938,8 +938,7 @@
     "CommunitiesEmptyTitle": "Nenhuma comunidade ainda",
     "Profiles": "Perfis",
     "ProfileActive": "Compartilhado quando você se conecta",
-    "ProfileCreate": "Criar seu perfil",
-    "IdentityAs": "Como {{identity}}"
+    "ProfileCreate": "Criar seu perfil"
   },
   "RootStack": {
     "Contacts": "Contatos",

@@ -45,7 +45,7 @@ import { AgentSettingsButton } from './AgentHeaderButtons'
 import { SectionRule } from './SectionRule'
 import { RequestsSection } from './RequestsSection'
 import type { CommunityCardPrimary } from './communityCardModel'
-import { communityHeadingOf, communityLabelOf, shortDid } from './communityName'
+import { communityHeadingOf, communityLabelOf } from './communityName'
 import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
@@ -378,7 +378,7 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   const unlinkedBody = (children: React.ReactNode) =>
     part === 'you' ? (
       <ScrollView contentContainerStyle={styles.content}>
-        <ProfilesSection identities={[]} onOpenCommunity={goToCommunity} />
+        <ProfilesSection />
         {children}
       </ScrollView>
     ) : (
@@ -1044,14 +1044,7 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
           // Profiles, Requests, then one card for the agent (Alberto, 10-18);
           // the app's settings are the header's gear.
           <>
-            <ProfilesSection
-              identities={(holdings?.personas ?? []).map((p) => ({
-                communityDid: p.communityDid,
-                community: communityHeadingOf(p.communityDid, t),
-                identity: p.label ?? shortDid(p.did),
-              }))}
-              onOpenCommunity={goToCommunity}
-            />
+            <ProfilesSection />
             {requestsSection}
             <YourAgentCard
               name={nameOf(link.vtaDid)}

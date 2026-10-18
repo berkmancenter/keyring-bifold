@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "8e6e22992fd5c0c49056abce43b3f3a2ff050058",
+  "generatedFrom": "38f7f56d3cf148c3870ddbca97887ea1a03de0ee",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],

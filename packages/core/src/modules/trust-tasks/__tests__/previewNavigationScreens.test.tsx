@@ -230,13 +230,10 @@ describe('the agent’s page and the preview’s parts', () => {
       }
     ).useNavigation()
 
-  it('You: Profiles, Requests, then one Your agent card; each community’s identity under Profiles', async () => {
+  it('You: Profiles, Requests, then one Your agent card; no community identities there', async () => {
     const tree = await renderHome('you')
     expect(sectionsOf(tree)).toEqual(['PreviewProfiles', 'AgentRequestsRow', 'PreviewYourAgentCard'])
-    expect(tree.getByTestId(id('PreviewIdentity_0'))).toHaveTextContent(/Preview\.IdentityAs/)
-    nav().navigate.mockClear()
-    await act(async () => fireEvent.press(tree.getByTestId(id('PreviewIdentity_0'))))
-    expect(nav().navigate).toHaveBeenCalledWith(Screens.VtiCommunity, expect.objectContaining({ communityDid }))
+    expect(tree.queryByTestId(id('PreviewIdentity_0'))).toBeNull()
   })
 
   it('You: the app’s settings are a gear in the header, opening today’s Menu', async () => {
@@ -506,18 +503,19 @@ describe('the preview screens', () => {
 
   it('Profiles: each R-Card profile, from the store, opening the profile editor', async () => {
     const profile = buildRCardTemplate(
-      { firstName: 'Ada', lastName: 'Lovelace', email: '', organization: '' },
+      { firstName: 'Ada', lastName: 'Lovelace', email: '', organization: 'Analytical Engines' },
       { id: 'p1' }
     )
     const state = { ...defaultState, rCard: { profiles: [profile], activeProfileId: profile.id } }
     const tree = render(
       <BasicAppContext>
         <StoreProvider initialState={state}>
-          <ProfilesSection identities={[]} onOpenCommunity={jest.fn()} />
+          <ProfilesSection />
         </StoreProvider>
       </BasicAppContext>
     )
     expect(tree.getByTestId(id('PreviewProfile_0'))).toHaveTextContent(/Ada Lovelace/)
+    expect(tree.getByTestId(id('PreviewProfile_0'))).toHaveTextContent(/Analytical Engines/)
     expect(tree.getByTestId(id('PreviewProfile_0'))).toHaveTextContent(/Preview\.ProfileActive/)
     expect(tree.queryByTestId(id('PreviewProfileCreate'))).toBeNull()
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewProfile_0'))))
@@ -527,7 +525,7 @@ describe('the preview screens', () => {
   it('Profiles with none yet: one row to create a profile', async () => {
     const tree = render(
       <BasicAppContext>
-        <ProfilesSection identities={[]} onOpenCommunity={jest.fn()} />
+        <ProfilesSection />
       </BasicAppContext>
     )
     await act(async () => fireEvent.press(tree.getByTestId(id('PreviewProfileCreate'))))
