@@ -271,7 +271,9 @@ export const ProfilesSection: React.FC = () => {
   const [store] = useStore()
   const { ColorPalette } = useTheme()
   const navigation = useNavigation() as unknown as Nav
-  const { profiles, activeProfileId } = store.rCard
+  // As JoinAs reads it: an install whose stored state lacks the slice shows none, never a crash.
+  const profiles = store.rCard?.profiles ?? []
+  const activeProfileId = store.rCard?.activeProfileId
   return (
     <Group title={t('Preview.Profiles')} testID="PreviewProfiles">
       {profiles.map((profile, i) => {
