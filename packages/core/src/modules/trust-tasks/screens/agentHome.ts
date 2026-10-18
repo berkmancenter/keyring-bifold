@@ -17,3 +17,17 @@ export function agentHomeScreen(
 ): Screens.VtaAgent | Screens.MyAgent {
   return link.kind === 'linked' ? Screens.VtaAgent : Screens.MyAgent
 }
+
+/**
+ * Where a My Agent stack lands. Today's (no `part`, or `all`) lands where
+ * `agentHomeScreen` says. The preview of the new navigation's Communities and
+ * You always land on the agent's page, which renders each part with no agent
+ * linked too: the old panel showed both tabs the same screen, with no way to
+ * the app's settings.
+ */
+export function stackLandsOn(
+  part: 'all' | 'communities' | 'you' | undefined,
+  link: Pick<VtaLinkState, 'kind'> = vtaAgent.getState().link
+): Screens.VtaAgent | Screens.MyAgent {
+  return part && part !== 'all' ? Screens.VtaAgent : agentHomeScreen(link)
+}

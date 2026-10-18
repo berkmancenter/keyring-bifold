@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { TOKENS, useServices } from '../container-api'
 import { vtaAgent } from '../modules/trust-tasks/module/vtaAgent'
-import { agentHomeScreen } from '../modules/trust-tasks/screens/agentHome'
+import { stackLandsOn } from '../modules/trust-tasks/screens/agentHome'
 import { useTheme } from '../contexts/theme'
 import MyAgent from '../modules/trust-tasks/screens/MyAgent'
 import VtiCommunity from '../modules/trust-tasks/screens/VtiCommunity'
@@ -68,19 +68,15 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation, part, pr
    * the redesign, and is deliberately not this.
    */
   const { link } = useSyncExternalStore(vtaAgent.subscribe, vtaAgent.getState)
-  const landsOn = agentHomeScreen(link)
+  // The preview's Communities and You always land on the agent's page (stackLandsOn).
+  const landsOn = stackLandsOn(part, link)
   const theme = useTheme()
   const { t } = useTranslation()
   const defaultStackOptions = useDefaultStackOptions(theme)
   const [ScreenOptionsDictionary, config] = useServices([TOKENS.OBJECT_SCREEN_CONFIG, TOKENS.CONFIG])
 
   return (
-    // The preview's Communities and You always land on the agent's page, which
-    // has its own render for each part with no agent linked.
-    <Stack.Navigator
-      initialRouteName={part && part !== 'all' ? Screens.VtaAgent : landsOn}
-      screenOptions={{ ...defaultStackOptions }}
-    >
+    <Stack.Navigator initialRouteName={landsOn} screenOptions={{ ...defaultStackOptions }}>
       <Stack.Screen
         name={Screens.MyAgent}
         options={{ title: t('Screens.MyAgent'), ...ScreenOptionsDictionary[Screens.MyAgent] }}

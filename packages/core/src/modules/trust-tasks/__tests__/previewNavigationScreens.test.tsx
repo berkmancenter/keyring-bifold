@@ -21,6 +21,7 @@ import PreviewAiAccess from '../preview/PreviewAiAccess'
 import { DeskWaitingRow, YouSettingsRows } from '../preview/PreviewParts'
 import PreviewRoom from '../preview/PreviewRoom'
 import { CommunityRoomsSection, YourRoomsSection } from '../preview/RoomsPreview'
+import { stackLandsOn } from '../screens/agentHome'
 import VtaAgentHome, { forgetAgentHoldings, type AgentHomePart } from '../screens/VtaAgentHome'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -261,11 +262,36 @@ describe('no agent linked, or not yet introduced: each part its own', () => {
     expect(tree.getByTestId(id('AgentHolds'))).toBeTruthy()
   })
 
-  it.each(['notLinked', 'revoked', 'introUnseen'])('today’s page, %s: nothing of the preview', async (name) => {
+  // The snapshots were written from the page before the preview's unlinked
+  // renders (a88c7054) and must match it: today's page is the same, not only
+  // free of the preview.
+  it.each([
+    ['notLinked', 'AgentHomeLink'],
+    ['revoked', 'RemovedPhone'],
+    ['introUnseen', 'AgentIntro'],
+  ])('today’s page, %s: as it was, with nothing of the preview', async (name, shown) => {
     controller.set({ activity: [], approvals: [], ...states[name] })
-    const tree = await renderHome()
-    expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
-    expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
+    for (const tree of [await renderHome(), await renderHome('all')]) {
+      expect(tree.getByTestId(id(shown))).toBeTruthy()
+      expect(tree.queryByTestId(id('PreviewYouSettings'))).toBeNull()
+      expect(tree.queryByTestId(id('PreviewCommunitiesUnlinked'))).toBeNull()
+      expect(tree.toJSON()).toMatchSnapshot()
+    }
+  })
+})
+
+describe('where a My Agent stack lands', () => {
+  it.each([
+    [undefined, 'notLinked', Screens.MyAgent],
+    [undefined, 'revoked', Screens.MyAgent],
+    [undefined, 'linked', Screens.VtaAgent],
+    ['all', 'notLinked', Screens.MyAgent],
+    ['all', 'linked', Screens.VtaAgent],
+    ['communities', 'notLinked', Screens.VtaAgent],
+    ['you', 'notLinked', Screens.VtaAgent],
+    ['you', 'revoked', Screens.VtaAgent],
+  ] as const)('part %s, %s → %s', (part, kind, screen) => {
+    expect(stackLandsOn(part, { kind } as never)).toBe(screen)
   })
 })
 
