@@ -103,6 +103,8 @@ export const PreviewTabNavigator: React.FC<PreviewTabNavigatorProps> = ({
     <Tab.Navigator
       initialRouteName={TabStacks.ContactStack}
       screenOptions={{
+        // As today's tabs. Communities relies on it: leaving the tab must unmount
+        // it, or a link made from You would open Join there (joinAfterLink).
         unmountOnBlur: true,
         tabBarStyle: { ...TabTheme.tabBarStyle },
         tabBarActiveTintColor: TabTheme.tabBarActiveTintColor,

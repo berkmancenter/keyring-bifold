@@ -343,6 +343,8 @@ const VtaAgentHome: React.FC<{ part?: AgentHomePart }> = ({ part = 'all' }) => {
   // opens the link screen over this one (joinAfterLink). Linked on that visit:
   // on to Join. Back here unlinked (back, cancel), or this screen gone (another
   // tab): the intent ends, so a later link by another route never opens Join.
+  // "Another tab" relies on the preview's tabs unmounting on blur
+  // (PreviewTabNavigator's unmountOnBlur); bottom tabs do not by default.
   useEffect(() => {
     if (part !== 'communities') return
     if (link.kind === 'linked') {
