@@ -45,7 +45,7 @@ const EmptyList: React.FC<EmptyListProps> = ({
         alignItems: 'center',
         backgroundColor: ColorPalette.brand.primaryBackground,
       }}
-      testID={testID ? testIdWithKey(testID) : undefined}
+      {...(testID ? { testID: testIdWithKey(testID) } : {})}
     >
       {icon ?? <Assets.svg.emptyWallet fill={ListItems.emptyList.color} height={100} />}
       <ThemedText style={[ListItems.emptyList, { textAlign: 'center' }]} testID={testIdWithKey('NoneYet')}>
@@ -59,7 +59,7 @@ const EmptyList: React.FC<EmptyListProps> = ({
             accessibilityLabel={actionTitle}
             buttonType={ButtonType.Primary}
             onPress={onAction}
-            testID={actionTestID ? testIdWithKey(actionTestID) : undefined}
+            {...(actionTestID ? { testID: testIdWithKey(actionTestID) } : {})}
           />
         </View>
       ) : null}
