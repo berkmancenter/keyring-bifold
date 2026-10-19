@@ -24,9 +24,16 @@
  *    operations/device.rs:252-272).
  *
  * The DID is kept beside it in an item with no access control, so naming the
- * key ({@link getUvDid}) never prompts on iOS. On Android, react-native-keychain's
- * biometric storage (`AES_GCM`) needs the biometric to encrypt as well, so
- * creating the key prompts once there.
+ * key ({@link getUvDid}) never prompts.
+ *
+ * On Android the secret is not kept by react-native-keychain, whose
+ * Keystore key opens for a few seconds after any unlock, the device PIN's
+ * included, and outlives a new enrolment. It is kept by
+ * @bifold/react-native-attestation's approval key (ApprovalKey.kt): released
+ * for one use at a time, through a strong biometric only, ended by a new
+ * enrolment, and refused outright on a phone that cannot hold one so. Making
+ * it prompts once. A phone that kept its key the earlier way reads as `lost`,
+ * and the sign-in sets it up again (oobSignInAgent.approveSignInWithUvKey).
  *
  * Used by the sign-in screen's Approve (oobSignInAgent.approveSignIn).
  *
@@ -34,6 +41,8 @@
  */
 import { TypedArrayEncoder } from '@credo-ts/core'
 import { ed25519 } from '@noble/curves/ed25519.js'
+import { approvalKeyForget, approvalKeyUnwrap, approvalKeyWrap } from '@bifold/react-native-attestation'
+import { Platform } from 'react-native'
 import * as Keychain from 'react-native-keychain'
 
 const SECRET_SERVICE = 'keyring.signin-uv-key'
@@ -55,6 +64,18 @@ export class UvKeyError extends Error {
 
 /** Cancelling is said in words, not a shared code (as ownerConfirm.ts reads it). */
 const CANCELLED = /cancel|negative button/i
+
+/** The prompt's cancel button on Android (iOS words its own). */
+const ANDROID_CANCEL = 'Cancel'
+
+const onAndroid = () => Platform.OS === 'android'
+
+/** An approval-key rejection's reason: the native side rejects with the code (ApprovalKey.kt). */
+const approvalKeyFailure = (error: unknown): UvKeyError => {
+  const code = (error as { code?: unknown } | null)?.code
+  const message = error instanceof Error ? error.message : String(error)
+  return new UvKeyError(code === 'lost' || code === 'cancelled' ? code : 'unavailable', message)
+}
 
 /**
  * Read when a key is made or used, never at import: importing @bifold/core
@@ -87,6 +108,16 @@ async function createUvKey(prompt: string): Promise<string> {
   const secret = ed25519.utils.randomSecretKey()
   try {
     const did = ed25519DidKey(ed25519.getPublicKey(secret))
+    if (onAndroid()) {
+      await approvalKeyWrap(toHex(secret), prompt, ANDROID_CANCEL).catch((error: unknown) => {
+        throw approvalKeyFailure(error)
+      })
+      await Keychain.setGenericPassword(PUBLIC_USER, did, {
+        service: PUBLIC_SERVICE,
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      })
+      return did
+    }
     const stored = await Keychain.setGenericPassword(did, toHex(secret), {
       service: SECRET_SERVICE,
       accessControl: accessControl(),
@@ -124,6 +155,29 @@ export async function getUvDid(prompt = 'Set up approving sign-ins on this phone
 }
 
 /**
+ * The secret, read through the biometric prompt, or undefined when the OS no longer has it. On Android one strong
+ * biometric opens it for this one use, and a key a new enrolment ended (or one kept the earlier way) is `lost`.
+ */
+async function readSecret(prompt: string): Promise<string | undefined> {
+  if (onAndroid()) {
+    return approvalKeyUnwrap(prompt, ANDROID_CANCEL).catch((error: unknown) => {
+      throw approvalKeyFailure(error)
+    })
+  }
+  try {
+    const item = await Keychain.getGenericPassword({
+      service: SECRET_SERVICE,
+      accessControl: accessControl(),
+      authenticationPrompt: { title: prompt },
+    })
+    return item ? item.password : undefined
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new UvKeyError(CANCELLED.test(message) ? 'cancelled' : 'unavailable', message)
+  }
+}
+
+/**
  * Sign `bytes` with the UV key. Reading the key shows the system biometric
  * prompt with `prompt` as its title; without the person's face or finger
  * there is no signature. Answers the raw 64-byte Ed25519 signature.
@@ -131,20 +185,10 @@ export async function getUvDid(prompt = 'Set up approving sign-ins on this phone
 export async function uvSign(bytes: Uint8Array, prompt: string): Promise<Uint8Array> {
   const did = await storedDid()
   if (!did) throw new UvKeyError('lost', 'this phone has no approval key')
-  let item: false | { username: string; password: string }
-  try {
-    item = await Keychain.getGenericPassword({
-      service: SECRET_SERVICE,
-      accessControl: accessControl(),
-      authenticationPrompt: { title: prompt },
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    throw new UvKeyError(CANCELLED.test(message) ? 'cancelled' : 'unavailable', message)
-  }
+  const secretHex = await readSecret(prompt)
   // An item invalidated by a change of enrolled biometrics reads as absent.
-  if (!item) throw new UvKeyError('lost', 'the approval key is no longer readable')
-  const secret = fromHex(item.password)
+  if (!secretHex) throw new UvKeyError('lost', 'the approval key is no longer readable')
+  const secret = fromHex(secretHex)
   try {
     if (secret.length !== 32 || ed25519DidKey(ed25519.getPublicKey(secret)) !== did) {
       throw new UvKeyError('lost', 'the approval key does not match its DID')
@@ -157,6 +201,8 @@ export async function uvSign(bytes: Uint8Array, prompt: string): Promise<Uint8Ar
 
 /** Forget the UV key, so the next {@link getUvDid} makes a new one (to enrol again after `lost`). */
 export async function resetUvKey(): Promise<void> {
+  // Android: the approval key, and any key kept the earlier way.
+  if (onAndroid()) await approvalKeyForget().catch(() => false)
   await Keychain.resetGenericPassword({ service: SECRET_SERVICE }).catch(() => false)
   await Keychain.resetGenericPassword({ service: PUBLIC_SERVICE }).catch(() => false)
 }
