@@ -546,6 +546,30 @@ RCT_EXPORT_METHOD(getAppStoreReceipt:(RCTPromiseResolveBlock)resolve
     }
 }
 
+// The sign-in approval key is Android's (ApprovalKey.kt): on iOS the keychain's BiometryCurrentSet already holds it.
+RCT_EXPORT_METHOD(approvalKeyWrap:(NSString *)secretHex
+                  prompt:(NSString *)prompt
+                  cancel:(NSString *)cancel
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+    reject(@"unavailable", @"the approval key is kept by the keychain on iOS", nil);
+}
+
+RCT_EXPORT_METHOD(approvalKeyUnwrap:(NSString *)prompt
+                  cancel:(NSString *)cancel
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+    reject(@"unavailable", @"the approval key is kept by the keychain on iOS", nil);
+}
+
+RCT_EXPORT_METHOD(approvalKeyForget:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+{
+    resolve(@YES);
+}
+
 RCT_EXPORT_METHOD(deleteHardwareSigningKey:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 {
