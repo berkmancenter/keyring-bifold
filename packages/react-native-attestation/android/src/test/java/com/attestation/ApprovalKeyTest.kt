@@ -22,7 +22,7 @@ class ApprovalKeyTest {
   }
 
   @Test
-  fun `a key react-native-keychain would make fails: a window, the device PIN, no enrolment binding`() {
+  fun `a key react-native-keychain would make fails - a window, the device PIN, no enrolment binding`() {
     val failed = ApprovalKey.failedChecks(
       5,
       KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL,
