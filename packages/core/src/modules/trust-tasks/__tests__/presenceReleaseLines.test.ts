@@ -9,7 +9,7 @@ import { renderHook } from '@testing-library/react-native'
 import { AGENT_DEVICE_TASK, HEARTBEAT_INTERVAL_MS, type AgentDevicePort } from '../module/vtaDevices'
 import { forgetAllVersions } from '../module/taskVersions'
 import type { VtaLinkState } from '../module/vtaLinkMachine'
-import { AgentPresence, linkSummary, useAgentPresence } from '../module/vtaPresence'
+import { AgentPresence, linkSummary, PRESENCE_OK_EVERY, useAgentPresence } from '../module/vtaPresence'
 import { VtiRefusal } from '../module/vtiAgent'
 
 const ME = 'did:peer:2.this-phone'
@@ -87,6 +87,67 @@ describe('every heartbeat tick says what happened, in Release', () => {
   })
 })
 
+// 7a on #474: an "ok" on every five-minute tick is 288 lines a phone a day in a channel kept for the few that matter.
+describe('a healthy tick is said when it changes, and hourly; a failure always', () => {
+  const okLines = () => said().filter((l) => l.startsWith('[VTA] presence tick: ok'))
+  const presenceOver = (port: () => AgentDevicePort | undefined, link: () => VtaLinkState = () => online) =>
+    new AgentPresence({ port: async () => port(), platform: 'android', onSiblingSeen: jest.fn(), link })
+
+  it('three healthy ticks in a row: one "ok"', async () => {
+    const p = presenceOver(() => portFailing())
+    for (let i = 0; i < 3; i++) await p.tick()
+    expect(okLines()).toEqual(['[VTA] presence tick: ok (linked/online)'])
+  })
+
+  it('after a failure, the next healthy tick is said again; every failure is said', async () => {
+    let failing = false
+    const p = presenceOver(() => portFailing(failing ? () => new Error('the VTA did not answer in time') : undefined))
+    await p.tick()
+    failing = true
+    await p.tick()
+    await p.tick()
+    failing = false
+    await p.tick()
+    expect(said()).toEqual([
+      '[VTA] presence tick: ok (linked/online)',
+      '[VTA] presence tick: failed, noAnswer (linked/online)',
+      '[VTA] presence tick: failed, noAnswer (linked/online)',
+      '[VTA] presence tick: ok (linked/online)',
+    ])
+  })
+
+  it('a new link state is said at once', async () => {
+    let link: VtaLinkState = online
+    const p = presenceOver(
+      () => portFailing(),
+      () => link
+    )
+    await p.tick()
+    link = { ...online, connection: { kind: 'connecting' } } as unknown as VtaLinkState
+    await p.tick()
+    expect(okLines()).toEqual([
+      '[VTA] presence tick: ok (linked/online)',
+      '[VTA] presence tick: ok (linked/connecting)',
+    ])
+  })
+
+  it(`still healthy: said again every ${PRESENCE_OK_EVERY} ticks, so a log shows the loop alive`, async () => {
+    const p = presenceOver(() => portFailing())
+    for (let i = 0; i < PRESENCE_OK_EVERY * 2 + 1; i++) await p.tick()
+    expect(okLines()).toEqual([
+      '[VTA] presence tick: ok (linked/online)',
+      `[VTA] presence tick: ok (linked/online), ${PRESENCE_OK_EVERY} in a row`,
+      `[VTA] presence tick: ok (linked/online), ${PRESENCE_OK_EVERY} in a row`,
+    ])
+  })
+
+  it('skipped, the same way: once until it changes', async () => {
+    const p = presenceOver(() => undefined)
+    for (let i = 0; i < 3; i++) await p.tick()
+    expect(said().filter((l) => l.includes('skipped'))).toHaveLength(1)
+  })
+})
+
 describe('the loop says when it starts and stops', () => {
   beforeEach(() => jest.useFakeTimers())
   afterEach(() => jest.useRealTimers())
@@ -106,6 +167,17 @@ describe('the loop says when it starts and stops', () => {
     expect(said()).toContain('[VTA] presence: stopped (linked/offline)')
     // Not online: nothing starts.
     expect(said().filter((l) => l.startsWith('[VTA] presence: started'))).toHaveLength(1)
+    unmount()
+  })
+
+  // 7a on #474: the link getter was an effect dependency, so an inline arrow restarted the heartbeat every render.
+  it('an inline link getter does not restart the loop on a re-render', () => {
+    const port = async () => portFailing()
+    const { rerender, unmount } = renderHook(() => useAgentPresence(port, undefined, undefined, () => online))
+    rerender({})
+    rerender({})
+    expect(said().filter((l) => l.startsWith('[VTA] presence: started'))).toHaveLength(1)
+    expect(said().filter((l) => l.startsWith('[VTA] presence: stopped'))).toHaveLength(0)
     unmount()
   })
 })
