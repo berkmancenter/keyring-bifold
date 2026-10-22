@@ -121,7 +121,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const { connectedWitness } = useWitnessConnection()
   
   // Track VRC flow in progress to show loading overlay during exchanges
-  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, progressFraction, progressComplete, confirmed: vrcConfirmed, onDismissTimeout, onDismissConfirmation } = useVrcFlowInProgress(connectionId)
+  const { inProgress: vrcFlowInProgress, statusText: vrcStatusText, timedOut: vrcTimedOut, waitingOnPeer: vrcWaitingOnPeer, progressFraction, progressComplete, confirmed: vrcConfirmed, onDismissTimeout, onDismissConfirmation, onDismissWaiting } = useVrcFlowInProgress(connectionId)
 
   // Check if this connection is a witness connection by matching connectionId
   const _isWitnessConnection = connectedWitness?.connectionId === connectionId
@@ -273,6 +273,20 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
                       const nav = navigation.getParent() ?? navigation
                       ;(nav as any).navigate(Stacks.TabStack)
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('Global.Dismiss')}
+                  >
+                    <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
+                  </TouchableOpacity>
+                </>
+              ) : vrcWaitingOnPeer ? (
+                <>
+                  <Text style={styles.flowOverlayText}>
+                    {t('Relationship.WaitingForAnswer', { name: theirLabel })}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
+                    onPress={onDismissWaiting}
                     accessibilityRole="button"
                     accessibilityLabel={t('Global.Dismiss')}
                   >

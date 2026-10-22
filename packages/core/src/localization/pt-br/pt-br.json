@@ -2395,5 +2395,8 @@
   },
   "MessageWake": {
     "Fetching": "Buscando novas mensagens…"
+  },
+  "Relationship": {
+    "WaitingForAnswer": "Aguardando a resposta de {{name}}."
   }
 }

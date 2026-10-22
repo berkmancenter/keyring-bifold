@@ -179,9 +179,21 @@ export interface VrcFlowOverlayState {
    * rather than just vanishing and leaving the user wondering.
    */
   confirmed: boolean
+  /**
+   * True once a wait on the OTHER phone has outlasted the flow timeout. That
+   * is not a failure: their phone may simply be closed, and the exchange
+   * finishes when they open Keyring and answer. Chat says so instead of
+   * declaring the exchange failed.
+   */
+  waitingOnPeer: boolean
   onDismissTimeout: () => void
   /** Dismiss the confirmation beat early (e.g. the user tapped through). */
   onDismissConfirmation: () => void
+  /**
+   * Hide the waiting dialog without ending the flow: it comes back when the
+   * other phone moves the exchange on.
+   */
+  onDismissWaiting: () => void
 }
 
 // Milestones: how far along the exchange each flow status represents. The
@@ -222,10 +234,29 @@ export const FLOW_HARD_TIMEOUT_MS = 180000
 export const RCARD_TRAILING_GRACE_MS = 30000
 // How long the success beat stays up before the dialog clears itself.
 
+/**
+ * Statuses that wait on a message from the other phone rather than on our
+ * own work. A peer whose app is closed answers only when they open it, so a
+ * timeout here means "still waiting", never "failed"; and the hard timeout
+ * counts only our own work, not time spent here.
+ */
+const PEER_WAIT_STATUSES: ReadonlySet<VrcFlowStatus> = new Set<VrcFlowStatus>([
+  'connecting',
+  'discovering',
+  'proposed',
+  'offer-sent',
+])
+export const isPeerWaitStatus = (status: VrcFlowStatus): boolean => PEER_WAIT_STATUSES.has(status)
+
 export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState => {
   const [inProgress, setInProgress] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [timedOut, setTimedOut] = useState(false)
+  const [waitingOnPeer, setWaitingOnPeer] = useState(false)
+  // The status the user dismissed the waiting dialog at; the dialog stays
+  // hidden until the flow leaves it.
+  const waitDismissedAtRef = useRef<VrcFlowStatus | null>(null)
+  const lastStatusRef = useRef<VrcFlowStatus>('idle')
   const [progressFraction, setProgressFraction] = useState(0)
   const [progressComplete, setProgressComplete] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
@@ -254,6 +285,8 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
     setConfirmed(false)
     rcardGraceExpiredRef.current = false
     setTimedOut(false)
+    setWaitingOnPeer(false)
+    waitDismissedAtRef.current = null
     setInProgress(false)
     setStatusText('')
     setProgressFraction(0)
@@ -308,17 +341,39 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
         vrcFlowStore.isRcardReceivePending(connectionId) &&
         !rcardGraceExpiredRef.current
 
-      if (shouldShowOverlay) {
-        if (!flowStartedAtRef.current) {
-          flowStartedAtRef.current = Date.now()
-        }
+      // A new status ends any wait the user was told about or dismissed.
+      if (flowStatus !== lastStatusRef.current) {
+        lastStatusRef.current = flowStatus
+        setWaitingOnPeer(false)
+        if (waitDismissedAtRef.current !== flowStatus) waitDismissedAtRef.current = null
+      }
+      const peerWait = isPeerWaitStatus(flowStatus)
 
-        const elapsedMs = Date.now() - flowStartedAtRef.current
-        if (elapsedMs >= FLOW_HARD_TIMEOUT_MS) {
-          setInProgress(true)
-          setTimedOut(true)
-          setStatusText("The exchange took too long. You may need to reconnect and try again.")
-          return
+      if (shouldShowOverlay && peerWait && waitDismissedAtRef.current === flowStatus) {
+        // Dismissed while waiting on the other phone: stay hidden, keep the
+        // flow, and arm no timer — nothing here can fail.
+        if (timeoutId) clearTimeout(timeoutId)
+        setInProgress(false)
+        return
+      }
+
+      if (shouldShowOverlay) {
+        if (peerWait) {
+          // The hard timeout counts our own work only; a wait on a closed
+          // phone can last hours and must not count against what follows.
+          flowStartedAtRef.current = null
+        } else {
+          if (!flowStartedAtRef.current) {
+            flowStartedAtRef.current = Date.now()
+          }
+
+          const elapsedMs = Date.now() - flowStartedAtRef.current
+          if (elapsedMs >= FLOW_HARD_TIMEOUT_MS) {
+            setInProgress(true)
+            setTimedOut(true)
+            setStatusText("The exchange took too long. You may need to reconnect and try again.")
+            return
+          }
         }
 
         // Cancel any pending completion animation
@@ -419,6 +474,9 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
           setTimedOut(false)
           setStatusText('')
           setConfirmed(true)
+          // A waiting dialog the user dismissed hid the overlay; the success
+          // beat shows it again.
+          setInProgress(true)
           // No auto-dismiss. The confirmation is the one moment the user is
           // asked to act — it offers a way through to Contacts — and a timer
           // was yanking it away mid-reach (device 2026-08-29). It now waits
@@ -452,7 +510,12 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
             currentStatus !== 'offer-received' &&
             !(currentStatus === 'offer-sent' && currentHasReceived) &&
             !currentComplete
-          if (shouldStillBeActive) {
+          if (shouldStillBeActive && isPeerWaitStatus(currentStatus)) {
+            // Their phone has not answered yet. Nothing has failed and
+            // nothing is resent (a resend would only tell the network we are
+            // still trying); Chat says who we are waiting for.
+            setWaitingOnPeer(true)
+          } else if (shouldStillBeActive) {
             // eslint-disable-next-line no-console
             console.warn(`[VRC Flow] Timeout after ${timeoutMs / 1000}s | Status: ${currentStatus} — showing timeout UI`)
             setTimedOut(true)
@@ -503,14 +566,24 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
     if (connectionId) vrcFlowStore.clearFlow(connectionId)
   }, [connectionId])
 
+  const onDismissWaiting = useCallback(() => {
+    const status = vrcFlowStore.getStatus(connectionId)
+    if (!isPeerWaitStatus(status)) return
+    waitDismissedAtRef.current = status
+    setWaitingOnPeer(false)
+    setInProgress(false)
+  }, [connectionId])
+
   return {
     inProgress,
     statusText,
     timedOut,
+    waitingOnPeer,
     progressFraction,
     progressComplete,
     confirmed,
     onDismissTimeout,
+    onDismissWaiting,
     onDismissConfirmation,
   }
 }
