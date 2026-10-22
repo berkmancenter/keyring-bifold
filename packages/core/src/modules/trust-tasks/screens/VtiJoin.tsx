@@ -425,21 +425,33 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
   // agent: whether it held an identity in THIS community decides what Join says.
   const link = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().link)
   const revokedAgent = link.kind === 'revoked' ? link.vtaDid : undefined
-  const [heldHereRefused, setHeldHereRefused] = useState(false)
+  // Known per agent and community, and unknown until the lookup answers: the
+  // first paint said "Link your agent first" (the sentence IN-350 is about)
+  // until it did. Only a revoked link waits; any other decides at once.
+  const lookup = !vtaDid && revokedAgent && agent && communityDid ? `${revokedAgent}|${communityDid}` : undefined
+  const [heldFor, setHeldFor] = useState<{ key: string; held: boolean }>()
   useEffect(() => {
-    if (vtaDid || !revokedAgent || !agent || !communityDid) {
-      setHeldHereRefused(false)
-      return
-    }
+    if (!lookup || !agent || !communityDid || !revokedAgent) return
     let live = true
     new GenericRecordsIdentityStore(agent)
       .getPersona(communityDid, revokedAgent)
-      .then((persona) => live && setHeldHereRefused(Boolean(persona)))
-      .catch(() => live && setHeldHereRefused(false))
+      .then((persona) => live && setHeldFor({ key: lookup, held: Boolean(persona) }))
+      .catch(() => live && setHeldFor({ key: lookup, held: false }))
     return () => {
       live = false
     }
-  }, [vtaDid, revokedAgent, agent, communityDid])
+  }, [lookup, agent, communityDid, revokedAgent])
+  const heldHereRefused: boolean | undefined = lookup ? (heldFor?.key === lookup ? heldFor.held : undefined) : false
+
+  if (!vtaDid && heldHereRefused === undefined) {
+    return (
+      <SafeAreaView style={styles.container} edges={['left', 'right']}>
+        <View style={styles.content} testID={testIdWithKey(VtiJoinIds.checkingAgent)}>
+          <ActivityIndicator color={ColorPalette.brand.primary} />
+        </View>
+      </SafeAreaView>
+    )
+  }
 
   if (!vtaDid && heldHereRefused) {
     // The agent stopped accepting this phone, and this community is one it

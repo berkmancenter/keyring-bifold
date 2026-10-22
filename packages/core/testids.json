@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "6784fd1e3fe0ffe8869370703e30f4b28d9864ea",
+  "generatedFrom": "4ba99c6ee70f050078ef9fbe0836519c09f5830e",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -557,6 +557,7 @@
     "JoinAsks": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinChanged": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinCheckAgain": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
+    "JoinCheckingAgent": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinCommunityButton": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "JoinContinueVetting": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinDirectoryUnreadable": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
@@ -1979,6 +1980,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.checkAgain"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.checkingAgent"
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.continueVetting"

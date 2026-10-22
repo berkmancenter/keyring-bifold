@@ -149,6 +149,23 @@ describe('I want to join a community', () => {
       expect(navigation.navigate).toHaveBeenCalledWith(Screens.MyAgent)
     })
 
+    // 7a's #473 review: the first paint said "Link your agent first" (the
+    // sentence IN-350 is about) until the identity lookup resolved.
+    it('while it is not yet known whether it holds an identity here, neither sentence is said', async () => {
+      ;(vtaAgent as unknown as Setter).set({ link: revoked })
+      let answer: (v: unknown) => void = () => undefined
+      jest
+        .spyOn(GenericRecordsIdentityStore.prototype, 'getPersona')
+        .mockReturnValue(new Promise((resolve) => (answer = resolve)) as never)
+      const tree = await renderJoin()
+      expect(tree.getByTestId(testIdWithKey('JoinCheckingAgent'))).toBeTruthy()
+      expect(tree.queryByTestId(testIdWithKey('JoinNeedsAgent'))).toBeNull()
+      expect(tree.queryByTestId(testIdWithKey('JoinAgentRefused'))).toBeNull()
+      await act(async () => answer({ did: 'did:webvh:QmPersona:p', communityDid: suggested }))
+      expect(tree.getByTestId(testIdWithKey('JoinAgentRefused'))).toBeTruthy()
+      expect(tree.queryByTestId(testIdWithKey('JoinCheckingAgent'))).toBeNull()
+    })
+
     it("a community it holds no identity in: today's words, to link an agent", async () => {
       ;(vtaAgent as unknown as Setter).set({ link: revoked })
       jest.spyOn(GenericRecordsIdentityStore.prototype, 'getPersona').mockResolvedValue(undefined)
