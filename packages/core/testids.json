@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "821c5f96bd77c1107d590d7ab7496768b9ebd35f",
+  "generatedFrom": "f611cbecc723a76f425ae15b2cac369118ca6ee0",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -655,6 +655,7 @@
     "MyAgentDid": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentEnrolCard": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentError": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
+    "MyAgentHandingOver": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentHoldingError": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentHost": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentIdentityCard": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
@@ -1289,6 +1290,9 @@
     },
     {
       "src/modules/trust-tasks/screens/MyAgent.tsx": "MyAgentIds.getAgentToggle"
+    },
+    {
+      "src/modules/trust-tasks/screens/MyAgent.tsx": "MyAgentIds.handingOver"
     },
     {
       "src/modules/trust-tasks/screens/MyAgent.tsx": "MyAgentIds.host"
