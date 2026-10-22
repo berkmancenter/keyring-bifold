@@ -29,7 +29,7 @@ import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { GenericRecordsCommunityStore, isCurrentMembership, type VtiMembership } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
-import { vtaAgent } from '../module/vtaAgent'
+import { agentTransition, vtaAgent } from '../module/vtaAgent'
 import { ownVetterGrantState, type VetterGrantState } from '../module/vtiGrantState'
 import { useCommunityChanged } from '../module/communityChanged'
 import { communityNameIsStale, refreshPublishedNameThrottled } from '../module/communityNameRefresh'
@@ -275,13 +275,11 @@ const VtaAgentHome: React.FC = () => {
     const timer = setTimeout(() => setHighlighted(undefined), HIGHLIGHT_MS)
     return () => clearTimeout(timer)
   }, [highlightParam, navigation])
-  // "Add" on the chips leaves the current agent, then opens the link screen:
-  // in between this page is unlinked, and for an instant it drew "Link your
-  // agent" (238, iPhone). Nothing is drawn while it goes; back here, as ever.
-  const [leavingToAdd, setLeavingToAdd] = useState(false)
-  useEffect(() => {
-    if (isFocused) setLeavingToAdd(false)
-  }, [isFocused])
+  // A switch, an unlink or an add passes through "not linked": the store says
+  // which (agentTransition), and this page shows the change, never "Link your
+  // agent" for that moment (238, iPhone: Add drew it for an instant; and a
+  // switch drew it for the whole sign-in to the next agent).
+  const transition = agentTransition(state)
   // Back on this page with an "Add" still open and nothing under way (it
   // failed, or the person left by a way that did not close it): the add is
   // given up and the agent before comes back, rather than "Link your agent"
@@ -354,13 +352,25 @@ const VtaAgentHome: React.FC = () => {
     )
   }
 
-  if (link.kind !== 'linked' && leavingToAdd) {
+  if (link.kind !== 'linked' && transition) {
     return (
       <SafeAreaView
         style={styles.container}
         edges={['left', 'right']}
         testID={testIdWithKey(VtaAgentHomeIds.homeLeaving)}
-      />
+      >
+        {transition === 'switching' && state.switchingTo ? (
+          <View style={styles.content}>
+            <ActivityIndicator />
+            <ThemedText>
+              {t('VtaLink.Switching', {
+                agent: agentDisplayName(withAgentName({ vtaDid: state.switchingTo }, state.agentNames), t),
+                interpolation: { escapeValue: false },
+              })}
+            </ThemedText>
+          </View>
+        ) : null}
+      </SafeAreaView>
     )
   }
 
@@ -581,7 +591,6 @@ const VtaAgentHome: React.FC = () => {
               if (agent) void vtaAgent.useAgent(agent, vtaDid)
             }}
             onAdd={() => {
-              setLeavingToAdd(true)
               void vtaAgent.startAddingAgent().then(() => go(Screens.VtaLink))
             }}
           />

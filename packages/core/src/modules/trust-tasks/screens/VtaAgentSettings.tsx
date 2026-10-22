@@ -28,9 +28,10 @@ import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
-import { AGENT_NICKNAME_MAX, vtaAgent, type VtaActivity } from '../module/vtaAgent'
+import { AGENT_NICKNAME_MAX, agentTransition, vtaAgent, type VtaActivity } from '../module/vtaAgent'
 
 import { agentDisplayName, withAgentName } from './agentName'
+import { agentHomeScreen } from './agentHome'
 import { GetCardsFromAgent } from './GetCardsFromAgent'
 import { shortTask } from './RequestCard'
 import { forgetAgentHoldings, ownHoldings } from './VtaAgentHome'
@@ -103,10 +104,12 @@ const VtaAgentSettings: React.FC = () => {
   const go = (screen: Screens) => (navigation as unknown as { navigate: (name: string) => void }).navigate(screen)
 
   if (link.kind !== 'linked') {
+    // An unlink (or a switch) passing through "not linked" is not "nothing to link" (Phase 1).
+    const changing = Boolean(agentTransition(state))
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
         <View style={styles.content} testID={testIdWithKey(VtaAgentSettingsIds.screen)}>
-          <ThemedText>{t('VtaLink.NothingToLink')}</ThemedText>
+          {changing ? null : <ThemedText>{t('VtaLink.NothingToLink')}</ThemedText>}
         </View>
       </SafeAreaView>
     )
@@ -137,7 +140,9 @@ const VtaAgentSettings: React.FC = () => {
     if (!agent) return
     setUnlinkOpen(false)
     forgetAgentHoldings()
-    void vtaAgent.unlink(agent).then(() => go(Screens.VtaLink))
+    // To the agent home, which shows the next agent, or the way to link when none is left: the link screen opened
+    // on the next agent's state and said "Linked ✓" for an agent nobody had just linked (Phase 1).
+    void vtaAgent.unlink(agent).then(() => go(agentHomeScreen()))
   }
 
   return (
