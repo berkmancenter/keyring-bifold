@@ -2,6 +2,9 @@
 export const VtiJoinIds = {
   needsAgent: 'JoinNeedsAgent',
   linkAgent: 'JoinLinkAgent',
+  /** The agent no longer accepts this phone, said for a community it holds an identity in (IN-350). */
+  agentRefused: 'JoinAgentRefused',
+  openMyAgent: 'JoinOpenMyAgent',
   errorCard: 'JoinErrorCard',
   error: 'JoinError',
   errorDetailsToggle: 'JoinErrorDetailsToggle',

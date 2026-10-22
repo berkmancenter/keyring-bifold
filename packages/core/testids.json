@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "5a3376c6523976dc010754113e22c9a139942fac",
+  "generatedFrom": "6784fd1e3fe0ffe8869370703e30f4b28d9864ea",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -547,6 +547,7 @@
     "JSONDetails.ScrollView": ["src/screens/JSONDetails.tsx"],
     "JoinActions": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinAgain": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
+    "JoinAgentRefused": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinAs": ["src/modules/trust-tasks/screens/JoinAs.tsx"],
     "JoinAsContinue": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinAsCreateProfile": ["src/modules/trust-tasks/screens/JoinAs.tsx"],
@@ -574,6 +575,7 @@
     "JoinNoVetting": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinNotAccepting": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinOpenCommunity": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
+    "JoinOpenMyAgent": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinPrivateVettingRefused": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinRememberedUnreachable": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinRequestLost": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
@@ -1961,6 +1963,9 @@
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.again"
     },
     {
+      "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.agentRefused"
+    },
+    {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.asContinue"
     },
     {
@@ -2025,6 +2030,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.openCommunity"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.openMyAgent"
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.preparingSlow"
