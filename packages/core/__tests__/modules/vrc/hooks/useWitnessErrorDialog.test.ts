@@ -174,9 +174,7 @@ describe('useWitnessErrorDialog', () => {
     it('should reset isRetrying to false when new error is received', async () => {
       const { result } = renderHook(() => useWitnessErrorDialog())
       const testError = createTestError('network-error', {
-        onRetry: jest.fn().mockImplementation(
-          () => new Promise((resolve) => setTimeout(resolve, 1000))
-        ),
+        onRetry: jest.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 1000))),
       })
 
       // First set an error with retry in progress
@@ -456,10 +454,7 @@ describe('useWitnessErrorDialog', () => {
       })
 
       expect(result.current.isRetrying).toBe(false)
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        '[WitnessErrorDialog] Retry failed:',
-        expect.any(Error)
-      )
+      expect(consoleErrorSpy).toHaveBeenCalledWith('[WitnessErrorDialog] Retry failed:', expect.any(Error))
 
       consoleErrorSpy.mockRestore()
     })
@@ -708,9 +703,7 @@ describe('useWitnessErrorDialog', () => {
       mockVrcFlowStore._flowErrors.set(connectionId1, error1)
       mockVrcFlowStore._flowErrors.set(connectionId2, error2)
       mockVrcFlowStore.getErrorConnections.mockReturnValue([connectionId1, connectionId2])
-      mockVrcFlowStore.getError.mockImplementation((id: string) =>
-        id === connectionId1 ? error1 : error2
-      )
+      mockVrcFlowStore.getError.mockImplementation((id: string) => (id === connectionId1 ? error1 : error2))
 
       const { result } = renderHook(() => useWitnessErrorDialog())
 
