@@ -1,10 +1,10 @@
 import { useBasicMessagesByConnectionId, useConnectionById } from '@bifold/react-hooks'
-import { 
+import {
   DidCommBasicMessageRecord,
   DidCommBasicMessageRole,
   DidCommConnectionRecord,
   DidCommDidExchangeRole,
-  DidCommDidExchangeState
+  DidCommDidExchangeState,
 } from '@credo-ts/didcomm'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'

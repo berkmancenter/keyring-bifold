@@ -388,7 +388,6 @@ describe('vrcFlowStore.clearFlow - error event emission', () => {
   })
 })
 
-
 describe('useVrcFlowInProgress - success confirmation beat', () => {
   beforeEach(() => {
     jest.useFakeTimers()
