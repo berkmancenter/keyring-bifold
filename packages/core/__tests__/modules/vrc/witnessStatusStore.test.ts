@@ -769,3 +769,48 @@ describe('VrcFlowStore R-Card receive tracking', () => {
     expect(vrcFlowStore.isRcardReceiveComplete('rc-1')).toBe(false)
   })
 })
+
+describe('VrcFlowStore: is an exchange working on this phone?', () => {
+  // The real singleton, as a tapped message notification asks it.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { vrcFlowStore } = require('../../../src/modules/vrc/witnessStatusStore')
+
+  afterEach(() => {
+    vrcFlowStore.clearFlow('w-1')
+    vrcFlowStore.clearFlow('w-2')
+  })
+
+  it('no flow: no', () => {
+    expect(vrcFlowStore.isWorkingOnThisPhone()).toBe(false)
+  })
+
+  it.each(['preparing-offer', 'biometric-fallback', 'witness-active', 'witness-fallback', 'sharing-witness-record'])(
+    '%s: yes, this phone is signing, witnessing or sending',
+    (status) => {
+      vrcFlowStore.setStatus('w-1', status)
+      expect(vrcFlowStore.isWorkingOnThisPhone()).toBe(true)
+    }
+  )
+
+  it.each(['connecting', 'discovering', 'proposed', 'offer-sent', 'offer-received'])(
+    '%s: no, it waits on the other phone or is done',
+    (status) => {
+      vrcFlowStore.setStatus('w-1', status)
+      expect(vrcFlowStore.isWorkingOnThisPhone()).toBe(false)
+    }
+  )
+
+  it('one connection working among others waiting: yes', () => {
+    vrcFlowStore.setStatus('w-1', 'proposed')
+    vrcFlowStore.setStatus('w-2', 'witness-active')
+    expect(vrcFlowStore.isWorkingOnThisPhone()).toBe(true)
+  })
+
+  it('a finished exchange still showing its last status: no', () => {
+    vrcFlowStore.setStatus('w-1', 'offer-sent')
+    vrcFlowStore.markOfferReceived('w-1')
+    vrcFlowStore.setStatus('w-1', 'sharing-witness-record')
+    expect(vrcFlowStore.isExchangeComplete('w-1')).toBe(true)
+    expect(vrcFlowStore.isWorkingOnThisPhone()).toBe(false)
+  })
+})
