@@ -1687,6 +1687,8 @@ async function handleInboundProposeResponse(
   })
 
   if (outcome.kind === 'handled') {
+    // Either way nothing is waiting any more: no state lingers as 'proposed'.
+    if (mismatch || cancelled) vrcFlowStore.clearFlow(context.connectionId)
     if (mismatch) {
       agent.config.logger.warn(
         `${LOG_PREFIX} upgrade acceptance refused: not this connection's relationship (exchange ${document.threadId ?? document.id})`
