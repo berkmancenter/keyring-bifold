@@ -541,7 +541,7 @@ describe('useWitnessErrorDialog', () => {
       expect(mockVrcFlowStore.clearError).toHaveBeenCalledWith(connectionId)
     })
 
-    it('should call vrcFlowStore.clearFlow', async () => {
+    it('should call vrcFlowStore.clearFlow, as cancelled (never read as a confirmation)', async () => {
       const testError = createTestError()
       const connectionId = 'conn-123'
 
@@ -559,7 +559,7 @@ describe('useWitnessErrorDialog', () => {
         result.current.onCancel()
       })
 
-      expect(mockVrcFlowStore.clearFlow).toHaveBeenCalledWith(connectionId)
+      expect(mockVrcFlowStore.clearFlow).toHaveBeenCalledWith(connectionId, 'cancelled')
     })
 
     it('should reset all state', async () => {
