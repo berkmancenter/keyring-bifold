@@ -284,7 +284,10 @@ const VtaAgentHome: React.FC = () => {
   // failed, or the person left by a way that did not close it): the add is
   // given up and the agent before comes back, rather than "Link your agent"
   // until a restart (IN-138). Only on arriving here: pressing Add on this
-  // page does not count.
+  // page does not count. What keeps it arrival-only is that it reads the
+  // store imperatively and depends on isFocused alone: addingAgent is now set
+  // before the agent is left (Phase 1), so an addingAgent read from the
+  // subscribed state and added to the deps would cancel every add mid-flight.
   useEffect(() => {
     if (!isFocused) return
     const now = vtaAgent.getState()

@@ -183,13 +183,15 @@ describe('Agent settings', () => {
       controller.set({ link: before })
     })
 
-    it('while an unlink passes through "not linked", it never says there is nothing to link', async () => {
+    // 7a on #481: telling the agent can hold an unlink up to ten seconds; a blank page that long reads as frozen.
+    it('while an unlink passes through "not linked", it says so, and never that there is nothing to link', async () => {
       const before = vtaAgent.getState().link
       const tree = await show()
       await act(async () => {
         controller.set({ unlinking: true, link: { kind: 'notLinked' } })
       })
       expect(tree.getByTestId(testIdWithKey('AgentSettingsScreen'))).not.toHaveTextContent(/VtaLink\.NothingToLink/)
+      expect(tree.getByTestId(testIdWithKey('AgentSettingsScreen'))).toHaveTextContent(/VtaLink\.Unlinking/)
       // The control: done, and nothing left, it does.
       await act(async () => {
         controller.set({ unlinking: false })
