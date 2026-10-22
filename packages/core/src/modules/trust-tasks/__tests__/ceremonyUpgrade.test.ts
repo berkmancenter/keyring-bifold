@@ -25,7 +25,6 @@ import {
   setupTrustTasksInbound,
   upgradeRelationship,
 } from '../ceremony'
-import { digestMultibase } from '../documentProof'
 import { TrustTaskMessage } from '../messages/TrustTaskMessage'
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 import { vrcFlowStore } from '../../vrc/witnessStatusStore'
@@ -75,9 +74,6 @@ jest.mock('../documentProof', () => ({
   })),
   verifyDocumentProof: jest.fn(async () => true),
 }))
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { verifyDocumentProof: mockedVerify } = require('../documentProof') as { verifyDocumentProof: jest.Mock }
 
 // ---- a minimal fake agent (extended for the authority flip) -----------------
 
@@ -214,7 +210,6 @@ afterEach(() => {
 
 const flushDelivery = () => new Promise((resolve) => setTimeout(resolve, 50))
 
-
 const ME = 'did:peer:4aaa' // the deterministic proposer of the first exchange
 const PEER = 'did:peer:4zzz'
 const conn = (fake: { connectionId: string }, mine: string, theirs: string) => ({
@@ -223,10 +218,13 @@ const conn = (fake: { connectionId: string }, mine: string, theirs: string) => (
   theirDid: theirs,
 })
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const rcard = () => (require('../../vrc/vrc-manager') as { issueRCardForAcceptedExchange: jest.Mock }).issueRCardForAcceptedExchange
+const rcard = () =>
+  (require('../../vrc/vrc-manager') as { issueRCardForAcceptedExchange: jest.Mock }).issueRCardForAcceptedExchange
 
 const docsOfType = (fake: { sentMessages: TrustTaskMessage[] }, type: string) =>
-  fake.sentMessages.map((m) => m.document as Record<string, unknown> & { payload: Record<string, unknown> }).filter((d) => d.type === type)
+  fake.sentMessages
+    .map((m) => m.document as Record<string, unknown> & { payload: Record<string, unknown> })
+    .filter((d) => d.type === type)
 
 /** The first exchange as its proposer: discovery, propose, acceptance, our card. */
 async function firstExchangeAsProposer(fake: ReturnType<typeof makeFakeAgent>) {
@@ -235,13 +233,29 @@ async function firstExchangeAsProposer(fake: ReturnType<typeof makeFakeAgent>) {
   const query = docsOfType(fake, discovery.TYPE_URI)[0]
   await deliver(
     fake.capturedHandlerRef,
-    { id: 'dddd1111-0000-4000-8000-00000000000d', type: `${discovery.TYPE_URI}#response`, threadId: query.id, issuer: PEER, recipient: ME, issuedAt: new Date().toISOString(), payload: { supportedTypes: [propose.TYPE_URI] } },
+    {
+      id: 'dddd1111-0000-4000-8000-00000000000d',
+      type: `${discovery.TYPE_URI}#response`,
+      threadId: query.id,
+      issuer: PEER,
+      recipient: ME,
+      issuedAt: new Date().toISOString(),
+      payload: { supportedTypes: [propose.TYPE_URI] },
+    },
     conn(fake, ME, PEER)
   )
   const first = docsOfType(fake, propose.TYPE_URI)[0]
   await deliver(
     fake.capturedHandlerRef,
-    { id: 'bbbb1111-0000-4000-8000-00000000000b', type: `${propose.TYPE_URI}#response`, threadId: first.id, issuer: PEER, recipient: ME, issuedAt: new Date().toISOString(), payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' } },
+    {
+      id: 'bbbb1111-0000-4000-8000-00000000000b',
+      type: `${propose.TYPE_URI}#response`,
+      threadId: first.id,
+      issuer: PEER,
+      recipient: ME,
+      issuedAt: new Date().toISOString(),
+      payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' },
+    },
     conn(fake, ME, PEER)
   )
   await flushDelivery()
@@ -253,7 +267,15 @@ async function firstExchangeAsResponder(fake: ReturnType<typeof makeFakeAgent>) 
   setupTrustTasksInbound(fake.agent)
   await deliver(
     fake.capturedHandlerRef,
-    { id: 'aaaa1111-1111-4111-8111-111111111111', type: propose.TYPE_URI, threadId: 'aaaa1111-1111-4111-8111-111111111111', issuer: ME, recipient: PEER, issuedAt: new Date().toISOString(), payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: false } },
+    {
+      id: 'aaaa1111-1111-4111-8111-111111111111',
+      type: propose.TYPE_URI,
+      threadId: 'aaaa1111-1111-4111-8111-111111111111',
+      issuer: ME,
+      recipient: PEER,
+      issuedAt: new Date().toISOString(),
+      payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: false },
+    },
     conn(fake, PEER, ME)
   )
   await respondToRelationshipProposal(fake.agent, fake.connectionId, true)
@@ -261,7 +283,15 @@ async function firstExchangeAsResponder(fake: ReturnType<typeof makeFakeAgent>) 
   const query = docsOfType(fake, discovery.TYPE_URI)[0]
   await deliver(
     fake.capturedHandlerRef,
-    { id: 'dddd2222-0000-4000-8000-00000000000d', type: `${discovery.TYPE_URI}#response`, threadId: query.id, issuer: ME, recipient: PEER, issuedAt: new Date().toISOString(), payload: { supportedTypes: [propose.TYPE_URI] } },
+    {
+      id: 'dddd2222-0000-4000-8000-00000000000d',
+      type: `${discovery.TYPE_URI}#response`,
+      threadId: query.id,
+      issuer: ME,
+      recipient: PEER,
+      issuedAt: new Date().toISOString(),
+      payload: { supportedTypes: [propose.TYPE_URI] },
+    },
     conn(fake, PEER, ME)
   )
 }
@@ -276,7 +306,12 @@ describe('upgrading a relationship on its existing connection', () => {
     const result = await upgradeRelationship(fake.agent, fake.connectionId, { witnessed: false })
     expect(result.kind).toBe('sent')
     expect(fake.sentMessages).toHaveLength(before + 1)
-    const sent = fake.sentMessages[before].document as { type: string; id: string; threadId: string; payload: { relationshipDid: string; witnessed: boolean } }
+    const sent = fake.sentMessages[before].document as {
+      type: string
+      id: string
+      threadId: string
+      payload: { relationshipDid: string; witnessed: boolean }
+    }
     expect(sent.type).toBe(propose.TYPE_URI)
     expect(sent.threadId).toBe(sent.id)
     expect(sent.id).not.toBe('aaaa1111-1111-4111-8111-111111111111')
@@ -315,10 +350,21 @@ describe('upgrading a relationship on its existing connection', () => {
     expect(rcard()).toHaveBeenCalledTimes(1)
     const up = await upgradeRelationship(fake.agent, fake.connectionId, { witnessed: false })
     if (up.kind !== 'sent') throw new Error('not sent')
-    expect(await pendingUpgradeOf(fake.agent, fake.connectionId)).toEqual({ exchangeId: up.exchangeId, witnessed: false })
+    expect(await pendingUpgradeOf(fake.agent, fake.connectionId)).toEqual({
+      exchangeId: up.exchangeId,
+      witnessed: false,
+    })
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'bbbb2222-0000-4000-8000-00000000000b', type: `${propose.TYPE_URI}#response`, threadId: up.exchangeId, issuer: PEER, recipient: ME, issuedAt: new Date().toISOString(), payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' } },
+      {
+        id: 'bbbb2222-0000-4000-8000-00000000000b',
+        type: `${propose.TYPE_URI}#response`,
+        threadId: up.exchangeId,
+        issuer: PEER,
+        recipient: ME,
+        issuedAt: new Date().toISOString(),
+        payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' },
+      },
       conn(fake, ME, PEER)
     )
     await flushDelivery()
@@ -339,7 +385,15 @@ describe('upgrading a relationship on its existing connection', () => {
     fake.relationshipRepo.updateCounterpartyRelationshipDid.mockClear()
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'bbbb3333-0000-4000-8000-00000000000b', type: `${propose.TYPE_URI}#response`, threadId: up.exchangeId, issuer: PEER, recipient: ME, issuedAt: new Date().toISOString(), payload: { accept: true, relationshipDid: 'did:peer:0zSomeoneElse' } },
+      {
+        id: 'bbbb3333-0000-4000-8000-00000000000b',
+        type: `${propose.TYPE_URI}#response`,
+        threadId: up.exchangeId,
+        issuer: PEER,
+        recipient: ME,
+        issuedAt: new Date().toISOString(),
+        payload: { accept: true, relationshipDid: 'did:peer:0zSomeoneElse' },
+      },
       conn(fake, ME, PEER)
     )
     await flushDelivery()
@@ -353,10 +407,20 @@ describe('upgrading a relationship on its existing connection', () => {
     expect(rcard()).toHaveBeenCalledTimes(1)
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'aaaa2222-2222-4222-8222-222222222222', type: propose.TYPE_URI, threadId: 'aaaa2222-2222-4222-8222-222222222222', issuer: ME, recipient: PEER, issuedAt: new Date().toISOString(), payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: true } },
+      {
+        id: 'aaaa2222-2222-4222-8222-222222222222',
+        type: propose.TYPE_URI,
+        threadId: 'aaaa2222-2222-4222-8222-222222222222',
+        issuer: ME,
+        recipient: PEER,
+        issuedAt: new Date().toISOString(),
+        payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: true },
+      },
       conn(fake, PEER, ME)
     )
-    expect(vrcFlowStore.getAnyProposalPrompt()).toEqual(expect.objectContaining({ connectionId: fake.connectionId, upgrade: 'witness' }))
+    expect(vrcFlowStore.getAnyProposalPrompt()).toEqual(
+      expect.objectContaining({ connectionId: fake.connectionId, upgrade: 'witness' })
+    )
     await respondToRelationshipProposal(fake.agent, fake.connectionId, true)
     await flushDelivery()
     const response = docsOfType(fake, `${propose.TYPE_URI}#response`).pop()!
@@ -370,7 +434,15 @@ describe('upgrading a relationship on its existing connection', () => {
     setupTrustTasksInbound(fake.agent)
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'aaaa3333-3333-4333-8333-333333333333', type: propose.TYPE_URI, threadId: 'aaaa3333-3333-4333-8333-333333333333', issuer: ME, recipient: PEER, issuedAt: new Date().toISOString(), payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: false } },
+      {
+        id: 'aaaa3333-3333-4333-8333-333333333333',
+        type: propose.TYPE_URI,
+        threadId: 'aaaa3333-3333-4333-8333-333333333333',
+        issuer: ME,
+        recipient: PEER,
+        issuedAt: new Date().toISOString(),
+        payload: { relationshipDid: 'did:peer:0zPeerRel', witnessed: false },
+      },
       conn(fake, PEER, ME)
     )
     const prompt = vrcFlowStore.getAnyProposalPrompt()
@@ -384,7 +456,15 @@ describe('upgrading a relationship on its existing connection', () => {
     const before = fake.sentMessages.length
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'aaaa4444-4444-4444-8444-444444444444', type: propose.TYPE_URI, threadId: 'aaaa4444-4444-4444-8444-444444444444', issuer: ME, recipient: PEER, issuedAt: new Date().toISOString(), payload: { relationshipDid: 'did:peer:0zSomeoneElse', witnessed: false } },
+      {
+        id: 'aaaa4444-4444-4444-8444-444444444444',
+        type: propose.TYPE_URI,
+        threadId: 'aaaa4444-4444-4444-8444-444444444444',
+        issuer: ME,
+        recipient: PEER,
+        issuedAt: new Date().toISOString(),
+        payload: { relationshipDid: 'did:peer:0zSomeoneElse', witnessed: false },
+      },
       conn(fake, PEER, ME)
     )
     expect(vrcFlowStore.getAnyProposalPrompt()).toBeUndefined()
@@ -404,7 +484,15 @@ describe('upgrading a relationship on its existing connection', () => {
     const before = fake.sentMessages.length
     await deliver(
       fake.capturedHandlerRef,
-      { id: 'bbbb4444-0000-4000-8000-00000000000b', type: `${propose.TYPE_URI}#response`, threadId: up.exchangeId, issuer: PEER, recipient: ME, issuedAt: new Date().toISOString(), payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' } },
+      {
+        id: 'bbbb4444-0000-4000-8000-00000000000b',
+        type: `${propose.TYPE_URI}#response`,
+        threadId: up.exchangeId,
+        issuer: PEER,
+        recipient: ME,
+        issuedAt: new Date().toISOString(),
+        payload: { accept: true, relationshipDid: 'did:peer:0zPeerRel' },
+      },
       conn(fake, ME, PEER)
     )
     await flushDelivery()
@@ -415,7 +503,7 @@ describe('upgrading a relationship on its existing connection', () => {
 
 describe('the issue and witness-share guards are once per exchange', () => {
   const doc = (issuer: string, threadId: string) => ({ document: { issuer, threadId } })
-  test('a prior of ours for THIS exchange blocks; one for another exchange, or the peer\'s, does not', () => {
+  test("a prior of ours for THIS exchange blocks; one for another exchange, or the peer's, does not", () => {
     const priors = [doc('did:peer:4aaa', 'x1'), doc('did:peer:4zzz', 'x2')]
     expect(priorForExchange(priors, 'did:peer:4aaa', 'x1')).toBe(true)
     expect(priorForExchange(priors, 'did:peer:4aaa', 'x2')).toBe(false)

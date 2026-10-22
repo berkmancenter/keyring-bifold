@@ -475,7 +475,10 @@ export function priorForExchange(
 }
 
 /** The propose-thread documents (proposes, responses) retained on a connection. */
-async function proposeThreadDocs(agent: Agent, connectionId: string): Promise<{ document: Record<string, unknown>; role?: string }[]> {
+async function proposeThreadDocs(
+  agent: Agent,
+  connectionId: string
+): Promise<{ document: Record<string, unknown>; role?: string }[]> {
   const documentRepository = agent.dependencyManager.container.resolve(TrustTaskDocumentRepository)
   return (await documentRepository.findByQuery(agent.context, { typeUri: propose.TYPE_URI, connectionId })) as never
 }
@@ -908,7 +911,9 @@ async function handleInboundPropose(
       })
       await service.retain(agent.context, error as never, 'error', context.connectionId)
       await sendTrustTaskDocument(agent, context.connectionId, error as unknown as Record<string, unknown>)
-      agent.config.logger.warn(`${LOG_PREFIX} upgrade propose refused: not this connection's relationship (exchange ${exchangeId})`)
+      agent.config.logger.warn(
+        `${LOG_PREFIX} upgrade propose refused: not this connection's relationship (exchange ${exchangeId})`
+      )
       return
     }
   }
@@ -1689,7 +1694,9 @@ async function handleInboundProposeResponse(
       return
     }
     if (cancelled) {
-      agent.config.logger.info(`${LOG_PREFIX} upgrade acceptance after it was withdrawn: no card (exchange ${document.threadId ?? document.id})`)
+      agent.config.logger.info(
+        `${LOG_PREFIX} upgrade acceptance after it was withdrawn: no card (exchange ${document.threadId ?? document.id})`
+      )
       return
     }
     agent.config.logger.info(
