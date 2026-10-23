@@ -9,6 +9,13 @@
  * credo-tsp-adapter declares them and the workspace hoists them (its tests build a real agent the same way). If that
  * package stops declaring them, this suite fails at import — declare them in core's devDependencies then; do not skip
  * the suite, which is the only proof the sealed box works on a real KMS.
+ *
+ * Why it is set up the way it is — the only real-Askar test in core, whose jest runs the react-native preset:
+ * - core's jest.config.js maps @openwallet-foundation/askar-shared to one copy. @credo-ts/askar is nested under core
+ *   and decides whether to provision a new store with `instanceof AskarError`; across two copies that check failed and
+ *   the store was opened instead ("database path was not found").
+ * - The store gets an explicit sqlite file in a temporary directory, removed afterwards, rather than the default under
+ *   the agent's data path; and not an in-memory database, which is per connection ("no such table: config").
  */
 import '@openwallet-foundation/askar-nodejs'
 
@@ -16,16 +23,11 @@ import { AskarModule } from '@credo-ts/askar'
 import { Agent, PeerDidNumAlgo } from '@credo-ts/core'
 import { agentDependencies } from '@credo-ts/node'
 import { askarNodeJS as askar } from '@openwallet-foundation/askar-nodejs'
+import { mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 import { openChallenge, sameChallenge, sealChallenge } from '../../../src/modules/vrc/contacts/continuityCrypto'
-
-// This tree nests more than one copy of askar-shared: register the Node binding on the copy @credo-ts/askar itself
-// resolves, or opening the store says the native binding was never registered.
-// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-const { NativeAskar } = require(
-  require.resolve('@openwallet-foundation/askar-shared', { paths: [require.resolve('@credo-ts/askar')] })
-) as { NativeAskar: { register: (native: unknown) => void } }
-NativeAskar.register(askar)
 
 async function relationshipDid(agent: Agent): Promise<string> {
   const result = await agent.dids.create({
@@ -41,6 +43,7 @@ describe('continuity crypto on a real KMS', () => {
   let first: string
   let second: string
   let third: string
+  const storeDir = mkdtempSync(join(tmpdir(), 'continuity-'))
 
   beforeAll(async () => {
     // jestSetup.js freezes Date.now for screen tests; a real Askar store needs the real clock.
@@ -54,6 +57,7 @@ describe('continuity crypto on a real KMS', () => {
           store: {
             id: `continuity-${process.pid}-${Math.random().toString(36).slice(2)}`,
             key: 'test-key',
+            database: { type: 'sqlite', config: { path: join(storeDir, 'sqlite.db') } },
           },
         }),
       },
@@ -66,6 +70,7 @@ describe('continuity crypto on a real KMS', () => {
 
   afterAll(async () => {
     await agent?.shutdown()
+    rmSync(storeDir, { recursive: true, force: true })
   })
 
   test('a challenge sealed to one relationship DID opens with its key, and says which', async () => {
