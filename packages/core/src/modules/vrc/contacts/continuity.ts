@@ -32,6 +32,8 @@ import { RESPONSE_SPEC, SPEC, TYPE_URI } from './continuitySpec'
 export const CONTINUITY_ASK = 'keyring.contact-continuity-ask'
 
 const HOUR = 60 * 60 * 1000
+/** How long an unanswered ask shows as asked. A Not now is silent by design, so an ask cannot wait for an answer. */
+export const ASK_SHOWN_FOR = 24 * HOUR
 export const ATTEMPTS_PER_CONNECTION_PER_HOUR = 5
 export const PROMPTS_PER_HOUR = 3
 
@@ -63,6 +65,13 @@ export async function askToConfirm(agent: Agent, links: ContactLinks, issuerId: 
   const connection = await agent.modules.didcomm.connections.getById(record.connectionId)
   if (!connection.did || !connection.theirDid) return 'noConnection'
 
+  // A new ask replaces the earlier ones on this connection, which also bounds how many are kept.
+  for (const earlier of await agent.genericRecords.findAllByQuery({
+    recordType: CONTINUITY_ASK,
+    connectionId: record.connectionId,
+  })) {
+    await agent.genericRecords.deleteById(earlier.id)
+  }
   const { getTrustTasksService, sendTrustTaskDocument } = ceremony()
   for (const about of others) {
     const { challenge, sealed } = await sealChallenge(agent, about)
@@ -75,7 +84,14 @@ export async function askToConfirm(agent: Agent, links: ContactLinks, issuerId: 
       payload: { sealed },
     }
     await agent.genericRecords.save({
-      content: { threadId: document.id, connectionId: record.connectionId, askedFrom: issuerId, about, challenge },
+      content: {
+        threadId: document.id,
+        connectionId: record.connectionId,
+        askedFrom: issuerId,
+        about,
+        challenge,
+        askedAt: Date.now(),
+      },
       tags: { recordType: CONTINUITY_ASK, connectionId: record.connectionId, threadId: String(document.id) },
     })
     await getTrustTasksService(agent).retain(agent.context, document, 'request', record.connectionId)
@@ -116,24 +132,26 @@ export async function handleContinuityResponse(
   continuityEvents.emit('confirmed', { connectionId: context.connectionId })
 }
 
-/** Mark the contact links of these relationships as confirmed by the other phone. */
+/**
+ * Mark the contact links of these relationships as confirmed by the other phone, in place: the link is never absent,
+ * so a failed write leaves the merge as it was. The confirmation lives in the content, which every read goes by.
+ */
 async function markConfirmedByPeer(agent: Agent, relationships: string[]): Promise<void> {
   for (const issuerDid of relationships) {
     for (const link of await agent.genericRecords.findAllByQuery({ recordType: CONTACT_LINK, issuerDid })) {
       const content = link.content as { issuerDid: string; contactId: string; confirmation?: string }
       if (content.confirmation === 'peer') continue
-      await agent.genericRecords.deleteById(link.id)
-      await agent.genericRecords.save({
-        content: { ...content, confirmation: 'peer' },
-        tags: {
-          recordType: CONTACT_LINK,
-          issuerDid: content.issuerDid,
-          contactId: content.contactId,
-          confirmation: 'peer',
-        },
-      })
+      link.content = { ...content, confirmation: 'peer' }
+      await agent.genericRecords.update(link)
     }
   }
+}
+
+/** Whether this phone asked the other phone, over `connectionId`, within the last day. */
+export async function askedRecently(agent: Pick<Agent, 'genericRecords'>, connectionId: string): Promise<boolean> {
+  const asks = (await agent.genericRecords.findAllByQuery({ recordType: CONTINUITY_ASK, connectionId })) ?? []
+  const now = Date.now()
+  return asks.some((ask) => now - Number((ask.content as { askedAt?: number }).askedAt ?? 0) < ASK_SHOWN_FOR)
 }
 
 /** Whether every link of the contact of `issuerId` has been confirmed by the other phone. */
@@ -235,8 +253,15 @@ export async function handleContinuityRequest(
   const relationships = await agent.dependencyManager.resolve(RelationshipDidRepository).getAll(agent.context)
   const current = relationships.find((record) => record.connectionId === connectionId)
   if (!current?.counterpartyRelationshipDid) return
+  // Excluded by the DID the asker knows, not only by connection: a record without a connection, or a second record
+  // holding the same DID, must not bring this relationship's own key back in.
   const earlierDids = relationships
-    .filter((record) => record.connectionId !== connectionId && record.myRelationshipDid)
+    .filter(
+      (record) =>
+        record.connectionId !== connectionId &&
+        record.myRelationshipDid &&
+        record.myRelationshipDid !== current.myRelationshipDid
+    )
     .map((record) => record.myRelationshipDid)
   const sealed = String((document.payload as { sealed?: unknown } | undefined)?.sealed ?? '')
   const opened = await openChallenge(agent, sealed, earlierDids)

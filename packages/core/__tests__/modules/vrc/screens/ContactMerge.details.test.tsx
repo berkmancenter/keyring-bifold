@@ -15,6 +15,7 @@ import { testIdWithKey } from '../../../../src/utils/testable'
 import { memoryGenericRecords } from '../fixtures/memoryGenericRecords'
 import { ALICE_AGAIN, ALICE_FIRST, BOB, SEVERAL_RELATIONSHIPS } from '../fixtures/severalRelationships'
 import { CONTACT_LINK } from '../../../../src/modules/vrc/contacts/contactLinks'
+import { ASK_SHOWN_FOR, CONTINUITY_ASK } from '../../../../src/modules/vrc/contacts/continuity'
 
 jest.mock('@bifold/react-hooks')
 // The shared mock returns bare keys; here a count is shown too, so a test can read how many relationships a removal
@@ -113,7 +114,7 @@ describe('Same person? on a contact', () => {
     expect(label.props.children).toBe('ContactDetails.MergedByYou')
     expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(3)
     expect(store.records).toHaveLength(1)
-    expect(store.records[0].tags.confirmation).toBe('user')
+    expect(store.records[0].content.confirmation).toBe('user')
 
     fireEvent.press(tree.getByTestId(id('ContactSeparate')))
     await waitFor(() => expect(tree.getByTestId(id('ContactMergeOffer'))).toBeTruthy())
@@ -279,5 +280,26 @@ describe('Same person? on a contact', () => {
     expect(await tree.findByTestId(id('ContactMergeConfirmedByPhone'))).toBeTruthy()
     expect(tree.queryByTestId(id('ContactMergedByYou'))).toBeNull()
     expect(tree.queryByTestId(id('ContactMergeAskPhone'))).toBeNull()
+  })
+
+  const askOn = (connectionId: string, askedAt: number) => ({
+    id: `ask-${askedAt}`,
+    content: { askedAt },
+    tags: { recordType: CONTINUITY_ASK, connectionId, threadId: `t-${askedAt}` },
+  })
+
+  test('an ask from today shows as asked, without promising an answer', async () => {
+    store.records.push(mergedLink('user'), askOn('conn-again', Date.now()))
+    const tree = openWithConnection(ALICE_AGAIN)
+    expect(await tree.findByTestId(id('ContactMergeAsked'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ContactMergeAskPhone'))).toBeNull()
+  })
+
+  test('an ask older than a day — perhaps a silent Not now — lets the person ask again', async () => {
+    store.records.push(mergedLink('user'), askOn('conn-again', Date.now() - ASK_SHOWN_FOR - 1000))
+    const tree = openWithConnection(ALICE_AGAIN)
+    await tree.findByTestId(id('ContactMergedByYou'))
+    await waitFor(() => expect(tree.getByTestId(id('ContactMergeAskPhone'))).toBeTruthy())
+    expect(tree.queryByTestId(id('ContactMergeAsked'))).toBeNull()
   })
 })

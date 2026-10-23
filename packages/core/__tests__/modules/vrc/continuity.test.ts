@@ -5,10 +5,12 @@
  */
 import { CONTACT_LINK } from '../../../src/modules/vrc/contacts/contactLinks'
 import {
+  ASK_SHOWN_FOR,
   ATTEMPTS_PER_CONNECTION_PER_HOUR,
   CONTINUITY_ASK,
   PROMPTS_PER_HOUR,
   askToConfirm,
+  askedRecently,
   continuityEvents,
   continuityPromptStore,
   handleContinuityRequest,
@@ -51,7 +53,7 @@ const RELATIONSHIPS = [
   { connectionId: 'conn-else', myRelationshipDid: 'did:peer:me-else', counterpartyRelationshipDid: 'did:peer:else' },
 ]
 
-function agentWith(store = memoryGenericRecords()) {
+function agentWith(store = memoryGenericRecords(), relationships: typeof RELATIONSHIPS = RELATIONSHIPS) {
   return {
     store,
     agent: {
@@ -60,9 +62,9 @@ function agentWith(store = memoryGenericRecords()) {
       w3cCredentials: { getAll: async () => [] },
       dependencyManager: {
         resolve: () => ({
-          getAll: async () => RELATIONSHIPS,
+          getAll: async () => relationships,
           findByCounterpartyRelationshipDid: async (_c: unknown, did: string) =>
-            RELATIONSHIPS.find((r) => r.counterpartyRelationshipDid === did) ?? null,
+            relationships.find((r) => r.counterpartyRelationshipDid === did) ?? null,
         }),
       },
       modules: {
@@ -107,6 +109,17 @@ describe('answering a continuity check', () => {
       'did:peer:me-old',
       'did:peer:me-else',
     ])
+    expect(continuityPromptStore.has('conn-new')).toBe(false)
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  test("the asker's own relationship DID is excluded by DID, even on a record without that connection", async () => {
+    // A second record holding this connection's own DID, with no connection of its own.
+    const { agent } = agentWith(memoryGenericRecords(), [
+      ...RELATIONSHIPS,
+      { myRelationshipDid: 'did:peer:me-new', counterpartyRelationshipDid: 'did:peer:them-new' } as never,
+    ])
+    await handleContinuityRequest(agent, accepting, request('sealed|did:peer:me-new|abc'), inbound('conn-new'))
     expect(continuityPromptStore.has('conn-new')).toBe(false)
     expect(mockSend).not.toHaveBeenCalled()
   })
@@ -220,6 +233,31 @@ describe('asking for a continuity check', () => {
     ])
   })
 
+  test('a new ask replaces the earlier ones on that connection', async () => {
+    const { agent, store } = agentWith()
+    await askToConfirm(agent, merged, 'did:peer:them-new')
+    await askToConfirm(agent, merged, 'did:peer:them-new')
+    const asks = store.records.filter((r) => r.tags.recordType === CONTINUITY_ASK)
+    expect(asks).toHaveLength(1)
+    expect(asks[0].tags.threadId).toBe(String(mockSend.mock.calls[1][2].id))
+  })
+
+  test('an ask shows as asked for a day, then not', async () => {
+    const { agent, store } = agentWith()
+    store.records.push({
+      id: 'ask-old',
+      content: { askedAt: Date.now() - ASK_SHOWN_FOR - 1000 },
+      tags: { recordType: CONTINUITY_ASK, connectionId: 'conn-new', threadId: 't-old' },
+    })
+    expect(await askedRecently(agent, 'conn-new')).toBe(false)
+    store.records.push({
+      id: 'ask-new',
+      content: { askedAt: Date.now() },
+      tags: { recordType: CONTINUITY_ASK, connectionId: 'conn-new', threadId: 't-new' },
+    })
+    expect(await askedRecently(agent, 'conn-new')).toBe(true)
+  })
+
   test('nothing to confirm for a contact of one relationship; no connection, nothing sent', async () => {
     const { agent } = agentWith()
     expect(await askToConfirm(agent, new Map(), 'did:peer:them-new')).toBe('nothingToConfirm')
@@ -265,6 +303,11 @@ describe('receiving the answer', () => {
       inbound('conn-new')
     )
     expect(await isConfirmedByPeer(agent, links, 'did:peer:them-new')).toBe(true)
+    // In place: the same link, updated, never deleted and saved again.
+    expect(store.update).toHaveBeenCalled()
+    expect(store.records.find((r) => r.id === 'link-old')?.content).toEqual(
+      expect.objectContaining({ confirmation: 'peer' })
+    )
     expect(store.records.filter((r) => r.tags.recordType === CONTINUITY_ASK)).toHaveLength(0)
     expect(confirmed).toHaveBeenCalledWith({ connectionId: 'conn-new' })
   })
@@ -284,6 +327,21 @@ describe('receiving the answer', () => {
       reply(threadId, 'challenge-for-did:peer:them-old'),
       inbound('conn-else')
     )
+    expect(await isConfirmedByPeer(agent, links, 'did:peer:them-new')).toBe(false)
+  })
+
+  test('a failed write while confirming leaves the merge as it was', async () => {
+    const { agent, store, threadId } = await asked()
+    store.update.mockRejectedValueOnce(new Error('store unavailable'))
+    await expect(
+      handleContinuityResponse(
+        agent,
+        accepting,
+        reply(threadId, 'challenge-for-did:peer:them-old'),
+        inbound('conn-new')
+      )
+    ).rejects.toThrow('store unavailable')
+    expect(store.records.find((r) => r.id === 'link-old')).toBeTruthy()
     expect(await isConfirmedByPeer(agent, links, 'did:peer:them-new')).toBe(false)
   })
 })

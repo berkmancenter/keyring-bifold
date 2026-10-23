@@ -579,7 +579,7 @@
     "MergedRemoveConfirm_one": "Remove {{count}}",
     "MergedRemoveConfirm_other": "Remove all {{count}}",
     "MergeAskPhone": "Ask {{name}}'s phone to confirm",
-    "MergeAsked": "Asked {{name}}'s phone. This changes once it answers.",
+    "MergeAsked": "Asked {{name}}'s phone. If they confirm, this changes.",
     "MergeConfirmedByPhone": "Merged by you, and confirmed by {{name}}'s phone"
   },
   "WhatAreContacts": {

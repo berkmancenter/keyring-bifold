@@ -102,7 +102,7 @@ export async function mergeContacts(
     if (member === contactId) continue
     await agent.genericRecords.save({
       content: { issuerDid: member, contactId, confirmation },
-      tags: { recordType: CONTACT_LINK, issuerDid: member, contactId, confirmation },
+      tags: { recordType: CONTACT_LINK, issuerDid: member, contactId },
     })
   }
 }

@@ -44,7 +44,7 @@ describe('merge and separate', () => {
     expect(store.records).toEqual([
       expect.objectContaining({
         content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
-        tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
+        tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id },
       }),
     ])
     expect([...(await loadContactLinks(agent))]).toEqual([[ALICE_AGAIN.id, ALICE_FIRST.id]])

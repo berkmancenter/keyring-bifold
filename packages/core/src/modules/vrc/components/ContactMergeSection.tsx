@@ -19,7 +19,7 @@ import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { ContactLinks } from '../contacts/contactLinks'
 import { findMergeCandidates, mergeContacts, separateContact, type MergeCandidate } from '../contacts/mergeContacts'
-import { CONTINUITY_ASK, askToConfirm, continuityEvents, isConfirmedByPeer } from '../contacts/continuity'
+import { askToConfirm, askedRecently, continuityEvents, isConfirmedByPeer } from '../contacts/continuity'
 
 export interface ContactMergeSectionProps {
   /** The relationship the contact screen opened. */
@@ -66,13 +66,11 @@ export const ContactMergeSection: React.FC<ContactMergeSectionProps> = ({
     let cancelled = false
     void (async () => {
       const confirmed = await isConfirmedByPeer(agent, links, issuerId).catch(() => false)
-      const pending = connectionId
-        ? ((await agent.genericRecords.findAllByQuery({ recordType: CONTINUITY_ASK, connectionId }).catch(() => [])) ??
-          [])
-        : []
+      // An ask shows as asked for a day: a Not now is silent, so it may never be answered.
+      const recent = connectionId ? await askedRecently(agent, connectionId).catch(() => false) : false
       if (!cancelled) {
         setConfirmedByPhone(confirmed)
-        setAsked(pending.length > 0)
+        setAsked(recent)
       }
     })()
     return () => {

@@ -545,7 +545,7 @@
     "MergedRemoveConfirm_one": "Supprimer ({{count}})",
     "MergedRemoveConfirm_other": "Tout supprimer ({{count}})",
     "MergeAskPhone": "Demander au téléphone de {{name}} de confirmer",
-    "MergeAsked": "Demandé au téléphone de {{name}}. Ceci change dès qu'il répond.",
+    "MergeAsked": "Demandé au téléphone de {{name}}. Si cette personne confirme, ceci change.",
     "MergeConfirmedByPhone": "Fusionné par vous, et confirmé par le téléphone de {{name}}"
   },
   "WhatAreContacts": {

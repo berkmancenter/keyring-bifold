@@ -5,8 +5,10 @@
  * getOrCreateRelationshipDid makes them (did:peer:0, one Ed25519 key). A challenge sealed to one relationship DID opens
  * with that DID's key and no other.
  *
- * Uses @credo-ts/node and askar-nodejs from the workspace (declared by credo-tsp-adapter, whose tests build a real
- * agent the same way).
+ * DEPENDENCY: @credo-ts/node and @openwallet-foundation/askar-nodejs are NOT declared by core; they resolve because
+ * credo-tsp-adapter declares them and the workspace hoists them (its tests build a real agent the same way). If that
+ * package stops declaring them, this suite fails at import — declare them in core's devDependencies then; do not skip
+ * the suite, which is the only proof the sealed box works on a real KMS.
  */
 import '@openwallet-foundation/askar-nodejs'
 
