@@ -43,7 +43,7 @@ describe('merge and separate', () => {
     await mergeContacts(agent, SEVERAL_RELATIONSHIPS, NO_CONTACT_LINKS, ALICE_AGAIN.id, ALICE_FIRST.id)
     expect(store.records).toEqual([
       expect.objectContaining({
-        content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id },
+        content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
         tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
       }),
     ])

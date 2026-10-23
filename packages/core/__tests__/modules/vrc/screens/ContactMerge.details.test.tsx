@@ -31,6 +31,11 @@ jest.mock('react-i18next', () => {
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'Icon')
 jest.mock('../../../../src/modules/openid/context/OpenIDCredentialRecordProvider')
 const mockDeleteContact = jest.fn(async (_params: { issuerId: string; connectionId: string | null }) => true)
+const mockAskToConfirm = jest.fn(async (..._args: unknown[]) => 'sent')
+jest.mock('../../../../src/modules/vrc/contacts/continuity', () => ({
+  ...jest.requireActual('../../../../src/modules/vrc/contacts/continuity'),
+  askToConfirm: (...args: unknown[]) => mockAskToConfirm(...args),
+}))
 jest.mock('../../../../src/modules/vrc/hooks/useDeleteContact', () => ({
   useDeleteContact: () => ({ deleteContact: mockDeleteContact }),
 }))
@@ -63,6 +68,7 @@ describe('Same person? on a contact', () => {
   beforeEach(() => {
     jest.spyOn(console, 'log').mockImplementation(() => null)
     mockDeleteContact.mockClear()
+    mockAskToConfirm.mockClear()
     store = memoryGenericRecords()
     mockUseAgent.mockReturnValue({
       agent: {
@@ -238,5 +244,40 @@ describe('Same person? on a contact', () => {
     expect(mockDeleteContact).not.toHaveBeenCalled()
     expect(pop).not.toHaveBeenCalled()
     expect(store.records).toHaveLength(1)
+  })
+
+  const mergedLink = (confirmation: 'user' | 'peer') => ({
+    id: 'link-1',
+    content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation },
+    tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation },
+  })
+  const openWithConnection = (issuer: { id: string; name: string }) =>
+    render(
+      <ContactDetails route={{ params: { contact: { issuer } } } as any} navigation={{ pop: jest.fn() } as any} />,
+      {
+        wrapper: Container,
+      }
+    )
+
+  test('merged on the person’s word: never shown as confirmed; their phone can be asked, and then says it was', async () => {
+    store.records.push(mergedLink('user'))
+    const tree = openWithConnection(ALICE_AGAIN)
+    await tree.findByTestId(id('ContactMergedByYou'))
+    expect(tree.queryByTestId(id('ContactMergeConfirmedByPhone'))).toBeNull()
+    await waitFor(() =>
+      expect(tree.getByTestId(id('ContactMergeAskPhone')).props.accessibilityState?.disabled).toBe(false)
+    )
+    fireEvent.press(tree.getByTestId(id('ContactMergeAskPhone')))
+    expect(await tree.findByTestId(id('ContactMergeAsked'))).toBeTruthy()
+    expect(mockAskToConfirm).toHaveBeenCalledWith(expect.anything(), expect.any(Map), ALICE_AGAIN.id)
+    expect(tree.queryByTestId(id('ContactMergeConfirmedByPhone'))).toBeNull()
+  })
+
+  test('confirmed by the other phone: says so, instead of "merged by you"', async () => {
+    store.records.push(mergedLink('peer'))
+    const tree = openWithConnection(ALICE_AGAIN)
+    expect(await tree.findByTestId(id('ContactMergeConfirmedByPhone'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ContactMergedByYou'))).toBeNull()
+    expect(tree.queryByTestId(id('ContactMergeAskPhone'))).toBeNull()
   })
 })
