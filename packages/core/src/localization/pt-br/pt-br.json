@@ -476,7 +476,11 @@
     "MergeBack": "Voltar",
     "MergedByYou": "Juntado por você — não confirmado pelo telefone de {{name}}",
     "Separate": "Separar",
-    "MergeFailed": "Não foi possível alterar seus contatos. Nada foi alterado."
+    "MergeFailed": "Não foi possível alterar seus contatos. Nada foi alterado.",
+    "MergedRemoveTitle": "Remover {{name}}?",
+    "MergedRemoveBody": "Isso remove {{count}} relacionamentos com {{name}}, incluindo os cartões de todos eles. Se forem pessoas diferentes, separe-os primeiro.",
+    "MergedRemoveSeparate": "Separá-los em vez disso",
+    "MergedRemoveConfirm": "Remover todos ({{count}})"
   },
   "WhatAreContacts": {
     "Title": "O que são Contatos?",

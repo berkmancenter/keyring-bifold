@@ -12,6 +12,8 @@ import { useTheme } from '../../../contexts/theme'
 import { ContactStackParams, Screens } from '../../../types/navigators'
 import { RelationshipDidRepository } from '../repositories/RelationshipDidRepository'
 import CommonRemoveModal from '../../../components/modals/CommonRemoveModal'
+import SafeAreaModal from '../../../components/modals/SafeAreaModal'
+import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ModalUsage } from '../../../types/remove'
 import { useDeleteContact } from '../hooks/useDeleteContact'
 import { useOpenIDCredentials } from '../../openid/context/OpenIDCredentialRecordProvider'
@@ -183,7 +185,17 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
     lookupConnection()
   }, [agent, contact.issuer.id])
 
+  const removeWords = { name: displayName, count: relationships.length, interpolation: { escapeValue: false } }
+
   const styles = StyleSheet.create({
+    sheetBack: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+    sheet: {
+      backgroundColor: ColorPalette.brand.modalPrimaryBackground,
+      padding: 24,
+      gap: 12,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+    },
     container: {
       flex: 1,
       backgroundColor: ColorPalette.brand.secondaryBackground,
@@ -435,6 +447,16 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
     setIsRemoveModalDisplayed(false)
   }, [])
 
+  // A merged contact rests on the person's word and may join two different people of the same name, so removing it
+  // says how many relationships go and offers to separate them instead.
+  const merged = relationships.length > 1
+  const handleSeparateInstead = useCallback(async () => {
+    setIsRemoveModalDisplayed(false)
+    if (!agent) return
+    await separateContact(agent as never, contactLinks, contact.issuer.id).catch(() => undefined)
+    setLinksVersion((version) => version + 1)
+  }, [agent, contactLinks, contact.issuer.id])
+
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScrollView style={styles.contentContainer} contentContainerStyle={styles.scrollContent}>
@@ -641,10 +663,41 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
 
       <CommonRemoveModal
         usage={ModalUsage.ContactRemove}
-        visible={isRemoveModalDisplayed}
+        visible={isRemoveModalDisplayed && !merged}
         onSubmit={handleConfirmRemove}
         onCancel={handleCancelRemove}
       />
+
+      <SafeAreaModal visible={isRemoveModalDisplayed && merged} transparent animationType="slide">
+        <View style={styles.sheetBack}>
+          {isRemoveModalDisplayed && merged ? (
+            <View style={styles.sheet} testID={testIdWithKey('ContactRemoveMerged')}>
+              <ThemedText variant="headingThree">{t('ContactDetails.MergedRemoveTitle', removeWords)}</ThemedText>
+              <ThemedText testID={testIdWithKey('ContactRemoveMergedBody')}>
+                {t('ContactDetails.MergedRemoveBody', removeWords)}
+              </ThemedText>
+              <Button
+                title={t('ContactDetails.MergedRemoveSeparate')}
+                buttonType={ButtonType.Primary}
+                onPress={() => void handleSeparateInstead()}
+                testID={testIdWithKey('ContactRemoveMergedSeparate')}
+              />
+              <Button
+                title={t('ContactDetails.MergedRemoveConfirm', removeWords)}
+                buttonType={ButtonType.Secondary}
+                onPress={() => void handleConfirmRemove()}
+                testID={testIdWithKey('ContactRemoveMergedConfirm')}
+              />
+              <Button
+                title={t('ContactDetails.MergeBack')}
+                buttonType={ButtonType.Tertiary}
+                onPress={handleCancelRemove}
+                testID={testIdWithKey('ContactRemoveMergedBack')}
+              />
+            </View>
+          ) : null}
+        </View>
+      </SafeAreaModal>
     </SafeAreaView>
   )
 }

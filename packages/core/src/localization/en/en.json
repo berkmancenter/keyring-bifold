@@ -567,7 +567,11 @@
     "MergeBack": "Back",
     "MergedByYou": "Merged by you — not confirmed by {{name}}'s phone",
     "Separate": "Separate",
-    "MergeFailed": "Couldn't change your contacts. Nothing was changed."
+    "MergeFailed": "Couldn't change your contacts. Nothing was changed.",
+    "MergedRemoveTitle": "Remove {{name}}?",
+    "MergedRemoveBody": "This removes {{count}} relationships with {{name}}, including the cards from all of them. If they're different people, separate them first.",
+    "MergedRemoveSeparate": "Separate them instead",
+    "MergedRemoveConfirm": "Remove all {{count}}"
   },
   "WhatAreContacts": {
     "Title": "What are Contacts?",

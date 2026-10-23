@@ -17,6 +17,17 @@ import { ALICE_AGAIN, ALICE_FIRST, BOB, SEVERAL_RELATIONSHIPS } from '../fixture
 import { CONTACT_LINK } from '../../../../src/modules/vrc/contacts/contactLinks'
 
 jest.mock('@bifold/react-hooks')
+// The shared mock returns bare keys; here a count is shown too, so a test can read how many relationships a removal
+// names.
+jest.mock('react-i18next', () => {
+  const shared = jest.requireActual('../../../../__mocks__/react-i18next')
+  const t = (key: string, options?: { count?: number }) =>
+    options?.count !== undefined ? `${key} (count ${options.count})` : key
+  return {
+    ...shared,
+    useTranslation: () => ({ t, i18n: { language: 'en', changeLanguage: async () => undefined, t } }),
+  }
+})
 jest.mock('react-native-vector-icons/MaterialCommunityIcons', () => 'Icon')
 jest.mock('../../../../src/modules/openid/context/OpenIDCredentialRecordProvider')
 const mockDeleteContact = jest.fn(async (_params: { issuerId: string; connectionId: string | null }) => true)
@@ -51,6 +62,7 @@ const id = testIdWithKey
 describe('Same person? on a contact', () => {
   beforeEach(() => {
     jest.spyOn(console, 'log').mockImplementation(() => null)
+    mockDeleteContact.mockClear()
     store = memoryGenericRecords()
     mockUseAgent.mockReturnValue({
       agent: {
@@ -119,7 +131,13 @@ describe('Same person? on a contact', () => {
       expect(tree.getByTestId(id('ContactViewMessages')).props.accessibilityState?.disabled).toBe(false)
     )
     fireEvent.press(tree.getByTestId(id('ContactRemove')))
-    fireEvent.press(tree.getByTestId('ConfirmRemove'))
+    // Not the plain removal question: one that says how many relationships go, with Separate right there.
+    expect(tree.queryByTestId('ConfirmRemove')).toBeNull()
+    expect(tree.getByTestId(id('ContactRemoveMergedBody')).props.children).toBe(
+      'ContactDetails.MergedRemoveBody (count 2)'
+    )
+    expect(tree.getByTestId(id('ContactRemoveMergedSeparate'))).toBeTruthy()
+    fireEvent.press(tree.getByTestId(id('ContactRemoveMergedConfirm')))
 
     await waitFor(() => expect(pop).toHaveBeenCalled())
     expect(mockDeleteContact.mock.calls.map((call) => call[0])).toEqual([
@@ -127,5 +145,28 @@ describe('Same person? on a contact', () => {
       { issuerId: ALICE_FIRST.id, connectionId: 'conn-first' },
     ])
     expect(store.records).toHaveLength(0)
+  })
+
+  test('a merged contact separated from the removal question loses nothing, and is offered again', async () => {
+    store.records.push({
+      id: 'link-1',
+      content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id },
+      tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
+    })
+    const tree = open(ALICE_AGAIN)
+    await tree.findByTestId(id('ContactMergedByYou'))
+    fireEvent.press(tree.getByTestId(id('ContactRemove')))
+    fireEvent.press(tree.getByTestId(id('ContactRemoveMergedSeparate')))
+    await waitFor(() => expect(tree.getByTestId(id('ContactMergeOffer'))).toBeTruthy())
+    expect(store.records).toHaveLength(0)
+    expect(mockDeleteContact).not.toHaveBeenCalled()
+  })
+
+  test('removing a contact of one relationship asks the usual question, without a count', async () => {
+    const tree = open(BOB)
+    await waitFor(() => expect(tree.getByText('Bob Jones')).toBeTruthy())
+    fireEvent.press(tree.getByTestId(id('ContactRemove')))
+    expect(tree.getByTestId('ConfirmRemove')).toBeTruthy()
+    expect(tree.queryByTestId(id('ContactRemoveMerged'))).toBeNull()
   })
 })

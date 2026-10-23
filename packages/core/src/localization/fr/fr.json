@@ -533,7 +533,11 @@
     "MergeBack": "Retour",
     "MergedByYou": "Fusionné par vous — non confirmé par le téléphone de {{name}}",
     "Separate": "Séparer",
-    "MergeFailed": "Impossible de modifier vos contacts. Rien n'a été changé."
+    "MergeFailed": "Impossible de modifier vos contacts. Rien n'a été changé.",
+    "MergedRemoveTitle": "Supprimer {{name}} ?",
+    "MergedRemoveBody": "Cela supprime {{count}} relations avec {{name}}, y compris les cartes de chacune. S'il s'agit de personnes différentes, séparez-les d'abord.",
+    "MergedRemoveSeparate": "Les séparer plutôt",
+    "MergedRemoveConfirm": "Tout supprimer ({{count}})"
   },
   "WhatAreContacts": {
     "Title": "Que sont les Contacts?",
