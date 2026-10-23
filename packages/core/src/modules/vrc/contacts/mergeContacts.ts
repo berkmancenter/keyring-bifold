@@ -9,12 +9,12 @@
  *
  * @module vrc/contacts/mergeContacts
  */
-import type { Agent, W3cCredentialRecord } from '@credo-ts/core'
+import type { W3cCredentialRecord } from '@credo-ts/core'
 
 import { isPeerVrcCredential } from '../credentialTypes'
 import { resolveContactDisplayInfo, toRawCredential } from '../utils/rcardDisplayUtils'
 
-import { CONTACT_LINK, ContactLinks, contactIdOf, relationshipsOfContact } from './contactLinks'
+import { CONTACT_LINK, ContactLinkStore, ContactLinks, contactIdOf, relationshipsOfContact } from './contactLinks'
 
 /** How a merge was confirmed: by the person only, so far (a confirmation by the other phone is a later step). */
 export type MergeConfirmation = 'user'
@@ -76,7 +76,7 @@ function firstCardAt(records: W3cCredentialRecord[], members: string[]): string 
   return dates.sort()[0] ?? ''
 }
 
-async function linkRecordsOf(agent: Agent, query: Record<string, string>) {
+async function linkRecordsOf(agent: ContactLinkStore, query: Record<string, string>) {
   return (await agent.genericRecords.findAllByQuery({ recordType: CONTACT_LINK, ...query })) ?? []
 }
 
@@ -85,7 +85,7 @@ async function linkRecordsOf(agent: Agent, query: Record<string, string>) {
  * relationship of the newer contact is linked to it (a link it had before is replaced).
  */
 export async function mergeContacts(
-  agent: Agent,
+  agent: ContactLinkStore,
   records: W3cCredentialRecord[],
   links: ContactLinks,
   issuerId: string,
@@ -108,7 +108,7 @@ export async function mergeContacts(
 }
 
 /** Separate a merged contact: every relationship it holds is its own contact again. */
-export async function separateContact(agent: Agent, links: ContactLinks, issuerId: string): Promise<void> {
+export async function separateContact(agent: ContactLinkStore, links: ContactLinks, issuerId: string): Promise<void> {
   for (const record of await linkRecordsOf(agent, { contactId: contactIdOf(links, issuerId) })) {
     await agent.genericRecords.deleteById(record.id)
   }

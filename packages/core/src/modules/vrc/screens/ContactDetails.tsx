@@ -5,8 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useAgent } from '@bifold/react-hooks'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 import { useTranslation } from 'react-i18next'
+import Toast from 'react-native-toast-message'
 
 import { ThemedText } from '../../../components/texts/ThemedText'
+import { ToastType } from '../../../components/toast/BaseToast'
 import { TOKENS, useServices } from '../../../container-api'
 import { useTheme } from '../../../contexts/theme'
 import { ContactStackParams, Screens } from '../../../types/navigators'
@@ -33,7 +35,7 @@ import { useRCardCredential } from '../hooks/useRCardCredential'
 import { formInputFromTemplate } from '../types/rcard'
 import { testIdWithKey } from '../../../utils/testable'
 import { DidDetails } from '../../trust-tasks/screens/DidDetails'
-import { relationshipsOfContact } from '../contacts/contactLinks'
+import { ContactLinks, loadContactLinks, relationshipsOfContact } from '../contacts/contactLinks'
 import { separateContact } from '../contacts/mergeContacts'
 import { useContactLinks } from '../contacts/useContactLinks'
 
@@ -420,13 +422,30 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
   const handleConfirmRemove = useCallback(async () => {
     setIsRemoveModalDisplayed(false)
 
+    // What goes is decided by the links as stored now, not as last read: a read that failed earlier would leave part
+    // of a merged contact behind. If they can't be read, or say other than the question the person answered (one
+    // relationship, or the count they were shown), nothing is removed and the screen reads them again.
+    let links: ContactLinks
+    try {
+      links = await loadContactLinks(agent)
+    } catch {
+      Toast.show({ type: ToastType.Error, text1: t('ContactDetails.MergeFailed') })
+      return
+    }
+    const group = relationshipsOfContact(links, contact.issuer.id)
+    if (group.length !== relationships.length) {
+      setLinksVersion((version) => version + 1)
+      Toast.show({ type: ToastType.Error, text1: t('ContactDetails.MergeFailed') })
+      return
+    }
+
     let success = await deleteContact({
       issuerId: contact.issuer.id,
       connectionId,
     })
 
     // A merged contact is removed whole: every relationship it holds, each with its own connection, then its links.
-    for (const other of relationships) {
+    for (const other of group) {
       if (!success || other === contact.issuer.id || !agent) continue
       const record = await agent.dependencyManager
         .resolve(RelationshipDidRepository)
@@ -434,14 +453,14 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
         .catch(() => null)
       success = await deleteContact({ issuerId: other, connectionId: record?.connectionId ?? null })
     }
-    if (success && relationships.length > 1 && agent) {
-      await separateContact(agent as never, contactLinks, contact.issuer.id).catch(() => undefined)
+    if (success && group.length > 1 && agent) {
+      await separateContact(agent, links, contact.issuer.id).catch(() => undefined)
     }
 
     if (success) {
       navigation.pop()
     }
-  }, [deleteContact, contact.issuer.id, connectionId, navigation, relationships, agent, contactLinks])
+  }, [deleteContact, contact.issuer.id, connectionId, navigation, relationships.length, agent, t])
 
   const handleCancelRemove = useCallback(() => {
     setIsRemoveModalDisplayed(false)
@@ -453,7 +472,7 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
   const handleSeparateInstead = useCallback(async () => {
     setIsRemoveModalDisplayed(false)
     if (!agent) return
-    await separateContact(agent as never, contactLinks, contact.issuer.id).catch(() => undefined)
+    await separateContact(agent, contactLinks, contact.issuer.id).catch(() => undefined)
     setLinksVersion((version) => version + 1)
   }, [agent, contactLinks, contact.issuer.id])
 

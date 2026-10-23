@@ -169,4 +169,46 @@ describe('Same person? on a contact', () => {
     expect(tree.getByTestId('ConfirmRemove')).toBeTruthy()
     expect(tree.queryByTestId(id('ContactRemoveMerged'))).toBeNull()
   })
+
+  test('after a failed read of the links, removal finds the merge in storage and removes nothing it was not asked to', async () => {
+    store.records.push({
+      id: 'link-1',
+      content: { issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id },
+      tags: { recordType: CONTACT_LINK, issuerDid: ALICE_AGAIN.id, contactId: ALICE_FIRST.id, confirmation: 'user' },
+    })
+    // The screen's own read fails, so it takes Alice for a contact of one relationship.
+    store.findAllByQuery.mockRejectedValueOnce(new Error('storage busy'))
+    const pop = jest.fn()
+    const tree = render(
+      <ContactDetails route={{ params: { contact: { issuer: ALICE_AGAIN } } } as any} navigation={{ pop } as any} />,
+      { wrapper: Container }
+    )
+    await waitFor(() => expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(1))
+    expect(tree.queryByTestId(id('ContactMergedByYou'))).toBeNull()
+
+    fireEvent.press(tree.getByTestId(id('ContactRemove')))
+    fireEvent.press(tree.getByTestId('ConfirmRemove'))
+
+    // The question answered was about one relationship; storage says two. Nothing goes, and the screen catches up.
+    expect(await tree.findByTestId(id('ContactMergedByYou'))).toBeTruthy()
+    expect(mockDeleteContact).not.toHaveBeenCalled()
+    expect(pop).not.toHaveBeenCalled()
+    expect(store.records).toHaveLength(1)
+  })
+
+  test('when the links cannot be read at all, nothing is removed', async () => {
+    store.findAllByQuery.mockRejectedValue(new Error('storage unavailable'))
+    const pop = jest.fn()
+    const tree = render(
+      <ContactDetails route={{ params: { contact: { issuer: BOB } } } as any} navigation={{ pop } as any} />,
+      { wrapper: Container }
+    )
+    await waitFor(() => expect(tree.getByText('Bob Jones')).toBeTruthy())
+    fireEvent.press(tree.getByTestId(id('ContactRemove')))
+    fireEvent.press(tree.getByTestId('ConfirmRemove'))
+    await waitFor(() => expect(store.findAllByQuery.mock.calls.length).toBeGreaterThanOrEqual(2))
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(mockDeleteContact).not.toHaveBeenCalled()
+    expect(pop).not.toHaveBeenCalled()
+  })
 })

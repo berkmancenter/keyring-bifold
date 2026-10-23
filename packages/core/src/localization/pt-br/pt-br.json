@@ -478,7 +478,7 @@
     "Separate": "Separar",
     "MergeFailed": "Não foi possível alterar seus contatos. Nada foi alterado.",
     "MergedRemoveTitle": "Remover {{name}}?",
-    "MergedRemoveBody": "Isso remove {{count}} relacionamentos com {{name}}, incluindo os cartões de todos eles. Se forem pessoas diferentes, separe-os primeiro.",
+    "MergedRemoveBody": "Isso remove {{count}} relacionamentos com {{name}}, incluindo os cartões de todos eles, e não pode ser desfeito. Se forem pessoas diferentes, separe-os primeiro.",
     "MergedRemoveSeparate": "Separá-los em vez disso",
     "MergedRemoveConfirm": "Remover todos ({{count}})"
   },

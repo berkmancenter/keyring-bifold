@@ -535,7 +535,7 @@
     "Separate": "Séparer",
     "MergeFailed": "Impossible de modifier vos contacts. Rien n'a été changé.",
     "MergedRemoveTitle": "Supprimer {{name}} ?",
-    "MergedRemoveBody": "Cela supprime {{count}} relations avec {{name}}, y compris les cartes de chacune. S'il s'agit de personnes différentes, séparez-les d'abord.",
+    "MergedRemoveBody": "Cela supprime {{count}} relations avec {{name}}, y compris les cartes de chacune, et ne peut pas être annulé. S'il s'agit de personnes différentes, séparez-les d'abord.",
     "MergedRemoveSeparate": "Les séparer plutôt",
     "MergedRemoveConfirm": "Tout supprimer ({{count}})"
   },

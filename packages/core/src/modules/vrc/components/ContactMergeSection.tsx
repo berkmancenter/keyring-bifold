@@ -95,7 +95,7 @@ export const ContactMergeSection: React.FC<ContactMergeSectionProps> = ({
           <Button
             title={t('ContactDetails.Separate')}
             buttonType={ButtonType.Secondary}
-            onPress={() => void run(() => separateContact(agent as never, links, issuerId))}
+            onPress={() => void run(() => separateContact(agent, links, issuerId))}
             disabled={busy}
             testID={testIdWithKey('ContactSeparate')}
           />
@@ -127,7 +127,7 @@ export const ContactMergeSection: React.FC<ContactMergeSectionProps> = ({
               <Button
                 title={t('ContactDetails.Merge')}
                 buttonType={ButtonType.Primary}
-                onPress={() => void run(() => mergeContacts(agent as never, records, links, issuerId, asking.issuerId))}
+                onPress={() => void run(() => mergeContacts(agent, records, links, issuerId, asking.issuerId))}
                 disabled={busy}
                 testID={testIdWithKey('ContactMergeYes')}
               />

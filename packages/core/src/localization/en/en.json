@@ -569,7 +569,7 @@
     "Separate": "Separate",
     "MergeFailed": "Couldn't change your contacts. Nothing was changed.",
     "MergedRemoveTitle": "Remove {{name}}?",
-    "MergedRemoveBody": "This removes {{count}} relationships with {{name}}, including the cards from all of them. If they're different people, separate them first.",
+    "MergedRemoveBody": "This removes {{count}} relationships with {{name}}, including the cards from all of them, and can't be undone. If they're different people, separate them first.",
     "MergedRemoveSeparate": "Separate them instead",
     "MergedRemoveConfirm": "Remove all {{count}}"
   },
