@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "5a91a53c293a790bceb0d1f514797d0807cf5ab4",
+  "generatedFrom": "adae1946e0dac603892fc97e189088be55187d75",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -305,8 +305,16 @@
     "ContactMenuOverlay": ["src/modules/vrc/components/InfoIcon.tsx"],
     "ContactMenuRemoveContact": ["src/modules/vrc/components/InfoIcon.tsx"],
     "ContactMenuViewContact": ["src/modules/vrc/components/InfoIcon.tsx"],
+    "ContactMerge": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergeBack": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergeConfirm": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergeFailed": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergeOffer": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergeYes": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactMergedByYou": ["src/modules/vrc/components/ContactMergeSection.tsx"],
     "ContactOnTheWay": ["src/screens/CredentialOfferAccept.tsx"],
     "ContactRemove": ["src/modules/vrc/screens/ContactDetails.tsx"],
+    "ContactSeparate": ["src/modules/vrc/components/ContactMergeSection.tsx"],
     "ContactViewMessages": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "Contacts": ["src/navigators/TabStack.tsx"],
     "ContactsList": ["src/modules/vrc/screens/WhatAreContacts.tsx"],

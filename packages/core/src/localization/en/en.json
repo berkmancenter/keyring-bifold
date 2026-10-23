@@ -558,7 +558,16 @@
     "GoToCredentialDetail": "Go to credential details",
     "CredentialName": "Credential name",
     "Credentials": "My credentials from this contact",
-    "NoCredentials": "You don't have any credentials from this contact."
+    "NoCredentials": "You don't have any credentials from this contact.",
+    "MergeOfferTitle": "Same person?",
+    "MergeOfferBody": "You have another contact named {{name}}. If it's the same person, merge them into one contact. Nothing is deleted, and you can separate them again.",
+    "Merge": "Merge",
+    "MergeConfirmTitle": "Merge the two {{name}} contacts?",
+    "MergeConfirmBody": "They will show as one contact, with the cards from both exchanges. Only this phone changes: {{name}} is not told. You can separate them again.",
+    "MergeBack": "Back",
+    "MergedByYou": "Merged by you — not confirmed by {{name}}'s phone",
+    "Separate": "Separate",
+    "MergeFailed": "Couldn't change your contacts. Nothing was changed."
   },
   "WhatAreContacts": {
     "Title": "What are Contacts?",

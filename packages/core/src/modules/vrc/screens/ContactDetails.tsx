@@ -24,6 +24,7 @@ import {
 import { verifyVrcHardwareEvidence } from '../services/BiometricSignatureVerifier'
 import RelationshipLayers from '../components/RelationshipLayers'
 import RelationshipUpgradeSection from '../components/RelationshipUpgradeSection'
+import ContactMergeSection from '../components/ContactMergeSection'
 import { relationshipLayers } from '../utils/relationshipLayers'
 import { resolveContactDisplayInfo } from '../utils/rcardDisplayUtils'
 import { useRCardCredential } from '../hooks/useRCardCredential'
@@ -31,6 +32,7 @@ import { formInputFromTemplate } from '../types/rcard'
 import { testIdWithKey } from '../../../utils/testable'
 import { DidDetails } from '../../trust-tasks/screens/DidDetails'
 import { relationshipsOfContact } from '../contacts/contactLinks'
+import { separateContact } from '../contacts/mergeContacts'
 import { useContactLinks } from '../contacts/useContactLinks'
 
 const AVATAR_BG = '#E8E0E8'
@@ -65,7 +67,9 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
   // Every relationship this contact has on this phone, the one the row opened first. One, unless relationships were
   // merged: cards, witness records and badges cover them all; the DID, messages, upgrade and removal stay on the
   // first (the row's own relationship).
-  const contactLinks = useContactLinks()
+  // Bumped after a merge or a separation on this screen, so the links are read again.
+  const [linksVersion, setLinksVersion] = useState(0)
+  const contactLinks = useContactLinks(linksVersion)
   const relationships = useMemo(
     () => relationshipsOfContact(contactLinks, contact.issuer.id),
     [contactLinks, contact.issuer.id]
@@ -404,15 +408,28 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
   const handleConfirmRemove = useCallback(async () => {
     setIsRemoveModalDisplayed(false)
 
-    const success = await deleteContact({
+    let success = await deleteContact({
       issuerId: contact.issuer.id,
       connectionId,
     })
 
+    // A merged contact is removed whole: every relationship it holds, each with its own connection, then its links.
+    for (const other of relationships) {
+      if (!success || other === contact.issuer.id || !agent) continue
+      const record = await agent.dependencyManager
+        .resolve(RelationshipDidRepository)
+        .findByCounterpartyRelationshipDid(agent.context, other)
+        .catch(() => null)
+      success = await deleteContact({ issuerId: other, connectionId: record?.connectionId ?? null })
+    }
+    if (success && relationships.length > 1 && agent) {
+      await separateContact(agent as never, contactLinks, contact.issuer.id).catch(() => undefined)
+    }
+
     if (success) {
       navigation.pop()
     }
-  }, [deleteContact, contact.issuer.id, connectionId, navigation])
+  }, [deleteContact, contact.issuer.id, connectionId, navigation, relationships, agent, contactLinks])
 
   const handleCancelRemove = useCallback(() => {
     setIsRemoveModalDisplayed(false)
@@ -545,6 +562,16 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
             ))}
           </View>
         )}
+
+        {/* Same person? Another contact with the same name can be merged into this one, and separated again. */}
+        <ContactMergeSection
+          issuerId={contact.issuer.id}
+          name={displayName}
+          relationships={relationships}
+          records={w3cCredentialRecords}
+          links={contactLinks}
+          onChanged={() => setLinksVersion((version) => version + 1)}
+        />
 
         {/* Add to this relationship, on its existing connection: sign again, or with a witness. */}
         {connectionId ? (

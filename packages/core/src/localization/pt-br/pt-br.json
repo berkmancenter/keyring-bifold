@@ -467,7 +467,16 @@
     "GoToCredentialDetail": "Ir para os detalhes da credencial",
     "CredentialName": "Nome da credencial",
     "Credentials": "Minhas credenciais",
-    "NoCredentials": "Você não tem nenhuma credencial com esse Contato."
+    "NoCredentials": "Você não tem nenhuma credencial com esse Contato.",
+    "MergeOfferTitle": "Mesma pessoa?",
+    "MergeOfferBody": "Você tem outro contato chamado {{name}}. Se for a mesma pessoa, junte-os em um só contato. Nada é apagado, e você pode separá-los de novo.",
+    "Merge": "Juntar",
+    "MergeConfirmTitle": "Juntar os dois contatos {{name}}?",
+    "MergeConfirmBody": "Eles aparecerão como um só contato, com os cartões das duas trocas. Só este telefone muda: {{name}} não é avisado. Você pode separá-los de novo.",
+    "MergeBack": "Voltar",
+    "MergedByYou": "Juntado por você — não confirmado pelo telefone de {{name}}",
+    "Separate": "Separar",
+    "MergeFailed": "Não foi possível alterar seus contatos. Nada foi alterado."
   },
   "WhatAreContacts": {
     "Title": "O que são Contatos?",
