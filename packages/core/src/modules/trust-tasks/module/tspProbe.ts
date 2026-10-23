@@ -22,6 +22,9 @@
  */
 import type { Agent } from '@credo-ts/core'
 
+import { didPrefix } from './didPrefix'
+import { releaseWarn } from './releaseLog'
+
 export const LOG_PREFIX = '[TrustTasks:TspProbe]'
 
 /** How long a probe waits for its answer: half a leg's 30 s answer clock. */
@@ -106,10 +109,14 @@ export function probeRecord(
  */
 export function probeAllowed(record: TspProbeRecord | undefined, serviceId: string | undefined, now: number): boolean {
   if (!record) return true
-  const sinceLast = now - Date.parse(record.at)
-  if (!(sinceLast >= TSP_PROBE_MIN_INTERVAL_MS)) return false
+  const at = Date.parse(record.at)
+  const notBefore = Date.parse(record.notBefore)
+  // A record whose dates cannot be read holds nothing: read as no record,
+  // rather than blocking this peer's probe for ever.
+  if (Number.isNaN(at) || Number.isNaN(notBefore)) return true
+  if (!(now - at >= TSP_PROBE_MIN_INTERVAL_MS)) return false
   if (record.outcome === 'unanswered' && serviceId && record.serviceId && serviceId !== record.serviceId) return true
-  return now >= Date.parse(record.notBefore)
+  return now >= notBefore
 }
 
 export interface TspProbeRun {
@@ -118,6 +125,7 @@ export interface TspProbeRun {
   /** Its document's `TSPTransport` service id, when it has one. */
   serviceId?: string
   store: TspProbeStore
+  /** For the Debug line a skipped probe leaves; outcomes are said in Release (`releaseWarn`). */
   logger: Pick<Agent['config']['logger'], 'info' | 'debug'>
   /** Send the invite and the read-only task, in TSP 1.0. */
   send: () => Promise<void>
@@ -147,22 +155,30 @@ export async function runTspProbe(run: TspProbeRun): Promise<TspProbeOutcome | '
   await run.store.put(probeRecord(run.did, 'started', run.serviceId, now())).catch(() => undefined)
   const startedAt = now()
   let answered = false
+  let sendFailed = false
   try {
     await run.send()
-    answered = await run.waitForAnswer(timeoutMs)
   } catch (error) {
+    // Our failure, not the peer's silence: never "unanswered", never a day's back-off.
+    sendFailed = true
     run.logger.debug(`${LOG_PREFIX} probe of ${run.did} could not be sent: ${error}`)
   }
-  const outcome: TspProbeOutcome = answered ? 'answered' : run.peerAnsweredOtherwise() ? 'unanswered' : 'inconclusive'
+  if (!sendFailed) answered = await run.waitForAnswer(timeoutMs).catch(() => false)
+  const outcome: TspProbeOutcome = answered
+    ? 'answered'
+    : !sendFailed && run.peerAnsweredOtherwise()
+      ? 'unanswered'
+      : 'inconclusive'
   await run.store.put(probeRecord(run.did, outcome, run.serviceId, now())).catch(() => undefined)
+  // Said in Release, by DID prefix only: a tester's report shows what each probe found.
   if (answered) {
-    run.logger.info(
-      `${LOG_PREFIX} ${run.did} answered a TSP 1.0 probe in ${now() - startedAt} ms — TSP 1.0 for this session`
+    releaseWarn(
+      `${LOG_PREFIX} ${didPrefix(run.did)} answered a TSP 1.0 probe in ${now() - startedAt} ms — TSP 1.0 for this session`
     )
     run.onAnswered()
   } else {
-    run.logger.info(
-      `${LOG_PREFIX} ${run.did} did not answer a TSP 1.0 probe in ${Math.round(timeoutMs / 1000)} s — DIDComm for this session (${outcome})`
+    releaseWarn(
+      `${LOG_PREFIX} ${didPrefix(run.did)} did not answer a TSP 1.0 probe in ${Math.round(timeoutMs / 1000)} s — DIDComm for this session (${outcome})`
     )
   }
   return outcome

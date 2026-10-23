@@ -1,6 +1,7 @@
 import type { Agent } from '@credo-ts/core'
 
 import { resolveDidDocumentRetrying } from './VtiMediatorTransport'
+import { didPrefix } from './didPrefix'
 import { releaseWarn } from './releaseLog'
 
 /**
@@ -165,6 +166,10 @@ export function setPreferDidcommForUpstream(prefer: boolean): void {
  *    the background (`tspProbe.ts`). The decision stays DIDComm until the leg
  *    changes it on the probe's answer.
  * With the switch on, nothing here probes or says anything about probing.
+ *
+ * Each of these decisions is said in Release (`releaseWarn`), once a peer a
+ * session, by DID prefix only: a tester's report shows which carriage a
+ * session used for each service, and why.
  */
 export async function chooseCarriage(
   agent: Agent,
@@ -193,19 +198,19 @@ export async function chooseCarriage(
     )
   } else if (advertises && canSpeakTsp && service.version === '1.0') {
     carriage = 'tsp'
-    agent.config.logger.info(`${LOG_PREFIX} ${peerDid} advertises TSP 1.0 — using TSP 1.0 for this session`)
+    releaseWarn(`${LOG_PREFIX} ${didPrefix(peerDid)} advertises TSP 1.0 — using TSP 1.0 for this session`)
   } else if (advertises && canSpeakTsp && service.version === 'other') {
-    agent.config.logger.info(
-      `${LOG_PREFIX} ${peerDid} advertises a TSP version this build does not send — using DIDComm for this session`
+    releaseWarn(
+      `${LOG_PREFIX} ${didPrefix(peerDid)} advertises a TSP version this build does not send — using DIDComm for this session`
     )
   } else if (advertises && canSpeakTsp && (await options.freshV1?.(peerDid).catch(() => false))) {
     carriage = 'tsp'
-    agent.config.logger.info(
-      `${LOG_PREFIX} ${peerDid} wrote TSP 1.0 to this phone within its record's expiry — using TSP 1.0 for this session`
+    releaseWarn(
+      `${LOG_PREFIX} ${didPrefix(peerDid)} wrote TSP 1.0 to this phone within its record's expiry — using TSP 1.0 for this session`
     )
   } else if (advertises && canSpeakTsp) {
-    agent.config.logger.info(
-      `${LOG_PREFIX} ${peerDid} advertises ${TSP_SERVICE_TYPE} with no version — using DIDComm, and probing TSP 1.0 in the background`
+    releaseWarn(
+      `${LOG_PREFIX} ${didPrefix(peerDid)} advertises ${TSP_SERVICE_TYPE} with no version — using DIDComm, and probing TSP 1.0 in the background`
     )
     options.onProbeWanted?.(peerDid, service.serviceId)
   } else if (advertises) {

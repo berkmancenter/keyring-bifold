@@ -741,6 +741,8 @@ export const REPLIES_STALLED_STEPS_MS = [30_000, 60_000, 120_000, 300_000] as co
  * is `whoami`, `list`, `show`, `status` or `get`. Only such a task is sent
  * again over DIDComm after a TSP 1.0 ask went unanswered (cutover plan §6.2,
  * change 2); anything else could run twice. Unversioned types do not match.
+ * The slash before the verb is load-bearing: it keeps `auth/revoke-session`,
+ * `keys/export-secret` and the like out.
  */
 export function isReadOnlyVtaTask(type: string): boolean {
   return /\/(whoami|list|show|status|get)\/\d+(\.\d+)*$/.test(type)
@@ -870,8 +872,12 @@ export class VtaClient {
   }
   /** The probe running now, for this session; one at a time. */
   private probing?: Promise<TspProbeOutcome | 'skipped'>
-  /** What the probe's answer may name as its thread, and who waits for it. */
-  private probeWaiter?: { ids: Set<string>; resolve: () => void }
+  /**
+   * What the probe's answer may name as its thread. `answered` is set the
+   * moment it arrives, so an answer that comes before the wait has begun (while
+   * the frames are still being sent) is not lost.
+   */
+  private probeWaiter?: { ids: Set<string>; answered: boolean; resolve: () => void }
   /** Whether the VTA has sent this session anything at all: the evidence it is up (a probe's "down" vs "silent"). */
   private heardFromAgent = false
   /** This agent's reply breaker: the caller's, shared by every client it makes for the agent, else this client's own. */
@@ -931,6 +937,7 @@ export class VtaClient {
       ]
       if (refs.some((ref) => typeof ref === 'string' && probe.ids.has(ref))) {
         this.probeWaiter = undefined
+        probe.answered = true
         probe.resolve()
         return
       }
@@ -1166,6 +1173,9 @@ export class VtaClient {
    * session speaks TSP 1.0 to the VTA.
    */
   private async probe(serviceId?: string): Promise<TspProbeOutcome | 'skipped'> {
+    // Held here, not only on `this`: `deliver` clears `this.probeWaiter` when
+    // the answer comes, and the wait must still see that it did.
+    let waiter: { ids: Set<string>; answered: boolean; resolve: () => void } | undefined
     return runTspProbe({
       did: this.vtaDid,
       serviceId,
@@ -1195,19 +1205,21 @@ export class VtaClient {
         const route = [this.mediator.did, did]
         const invite = await tsp.packInviteV1(did, this.vtaDid, tspIdentity.identity, tspIdentity.resolver, { route })
         const ask = await packTrustTaskForPeer(tspIdentity, did, this.vtaDid, document, 'v1')
-        this.probeWaiter = { ids: new Set([threadId, documentId]), resolve: () => undefined }
+        waiter = { ids: new Set([threadId, documentId]), answered: false, resolve: () => undefined }
+        this.probeWaiter = waiter
         await session.sendTspFrame(invite.bytes)
         await session.sendTspFrame(ask.bytes)
       },
       waitForAnswer: (timeoutMs) =>
         new Promise<boolean>((resolve) => {
-          const waiter = this.probeWaiter
-          if (!waiter) return resolve(false)
+          const current = waiter
+          if (!current) return resolve(false)
+          if (current.answered) return resolve(true)
           const timer = setTimeout(() => {
-            if (this.probeWaiter === waiter) this.probeWaiter = undefined
+            if (this.probeWaiter === current) this.probeWaiter = undefined
             resolve(false)
           }, timeoutMs)
-          waiter.resolve = () => {
+          current.resolve = () => {
             clearTimeout(timer)
             resolve(true)
           }

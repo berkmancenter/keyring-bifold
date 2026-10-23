@@ -50,7 +50,7 @@ import { MemoryTspPeerRevisionStore, isFreshV1 } from '../module/vtiTsp'
 const AGENT = 'did:webvh:agent'
 const WRITE = 'https://trusttasks.org/spec/vta/acl/grant/0.1'
 
-function harness() {
+function harness(options: { answerProbeWhileSending?: boolean } = {}) {
   const logger = { warn: jest.fn(), info: jest.fn(), debug: jest.fn() }
   const probeStore = new MemoryTspProbeStore()
   const peerRevisionStore = new MemoryTspPeerRevisionStore()
@@ -61,6 +61,9 @@ function harness() {
   const sendTspFrame = jest.fn(async (bytes: Uint8Array) => {
     if (bytes[0] === 0x49) sent.push('tsp:invite')
     else sent.push(`tsp:${String(docs.at(-1)?.doc.type)}`)
+    // The agent's answer can reach `deliver` before the probe's wait has begun.
+    if (options.answerProbeWhileSending && docs.at(-1)?.doc.type === VTA_TASK.whoAmI && bytes[0] !== 0x49)
+      answer(VTA_TASK.whoAmI)
   })
   const sendTo = jest.fn(async (_to: string, message: { body: Record<string, unknown> }) => {
     docs.push({ carriage: 'didcomm', doc: message.body })
@@ -154,6 +157,17 @@ describe('the background probe of the agent', () => {
     expect(docs.at(-1)?.revision).toBe('v1')
     answer(VTA_TASK.didsList)
     await second
+    expect(probeStore.records.get(AGENT)?.outcome).toBe('answered')
+  })
+
+  it('an answer that arrives while the probe is still sending is not lost (no false "unanswered")', async () => {
+    const { client, answer, probeStore } = harness({ answerProbeWhileSending: true })
+    const first = client.task(VTA_TASK.configShow, {}, 30_000)
+    await flush()
+    const probe = client.probeInFlight
+    answer(VTA_TASK.configShow)
+    await first
+    expect(await probe).toBe('answered')
     expect(probeStore.records.get(AGENT)?.outcome).toBe('answered')
   })
 

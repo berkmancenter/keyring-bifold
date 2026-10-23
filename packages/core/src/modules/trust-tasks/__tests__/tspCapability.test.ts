@@ -34,10 +34,16 @@ const agentWith = (doc: unknown, onResolve?: () => void) =>
     },
   }) as never
 
+// Release lines (`releaseWarn`) go to console.warn.
+const released: string[] = []
+let warnSpy: jest.SpyInstance
 beforeEach(() => {
   logs.length = 0
+  released.length = 0
   clearTspCapabilityCache()
+  warnSpy = jest.spyOn(console, 'warn').mockImplementation((m: unknown) => void released.push(String(m)))
 })
+afterEach(() => warnSpy.mockRestore())
 
 describe('reading a document', () => {
   it('finds TSPTransport as a bare string, the way vta-service writes it', () => {
@@ -127,7 +133,7 @@ describe('choosing, and saying so', () => {
   it('uses TSP when the peer offers TSP 1.0 and we can speak it', async () => {
     const agent = agentWith({ service: [{ type: TSP_SERVICE_TYPE, version: '1.0' }] })
     expect(await chooseCarriage(agent, 'did:example:c', true)).toBe('tsp')
-    expect(logs.some((l) => l.level === 'info' && l.message.includes('using TSP 1.0'))).toBe(true)
+    expect(released.some((m) => m.includes('using TSP 1.0'))).toBe(true)
   })
 
   it('falls back LOUDLY when the peer offers TSP and we cannot speak it', async () => {
@@ -153,7 +159,7 @@ describe('choosing, and saying so', () => {
     expect(await chooseCarriage(agent, 'did:example:f', true, { decided })).toBe('tsp')
     expect(await chooseCarriage(agent, 'did:example:f', true, { decided })).toBe('tsp')
     expect(resolves).toBe(1)
-    expect(logs.filter((l) => l.message.includes('using TSP'))).toHaveLength(1)
+    expect(released.filter((m) => m.includes('using TSP'))).toHaveLength(1)
   })
 })
 
@@ -190,7 +196,7 @@ describe('the per-peer rule (cutover plan §6.2)', () => {
       'didcomm'
     )
     expect(onProbeWanted).not.toHaveBeenCalled()
-    expect(logs.some((l) => l.message.includes('does not send'))).toBe(true)
+    expect(released.some((m) => m.includes('does not send'))).toBe(true)
   })
 
   it('row 3: no version, but a fresh TSP 1.0 record: TSP, and no probe', async () => {
@@ -206,7 +212,7 @@ describe('the per-peer rule (cutover plan §6.2)', () => {
     const freshV1 = jest.fn(async () => false)
     expect(await chooseCarriage(agentWith(tspDoc()), 'did:r4', true, { freshV1, onProbeWanted })).toBe('didcomm')
     expect(onProbeWanted).toHaveBeenCalledWith('did:r4', 'did:example:x#tsp')
-    expect(logs.some((l) => l.message.includes('probing TSP 1.0 in the background'))).toBe(true)
+    expect(released.some((m) => m.includes('probing TSP 1.0 in the background'))).toBe(true)
   })
 
   it('a record that cannot be read counts as not fresh: DIDComm, never a guess', async () => {
@@ -242,5 +248,22 @@ describe('the kill-switch (row 1)', () => {
     expect(onProbeWanted).not.toHaveBeenCalled()
     expect(freshV1).not.toHaveBeenCalled()
     expect(logs.some((l) => /prob/i.test(l.message))).toBe(false)
+    expect(released.some((m) => /prob/i.test(m))).toBe(false)
+  })
+})
+
+describe('Release lines (the stopgap switch off)', () => {
+  beforeEach(() => setPreferDidcommForUpstream(false))
+  afterEach(() => setPreferDidcommForUpstream(true))
+
+  it('each decision is said in Release once, naming the peer by prefix only', async () => {
+    const did = 'did:webvh:QmVeryLongIdentifierThatMustNotReachAReport:example.org:agent'
+    const decided = new Map<string, 'tsp' | 'didcomm'>()
+    const agent = agentWith({ service: [{ type: TSP_SERVICE_TYPE, version: '1.0' }] })
+    await chooseCarriage(agent, did, true, { decided })
+    await chooseCarriage(agent, did, true, { decided })
+    const lines = released.filter((m) => m.includes('using TSP 1.0'))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).not.toContain(did)
   })
 })

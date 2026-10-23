@@ -18,6 +18,15 @@ import {
 import { MemoryTspPeerRevisionStore, V1_RECORD_TTL_MS, isFreshV1 } from '../module/vtiTsp'
 
 const HOUR = 60 * 60 * 1000
+
+// Probe outcomes are Release lines (`releaseWarn`, console.warn).
+const released: string[] = []
+let warnSpy: jest.SpyInstance
+beforeEach(() => {
+  released.length = 0
+  warnSpy = jest.spyOn(console, 'warn').mockImplementation((m: unknown) => void released.push(String(m)))
+})
+afterEach(() => warnSpy.mockRestore())
 const T0 = Date.parse('2026-10-23T12:00:00Z')
 
 function probeRun(overrides: Partial<TspProbeRun> & { at: number; store: MemoryTspProbeStore }) {
@@ -69,6 +78,12 @@ describe('what a probe outcome leaves', () => {
     expect(probeAllowed(unanswered, 's-moved', T0 + HOUR)).toBe(true)
     expect(probeAllowed(undefined, 's', T0)).toBe(true)
   })
+
+  it('a record whose dates cannot be read blocks nothing (read as no record)', () => {
+    const broken = { did: 'd', outcome: 'unanswered' as const, at: 'yesterday', notBefore: 'soon' }
+    expect(probeAllowed(broken, 's', T0)).toBe(true)
+    expect(probeAllowed({ ...probeRecord('d', 'answered', 's', T0), notBefore: 'x' }, 's', T0 + 1)).toBe(true)
+  })
 })
 
 describe('running a probe', () => {
@@ -82,9 +97,8 @@ describe('running a probe', () => {
       outcome: 'answered',
       serviceId: 'did:example:vta#tsp',
     })
-    expect(logger.info.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(
-      /did:example:vta answered a TSP 1\.0 probe in \d+ ms — TSP 1\.0 for this session/
-    )
+    expect(logger.info).not.toHaveBeenCalled()
+    expect(released.join('\n')).toMatch(/answered a TSP 1\.0 probe in \d+ ms — TSP 1\.0 for this session/)
   })
 
   it('silent while the peer answered otherwise: "unanswered", a day before the next one', async () => {
@@ -93,7 +107,8 @@ describe('running a probe', () => {
     expect(await runTspProbe(run)).toBe('unanswered')
     expect(onAnswered).not.toHaveBeenCalled()
     expect(Date.parse(store.records.get('did:example:vta')!.notBefore) - T0).toBe(24 * HOUR)
-    expect(logger.info.mock.calls.map((c) => String(c[0])).join('\n')).toContain(
+    expect(logger.info).not.toHaveBeenCalled()
+    expect(released.join('\n')).toContain(
       'did not answer a TSP 1.0 probe in 15 s — DIDComm for this session (unanswered)'
     )
   })
@@ -105,16 +120,21 @@ describe('running a probe', () => {
     expect(Date.parse(store.records.get('did:example:vta')!.notBefore) - T0).toBe(HOUR)
   })
 
-  it('a send that fails is not answered, and is classified the same way', async () => {
+  it("a send that fails is our failure, not the peer's silence: inconclusive even when the peer answered otherwise", async () => {
     const store = new MemoryTspProbeStore()
+    const waitForAnswer = jest.fn(async () => false)
     const { run } = probeRun({
       at: T0,
       store,
+      peerAnsweredOtherwise: () => true,
+      waitForAnswer,
       send: async () => {
         throw new Error('socket closed')
       },
     })
     expect(await runTspProbe(run)).toBe('inconclusive')
+    expect(waitForAnswer).not.toHaveBeenCalled()
+    expect(Date.parse(store.records.get('did:example:vta')!.notBefore) - T0).toBe(HOUR)
   })
 
   it('a reconnect storm: the record is written before anything is sent, so a second session finds it and skips', async () => {
@@ -133,8 +153,9 @@ describe('running a probe', () => {
       const again = probeRun({ at: T0 + minutes * 60 * 1000, store })
       expect(await runTspProbe(again.run)).toBe('skipped')
       expect(again.send).not.toHaveBeenCalled()
-      expect(again.logger.info).not.toHaveBeenCalled()
     }
+    // A skip is the cap working: nothing said in Release.
+    expect(released).toHaveLength(0)
     release(false)
     expect(await running).toBe('inconclusive')
   })
