@@ -54,7 +54,6 @@ describe('continuity crypto on a real KMS', () => {
           store: {
             id: `continuity-${process.pid}-${Math.random().toString(36).slice(2)}`,
             key: 'test-key',
-            database: { type: 'sqlite', config: { inMemory: true } },
           },
         }),
       },
