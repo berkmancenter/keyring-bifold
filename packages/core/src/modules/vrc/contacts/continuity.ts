@@ -356,18 +356,21 @@ export async function restoreContinuityPrompts(agent: Pick<Agent, 'genericRecord
 /** The person's answer to a continuity prompt: on Confirm the challenge goes back, and nothing else; otherwise nothing. */
 export async function respondToContinuityPrompt(agent: Agent, connectionId: string, confirm: boolean): Promise<void> {
   const prompt = continuityPromptStore.get(connectionId)
+  if (prompt && confirm) {
+    // Sent first: if sending fails, the prompt and its record stay, and the person can answer again. The request is
+    // never delivered twice, so an answer lost here could not be given later.
+    const response = respondWith(prompt.request as never, utils.uuid(), { challenge: prompt.challenge }, () =>
+      new Date().toISOString()
+    ) as unknown as Record<string, unknown>
+    const { getTrustTasksService, sendTrustTaskDocument } = ceremony()
+    await getTrustTasksService(agent).retain(agent.context, response, 'response', connectionId)
+    await sendTrustTaskDocument(agent, connectionId, response)
+  }
   continuityPromptStore.take(connectionId)
-  // A record left behind by a failed delete lapses with the ask; it never stops the answer.
+  // A record left behind by a failed delete lapses with the ask; answering it again finds no ask on the other phone.
   await forgetPrompt(agent, connectionId).catch((error: unknown) =>
     agent.config?.logger?.warn(
       `[VRC:Contacts] could not drop a continuity prompt: ${(error as Error)?.message ?? error}`
     )
   )
-  if (!prompt || !confirm) return
-  const response = respondWith(prompt.request as never, utils.uuid(), { challenge: prompt.challenge }, () =>
-    new Date().toISOString()
-  ) as unknown as Record<string, unknown>
-  const { getTrustTasksService, sendTrustTaskDocument } = ceremony()
-  await getTrustTasksService(agent).retain(agent.context, response, 'response', connectionId)
-  await sendTrustTaskDocument(agent, connectionId, response)
 }

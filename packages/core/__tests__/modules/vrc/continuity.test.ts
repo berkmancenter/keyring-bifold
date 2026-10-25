@@ -267,6 +267,19 @@ describe('a prompt kept on the phone until it is answered', () => {
     expect(kept(store)).toHaveLength(0)
   })
 
+  test('a Confirm that fails to send loses nothing: the prompt and its record stay, and answering again sends', async () => {
+    const { agent, store } = agentWith()
+    await handleContinuityRequest(agent, pipeline, request('conn-new', box('did:peer:me-old')), inbound('conn-new'))
+    mockSend.mockRejectedValueOnce(new Error('no route to the mediator'))
+    await expect(respondToContinuityPrompt(agent, 'conn-new', true)).rejects.toThrow('no route')
+    expect(continuityPromptStore.has('conn-new')).toBe(true)
+    expect(kept(store)).toHaveLength(1)
+    await respondToContinuityPrompt(agent, 'conn-new', true)
+    expect(mockSend).toHaveBeenCalledTimes(2)
+    expect(continuityPromptStore.has('conn-new')).toBe(false)
+    expect(kept(store)).toHaveLength(0)
+  })
+
   test('Not now lets the record go too, so it is not asked again after a restart', async () => {
     const { agent, store } = agentWith()
     await handleContinuityRequest(agent, pipeline, request('conn-new', box('did:peer:me-old')), inbound('conn-new'))
