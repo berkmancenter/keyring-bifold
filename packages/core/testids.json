@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "3c791069f468dd47783a19d30f88df529772e355",
+  "generatedFrom": "e592627efc94e001f1b92d847f58a24f6c98e7a8",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -343,6 +343,9 @@
     "ContactRemoveMergedConfirm": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactRemoveMergedSeparate": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactSeparate": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactSeparateBack": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactSeparateConfirm": ["src/modules/vrc/components/ContactMergeSection.tsx"],
+    "ContactSeparateYes": ["src/modules/vrc/components/ContactMergeSection.tsx"],
     "ContactViewMessages": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "Contacts": ["src/navigators/TabStack.tsx"],
     "ContactsList": ["src/modules/vrc/screens/WhatAreContacts.tsx"],
