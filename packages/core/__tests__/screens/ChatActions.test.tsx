@@ -197,6 +197,28 @@ describe('who a quote is by', () => {
     expect(tree.getByText('Chat.ReplyUnavailable')).toBeTruthy()
     expect(tree.queryByText('Unknown')).toBeNull()
   })
+
+  it('says the original expired, and shows no quote while the original is still being read', () => {
+    timeline([
+      item({
+        text: 'about that',
+        chatEventId: '01JB3XKX6F8Q2W4E5R6T7Y8Z9H',
+        inReplyTo: '01JB3XKX6F8Q2W4E5R6T7Y8Z9J',
+        replyTo: { expired: true },
+      }),
+      item({
+        text: 'still reading',
+        chatEventId: '01JB3XKX6F8Q2W4E5R6T7Y8Z9K',
+        inReplyTo: '01JB3XKX6F8Q2W4E5R6T7Y8Z9M',
+        replyTo: { unread: true },
+        createdAt: at(5),
+      }),
+    ])
+    const tree = renderChat()
+    expect(tree.getByText('Chat.ReplyExpired')).toBeTruthy()
+    expect(tree.getByText('still reading')).toBeTruthy()
+    expect(tree.queryByText('Unknown')).toBeNull()
+  })
 })
 
 describe('reactions', () => {

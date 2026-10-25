@@ -397,8 +397,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
             {...messageProps}
             // A reply shows what it answers, through gifted-chat's own MessageReply: the original's text, or that it
             // expired, or that it is not on this phone.
+            // 'unread' is a reply whose original is still being read: nothing to quote yet, so no quote (an empty one
+            // would read "Unknown").
             currentMessage={
-              message.replyTo
+              message.replyTo && !('unread' in message.replyTo)
                 ? {
                     ...message,
                     replyMessage: {
