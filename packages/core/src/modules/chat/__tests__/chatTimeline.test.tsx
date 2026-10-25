@@ -257,7 +257,6 @@ describe("one chat's events as timeline items", () => {
     expect(chatTimelineItems([bare], style)[0].text).toBe('')
   })
 
-  // An attachment this phone could not check or save is not a photo it can show: calling it one would be false.
   // A kept photo is drawn from its file; its URI is built now from the chat's folder, percent-encoded (media/store.ts).
   test('a kept photo carries its file URI and size for the bubble; an unsupported one carries none', () => {
     const file = '01JB3XKX6F8Q2W4E5R6T7Y8Z9P.jpg'
@@ -281,6 +280,7 @@ describe("one chat's events as timeline items", () => {
     expect(render(<View>{c.renderEvent()}</View>).getByText('look at this')).toBeTruthy()
   })
 
+  // An attachment this phone could not check or save is not a photo it can show: calling it one would be false.
   test('an attachment this phone cannot show reads as unsupported, never as a photo', () => {
     const unsupported = event({ connectionId: 'A', eventType: 'message', attachments: [{ unsupported: 'too-large' }] })
     const notSaved = event({
