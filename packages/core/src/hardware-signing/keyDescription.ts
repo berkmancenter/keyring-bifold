@@ -31,6 +31,11 @@ interface Der {
   from: number
 }
 
+/**
+ * One DER element's header, its tag number decoded with its class split off, multi-byte (high) tags included: Android's
+ * authorization list tags entries 503 and 504 that way. signingTime.ts has a simpler reader that keeps the whole first
+ * identifier byte as the tag (0x30, not 0x10, for a SEQUENCE); the two are not interchangeable.
+ */
 function readDer(bytes: Uint8Array, offset: number, limit: number): Der {
   let at = offset
   if (at >= limit) throw new Error('truncated DER')
@@ -166,6 +171,21 @@ export function isLeafNativeChecked(leaf: LeafFacts, leafPublicKeyBase64: string
   if (!leafPublicKeyBase64) return false
   const reported = new Uint8Array(Buffer.from(leafPublicKeyBase64, 'base64'))
   return reported.length > 0 && (sameBytes(reported, leaf.spki) || sameBytes(reported, leaf.rawKey))
+}
+
+/**
+ * Why the leaf read cannot be tied to the certificate native validated, or undefined when it is that one. Three cases
+ * are told apart, so a refused card says which: the leaf could not be read at all; native reported no key to compare
+ * it with; or native reported a different key.
+ */
+export function leafCheckRefusal(
+  leaf: LeafFacts | undefined,
+  leafPublicKeyBase64: string | undefined
+): string | undefined {
+  if (!leaf) return 'the attestation certificate could not be read'
+  if (!leafPublicKeyBase64) return 'the native verifier reported no certificate key to compare the key description with'
+  if (!isLeafNativeChecked(leaf, leafPublicKeyBase64)) return 'the key description read is not the certificate verified'
+  return undefined
 }
 
 /**
