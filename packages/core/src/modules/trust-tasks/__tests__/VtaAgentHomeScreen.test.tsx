@@ -899,6 +899,8 @@ describe('Your agent — after linking', () => {
     const options = setOptions.mock.calls.at(-1)?.[0] as { headerLeft: () => unknown; headerRight: () => unknown }
     expect(options.headerLeft()).toBeNull()
     expect(options.headerRight()).toBeNull()
+    // CONTROL (reverted next): a second error of a signature the baseline has must turn the ratchet red.
+    expect(setOptions.mock.calls.at(-1)).toBeDefined()
     controller.set({ introSeen: true })
   })
 
