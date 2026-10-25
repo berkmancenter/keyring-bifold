@@ -102,7 +102,15 @@ class ContactFactsStore {
       const did = r.counterpartyRelationshipDid
       if (!did) continue
       const info = resolveContactDisplayInfo(records, did)
-      const facts: ConnectionFacts = { name: known(info.name || undefined), photo: known(info.photo || undefined) }
+      const name = info.name || undefined
+      const photo = info.photo || undefined
+      // Unchanged, the same object: every credential change re-reads, and a screen re-renders only for a contact
+      // whose name or photo moved (the chat list is long).
+      const before = this.byRelationship.get(did)
+      const facts: ConnectionFacts =
+        before && sameValue(before.name, name) && sameValue(before.photo, photo)
+          ? before
+          : { name: known(name), photo: known(photo) }
       byRelationship.set(did, facts)
       if (r.connectionId) byConnection.set(r.connectionId, facts)
     }
@@ -232,3 +240,5 @@ export function useContactFacts(relationshipDids: string[]): ContactFacts {
 
 const sameKnown = (a: Known<boolean>, b: Known<boolean>) =>
   a.known === b.known && (!a.known || !b.known || a.value === b.value)
+
+const sameValue = (fact: Known<string | undefined>, value: string | undefined) => fact.known && fact.value === value
