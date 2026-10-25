@@ -12,6 +12,7 @@ import { getChatEventRepository } from '../modules/chat/ChatModule'
 import { ChatEventRecord } from '../modules/chat/records/ChatEventRecord'
 import { timerOf, type ChatTimer } from '../modules/chat/timer'
 import { hidesText } from './chat/disappearing'
+import { messageTextOf } from './chat/messageText'
 import { getVrcNameForConnection } from '../modules/vrc/utils/vrcNameHelper'
 import { PersistentStorage } from '../services/storage'
 import { Preferences } from '../types/state'
@@ -97,7 +98,8 @@ const InAppMessageNotifier: React.FC = () => {
       } catch {
         timer = undefined
       }
-      return hidesText(timer, record.expiresIn) ? t('Chat.NewMessage') : cut(record.content?.text ?? '')
+      if (hidesText(timer, record.expiresIn)) return t('Chat.NewMessage')
+      return cut(messageTextOf(record, { photo: t('Chat.Photo'), unsupported: t('Chat.UnsupportedAttachment') }))
     }
 
     const notify = async (connectionId: string, preview: () => Promise<string>) => {

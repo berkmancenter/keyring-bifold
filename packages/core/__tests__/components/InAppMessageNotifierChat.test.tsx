@@ -144,6 +144,35 @@ describe('a received chat message', () => {
     expect(toasted()).toEqual([expect.objectContaining({ text2: 'Chat.NewMessage' })])
   })
 
+  // A photo or an attachment arrives already stored (the receive path checks and writes the image); the toast reads
+  // the stored record, as for any message.
+  const received = (props: Partial<ConstructorParameters<typeof ChatEventRecord>[0]>) => {
+    const record = new ChatEventRecord({
+      connectionId: 'conn-1',
+      role: 'received',
+      eventId: eventId(),
+      eventType: 'message',
+      ...props,
+    })
+    stored.push(record)
+    bus.emit(agent.context, { type: 'RecordSaved', payload: { record } })
+  }
+  const photo = { id: 'a1', mediaType: 'image/jpeg' as const, byteCount: 1000, width: 10, height: 10, file: 'a1.jpg' }
+
+  test('a photo with no caption: "📷 Photo"; an attachment it could not show is never called a photo', async () => {
+    received({ attachments: [photo] })
+    received({ attachments: [{ id: 'a2', unsupported: 'unsupported-type' }] })
+    await settle()
+    expect(toasted().map((options) => options.text2)).toEqual(['Chat.Photo', 'Chat.UnsupportedAttachment'])
+  })
+
+  test('a photo sent with a timer: "New message", like any timed message', async () => {
+    received({ attachments: [photo], content: { format: 'text/plain', text: 'the door code' }, expiresIn: 3600 })
+    await settle()
+    expect(toasted()).toEqual([expect.objectContaining({ text2: 'Chat.NewMessage' })])
+    expect(JSON.stringify(toasted())).not.toContain('door code')
+  })
+
   test('in the chat someone is looking at: no toast', async () => {
     setActiveChatConnectionId('conn-1')
     await message('see you at noon')
