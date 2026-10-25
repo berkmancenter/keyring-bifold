@@ -779,6 +779,8 @@ export interface ChatTimelineOptions {
   expired?: ReadonlySet<string> | 'unread'
   /** Who a quoted original is by, as a reply shows it: this phone's person, and the contact. */
   authorNames?: { me: string; them: string }
+  /** What a message with a photo and no text reads as ("📷 Photo"), here and when a reply quotes it. */
+  photoLabel?: string
 }
 
 /**
@@ -792,14 +794,17 @@ export function chatTimelineItems(
   textStyleFor: (role: Role) => object,
   options: ChatTimelineOptions = {}
 ): ExtendedChatMessage[] {
-  const { systemLine, expired } = options
+  const { systemLine, expired, photoLabel } = options
+  // A photo with no caption reads as the label, so neither its bubble nor a reply quoting it is empty.
+  const textOf = (record: ChatEventRecord) =>
+    record.content?.text ?? (record.attachments?.length ? (photoLabel ?? '') : '')
   const { messages, reactions, systems } = foldChatEvents(events)
   const byEventId = new Map(messages.map((m) => [m.eventId, m]))
   const roleOf = (record: ChatEventRecord) => (record.role === 'sent' ? Role.me : Role.them)
   const missing = (eventId: string): NonNullable<ExtendedChatMessage['replyTo']> =>
     expired === 'unread' ? { unread: true } : expired?.has(eventId) ? { expired: true } : { unavailable: true }
   const items: ExtendedChatMessage[] = messages.map((record) => {
-    const text = record.content?.text ?? ''
+    const text = textOf(record)
     const target = record.inReplyTo ? byEventId.get(record.inReplyTo) : undefined
     return {
       _id: record.id,
@@ -813,7 +818,7 @@ export function chatTimelineItems(
       replyTo: record.inReplyTo
         ? target
           ? {
-              text: target.content?.text ?? '',
+              text: textOf(target),
               author: target.role === 'sent' ? options.authorNames?.me : options.authorNames?.them,
             }
           : missing(record.inReplyTo)
@@ -1326,6 +1331,7 @@ export const useChatMessagesByConnection = (connection: DidCommConnectionRecord)
         systemLine: (record) => timerLine(t, record, theirLabel),
         expired,
         authorNames: { me: t('Chat.UserYou'), them: theirLabel },
+        photoLabel: t('Chat.Photo'),
       })
     )
 

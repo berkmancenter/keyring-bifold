@@ -185,6 +185,20 @@ describe("one chat's events as timeline items", () => {
     expect(items.find((i) => i.text === 'to something gone')?.replyTo).toEqual({ unavailable: true })
   })
 
+  // A photo with no caption must not draw an empty bubble, nor a reply quoting it an empty quote (S3-3a, before the
+  // image bubble lands). With a caption, the caption is its text.
+  test('a photo with no caption reads as the photo label, and so does a reply quoting it', () => {
+    const photo = { id: 'a1', mediaType: 'image/jpeg' as const, byteCount: 1000, width: 10, height: 10, file: 'x.jpg' }
+    const bare = event({ connectionId: 'A', eventType: 'message', attachments: [photo] })
+    const captioned = message('A', 'look at this', { attachments: [photo] })
+    const reply = message('A', 'nice', { inReplyTo: bare.eventId })
+    const items = chatTimelineItems([bare, captioned, reply], style, { photoLabel: '📷 Photo' })
+    expect(items.map((i) => i.text)).toEqual(['📷 Photo', 'look at this', 'nice'])
+    expect(items.find((i) => i.text === 'nice')?.replyTo).toEqual({ text: '📷 Photo' })
+    // Without the label, nothing is invented.
+    expect(chatTimelineItems([bare], style)[0].text).toBe('')
+  })
+
   test('a reply to an original that disappeared on its timer says so; one never here says it is not on this phone', () => {
     const expiredOriginal = '01JYYYYYYYYYYYYYYYYYYYYYYY'
     const neverHere = '01JZZZZZZZZZZZZZZZZZZZZZZZ'
