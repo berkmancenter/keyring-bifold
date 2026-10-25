@@ -41,6 +41,8 @@ shapes = {
   'no_auth_required_in_software': key_description([ctx(503, NULL)], [PURPOSE, ALGORITHM, ctx(504, integer(2))]),
   'user_auth_missing': key_description([], [PURPOSE, ALGORITHM]),
   'user_auth_zero': key_description([], [PURPOSE, ALGORITHM, ctx(504, integer(0))]),
+  'user_auth_enumerated': key_description([], [PURPOSE, ALGORITHM, ctx(504, enum(2)), ctx(505, integer(0))]),
+  'user_auth_wrong_type': key_description([], [PURPOSE, ALGORITHM, ctx(504, octets(bytes([2])))]),
   'user_auth_software_only': key_description([ctx(504, integer(2))], [PURPOSE, ALGORITHM]),
 }
 for name, der in shapes.items():

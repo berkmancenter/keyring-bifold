@@ -21,6 +21,8 @@ import {
   USER_AUTH_MISSING,
   USER_AUTH_SOFTWARE_ONLY,
   USER_AUTH_ZERO,
+  USER_AUTH_ENUMERATED,
+  USER_AUTH_WRONG_TYPE,
   NO_EXTENSION,
   rawKeyOf,
   spkiOf,
@@ -41,6 +43,10 @@ describe('reading an Android key description', () => {
     expect(userAuthenticationRefusal(readLeaf(AUTH_REQUIRED_STRONGBOX))).toBeUndefined()
   })
 
+  test('a user auth type written as ENUMERATED is read like an INTEGER, as devices have been seen to do', () => {
+    expect(userAuthenticationRefusal(readLeaf(USER_AUTH_ENUMERATED))).toBeUndefined()
+  })
+
   test.each([
     ['attested in software only', SOFTWARE_LEVEL],
     ['no authentication required (hardware list)', NO_AUTH_REQUIRED],
@@ -48,6 +54,7 @@ describe('reading an Android key description', () => {
     ['no user auth type', USER_AUTH_MISSING],
     ['a user auth type of zero', USER_AUTH_ZERO],
     ['a user auth type in the software list only', USER_AUTH_SOFTWARE_ONLY],
+    ['a user auth type that is not a number', USER_AUTH_WRONG_TYPE],
     ['no key description at all', NO_EXTENSION],
     ['not a certificate', '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----'],
   ])('a key %s is refused', (_label, pem) => {

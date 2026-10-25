@@ -90,6 +90,8 @@ function integerValue(bytes: Uint8Array, element: Der): number {
 
 const UNIVERSAL = 0x00
 const CONTEXT = 0x80
+const INTEGER = 0x02
+const ENUMERATED = 0x0a
 
 export interface LeafFacts {
   /** The leaf's SubjectPublicKeyInfo, DER (the form Android's native verifier reports). */
@@ -178,8 +180,14 @@ export function userAuthenticationRefusal(leaf: LeafFacts | undefined): string |
   if (description.software.has(NO_AUTH_REQUIRED) || description.hardware.has(NO_AUTH_REQUIRED)) {
     return 'the key needs no user authentication'
   }
+  // INTEGER on paper; ENUMERATED accepted too, as devices have been seen to encode the security level that way. What
+  // the rule needs is a non-zero auth type, inside a chain native has already validated.
   const authType = description.hardware.get(USER_AUTH_TYPE)
-  if (!authType || authType.tag !== 0x02 || integerValue(description.bytes, authType) === 0) {
+  if (
+    !authType ||
+    (authType.tag !== INTEGER && authType.tag !== ENUMERATED) ||
+    integerValue(description.bytes, authType) === 0
+  ) {
     return 'the key names no user authentication enforced in secure hardware'
   }
   return undefined
