@@ -1521,7 +1521,16 @@ class VtiAgentController {
    * without branding that is read instead — in the background, since a screen
    * that subscribes to `communityTarget` picks the name up whenever it lands.
    */
+  /** The last manifest each community answered with, this run: what a screen can show before it reads again. */
+  private manifests = new Map<string, VtiManifest>()
+
+  /** The manifest `communityDid` last answered with, this run, if it has. Read offline. */
+  lastManifest(communityDid: string): VtiManifest | undefined {
+    return this.manifests.get(communityDid)
+  }
+
   private learnManifest(communityDid: string, agent: Agent | undefined, manifest: VtiManifest): VtiManifest {
+    this.manifests.set(communityDid, manifest)
     const branded = manifest.branding?.displayName?.trim()
     // How its cards look: kept even when it gives nothing, so the Wallet knows it has none (communityBrand.ts).
     rememberCommunityBrand(agent, communityDid, {
