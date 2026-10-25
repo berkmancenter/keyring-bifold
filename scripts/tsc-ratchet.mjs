@@ -34,15 +34,19 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+// Some messages name a file by absolute path (TS7016 names the module's .js), which
+// differs between a laptop and the runner; the signature keeps it repo-relative.
+const relativeMessage = (message, root) => message.split(root + path.sep).join('').trim()
+
 /** One diagnostic line of `tsc --pretty false`, or undefined for anything else. */
-export function parseLine(line, pkgDir) {
+export function parseLine(line, pkgDir, root = repoRoot) {
   const withFile = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/.exec(line)
   if (withFile) {
     const file = path.relative(pkgDir, path.resolve(pkgDir, withFile[1])).split(path.sep).join('/')
-    return { file, code: withFile[4], message: withFile[5].trim() }
+    return { file, code: withFile[4], message: relativeMessage(withFile[5], root) }
   }
   const global = /^error (TS\d+): (.*)$/.exec(line)
-  if (global) return { file: '<global>', code: global[1], message: global[2].trim() }
+  if (global) return { file: '<global>', code: global[1], message: relativeMessage(global[2], root) }
   return undefined
 }
 

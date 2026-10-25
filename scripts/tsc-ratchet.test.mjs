@@ -32,6 +32,15 @@ test('the same error moved to another line is the same signature: no churn', () 
   assert.deepEqual(compare(before, after), { rose: [], fell: [] })
 })
 
+test('an absolute path in a message is made repo-relative, so laptop and runner agree', () => {
+  const at = (root) =>
+    `src/c.test.ts(1,20): error TS7016: Could not find a declaration file for module 'jsonld'. '${root}/packages/core/node_modules/jsonld/lib/index.js' implicitly has an 'any' type.`
+  const laptop = parseLine(at('/Users/someone/keyring-bifold'), PKG, '/Users/someone/keyring-bifold')
+  const runner = parseLine(at('/home/runner/work/keyring-bifold'), PKG, '/home/runner/work/keyring-bifold')
+  assert.deepEqual(laptop, runner)
+  assert.match(laptop.message, / 'packages\/core\/node_modules\/jsonld\/lib\/index\.js' /)
+})
+
 test('fails on a NEW signature', () => {
   const r = judge({ status: 2, output: out(e1, e2) }, countDiagnostics(out(e1), PKG), PKG)
   assert.equal(r.ok, false)
