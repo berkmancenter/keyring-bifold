@@ -26,6 +26,7 @@ const LOG_PREFIX = '[Chat:inbound]'
 export type ChatInboundVerdict =
   | 'stored'
   | 'duplicate'
+  | 'reused-event-id'
   | 'no-connection'
   | 'no-authenticated-sender'
   | ChatEventRejection
@@ -59,6 +60,10 @@ export async function receiveChatEventMessage(
   const repository = getChatEventRepository(agent)
   const connectionId = ctx.connection.id
   if (await repository.findEvent(agent.context, connectionId, 'received', event.eventId)) return 'duplicate'
+  // An eventId is a random ULID, so a received one never matches one this phone sent, unless the peer copied it. Every
+  // lookup by eventId (deletion with its dependents, the expiry sweep, replies, a photo's file) would then reach this
+  // phone's own message too: a peer could delete it, or expire it with a short timer of its own. So it is refused.
+  if (await repository.findEvent(agent.context, connectionId, 'sent', event.eventId)) return 'reused-event-id'
 
   await repository.save(
     agent.context,
