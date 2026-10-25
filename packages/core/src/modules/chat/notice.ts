@@ -33,6 +33,7 @@ import {
 
 import { RCE_PROTOCOL_VERSION } from '../vrc/vrc-manager'
 import { RelationshipDidRepository } from '../vrc/repositories/RelationshipDidRepository'
+import { CHAT_MIN_RCE_VERSION } from './capability'
 import { getChatEventRepository, getChatPeerRepository } from './ChatModule'
 import { deleteChatMessages } from './history'
 import { ChatCapabilityMessage } from './messages/ChatCapabilityMessage'
@@ -78,14 +79,13 @@ async function peerRecord(agent: Agent, connectionId: string): Promise<ChatPeerR
   return created
 }
 
-async function knowsThisPhonesVersion(agent: Agent, connection: DidCommConnectionRecord): Promise<boolean> {
-  if (!connection.theirDid) return false
+// Whether the contact has heard this phone's current version from this phone. Its stored version says what the
+// contact is, not what it knows of this phone: a contact paired while this phone ran an older build heard only that
+// build's version, and still believes it after this phone upgrades.
+async function heardThisPhonesVersion(agent: Agent, connectionId: string): Promise<boolean> {
   try {
-    const relationships = agent.dependencyManager.resolve(RelationshipDidRepository)
-    const relationship = await relationships.findByConnectionDid(agent.context, connection.theirDid)
-    if ((relationship?.counterpartyRceVersion ?? 1) < RCE_PROTOCOL_VERSION) return false
-    const peer = await getChatPeerRepository(agent).findByConnection(agent.context, connection.id)
-    return !peer?.chatRefusedAt
+    const peer = await getChatPeerRepository(agent).findByConnection(agent.context, connectionId)
+    return (peer?.announcedVersion ?? 0) >= RCE_PROTOCOL_VERSION && !peer?.chatRefusedAt
   } catch {
     return false
   }
@@ -100,20 +100,44 @@ async function sendNotice(agent: Agent, connection: DidCommConnectionRecord, rep
   const peer = await peerRecord(agent, connection.id)
   peer.noticeId = message.id
   peer.noticeSentAt = new Date(now)
+  peer.announcedVersion = RCE_PROTOCOL_VERSION
   await getChatPeerRepository(agent).update(agent.context, peer)
 }
 
 /**
- * Called when the person opens a chat. Sends this phone's notice when the
- * contact may not know this phone's RCE version, and no notice went out in the
- * last {@link NOTICE_RETRY_MS}.
+ * A chat event stored from a contact: it speaks `keyring/chat/1.0`, whatever was stored before. Raise its stored
+ * version to at least {@link CHAT_MIN_RCE_VERSION} (never lower it) and clear any refusal, so this phone answers in
+ * chat events from then on. This is how a phone learns that a contact upgraded when the contact's notice never came.
+ * Called by inbound.ts; a failure here never fails the stored event.
+ */
+export async function noteChatFromContact(agent: Agent, connection: DidCommConnectionRecord): Promise<void> {
+  if (connection.theirDid) {
+    const relationships = agent.dependencyManager.resolve(RelationshipDidRepository)
+    const relationship = await relationships.findByConnectionDid(agent.context, connection.theirDid)
+    if (relationship && (relationship.counterpartyRceVersion ?? 1) < CHAT_MIN_RCE_VERSION) {
+      relationship.counterpartyRceVersion = CHAT_MIN_RCE_VERSION
+      await relationships.update(agent.context, relationship)
+    }
+  }
+  const peers = getChatPeerRepository(agent)
+  const peer = await peers.findByConnection(agent.context, connection.id)
+  if (peer?.chatRefusedAt) {
+    peer.chatRefusedAt = undefined
+    await peers.update(agent.context, peer)
+  }
+}
+
+/**
+ * Called when the person opens a chat. Sends this phone's notice unless the
+ * contact has already heard this phone's current RCE version in a notice from
+ * it, and no notice went out in the last {@link NOTICE_RETRY_MS}.
  *
- * A contact stored at this phone's version or newer already knows it: it was
- * announced in the relationship handshake, or this phone answered that
- * contact's own notice. Anything lower may not, so every version bump is
- * announced the way chat was (a later capability, such as photos, reaches
- * contacts made before it without code of its own). A contact that refused a
- * chat event is noticed again, as before.
+ * The contact's stored version is not the test: a contact paired while this
+ * phone ran an older build heard only that build's version in the handshake.
+ * So after any upgrade every contact gets one notice, on the first chat open,
+ * and a later capability (photos) reaches contacts made before it with no code
+ * of its own. A refused notice, or a contact that refused a chat event, is
+ * noticed again after the interval.
  */
 export async function sendCapabilityNoticeIfNeeded(
   agent: Agent,
@@ -123,7 +147,7 @@ export async function sendCapabilityNoticeIfNeeded(
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   // Chat rides DIDComm v1 only, for now (plan §4.1).
   if (connection.didcommVersion === 'v2') return 'not-v1'
-  if (await knowsThisPhonesVersion(agent, connection)) return 'not-needed'
+  if (await heardThisPhonesVersion(agent, connectionId)) return 'not-needed'
   const existing = await getChatPeerRepository(agent).findByConnection(agent.context, connectionId)
   if (existing?.noticeSentAt && now - existing.noticeSentAt.getTime() < NOTICE_RETRY_MS) return 'recent'
   await sendNotice(agent, connection, false, now)
@@ -186,7 +210,14 @@ export async function receiveChatProblemReport(
 
   const peers = getChatPeerRepository(agent)
   const peer = await peers.findByConnection(agent.context, connection.id)
-  if (peer?.noticeId === parentId) return 'notice-refused'
+  if (peer?.noticeId === parentId) {
+    // Not heard after all: notice again after the interval.
+    if (peer.announcedVersion !== undefined) {
+      peer.announcedVersion = undefined
+      await peers.update(agent.context, peer)
+    }
+    return 'notice-refused'
+  }
 
   const events = getChatEventRepository(agent)
   const refused = await events.findEvent(agent.context, connection.id, 'sent', parentId)

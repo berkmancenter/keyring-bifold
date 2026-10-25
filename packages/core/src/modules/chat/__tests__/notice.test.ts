@@ -13,6 +13,7 @@ import { ChatEventRecord } from '../records/ChatEventRecord'
 import { ChatPeerRecord } from '../records/ChatPeerRecord'
 import {
   NOTICE_RETRY_MS,
+  noteChatFromContact,
   receiveCapabilityNotice,
   receiveChatProblemReport,
   sendCapabilityNoticeIfNeeded,
@@ -148,6 +149,9 @@ function makeAgent(
     peers: () => of(ChatPeerRecord.type) as ChatPeerRecord[],
     events: () => of(ChatEventRecord.type) as ChatEventRecord[],
     addEvent: (record: ChatEventRecord) => of(ChatEventRecord.type).push(record),
+    // A contact this phone has already told a version, in a notice it did not refuse.
+    told: (announcedVersion: number) =>
+      of(ChatPeerRecord.type).push(new ChatPeerRecord({ connectionId: 'conn-1', announcedVersion })),
   }
 }
 
@@ -188,21 +192,42 @@ describe('sendCapabilityNoticeIfNeeded', () => {
     expect(fake.peers()[0]).toMatchObject({ connectionId: 'conn-1', noticeId: message.id })
   })
 
-  it('does not send again within the retry interval, and does after it', async () => {
+  it('does not send again once the contact has heard it', async () => {
     const fake = makeAgent({ rceVersion: 5 })
     await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS)).toBe('not-needed')
+    expect(fake.sent).toHaveLength(1)
+  })
+
+  it('tells a contact that refused the notice again, but not within the retry interval', async () => {
+    const fake = makeAgent({ rceVersion: 5 })
+    await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)
+    await receiveChatProblemReport(
+      fake.agent,
+      { message: problemReport(fake.peers()[0].noticeId as string), connection: fake.connections['conn-1'] } as never,
+      NOW
+    )
     expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS - 1)).toBe('recent')
     expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS)).toBe('sent')
     expect(fake.sent).toHaveLength(2)
   })
 
-  it('announces a later version to a contact stored below it, and nothing to one stored at it', async () => {
+  it('after an upgrade, tells a contact that heard only the older version, once', async () => {
     mockRceVersion = 7
-    const atSix = makeAgent({ rceVersion: 6 })
-    expect(await sendCapabilityNoticeIfNeeded(atSix.agent, 'conn-1', NOW)).toBe('sent')
-    expect((atSix.sent[0].message as ChatCapabilityMessage).rceVersion).toBe(7)
-    const atSeven = makeAgent({ rceVersion: 7 })
-    expect(await sendCapabilityNoticeIfNeeded(atSeven.agent, 'conn-1', NOW)).toBe('not-needed')
+    const fake = makeAgent({ rceVersion: 7 })
+    fake.told(6)
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)).toBe('sent')
+    expect((fake.sent[0].message as ChatCapabilityMessage).rceVersion).toBe(7)
+    expect(fake.peers()[0].announcedVersion).toBe(7)
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS)).toBe('not-needed')
+  })
+
+  // The two-phone run, 2026-10-25: this phone paired while on a build without chat, so the contact's handshake
+  // already said 6 and the contact heard only this phone's older version. After this phone upgrades, the contact's
+  // stored version is no reason to stay quiet.
+  it('tells a contact paired before this phone upgraded, whatever that contact is stored at', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)).toBe('sent')
   })
 
   it('notices again a contact that refused a chat event, even one stored at this version', async () => {
@@ -216,8 +241,9 @@ describe('sendCapabilityNoticeIfNeeded', () => {
     expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)).toBe('sent')
   })
 
-  it('sends nothing to a contact already known to speak chat, or on a DIDComm v2 connection', async () => {
+  it('sends nothing to a contact already told this version, or on a DIDComm v2 connection', async () => {
     const speaks = makeAgent({ rceVersion: 6 })
+    speaks.told(6)
     expect(await sendCapabilityNoticeIfNeeded(speaks.agent, 'conn-1', NOW)).toBe('not-needed')
     const v2 = makeAgent({ rceVersion: 5, didcommVersion: 'v2' })
     expect(await sendCapabilityNoticeIfNeeded(v2.agent, 'conn-1', NOW)).toBe('not-v1')
@@ -228,6 +254,12 @@ describe('sendCapabilityNoticeIfNeeded', () => {
 describe('receiveCapabilityNotice', () => {
   const ctx = (fake: ReturnType<typeof makeAgent>, message: ChatCapabilityMessage, overrides = {}) =>
     ({ message, connection: fake.connections['conn-1'], senderKey: {}, ...overrides }) as never
+
+  it('records the version it told the contact in its answer', async () => {
+    const fake = makeAgent({ rceVersion: 5 })
+    await receiveCapabilityNotice(fake.agent, ctx(fake, notice(6)), NOW)
+    expect(fake.peers()[0].announcedVersion).toBe(6)
+  })
 
   it('raises the stored version and answers once with a reply notice', async () => {
     const fake = makeAgent({ rceVersion: 5 })
@@ -284,6 +316,15 @@ describe('receiveCapabilityNotice', () => {
 describe('receiveChatProblemReport', () => {
   const ctx = (fake: ReturnType<typeof makeAgent>, message: DidCommProblemReportMessage, connectionId = 'conn-1') =>
     ({ message, connection: fake.connections[connectionId] }) as never
+
+  it('forgets a refused notice was heard, so the contact is told again after the interval', async () => {
+    const fake = makeAgent({ rceVersion: 5 })
+    await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)
+    const noticeId = fake.peers()[0].noticeId as string
+    await receiveChatProblemReport(fake.agent, ctx(fake, problemReport(noticeId)), NOW)
+    expect(fake.peers()[0].announcedVersion).toBeUndefined()
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS)).toBe('sent')
+  })
 
   it('records a refused notice and sends nothing', async () => {
     const fake = makeAgent({ rceVersion: 5 })
@@ -386,6 +427,47 @@ describe('receiveChatProblemReport', () => {
       NOW
     )
     expect(await counterpartySpeaksChat(fake.agent, 'conn-1')).toBe(true)
+  })
+})
+
+describe('noteChatFromContact', () => {
+  it('raises a contact stored below 6 to 6, so this phone answers in chat events', async () => {
+    const fake = makeAgent({ rceVersion: 5 })
+    await noteChatFromContact(fake.agent, fake.connections['conn-1'] as never)
+    expect(fake.relationship?.counterpartyRceVersion).toBe(6)
+    expect(await counterpartySpeaksChat(fake.agent, 'conn-1')).toBe(true)
+  })
+
+  it('raises to chat’s version only, never to this phone’s own or beyond', async () => {
+    mockRceVersion = 7
+    const fake = makeAgent({ rceVersion: 5 })
+    await noteChatFromContact(fake.agent, fake.connections['conn-1'] as never)
+    expect(fake.relationship?.counterpartyRceVersion).toBe(6)
+  })
+
+  it('never lowers a higher stored version', async () => {
+    const fake = makeAgent({ rceVersion: 7 })
+    await noteChatFromContact(fake.agent, fake.connections['conn-1'] as never)
+    expect(fake.relationship?.counterpartyRceVersion).toBe(7)
+    expect(fake.relationshipUpdates).toHaveLength(0)
+  })
+
+  it('clears a refusal', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    fake.addEvent(sentEvent('conn-1', 'reaction'))
+    await receiveChatProblemReport(
+      fake.agent,
+      { message: problemReport(EVENT_ID), connection: fake.connections['conn-1'] } as never,
+      NOW
+    )
+    expect(await counterpartySpeaksChat(fake.agent, 'conn-1')).toBe(false)
+    await noteChatFromContact(fake.agent, fake.connections['conn-1'] as never)
+    expect(await counterpartySpeaksChat(fake.agent, 'conn-1')).toBe(true)
+  })
+
+  it('does nothing for a contact with no relationship record', async () => {
+    const fake = makeAgent({ noRelationship: true })
+    await expect(noteChatFromContact(fake.agent, fake.connections['conn-1'] as never)).resolves.toBeUndefined()
   })
 })
 
