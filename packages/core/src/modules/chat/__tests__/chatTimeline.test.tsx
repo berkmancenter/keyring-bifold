@@ -188,16 +188,18 @@ describe("one chat's events as timeline items", () => {
 })
 
 describe('records as storage gives them back', () => {
-  // Storage turns a record into JSON and back (AskarStorageService's recordToInstance). On main, `sentTime` comes
-  // back a string, so the timeline's sort throws on every chat read from the phone; built in memory, as every other
-  // test here does, it never shows. Marked failing until ChatEventRecord revives `sentTime` as a Date (the Step 1
-  // owner's fix): when that lands this test goes red, and `.failing` comes off.
-  test.failing('a chat read back from storage folds into the timeline, in order', () => {
+  // Storage turns a record into JSON and back (AskarStorageService's recordToInstance). Built in memory, as every
+  // other test here is, a record never goes through it: `sentTime` came back a string until ChatEventRecord revived
+  // it as a Date, and the timeline's sort threw on every chat read from the phone.
+  test('a chat read back from storage folds into the timeline, in order', () => {
     const stored = [
       message('A', 'second', { sentTime: new Date(Date.UTC(2026, 9, 25, 11)) }),
       message('A', 'first', { sentTime: new Date(Date.UTC(2026, 9, 25, 10)) }),
     ]
     const readBack = stored.map((r) => JsonTransformer.deserialize(JsonTransformer.serialize(r), ChatEventRecord))
+    // Read back, not the records built here: what storage returns, with its time a Date again.
+    expect(readBack[0]).not.toBe(stored[0])
+    expect(readBack.every((r) => r.sentTime instanceof Date)).toBe(true)
     expect(chatTimelineItems(readBack, () => ({})).map((i) => i.text)).toEqual(['first', 'second'])
   })
 })
