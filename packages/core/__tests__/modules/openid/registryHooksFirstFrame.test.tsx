@@ -38,6 +38,8 @@ beforeEach(() => {
   credentialRegistry.getState().reset()
   resetNotificationFirstSeen()
 })
+// A test that moves the clock gets real timers back even when its assertions fail.
+afterEach(() => jest.useRealTimers())
 
 describe('Revoked, from the registry', () => {
   test('a credential the registry has flagged is Revoked in the first frame', () => {
@@ -88,7 +90,6 @@ describe('notifications, from the registry', () => {
     act(() => credentialRegistry.setState({ lastSweepAt: '2026-10-25T12:01:00Z' }))
     expect(seen.length).toBeGreaterThan(1)
     expect(seen[seen.length - 1][0].createdAt?.getTime()).toBe(first)
-    jest.useRealTimers()
   })
 
   test('a replacement is listed in the first frame, and keeps its first-seen time across a rebuild', () => {
@@ -103,6 +104,5 @@ describe('notifications, from the registry', () => {
     act(() => credentialRegistry.setState({ checked: ['cred-1'] }))
     expect(seen.length).toBeGreaterThan(1)
     expect(seen[seen.length - 1][0].createdAt?.getTime()).toBe(first)
-    jest.useRealTimers()
   })
 })
