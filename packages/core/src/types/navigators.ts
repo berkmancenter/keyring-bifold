@@ -93,6 +93,7 @@ export enum Screens {
   VtiJoin = 'Join',
   SignIn = 'Sign in to a community',
   VtaClaim = 'Set up your agent',
+  RoomsList = 'Your rooms',
 }
 
 export enum Stacks {
@@ -175,6 +176,8 @@ export type MyAgentStackParams = {
   // The code, and the scan it came from (the route's id: each scan is its own screen).
   [Screens.VtaClaim]: { link: string; scanId: string } | undefined
   [Screens.EditRCard]: { profileId: string } | undefined
+  // Every room and offer, or one community's when opened from its card (rooms flag on only).
+  [Screens.RoomsList]: { communityDid?: string } | undefined
 }
 
 export type OnboardingStackParams = {

@@ -89,6 +89,10 @@ jest.mock('../module/vtiPersonaInbox', () => ({
 
 const communityDid = 'did:webvh:QmUsH14W1foRZyP9v7LtfxwFy7qWgzNBLSzhWhbMQeMPJB:keyring-vti-vtc.ngrok.app'
 
+// The rooms service, set by the rooms tests (undefined: the rooms flag is off, as in every other test).
+let mockRoomsService: unknown = undefined
+jest.mock('../../rooms/useRoomsService', () => ({ useRoomsService: () => mockRoomsService }))
+
 const show = () => {
   const mockUseRoute = useRoute as jest.Mock
   const mockUseAgent = useAgent as jest.Mock
@@ -300,6 +304,52 @@ describe('the community screen, for a member', () => {
     expect(tree.queryByTestId(testIdWithKey('CommunityCriteria'))).toBeNull()
     expect(tree.queryByTestId(testIdWithKey('ApplyToCommunityButton'))).toBeNull()
     expect(tree.queryByTestId(testIdWithKey('CommunityOpenDesk'))).toBeNull()
+  })
+
+  it("rooms flag on: a member sees this community's rooms; off, no Rooms section (the on case is the control)", async () => {
+    mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
+    mockRoomsService = {
+      isSample: false,
+      capabilities: async () => jest.requireActual('../../rooms/capabilities').sampleCapabilities(),
+      listMyRooms: async () => [
+        {
+          roomId: 'did:webvh:r:here',
+          name: 'Planning',
+          nameFrom: 'community',
+          source: 'community',
+          communityDid,
+          tier: 'open',
+          verbs: ['read'],
+          standing: 'member',
+        },
+        {
+          roomId: 'did:webvh:r:else',
+          name: 'Elsewhere',
+          nameFrom: 'community',
+          source: 'community',
+          communityDid: 'did:webvh:other',
+          tier: 'open',
+          verbs: ['read'],
+          standing: 'member',
+        },
+      ],
+      listOffers: async () => [],
+    }
+    try {
+      const on = show()
+      await act(async () => undefined)
+      expect(on.getByTestId(testIdWithKey('CommunityRooms'))).toBeTruthy()
+      expect(on.getByText('Planning')).toBeTruthy()
+      expect(on.queryByText('Elsewhere')).toBeNull()
+      on.unmount()
+      mockRoomsService = undefined
+      const off = show()
+      await act(async () => undefined)
+      expect(off.getByTestId(testIdWithKey('CommunityMember'))).toBeTruthy()
+      expect(off.queryByTestId(testIdWithKey('CommunityRooms'))).toBeNull()
+    } finally {
+      mockRoomsService = undefined
+    }
   })
 
   it('a member who vets here is offered their desk', async () => {
