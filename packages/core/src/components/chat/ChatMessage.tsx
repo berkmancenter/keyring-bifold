@@ -87,16 +87,18 @@ const MessageIcon: React.FC<{ iconType: MessageIconType; isMe: boolean }> = ({ i
   }
 
   return (
-    <View style={{
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: EVENT_CIRCLE_COLOR,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 10,
-      flexShrink: 0,
-    }}>
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: EVENT_CIRCLE_COLOR,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
+        flexShrink: 0,
+      }}
+    >
       {getIcon()}
     </View>
   )
@@ -108,10 +110,10 @@ const shouldShowDaySeparator = (currentMessage: ExtendedChatMessage, previousMes
     // Always show day separator for the first message (oldest message at bottom with inverted list)
     return true
   }
-  
+
   const currentDate = moment(currentMessage.createdAt).startOf('day')
   const previousDate = moment(previousMessage.createdAt).startOf('day')
-  
+
   return !currentDate.isSame(previousDate)
 }
 
@@ -122,34 +124,34 @@ const formatDaySeparator = (date: Date): string => {
 
 const EventCard: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
   return (
-    <View style={{
-      backgroundColor: EVENT_CARD_BG,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: EVENT_CARD_BORDER,
-      paddingVertical: 10,
-      paddingHorizontal: 12,
-      marginHorizontal: 12,
-      marginVertical: 10,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.15,
-      shadowRadius: 4,
-      elevation: 2,
-      minHeight: 62,
-      justifyContent: 'center',
-    }}>
+    <View
+      style={{
+        backgroundColor: EVENT_CARD_BG,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: EVENT_CARD_BORDER,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        marginHorizontal: 12,
+        marginVertical: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        elevation: 2,
+        minHeight: 62,
+        justifyContent: 'center',
+      }}
+    >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         <MessageIcon iconType={message.iconType!} isMe={false} />
-        <View style={{ flex: 1 }}>
-          {message.renderEvent()}
-        </View>
+        <View style={{ flex: 1 }}>{message.renderEvent()}</View>
       </View>
     </View>
   )
 }
 
-const CredentialOfferActions: React.FC<{ 
+const CredentialOfferActions: React.FC<{
   message: ExtendedChatMessage
 }> = ({ message }) => {
   const { t } = useTranslation()
@@ -161,22 +163,22 @@ const CredentialOfferActions: React.FC<{
       message.onDecline()
     }
   }, [message])
-  
+
   if (!message.onDetails) {
     return null
   }
 
   if (message.messageOpensCallbackType === CallbackType.CredentialOffer) {
     return (
-      <View style={{
-        marginTop: 14,
-        marginBottom: 16,
-        marginHorizontal: 12,
-        paddingVertical: 4,
-      }}>
-        <Text style={{ color: '#333', fontSize: 14, marginBottom: 14 }}>
-          Would you like to accept it?
-        </Text>
+      <View
+        style={{
+          marginTop: 14,
+          marginBottom: 16,
+          marginHorizontal: 12,
+          paddingVertical: 4,
+        }}
+      >
+        <Text style={{ color: '#333', fontSize: 14, marginBottom: 14 }}>Would you like to accept it?</Text>
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <TouchableOpacity
             onPress={message.onDetails}
@@ -234,11 +236,13 @@ const CredentialOfferActions: React.FC<{
   return (
     <View style={{ marginTop: 8, marginHorizontal: 12 }}>
       <TouchableOpacity onPress={message.onDetails}>
-        <Text style={{ 
-          color: 'black', 
-          fontSize: 14,
-          textDecorationLine: 'underline',
-        }}>
+        <Text
+          style={{
+            color: 'black',
+            fontSize: 14,
+            textDecorationLine: 'underline',
+          }}
+        >
           {getLinkText()}
         </Text>
       </TouchableOpacity>
@@ -276,9 +280,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
       <View>
         {daySeparator}
         <EventCard message={message} />
-        {(message.iconType === MessageIconType.Credential || 
-          message.iconType === MessageIconType.Proof
-        ) && (
+        {(message.iconType === MessageIconType.Credential || message.iconType === MessageIconType.Proof) && (
           <CredentialOfferActions message={message} />
         )}
       </View>
