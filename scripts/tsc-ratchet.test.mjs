@@ -11,15 +11,17 @@ const e1 = "src/a.ts(10,5): error TS2339: Property 'x' does not exist on type 'Y
 const e1Moved = "src/a.ts(42,9): error TS2339: Property 'x' does not exist on type 'Y'."
 const e2 = "src/b.ts(3,1): error TS2322: Type 'string' is not assignable to type 'number'."
 
-test('a signature is file, code and message — no line or column', () => {
+test('a diagnostic parses into file, code, position and message', () => {
   assert.deepEqual(parseLine(e1, PKG), {
     file: 'src/a.ts',
     code: 'TS2339',
+    at: '10,5',
     message: "Property 'x' does not exist on type 'Y'.",
   })
   assert.deepEqual(parseLine('error TS5058: The specified path does not exist.', PKG), {
     file: '<global>',
     code: 'TS5058',
+    at: '',
     message: 'The specified path does not exist.',
   })
   assert.equal(parseLine("  Type 'A' is missing the following properties", PKG), undefined)
@@ -32,13 +34,16 @@ test('the same error moved to another line is the same signature: no churn', () 
   assert.deepEqual(compare(before, after), { rose: [], fell: [] })
 })
 
-test('an absolute path in a message is made repo-relative, so laptop and runner agree', () => {
-  const at = (root) =>
-    `src/c.test.ts(1,20): error TS7016: Could not find a declaration file for module 'jsonld'. '${root}/packages/core/node_modules/jsonld/lib/index.js' implicitly has an 'any' type.`
-  const laptop = parseLine(at('/Users/someone/keyring-bifold'), PKG, '/Users/someone/keyring-bifold')
-  const runner = parseLine(at('/home/runner/work/keyring-bifold'), PKG, '/home/runner/work/keyring-bifold')
-  assert.deepEqual(laptop, runner)
-  assert.match(laptop.message, / 'packages\/core\/node_modules\/jsonld\/lib\/index\.js' /)
+test('the message is not in the signature: a printed type or a path that changes elsewhere does not churn', () => {
+  const before = out(
+    "src/s.test.ts(5,1): error TS2352: Conversion of type '{ Global: {...}; ... 75 more ...; Relationship: { ...; }; }' to type 'X' may be a mistake.",
+    "src/j.test.ts(1,20): error TS7016: Could not find a declaration file for module 'jsonld'. '/Users/someone/bifold/node_modules/jsonld/lib/index.js' implicitly has an 'any' type."
+  )
+  const after = out(
+    "src/s.test.ts(5,1): error TS2352: Conversion of type '{ Global: {...}; ... 76 more ...; Emoji: { ...; }; }' to type 'X' may be a mistake.",
+    "src/j.test.ts(1,20): error TS7016: Could not find a declaration file for module 'jsonld'. '/home/runner/work/bifold/node_modules/jsonld/lib/index.js' implicitly has an 'any' type."
+  )
+  assert.deepEqual(compare(countDiagnostics(before, PKG), countDiagnostics(after, PKG)), { rose: [], fell: [] })
 })
 
 test("a 'Did you mean' suggestion does not change the signature (tsc caps suggestions per program)", () => {
@@ -60,13 +65,16 @@ test("a 'Did you mean' suggestion does not change the signature (tsc caps sugges
       "a.test.ts(1,1): error TS2353: Object literal may only specify known properties, and 'nme' does not exist in type 'User'.",
     ],
   ]
-  for (const [suggesting, plain] of pairs) assert.deepEqual(parseLine(suggesting, PKG), parseLine(plain, PKG))
+  for (const [suggesting, plain] of pairs)
+    assert.deepEqual(countDiagnostics(suggesting, PKG), countDiagnostics(plain, PKG), suggesting)
 })
 
 test('fails on a NEW signature', () => {
   const r = judge({ status: 2, output: out(e1, e2) }, countDiagnostics(out(e1), PKG), PKG)
   assert.equal(r.ok, false)
   assert.match(r.lines.join('\n'), /NEW {2}0 -> 1 {2}src\/b\.ts {2}TS2322/)
+  // The gate shows the diagnostic itself, so the author can find it.
+  assert.match(r.lines.join('\n'), / {7}src\/b\.ts\(3,1\): Type 'string' is not assignable to type 'number'\./)
 })
 
 test('fails when a COUNT rises: a second error of a kind the file already has', () => {
@@ -74,6 +82,9 @@ test('fails when a COUNT rises: a second error of a kind the file already has', 
   const r = judge({ status: 2, output: out(e1, e1Moved) }, baseline, PKG)
   assert.equal(r.ok, false)
   assert.match(r.lines.join('\n'), /NEW {2}1 -> 2 {2}src\/a\.ts {2}TS2339/)
+  // A different error of the same code in the same file raises the count too.
+  const other = "src/a.ts(7,3): error TS2339: Property 'z' does not exist on type 'W'."
+  assert.equal(judge({ status: 2, output: out(e1, other) }, baseline, PKG).ok, false)
 })
 
 test('fails when tsc exits non-zero with NO output: a crash is not "zero new errors"', () => {
@@ -122,10 +133,8 @@ test('the baseline round-trips, sorted, with its header and counts', () => {
   const text = formatBaseline(counts)
   assert.match(text, /^# tsc-ratchet baseline/)
   const body = text.split('\n').filter((l) => l && !l.startsWith('#'))
-  assert.deepEqual(body, [
-    "2\tsrc/a.ts\tTS2339\tProperty 'x' does not exist on type 'Y'.",
-    "1\tsrc/b.ts\tTS2322\tType 'string' is not assignable to type 'number'.",
-  ])
+  assert.deepEqual(body, ['2\tsrc/a.ts\tTS2339', '1\tsrc/b.ts\tTS2322'])
   assert.deepEqual(parseBaseline(text), counts)
-  assert.throws(() => parseBaseline('two\tsrc/a.ts\tTS1\tm'), /unreadable baseline line/)
+  assert.throws(() => parseBaseline('two\tsrc/a.ts\tTS1'), /unreadable baseline line/)
+  assert.throws(() => parseBaseline('1\tsrc/a.ts\tTS1\tan old message column'), /unreadable baseline line/)
 })

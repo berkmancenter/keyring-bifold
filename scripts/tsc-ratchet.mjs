@@ -13,9 +13,14 @@
 // its tsconfig.json, so a bare `--write` cannot record a baseline from the wrong
 // project.
 //
-// A diagnostic's signature is its file, its TS code and its message, with no
-// line or column (those move with unrelated edits). The baseline keeps a COUNT
-// per signature, so a second error of a kind a file already has is still seen.
+// A diagnostic's signature is its file and its TS code, and the baseline keeps a
+// COUNT per signature, so a second error of a kind a file already has is still
+// seen. Line and column are left out because unrelated edits move them, and so
+// is the message, which moves too: it prints types inline ("... 75 more ...;
+// Relationship" became "... 76 more ...; Emoji" when a locale section was added),
+// it can hold an absolute path, and its "Did you mean" depends on the whole
+// program (see SUGGESTING). When a count rises, the gate prints that file's
+// current diagnostics of that code so the new one can be found.
 //
 // Fails (exit 1) when:
 //   - a signature appears that the baseline does not have, or a count rises;
@@ -38,51 +43,26 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-// Some messages name a file by absolute path (TS7016 names the module's .js), which
-// differs between a laptop and the runner; the signature keeps it repo-relative.
-const relativeMessage = (message, root) => message.replaceAll(root + path.sep, '').trim()
-
 // tsc adds "Did you mean ...?" to an error only while it has issued fewer than 10
-// suggestions in the whole program (maximumSuggestionCount in the checker), so an
-// error in an unrelated file can turn an unchanged TS2552 into a TS2304. Each
-// suggesting variant is folded into its plain form so the signature holds still.
-const SUGGESTING = {
-  TS2552: ['TS2304', (m) => m],
-  TS2551: ['TS2339', (m) => m],
-  TS2724: [
-    'TS2305',
-    (m) => m.replace(/^(.*) has no exported member named (.*)\.$/, 'Module $1 has no exported member $2.'),
-  ],
-  TS2561: [
-    'TS2353',
-    (m) =>
-      m.replace(
-        /^Object literal may only specify known properties, but /,
-        'Object literal may only specify known properties, and '
-      ),
-  ],
-}
-
-export function withoutSuggestion(code, message) {
-  const plain = SUGGESTING[code]
-  if (!plain) return { code, message }
-  const stripped = message.replace(/ Did you mean (to write )?'[^']*'\?$/, '')
-  return stripped === message ? { code, message } : { code: plain[0], message: plain[1](stripped) }
-}
+// suggestions in the whole program (maximumSuggestionCount in the checker), and
+// the suggesting form has its own code, so an error in an unrelated file can turn
+// an unchanged TS2552 into a TS2304. Each suggesting code counts as its plain one.
+const SUGGESTING = { TS2552: 'TS2304', TS2551: 'TS2339', TS2724: 'TS2305', TS2561: 'TS2353' }
 
 /** One diagnostic line of `tsc --pretty false`, or undefined for anything else. */
-export function parseLine(line, pkgDir, root = repoRoot) {
+export function parseLine(line, pkgDir) {
   const withFile = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/.exec(line)
   if (withFile) {
     const file = path.relative(pkgDir, path.resolve(pkgDir, withFile[1])).split(path.sep).join('/')
-    return { file, ...withoutSuggestion(withFile[4], relativeMessage(withFile[5], root)) }
+    const code = SUGGESTING[withFile[4]] ?? withFile[4]
+    return { file, code, at: `${withFile[2]},${withFile[3]}`, message: withFile[5].trim() }
   }
   const global = /^error (TS\d+): (.*)$/.exec(line)
-  if (global) return { file: '<global>', code: global[1], message: relativeMessage(global[2], root) }
+  if (global) return { file: '<global>', code: global[1], at: '', message: global[2].trim() }
   return undefined
 }
 
-const key = (d) => `${d.file}\t${d.code}\t${d.message}`
+const key = (d) => `${d.file}\t${d.code}`
 
 /** Count diagnostics by signature. Continuation lines (indented) are not diagnostics. */
 export function countDiagnostics(output, pkgDir) {
@@ -94,9 +74,19 @@ export function countDiagnostics(output, pkgDir) {
   return counts
 }
 
+/** The diagnostics themselves, by signature, for showing where a rise is. */
+export function diagnosticsBySignature(output, pkgDir) {
+  const found = new Map()
+  for (const line of output.split(/\r?\n/)) {
+    const d = parseLine(line, pkgDir)
+    if (d) found.set(key(d), [...(found.get(key(d)) ?? []), `${d.file}(${d.at}): ${d.message}`])
+  }
+  return found
+}
+
 export function formatBaseline(counts) {
   const header = [
-    '# tsc-ratchet baseline: <count> TAB <file> TAB <TS code> TAB <message>, sorted.',
+    '# tsc-ratchet baseline: <count> TAB <file> TAB <TS code>, sorted.',
     '# Policy: src has no type errors (the build enforces it); test files get no new ones, and',
     '# this list only shrinks. A new line is an exception: it needs a named reason in the PR',
     "# body and the review lane's explicit agreement. `--write` only to record fixes.",
@@ -111,7 +101,7 @@ export function parseBaseline(text) {
     if (!line.trim() || line.startsWith('#')) continue
     const [n, ...rest] = line.split('\t')
     const count = Number(n)
-    if (!Number.isInteger(count) || count < 1 || rest.length < 3)
+    if (!Number.isInteger(count) || count < 1 || rest.length !== 2)
       throw new Error(`tsc-ratchet: unreadable baseline line: ${line}`)
     counts.set(rest.join('\t'), count)
   }
@@ -176,7 +166,11 @@ export function judge(
   const lines = [
     `tsc-ratchet: ${total} diagnostic(s) now; baseline ${[...baseline.values()].reduce((a, b) => a + b, 0)}`,
   ]
-  for (const r of rose) lines.push(`NEW  ${r.was} -> ${r.now}  ${r.signature.replace(/\t/g, '  ')}`)
+  const found = rose.length ? diagnosticsBySignature(output, pkgDir) : new Map()
+  for (const r of rose) {
+    lines.push(`NEW  ${r.was} -> ${r.now}  ${r.signature.replace(/\t/g, '  ')}`)
+    for (const d of found.get(r.signature) ?? []) lines.push(`       ${d}`)
+  }
   for (const f of fell) lines.push(`FIXED ${f.was} -> ${f.now}  ${f.signature.replace(/\t/g, '  ')}`)
   if (rose.length) {
     lines.push(
@@ -195,14 +189,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   }
   const pkgDir = path.resolve(repoRoot, arg('--package') ?? 'packages/core')
   const baselinePath = path.join(pkgDir, 'tsc-baseline.txt')
-  const baseline = existsSync(baselinePath) ? parseBaseline(readFileSync(baselinePath, 'utf8')) : new Map()
+  const writing = process.argv.includes('--write')
+  // --write replaces the baseline, so it does not need (or trust) the old one.
+  const baseline = !writing && existsSync(baselinePath) ? parseBaseline(readFileSync(baselinePath, 'utf8')) : new Map()
   const project =
     arg('--project') ??
     (existsSync(path.join(pkgDir, 'tsconfig.ratchet.json')) ? 'tsconfig.ratchet.json' : 'tsconfig.json')
   const writeCommand = `node scripts/tsc-ratchet.mjs --package ${path.relative(repoRoot, pkgDir)} --project ${project} --write`
   const result = judge(runTsc(pkgDir, { project }), baseline, pkgDir, writeCommand)
   for (const line of result.lines) console.log(line)
-  if (process.argv.includes('--write')) {
+  if (writing) {
     if (!result.current) {
       console.log('tsc-ratchet: not writing a baseline from a failed tsc run')
       process.exit(1)
