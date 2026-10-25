@@ -2684,6 +2684,10 @@
     "NotAvailableYet": "Pas encore disponible",
     "AgentNeedsUpdate": "Votre agent doit être mis à jour",
     "CommunityNeedsUpdate": "Cette communauté doit être mise à jour",
+    "DetailsNotLoaded": "Détails non chargés",
+    "NoRightRead": "Vous ne pouvez pas lire ce salon",
+    "NoRightWrite": "Vous ne pouvez pas publier ici",
+    "NoRightCurate": "Réservé aux curateurs",
     "AdminOnly": "Seuls les administrateurs de la communauté peuvent voir ceci",
     "NoAgentLinked": "Reliez d'abord votre agent",
     "AgentUnknown": "Impossible de joindre votre agent. Réessayez plus tard."

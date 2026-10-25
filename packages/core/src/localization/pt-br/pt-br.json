@@ -2593,6 +2593,10 @@
     "NotAvailableYet": "Ainda não disponível",
     "AgentNeedsUpdate": "Seu agente precisa ser atualizado",
     "CommunityNeedsUpdate": "Esta comunidade precisa de uma atualização",
+    "DetailsNotLoaded": "Detalhes não carregados",
+    "NoRightRead": "Você não pode ler esta sala",
+    "NoRightWrite": "Você não pode publicar aqui",
+    "NoRightCurate": "Só curadores podem fazer isso",
     "AdminOnly": "Só os administradores da comunidade podem ver isto",
     "NoAgentLinked": "Vincule seu agente primeiro",
     "AgentUnknown": "Não foi possível falar com seu agente. Tente mais tarde."

@@ -11,22 +11,24 @@ import { Pressable, StyleSheet, View } from 'react-native'
 
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
-import type { OperationStatus } from '../types'
+import type { OperationStatus, RoomsOperation } from '../types'
 
 import { roomsStatusText } from './roomsStatusText'
 
 export interface RoomStatusRowProps {
   label: string
   status: OperationStatus
+  /** What the row does, so a missing right is worded for it ("You can't post here"). */
+  operation?: RoomsOperation
   /** Runs only when the operation is available. */
   onPress?: () => void
   testID?: string
 }
 
-export const RoomStatusRow: React.FC<RoomStatusRowProps> = ({ label, status, onPress, testID }) => {
+export const RoomStatusRow: React.FC<RoomStatusRowProps> = ({ label, status, operation, onPress, testID }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
-  const note = roomsStatusText(t, status)
+  const note = roomsStatusText(t, status, operation)
   const available = note === undefined
   const styles = StyleSheet.create({
     row: {

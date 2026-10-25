@@ -2753,6 +2753,10 @@
     "NotAvailableYet": "Not available yet",
     "AgentNeedsUpdate": "Your agent needs an update",
     "CommunityNeedsUpdate": "This community needs an update",
+    "DetailsNotLoaded": "Details not loaded",
+    "NoRightRead": "You can't read this room",
+    "NoRightWrite": "You can't post here",
+    "NoRightCurate": "Only curators can do this",
     "AdminOnly": "Only the community's administrators can see this",
     "NoAgentLinked": "Link your agent first",
     "AgentUnknown": "Couldn't reach your agent. Try again later."
