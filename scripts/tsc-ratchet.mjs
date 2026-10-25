@@ -47,7 +47,9 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // suggestions in the whole program (maximumSuggestionCount in the checker), and
 // the suggesting form has its own code, so an error in an unrelated file can turn
 // an unchanged TS2552 into a TS2304. Each suggesting code counts as its plain one.
-const SUGGESTING = { TS2552: 'TS2304', TS2551: 'TS2339', TS2724: 'TS2305', TS2561: 'TS2353' }
+// TS2552 and TS2833 (a namespace) are the codes that budget controls; the property,
+// export and object-literal variants are folded too, for the same kind of drift.
+const SUGGESTING = { TS2552: 'TS2304', TS2833: 'TS2503', TS2551: 'TS2339', TS2724: 'TS2305', TS2561: 'TS2353' }
 
 /** One diagnostic line of `tsc --pretty false`, or undefined for anything else. */
 export function parseLine(line, pkgDir) {
@@ -174,7 +176,9 @@ export function judge(
   for (const f of fell) lines.push(`FIXED ${f.was} -> ${f.now}  ${f.signature.replace(/\t/g, '  ')}`)
   if (rose.length) {
     lines.push(
-      "tsc-ratchet: new type errors. Fix them. A baseline exception needs a named reason in the PR body and the review lane's agreement."
+      "tsc-ratchet: new type errors. Fix them. A baseline exception needs a named reason in the PR body and the review lane's agreement.",
+      'tsc-ratchet: if a file above is one your change does not touch, the error did not come from you: tsc moved an' +
+        " existing error's signature, which is a bug in this gate. Tell the review lane rather than re-running."
     )
     return { ok: false, lines, current }
   }

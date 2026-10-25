@@ -1,6 +1,9 @@
 // node --test scripts/tsc-ratchet.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import os from 'node:os'
 import path from 'node:path'
 
 import { compare, countDiagnostics, formatBaseline, judge, parseBaseline, parseLine, runTsc } from './tsc-ratchet.mjs'
@@ -69,10 +72,55 @@ test("a 'Did you mean' suggestion does not change the signature (tsc caps sugges
     assert.deepEqual(countDiagnostics(suggesting, PKG), countDiagnostics(plain, PKG), suggesting)
 })
 
+test('real tsc: errors added in one file flip an untouched file from TS2552 to TS2304, and the gate holds', () => {
+  // The false-positive control. tsc's suggestion budget (10 per program) is spent
+  // in check order, so a.ts's 12 misspellings use it up before b.ts is checked.
+  const tsc = createRequire(import.meta.url).resolve('typescript/bin/tsc')
+  // realpath: tsc prints paths relative to its cwd, and macOS's tmpdir is behind a symlink.
+  const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'tsc-ratchet-')))
+  try {
+    const misspell = (name, n) =>
+      Array.from({ length: n }, (_, i) => `export const ${name}${i} = consol === undefined`).join('\n') + '\n'
+    writeFileSync(
+      path.join(dir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { types: [], noEmit: true }, files: ['b.ts'] })
+    )
+    writeFileSync(path.join(dir, 'a.ts'), misspell('scratch', 12))
+    writeFileSync(path.join(dir, 'b.ts'), misspell('untouched', 3))
+    const before = runTsc(dir, { tscPath: tsc })
+    writeFileSync(
+      path.join(dir, 'tsconfig.json'),
+      JSON.stringify({ compilerOptions: { types: [], noEmit: true }, files: ['a.ts', 'b.ts'] })
+    )
+    const after = runTsc(dir, { tscPath: tsc })
+    const rawCodes = (o) =>
+      o.output
+        .split('\n')
+        .filter((l) => l.startsWith('b.ts'))
+        .map((l) => / (TS\d+):/.exec(l)[1])
+    // Positive control: the raw codes in b.ts really do change.
+    assert.deepEqual(rawCodes(before), ['TS2552', 'TS2552', 'TS2552'])
+    assert.deepEqual(rawCodes(after), ['TS2304', 'TS2304', 'TS2304'])
+    // The gate, on the untouched file: nothing rose and nothing fell.
+    const only = (o, file) =>
+      o.output
+        .split('\n')
+        .filter((l) => l.startsWith(file))
+        .join('\n')
+    assert.deepEqual(compare(countDiagnostics(only(before, 'b.ts'), dir), countDiagnostics(only(after, 'b.ts'), dir)), {
+      rose: [],
+      fell: [],
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('fails on a NEW signature', () => {
   const r = judge({ status: 2, output: out(e1, e2) }, countDiagnostics(out(e1), PKG), PKG)
   assert.equal(r.ok, false)
   assert.match(r.lines.join('\n'), /NEW {2}0 -> 1 {2}src\/b\.ts {2}TS2322/)
+  assert.match(r.lines.join('\n'), /a file above is one your change does not touch/)
   // The gate shows the diagnostic itself, so the author can find it.
   assert.match(r.lines.join('\n'), / {7}src\/b\.ts\(3,1\): Type 'string' is not assignable to type 'number'\./)
 })
