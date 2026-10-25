@@ -45,6 +45,9 @@ export type RoomsOperation =
  * - `agentUnknown`: the agent could not be asked what it serves; try again later.
  * - `communityDoesNotServe`: the community's service is too old for it (reserved: community
  *   operations are not yet discovered in advance, so today a call to an old community fails instead).
+ * - `detailsNotLoaded`: a room known only from the agent's key custody, without the community's
+ *   record of it (rights, host). The operation needs those ("Details not loaded").
+ * - `noRight`: this member's rights in the room do not include it ("You can't post here").
  */
 export type RoomsReason =
   | 'ok'
@@ -56,6 +59,8 @@ export type RoomsReason =
   | 'noAgentLinked'
   | 'agentUnknown'
   | 'communityDoesNotServe'
+  | 'detailsNotLoaded'
+  | 'noRight'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -74,23 +79,54 @@ export type RoomTier = 'open' | 'attributed' | 'private'
 /** What a room's authority credential lets this member do (vti-rooms `Action`). */
 export type RoomVerb = 'read' | 'write' | 'curate' | 'admin'
 
-/** An identity as a person sees it: the community's identity words, never a name. */
+/**
+ * An identity as a person sees it: never a name. `identityWords` are the community's words for the
+ * DID when the community supplied them; without them a screen shows a short form of the DID.
+ */
 export interface Identity {
-  identityWords: string
+  identityWords?: string
   did: string
 }
 
+/**
+ * A room as a list row. Its details come from the community's record of the member's rooms
+ * (`vtc/rooms/memberships/list`: labels, tiers, actions, expiries, states). The agent's own list
+ * (`rooms/keys/list`) says only which rooms it holds keys for, so a room known only that way has
+ * `source: 'custody'` and no rights, host or expiry yet.
+ */
 export interface RoomSummary {
   roomId: string
+  /** Never empty: the community's label, else the member's own label, else a short form of the room ID. */
   name: InertText
+  /** Which of those `name` is. An ID is shown as an ID ("Room 3f9a…"), never as if the community named it. */
+  nameFrom: 'community' | 'personal' | 'roomId'
+  /** Where this room's details come from. */
+  source: 'community' | 'custody'
   communityDid?: string
   communityName?: InertText
-  tier: RoomTier
-  verbs: RoomVerb[]
-  /** When this member's access ends unless renewed (ISO 8601). */
+  /** `unknown` for a custody-only room: show no tier badge. */
+  tier: RoomTier | 'unknown'
+  /** Undefined: not known yet. `[]`: known, and none (e.g. lapsed). Screens use `roomCapabilities` for words. */
+  verbs?: RoomVerb[]
+  /** When this member's access ends unless renewed (ISO 8601). Unknown for a custody-only room. */
   validUntil?: string
+  /** The DID of the host serving this room. Unknown for a custody-only room. */
+  host?: string
   standing: 'member' | 'lapsed' | 'removed'
 }
+
+/** The operations whose status also depends on the room: its source and this member's rights in it. */
+export type RoomOperation =
+  | 'listNotes'
+  | 'readNote'
+  | 'write'
+  | 'curate'
+  | 'listFiles'
+  | 'openFile'
+  | 'agentAccess'
+  | 'listCommunityMembers'
+
+export type RoomCapabilities = Record<RoomOperation, OperationStatus>
 
 export interface Room extends RoomSummary {
   /** The identity this member acts as in the room. */
@@ -98,15 +134,41 @@ export interface Room extends RoomSummary {
 }
 
 export interface NoteSummary {
+  /** The record's key. Opaque on attributed and private rooms; never shown as a title. */
   key: string
   version: number
-  title: InertText
+  /**
+   * Present only where the host can see it: an open room's records carry it. On attributed and
+   * private rooms the title is sealed with the body, so it appears on the note once it is read.
+   */
+  title?: InertText
   author?: Identity
   /** Set when an AI agent wrote it under its person's membership. */
   byAgent?: boolean
-  createdAt?: string
-  status: 'live' | 'retracted'
+  updatedAt?: string
+  /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
+  status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
+}
+
+/**
+ * What the person's agent concluded about the host's answer (`ReadVerification`): whether it is
+ * consistent with what the host committed to and what the agent saw before. A host that drops or
+ * rolls back records shows as `conflict`.
+ * - `consistent`: every check the agent could make agreed.
+ * - `unverified`: some checks could not be made, e.g. a first read or no anchor published.
+ * - `conflict`: a check failed; show it, the host may be withholding or replaying records.
+ */
+export interface HostCheck {
+  verdict: 'consistent' | 'unverified' | 'conflict'
+  detail: string
+}
+
+export interface NoteList {
+  notes: NoteSummary[]
+  /** False when the host's listing stopped early. */
+  complete: boolean
+  check: HostCheck
 }
 
 export interface InertFlags {
@@ -119,6 +181,7 @@ export interface InertFlags {
 export interface Note extends NoteSummary {
   body: InertText
   flags: InertFlags
+  check: HostCheck
 }
 
 export interface WriteDraft {
@@ -142,7 +205,7 @@ export interface WritePreview {
   roomId: string
   roomName: InertText
   communityName?: InertText
-  tier: RoomTier
+  tier: RoomSummary['tier']
   actingAs: Identity
   /** `members`: only members can read it. `membersAndHost`: an open room, readable by its host too. */
   visibleTo: 'members' | 'membersAndHost'
@@ -255,7 +318,9 @@ export interface RoomsService {
 
   listMyRooms(): Promise<RoomSummary[]>
   getRoom(roomId: string): Promise<Room>
-  listNotes(roomId: string): Promise<NoteSummary[]>
+  /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
+  roomCapabilities(roomId: string): Promise<RoomCapabilities>
+  listNotes(roomId: string): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
   confirmWrite(token: string): Promise<{ key: string; version: number }>

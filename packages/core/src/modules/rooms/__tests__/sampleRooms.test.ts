@@ -15,7 +15,7 @@ describe('the sample rooms service', () => {
 
   it('names people only by identity words', async () => {
     const rooms = createSampleRoomsService()
-    const notes = await rooms.listNotes(PLANNING)
+    const { notes } = await rooms.listNotes(PLANNING)
     for (const note of notes) expect(note.author?.identityWords).toMatch(/^…[a-z]+-[a-z]+$/)
     expect((await rooms.getRoom(PLANNING)).actingAs.identityWords).toMatch(/^…[a-z]+-[a-z]+$/)
   })
@@ -34,7 +34,7 @@ describe('the sample rooms service', () => {
       visibleTo: 'members',
       authorShown: true,
     })
-    expect((await rooms.listNotes(PLANNING)).some((n) => n.title === 'Minutes')).toBe(false)
+    expect((await rooms.listNotes(PLANNING)).notes.some((n) => n.title === 'Minutes')).toBe(false)
     const { key } = await rooms.confirmWrite(preview.token)
     expect((await rooms.readNote(PLANNING, key)).body).toBe('Agreed item 3.')
     await expect(rooms.confirmWrite(preview.token)).rejects.toBeInstanceOf(RoomsPreviewExpired)
@@ -46,7 +46,7 @@ describe('the sample rooms service', () => {
     const preview = await rooms.prepareWrite(PLANNING, { title: 'Late', body: 'too late' })
     clock += PREVIEW_TOKEN_TTL_MS + 1
     await expect(rooms.confirmWrite(preview.token)).rejects.toBeInstanceOf(RoomsPreviewExpired)
-    expect((await rooms.listNotes(PLANNING)).some((n) => n.title === 'Late')).toBe(false)
+    expect((await rooms.listNotes(PLANNING)).notes.some((n) => n.title === 'Late')).toBe(false)
   })
 
   it('replacing a note that changed since the preview is a conflict carrying the current version', async () => {
@@ -62,7 +62,7 @@ describe('the sample rooms service', () => {
   it('an open room tells the writer the host can read it, and a read-only room refuses', async () => {
     const rooms = createSampleRoomsService()
     await expect(rooms.prepareWrite('did:webvh:sample:welcome-desk', { title: 't', body: 'b' })).rejects.toThrow(
-      'only read'
+      'may not write'
     )
   })
 
@@ -84,7 +84,26 @@ describe('the sample rooms service', () => {
     const rooms = createSampleRoomsService()
     await expect(rooms.listCommunityMembers('did:webvh:sample:test-vtc')).rejects.toBeInstanceOf(RoomsUnavailable)
     await rooms.leaveViaCommunity('did:webvh:sample:test-vtc')
-    expect(await rooms.listMyRooms()).toEqual([])
+    expect((await rooms.listMyRooms()).filter((r) => r.communityDid)).toEqual([])
+  })
+
+  it('a room says per operation what this member can do there, from its rights and its source', async () => {
+    const rooms = createSampleRoomsService()
+    const planning = await rooms.roomCapabilities(PLANNING)
+    expect(planning.write).toMatchObject({ status: 'available', reason: 'sample' })
+    expect(planning.curate).toMatchObject({ status: 'unavailable', reason: 'noRight' })
+    expect(planning.listCommunityMembers.reason).toBe('adminOnly')
+    expect((await rooms.roomCapabilities('did:webvh:sample:welcome-desk')).write.reason).toBe('noRight')
+    const custody = await rooms.roomCapabilities('did:webvh:sample:3f9a7c21e0')
+    expect(custody.readNote).toMatchObject({ status: 'unavailable', reason: 'detailsNotLoaded' })
+  })
+
+  it('a room known only from custody is named by its ID, says so, and has no rights or tier yet', async () => {
+    const rooms = createSampleRoomsService()
+    const custody = (await rooms.listMyRooms()).find((r) => r.source === 'custody')!
+    expect(custody).toMatchObject({ nameFrom: 'roomId', tier: 'unknown' })
+    expect(custody.verbs).toBeUndefined()
+    expect(custody.name.length).toBeGreaterThan(0)
   })
 
   it('grants and withdraws an agent’s access', async () => {

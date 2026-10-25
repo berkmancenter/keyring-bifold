@@ -1,4 +1,10 @@
-import { deriveCapabilities, ROOMS_OPERATIONS, ROOMS_REQUIREMENTS, sampleCapabilities } from '../capabilities'
+import {
+  deriveCapabilities,
+  deriveRoomCapabilities,
+  ROOMS_OPERATIONS,
+  ROOMS_REQUIREMENTS,
+  sampleCapabilities,
+} from '../capabilities'
 import type { RoomsOperation } from '../types'
 
 const SPEC = 'https://trusttasks.org/spec/'
@@ -58,5 +64,34 @@ describe('sampleCapabilities', () => {
     expect(caps.listMyRooms).toMatchObject({ status: 'available', reason: 'sample' })
     expect(caps.groupChat.reason).toBe('notBuiltUpstream')
     expect(caps.listCommunityMembers.reason).toBe('adminOnly')
+  })
+})
+
+describe('deriveRoomCapabilities', () => {
+  const served = deriveCapabilities({
+    agentLinked: true,
+    servedTypes: [`${SPEC}rooms/keys/browse/0.1`, `${SPEC}rooms/keys/read/0.1`, `${SPEC}rooms/keys/act/0.5`],
+    built: all,
+  })
+
+  it('keeps the service-wide "no" whatever the room says', () => {
+    const caps = deriveRoomCapabilities(served, { source: 'community', verbs: ['read', 'write', 'curate'] })
+    expect(caps.openFile.reason).toBe('agentDoesNotServe')
+    expect(caps.listCommunityMembers.reason).toBe('adminOnly')
+  })
+
+  it('separates "not known yet" from "known, and none"', () => {
+    expect(deriveRoomCapabilities(served, { source: 'custody' }).readNote.reason).toBe('detailsNotLoaded')
+    expect(deriveRoomCapabilities(served, { source: 'community', verbs: undefined }).readNote.reason).toBe(
+      'detailsNotLoaded'
+    )
+    expect(deriveRoomCapabilities(served, { source: 'community', verbs: [] }).readNote.reason).toBe('noRight')
+  })
+
+  it('narrows by the right each operation needs', () => {
+    const caps = deriveRoomCapabilities(served, { source: 'community', verbs: ['read'] })
+    expect(caps.readNote).toMatchObject({ status: 'available', reason: 'ok' })
+    expect(caps.write).toMatchObject({ status: 'unavailable', reason: 'noRight' })
+    expect(caps.curate.reason).toBe('noRight')
   })
 })
