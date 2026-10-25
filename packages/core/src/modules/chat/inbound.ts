@@ -41,6 +41,12 @@ export async function receiveChatEventMessage(
   ctx: ChatInboundMessageContext
 ): Promise<ChatInboundVerdict> {
   // Only an authenticated message on an existing connection is a chat event.
+  // Over DIDComm v1 the senderKey check can never refuse anything: Credo finds a
+  // v1 connection only from the sender and recipient keys, so a connection
+  // implies a sender key. Over v2 (and TSP) a connection can be found from the
+  // `from`/`to` DIDs alone, so an anoncrypt message reaches here with no
+  // sender key and is dropped. Whoever enables chat over v2 must decide that
+  // deliberately, not inherit it.
   if (!ctx.connection) return 'no-connection'
   if (!ctx.senderKey) return 'no-authenticated-sender'
 
