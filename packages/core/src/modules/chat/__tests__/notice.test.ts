@@ -1,4 +1,9 @@
-import { DidCommMessageHandlerRegistry, DidCommMessageSender, DidCommProblemReportMessage } from '@credo-ts/didcomm'
+import {
+  DidCommBasicMessageRepository,
+  DidCommMessageHandlerRegistry,
+  DidCommMessageSender,
+  DidCommProblemReportMessage,
+} from '@credo-ts/didcomm'
 import { EventEmitter, InjectionSymbols, JsonTransformer } from '@credo-ts/core'
 import type { BaseRecord } from '@credo-ts/core'
 
@@ -75,6 +80,8 @@ function makeAgent(
       ),
   })
   singletons.set(EventEmitter, { emit: jest.fn() })
+  // Delete for me's cascade (history.ts) also looks at plain BasicMessages; this chat has none.
+  singletons.set(DidCommBasicMessageRepository, { findByQuery: async () => [], delete: async () => undefined })
   singletons.set(DidCommMessageSender, {
     sendMessage: async (outbound: { message: unknown; connection: Connection }) => {
       sent.push({ message: outbound.message, connectionId: outbound.connection.id })
@@ -278,6 +285,23 @@ describe('receiveChatProblemReport', () => {
     expect(await receiveChatProblemReport(fake.agent, ctx(fake, problemReport(EVENT_ID)), NOW)).toBe('chat-refused')
     expect(fake.events()).toHaveLength(1)
     expect(fake.basic).toHaveLength(0)
+  })
+
+  it('removes a refused message together with the reactions on it', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    fake.addEvent(sentEvent('conn-1', 'message'))
+    fake.addEvent(
+      new ChatEventRecord({
+        connectionId: 'conn-1',
+        role: 'received',
+        eventId: '01JB3XKX6F8Q2W4E5R6T7Y8Z9X',
+        eventType: 'reaction',
+        target: EVENT_ID,
+        emoji: '👍',
+      })
+    )
+    expect(await receiveChatProblemReport(fake.agent, ctx(fake, problemReport(EVENT_ID)), NOW)).toBe('chat-refused')
+    expect(fake.events()).toHaveLength(0)
   })
 
   it('drops a refused reaction without sending anything in its place', async () => {
