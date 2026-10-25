@@ -175,6 +175,17 @@ jobs:
         run: |
           yarn build
 
+      # TEMPORARY (reverted before review): write the baseline from this clean install.
+      - name: Generate the baseline in CI
+        run: |
+          node scripts/tsc-ratchet.mjs --package packages/core --project tsconfig.ratchet.json --write
+
+      - name: Upload the generated baseline
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tsc-baseline
+          path: packages/core/tsc-baseline.txt
+
       - name: tsc-ratchet tests
         run: |
           node --test scripts/tsc-ratchet.test.mjs
