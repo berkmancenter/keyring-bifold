@@ -65,7 +65,11 @@ export async function pickAndSendPhoto(
   } catch (error) {
     return error instanceof ChatPhotoPermissionError ? 'no-permission' : 'unreadable'
   }
-  if (!picked) return 'cancelled'
+  if (!picked) {
+    // A picker that iOS could not present reports a cancel too, so the log shows what the screen does not.
+    agent.config?.logger.info(`[Chat:photo] the ${source} picker closed without a photo`)
+    return 'cancelled'
+  }
 
   let prepared
   try {

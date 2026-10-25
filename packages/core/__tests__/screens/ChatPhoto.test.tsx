@@ -2,10 +2,11 @@ import { useConnectionById, useBasicMessagesByConnectionId } from '@bifold/react
 import { DidCommConnectionRecord, DidCommDidExchangeRole, DidCommDidExchangeState } from '@credo-ts/didcomm'
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
-import { Alert } from 'react-native'
+import { Alert, Platform } from 'react-native'
 import { Actions } from 'react-native-gifted-chat'
 import Toast from 'react-native-toast-message'
 
+import ActionSlider from '../../src/components/chat/ActionSlider'
 import * as network from '../../src/contexts/network'
 import { useChatMessagesByConnection } from '../../src/hooks/chat-messages'
 import { pickAndSendPhoto } from '../../src/modules/chat/media/compose'
@@ -56,6 +57,13 @@ const renderChat = () => {
 const openPlus = (tree: ReturnType<typeof render>) =>
   act(() => (tree.UNSAFE_getByType(Actions).props.onPressActionButton as () => void)())
 
+// Press one of the sheet's actions; on iOS the photo picker waits for the sheet's modal to report it has closed.
+const pressAction = async (tree: ReturnType<typeof render>, testID: string) => {
+  const { onClosed } = tree.UNSAFE_getByType(ActionSlider).props as { onClosed: () => void }
+  await act(async () => fireEvent.press(tree.getByTestId(id(testID))))
+  await act(async () => onClosed())
+}
+
 beforeEach(() => {
   jest.clearAllMocks()
   // @ts-expect-error useConnectionById will be replaced with a mock which will have this method
@@ -79,7 +87,7 @@ describe('the composer’s "+"', () => {
     const tree = renderChat()
     await openPlus(tree)
     expect(tree.getByTestId(id('ChatAttachCamera'))).toBeTruthy()
-    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachLibrary'))))
+    await pressAction(tree, 'ChatAttachLibrary')
     expect(send).toHaveBeenCalledWith(
       expect.anything(),
       '1',
@@ -99,7 +107,7 @@ describe('the composer’s "+"', () => {
     send.mockResolvedValueOnce(outcome)
     const tree = renderChat()
     await openPlus(tree)
-    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachCamera'))))
+    await pressAction(tree, 'ChatAttachCamera')
     await waitFor(() => expect(Toast.show).toHaveBeenCalledWith(expect.objectContaining({ text1: words })))
   })
 
@@ -107,7 +115,7 @@ describe('the composer’s "+"', () => {
     send.mockResolvedValueOnce('cancelled')
     const tree = renderChat()
     await openPlus(tree)
-    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachCamera'))))
+    await pressAction(tree, 'ChatAttachCamera')
     expect(Toast.show).not.toHaveBeenCalled()
   })
 
@@ -115,7 +123,7 @@ describe('the composer’s "+"', () => {
     const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined)
     const tree = renderChat()
     await openPlus(tree)
-    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachLibrary'))))
+    await pressAction(tree, 'ChatAttachLibrary')
     const { confirmGif } = send.mock.calls[0][3] as { confirmGif: () => Promise<boolean> }
     const answer = (index: number) => {
       const pending = confirmGif()
@@ -126,6 +134,38 @@ describe('the composer’s "+"', () => {
     await expect(answer(1)).resolves.toBe(true)
     await expect(answer(0)).resolves.toBe(false)
     expect(alert.mock.calls[0][0]).toBe('Chat.GifAsIsTitle')
+  })
+
+  // On iOS a picker presented while the sheet's modal slides away goes down with it, and nothing opens (272 RC).
+  it('opens the picker only once the sheet has closed', async () => {
+    const tree = renderChat()
+    await openPlus(tree)
+    const { onClosed } = tree.UNSAFE_getByType(ActionSlider).props as { onClosed: () => void }
+
+    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachLibrary'))))
+    expect(tree.queryByTestId(id('ChatAttachLibrary'))).toBeNull()
+    expect(send).not.toHaveBeenCalled()
+
+    await act(async () => onClosed())
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledWith(expect.anything(), '1', 'library', expect.anything())
+
+    await act(async () => onClosed())
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens the picker at once on Android, where the modal never says it has closed', async () => {
+    const os = jest.replaceProperty(Platform, 'OS', 'android')
+    try {
+      const tree = renderChat()
+      await openPlus(tree)
+
+      await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachCamera'))))
+
+      expect(send).toHaveBeenCalledWith(expect.anything(), '1', 'camera', expect.anything())
+    } finally {
+      os.restore()
+    }
   })
 
   it('is not offered in the witness’s chat', () => {

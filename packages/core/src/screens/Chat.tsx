@@ -50,7 +50,18 @@ import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
 import { testIdWithKey } from '../utils/testable'
-import { Alert, Animated, Easing, Pressable, View, StyleSheet, Text, TouchableOpacity, ViewToken } from 'react-native'
+import {
+  Alert,
+  Animated,
+  Easing,
+  Platform,
+  Pressable,
+  View,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  ViewToken,
+} from 'react-native'
 
 const PROGRESS_BAR_WIDTH = 200
 
@@ -450,7 +461,6 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   // it was not. A GIF goes as it is, with whatever it carries, so the person is asked first.
   const onPhoto = useCallback(
     async (source: PhotoSource) => {
-      setShowActionSlider(false)
       if (!agent) return
       const outcome = await pickAndSendPhoto(agent, connectionId, source, {
         fallbackText: t('Chat.PhotoFallback'),
@@ -473,6 +483,21 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     [agent, connectionId, t]
   )
 
+  // iOS presents the picker from the topmost view controller, which is the sheet's modal while it slides away, and
+  // the picker goes down with it: nothing opens (seen on the 272 RC). So the picker waits until iOS says the sheet has
+  // closed. On Android the picker is an activity of its own, which a closing dialog does not take with it.
+  const afterSheetCloses = useRef<(() => void) | undefined>(undefined)
+  const closeSheetThen = useCallback((next: () => void) => {
+    setShowActionSlider(false)
+    if (Platform.OS === 'ios') afterSheetCloses.current = next
+    else next()
+  }, [])
+  const onSheetClosed = useCallback(() => {
+    const next = afterSheetCloses.current
+    afterSheetCloses.current = undefined
+    next?.()
+  }, [])
+
   const actions = useMemo(() => {
     const photo = _isWitnessConnection
       ? []
@@ -480,13 +505,13 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           {
             text: t('Chat.AttachCamera'),
             testID: ChatIds.attachCamera,
-            onPress: () => void onPhoto('camera'),
+            onPress: () => closeSheetThen(() => void onPhoto('camera')),
             icon: () => <Icon name="camera-outline" size={30} color={ColorPalette.brand.primary} />,
           },
           {
             text: t('Chat.AttachLibrary'),
             testID: ChatIds.attachLibrary,
-            onPress: () => void onPhoto('library'),
+            onPress: () => closeSheetThen(() => void onPhoto('library')),
             icon: () => <Icon name="image-outline" size={30} color={ColorPalette.brand.primary} />,
           },
         ]
@@ -504,7 +529,16 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
       : []
     const all = [...photo, ...proof]
     return all.length > 0 ? all : undefined
-  }, [_isWitnessConnection, store.preferences.useVerifierCapability, t, onPhoto, onSendRequest, Assets, ColorPalette])
+  }, [
+    _isWitnessConnection,
+    store.preferences.useVerifierCapability,
+    t,
+    closeSheetThen,
+    onPhoto,
+    onSendRequest,
+    Assets,
+    ColorPalette,
+  ])
 
   const onDismiss = useCallback(() => {
     setShowActionSlider(false)
@@ -583,7 +617,9 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
             viewabilityConfig: { itemVisiblePercentThreshold: 50 },
           }}
         />
-        {showActionSlider && <ActionSlider onDismiss={onDismiss} actions={actions} />}
+        {actions && (
+          <ActionSlider visible={showActionSlider} onDismiss={onDismiss} onClosed={onSheetClosed} actions={actions} />
+        )}
         <MessageActions
           visible={actionTarget !== null}
           onClose={closeActions}

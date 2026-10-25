@@ -19,10 +19,14 @@ interface Action {
 
 interface Props {
   actions: Action[] | undefined
+  visible: boolean
+  /** Asks for the sheet to close: a tap outside it, Close, or the back button. */
   onDismiss: () => void
+  /** Once the sheet has finished closing. iOS only, as the modal's onDismiss is: Android never calls it. */
+  onClosed?: () => void
 }
 
-const ActionSlider: React.FC<Props> = ({ actions, onDismiss }) => {
+const ActionSlider: React.FC<Props> = ({ actions, visible, onDismiss, onClosed }) => {
   const { ColorPalette, TextTheme } = useTheme()
   const { t } = useTranslation()
 
@@ -69,7 +73,13 @@ const ActionSlider: React.FC<Props> = ({ actions, onDismiss }) => {
   })
 
   return (
-    <SafeAreaModal animationType="slide" transparent={true} onRequestClose={onDismiss}>
+    <SafeAreaModal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={onDismiss}
+      onDismiss={onClosed}
+    >
       <TouchableOpacity accessible={false} style={styles.outsideListener} onPress={onDismiss} />
       <View style={styles.centeredView}>
         <View style={styles.modalView}>
