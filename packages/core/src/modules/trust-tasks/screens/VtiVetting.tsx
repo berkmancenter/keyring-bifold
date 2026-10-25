@@ -604,8 +604,11 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     }
     void refreshSeat()
     seatRefresh.current = refreshSeat
-    // The 3 s read stays for what no write here announces: the grant's standing,
-    // checked over the network (a community can revoke it while the screen is open).
+    // The 3 s read stays, for two reasons. What no write here announces: the
+    // grant's standing, checked over the network (a community can revoke it while
+    // the screen is open). And a change announced while this read is not
+    // registered (before this effect runs, or between its cleanup and its next
+    // run) is otherwise lost: the announcement is not repeated.
     const timer = setInterval(() => void refreshSeat(), 3000)
     return () => {
       cancelled = true
