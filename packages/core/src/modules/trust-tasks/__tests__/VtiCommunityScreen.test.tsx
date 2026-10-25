@@ -7,7 +7,7 @@
  */
 import { useNavigation, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
-import React from 'react'
+import React, { Profiler } from 'react'
 import { StyleSheet } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
@@ -41,6 +41,8 @@ jest.mock('react-native-toast-message', () => ({
 let mockPersona: unknown = undefined
 // Every identity on the phone, any agent's (the holders hook reads them all).
 let mockPersonas: unknown[] = []
+// When set, the identities are read only once it settles.
+let mockPersonasRead: Promise<void> | undefined
 const mockForgetCommunity = jest.fn(async () => undefined)
 const mockForgetPersona = jest.fn(async () => undefined)
 jest.mock('../module/VtiCommunityStore', () => ({
@@ -53,7 +55,10 @@ jest.mock('../module/VtiCommunityStore', () => ({
 jest.mock('../module/VtiIdentityStore', () => ({
   GenericRecordsIdentityStore: class {
     getPersona = async () => mockPersona
-    listPersonas = async () => mockPersonas
+    listPersonas = async () => {
+      if (mockPersonasRead) await mockPersonasRead
+      return mockPersonas
+    }
     forgetPersona = (...a: unknown[]) => mockForgetPersona(...(a as []))
   },
 }))
@@ -414,6 +419,35 @@ describe("a community known only through another agent's identity", () => {
     expect(
       StyleSheet.flatten(tree.getByTestId(testIdWithKey('CommunityScroll')).props.contentContainerStyle).paddingBottom
     ).toBeGreaterThanOrEqual(TAB_BAR_CLEARANCE)
+  })
+
+  // Whose identity it is is read from this phone, after the journey: shown before, another agent's membership read
+  // as this agent's ("member", Leave) and then turned into "another agent's" (UI-smoothness plan, Phase 5).
+  it("never shows another agent's membership as this agent's, not even while whose it is is read", async () => {
+    let release: () => void = () => undefined
+    mockPersonasRead = new Promise<void>((resolve) => (release = resolve))
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid } })
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: {} })
+    const frames: string[] = []
+    const tree = render(<BasicAppContext>{null}</BasicAppContext>)
+    const look = () =>
+      frames.push(
+        ['CommunityMember', 'LeaveCommunityButton', 'ApplyToCommunityButton', 'CommunityHeldElsewhereText']
+          .filter((key) => tree.queryByTestId(testIdWithKey(key)) !== null)
+          .join(',') || 'none'
+      )
+    tree.rerender(
+      <BasicAppContext>
+        <Profiler id="community" onRender={look}>
+          <VtiCommunity />
+        </Profiler>
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    await act(async () => release())
+    mockPersonasRead = undefined
+    expect(frames.filter((f) => f !== 'none' && f !== 'CommunityHeldElsewhereText')).toEqual([])
+    expect(frames[frames.length - 1]).toBe('CommunityHeldElsewhereText')
   })
 
   it('says whose identity it is, with no "member", no Leave and no Apply', async () => {

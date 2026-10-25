@@ -77,13 +77,15 @@ const VtiCommunity: React.FC = () => {
   const holding = useAgentsHoldingIdentity(communityDid)
   const heldElsewhere = holding.onlyOthers ? holding.holders.find(Boolean) : undefined
   const join = joinKnown(journey)
-  const membership = !heldElsewhere && join?.kind === 'member' ? join.membership : undefined
-  const vetsHere = !heldElsewhere && vetterGrantKnown(journey)?.state === 'active'
+  // Whose standing it is must be known before any is shown as this agent's.
+  const mine = holding.known && !heldElsewhere
+  const membership = mine && join?.kind === 'member' ? join.membership : undefined
+  const vetsHere = mine && vetterGrantKnown(journey)?.state === 'active'
   // Not known yet whether this is a member: neither the criteria nor the way
   // to apply — a member saw the non-member page until the read came back
   // (UI-smoothness plan, Phase 2b). One that could not be read is said, with
   // a way to read it again.
-  const standingUnknown = !heldElsewhere && join === undefined
+  const standingUnknown = !heldElsewhere && (join === undefined || !holding.known)
   const standingFailed = standingUnknown && readFailed(journey, 'join')
   const [rereading, setRereading] = useState(false)
   const readAgain = useCallback(async () => {
