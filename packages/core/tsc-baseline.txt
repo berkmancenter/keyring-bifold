@@ -27,6 +27,7 @@
 1	__tests__/screens/TrustTaskApprovalModal.test.tsx	TS2353
 8	__tests__/screens/W3cProofRequest.test.tsx	TS2578
 2	__tests__/services/rCardCredential.test.ts	TS2339
+3	src/modules/chat/__tests__/ChatEventMessage.test.ts	TS2322
 1	src/modules/trust-tasks/__tests__/BleDeviceLocalityProvider.test.ts	TS2345
 1	src/modules/trust-tasks/__tests__/MyAgentScreen.test.tsx	TS2353
 2	src/modules/trust-tasks/__tests__/SignInScreen.test.tsx	TS2322
