@@ -57,6 +57,7 @@ const STATUS_OF: Record<RoomsReason, RoomsStatus> = {
   adminOnly: 'unavailable',
   noAgentLinked: 'unavailable',
   agentUnknown: 'unavailable',
+  communityDoesNotServe: 'unavailable',
 }
 
 const status = (reason: RoomsReason, detail: string): OperationStatus => ({ status: STATUS_OF[reason], reason, detail })
