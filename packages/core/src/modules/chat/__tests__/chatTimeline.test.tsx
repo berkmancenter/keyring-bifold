@@ -199,6 +199,23 @@ describe("one chat's events as timeline items", () => {
     expect(chatTimelineItems([bare], style)[0].text).toBe('')
   })
 
+  // An attachment this phone could not check or save is not a photo it can show: calling it one would be false.
+  test('an attachment this phone cannot show reads as unsupported, never as a photo', () => {
+    const unsupported = event({ connectionId: 'A', eventType: 'message', attachments: [{ unsupported: 'too-large' }] })
+    const notSaved = event({
+      connectionId: 'A',
+      eventType: 'message',
+      attachments: [{ id: 'a1', unsupported: 'not-saved' }],
+    })
+    const captioned = message('A', 'see this', { attachments: [{ unsupported: 'type-mismatch' }] })
+    const labels = { photoLabel: '📷 Photo', unsupportedLabel: 'Unsupported attachment' }
+    expect(chatTimelineItems([unsupported, notSaved, captioned], style, labels).map((i) => i.text)).toEqual([
+      'Unsupported attachment',
+      'Unsupported attachment',
+      'see this',
+    ])
+  })
+
   test('a reply to an original that disappeared on its timer says so; one never here says it is not on this phone', () => {
     const expiredOriginal = '01JYYYYYYYYYYYYYYYYYYYYYYY'
     const neverHere = '01JZZZZZZZZZZZZZZZZZZZZZZZ'

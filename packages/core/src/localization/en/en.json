@@ -1263,6 +1263,7 @@
   },
   "Chat": {
     "Photo": "📷 Photo",
+    "UnsupportedAttachment": "Unsupported attachment",
     "OpenPresentation": "Open presentation",
     "ViewRequest": "View request",
     "ViewOffer": "View offer",

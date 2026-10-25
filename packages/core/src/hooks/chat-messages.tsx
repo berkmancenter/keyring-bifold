@@ -781,6 +781,8 @@ export interface ChatTimelineOptions {
   authorNames?: { me: string; them: string }
   /** What a message with a photo and no text reads as ("📷 Photo"), here and when a reply quotes it. */
   photoLabel?: string
+  /** What one whose only attachment this phone cannot show reads as ("Unsupported attachment"); never the photo label. */
+  unsupportedLabel?: string
 }
 
 /**
@@ -794,10 +796,15 @@ export function chatTimelineItems(
   textStyleFor: (role: Role) => object,
   options: ChatTimelineOptions = {}
 ): ExtendedChatMessage[] {
-  const { systemLine, expired, photoLabel } = options
-  // A photo with no caption reads as the label, so neither its bubble nor a reply quoting it is empty.
-  const textOf = (record: ChatEventRecord) =>
-    record.content?.text ?? (record.attachments?.length ? (photoLabel ?? '') : '')
+  const { systemLine, expired, photoLabel, unsupportedLabel } = options
+  // A photo with no caption reads as the label, so neither its bubble nor a reply quoting it is empty. Only a photo
+  // this phone kept is called one: an attachment it could not check or save says so instead.
+  const textOf = (record: ChatEventRecord) => {
+    if (record.content?.text) return record.content.text
+    if (record.attachments?.some((a) => !('unsupported' in a))) return photoLabel ?? ''
+    if (record.attachments?.length) return unsupportedLabel ?? ''
+    return ''
+  }
   const { messages, reactions, systems } = foldChatEvents(events)
   const byEventId = new Map(messages.map((m) => [m.eventId, m]))
   const roleOf = (record: ChatEventRecord) => (record.role === 'sent' ? Role.me : Role.them)
@@ -1332,6 +1339,7 @@ export const useChatMessagesByConnection = (connection: DidCommConnectionRecord)
         expired,
         authorNames: { me: t('Chat.UserYou'), them: theirLabel },
         photoLabel: t('Chat.Photo'),
+        unsupportedLabel: t('Chat.UnsupportedAttachment'),
       })
     )
 
