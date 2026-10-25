@@ -215,7 +215,13 @@ const tap = (agent: never) =>
     graceMs: 0,
   })
 
-/** Resolves once the Messages list reports it no longer has focus. */
+/**
+ * Resolves once the Messages list reports it no longer has focus.
+ *
+ * If "a person who goes elsewhere after the list took focus is not moved" fails again (Received "chat"), suspect
+ * this wait first. The flake it replaced (run 40184117411) never reproduced locally, so #578's fix rests on removing
+ * the ordering assumption, not on a reproduction.
+ */
 const listLostFocus = () =>
   new Promise<void>((resolve) => {
     if (!messagesListFocus.focused()) return resolve()

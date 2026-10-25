@@ -77,6 +77,8 @@ export function newestUnreadConnection(
 /**
  * The connection of the newest unread message of all, BasicMessages and keyring/chat messages together, each by the
  * badge's own rule. Both kinds are timed by when this phone stored them (createdAt), so they compare on one clock.
+ * Never by the sender's own time (a chat event's clientTs): a peer could then make its message win every tap by
+ * claiming a time in the future.
  */
 export function newestUnreadAcross(
   basicMessages: DidCommBasicMessageRecord[],
@@ -372,9 +374,11 @@ export function nextReceivedMessage(agent: Agent): { arrived: Promise<void>; can
       .subscribe((event) => received(event.payload.basicMessageRecord))
     // A keyring/chat message is stored once, when it arrives; a reaction, a redaction or what this phone sent never
     // ends the wait.
+    // The role and type are checked here as in newestUnread's query, not left to the unread rule alone.
     const chat = agent.events.observable<BaseEvent>(RepositoryEventTypes.RecordSaved).subscribe((event) => {
       const record = (event.payload as { record?: ChatEventRecord } | undefined)?.record
-      if (record?.type === ChatEventRecord.type && isUnreadKeyringChatEvent(record)) resolve()
+      if (record?.type !== ChatEventRecord.type || record.role !== 'received' || record.eventType !== 'message') return
+      if (isUnreadKeyringChatEvent(record)) resolve()
     })
     cancel = () => {
       v1.unsubscribe()
