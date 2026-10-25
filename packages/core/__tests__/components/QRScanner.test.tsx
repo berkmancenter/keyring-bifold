@@ -132,6 +132,7 @@ describe('QRScanner Component', () => {
   })
 
   test('Renders correctly on first tab', async () => {
+    // @ts-expect-error useAgent will be replaced with a mock which will have this method
     useAgent().agent?.modules.didcomm.oob.createInvitation.mockReturnValue({
       outOfBandInvitation: {
         toUrl: () => {
