@@ -26,6 +26,7 @@ const notFound = () => Object.assign(new Error('gone'), { name: 'RecordNotFoundE
 
 function makeAgent(events: Ev[], basic: Basic[], { failOn }: { failOn?: string } = {}) {
   const store = { events: [...events], basic: [...basic] }
+  const deletedEvents: { connectionId: string }[] = []
   const remove = <T extends { id: string }>(list: T[], id: string) => {
     if (id === failOn) throw new Error('the store could not be written')
     const i = list.findIndex((r) => r.id === id)
@@ -38,7 +39,10 @@ function makeAgent(events: Ev[], basic: Basic[], { failOn }: { failOn?: string }
       {
         findByConnection: async (_ctx: unknown, connectionId: string) =>
           store.events.filter((e) => e.connectionId === connectionId),
-        deleteById: async (_ctx: unknown, id: string) => remove(store.events, id),
+        delete: async (_ctx: unknown, record: Ev) => {
+          remove(store.events, record.id)
+          deletedEvents.push(record)
+        },
       },
     ],
     [
@@ -46,13 +50,16 @@ function makeAgent(events: Ev[], basic: Basic[], { failOn }: { failOn?: string }
       {
         findByQuery: async (_ctx: unknown, q: { connectionId: string }) =>
           store.basic.filter((b) => b.connectionId === q.connectionId),
-        deleteById: async (_ctx: unknown, id: string) => remove(store.basic, id),
+        delete: async (_ctx: unknown, record: Basic) => {
+          remove(store.basic, record.id)
+          deletedEvents.push(record)
+        },
       },
     ],
   ])
   const container = { isRegistered: (t: unknown) => singletons.has(t), resolve: (t: unknown) => singletons.get(t) }
   const agent = { context: {}, dependencyManager: { container, resolve: container.resolve } }
-  return { agent: agent as never, store }
+  return { agent: agent as never, store, deletedEvents }
 }
 
 const ev = (connectionId: string, eventId: string, eventType: string, target?: string): Ev => ({
@@ -99,8 +106,10 @@ describe('chat history on this phone', () => {
   })
 
   test('Clear chat removes every message, event and media file of that chat, and nothing of another', async () => {
-    const { agent, store } = makeAgent(chat, basics)
+    const { agent, store, deletedEvents } = makeAgent(chat, basics)
     await deleteChatMessages(agent, 'conn-1')
+    // Each delete went through the repository with the whole record, so whoever follows RecordDeleted knows the chat.
+    expect(deletedEvents.map((r) => r.connectionId)).toEqual(Array(7).fill('conn-1'))
     expect(store.events.map((e) => e.eventId)).toEqual(['N1'])
     expect(store.basic.map((b) => b.id)).toEqual(['b3'])
     expect([...mockFiles]).toEqual(['/lib/Application Support/chat-media/conn-2/N1.jpg'])
@@ -138,10 +147,10 @@ describe('chat history on this phone', () => {
     const repository = (
       agent as never as { dependencyManager: { resolve: (t: unknown) => any } }
     ).dependencyManager.resolve(ChatEventRepository)
-    const original = repository.deleteById
-    repository.deleteById = async (ctx: unknown, id: string) => {
-      if (id === 'rec-R1') throw notFound()
-      return original(ctx, id)
+    const original = repository.delete
+    repository.delete = async (ctx: unknown, record: Ev) => {
+      if (record.id === 'rec-R1') throw notFound()
+      return original(ctx, record)
     }
     mockFiles = new Set()
     await expect(deleteChatMessages(agent, 'conn-1')).resolves.toBeUndefined()

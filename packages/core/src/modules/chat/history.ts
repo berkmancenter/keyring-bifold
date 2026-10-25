@@ -46,6 +46,10 @@ export interface ChatMessageIds {
  * Delete chat history on this phone. With `ids`, those messages and what hangs off them (Delete for me); without,
  * every message, event and media file of the chat (Clear chat, and removing a contact). Only records of
  * `connectionId` are touched, whatever ids are passed.
+ *
+ * Every record goes through its repository's `delete(record)`, whose RecordDeleted event carries the whole record
+ * (its connectionId included), so the chat list and unread counts that follow those events update at once.
+ * `deleteById` would announce only the id and type.
  */
 export async function deleteChatMessages(agent: Agent, connectionId: string, ids?: ChatMessageIds): Promise<void> {
   const basicMessages = agent.dependencyManager.resolve(DidCommBasicMessageRepository)
@@ -54,13 +58,13 @@ export async function deleteChatMessages(agent: Agent, connectionId: string, ids
   const basic = await basicMessages.findByQuery(agent.context, { connectionId })
   const basicDoomed = ids ? basic.filter((r) => ids.basicMessageIds?.includes(r.id)) : basic
   for (const record of basicDoomed) {
-    await basicMessages.deleteById(agent.context, record.id).catch(unlessAlreadyGone)
+    await basicMessages.delete(agent.context, record).catch(unlessAlreadyGone)
   }
 
   const events = await chatEvents.findByConnection(agent.context, connectionId)
   const eventsDoomed = ids ? withDependents(events, new Set(ids.eventIds ?? [])) : events
   for (const record of eventsDoomed) {
-    await chatEvents.deleteById(agent.context, record.id).catch(unlessAlreadyGone)
+    await chatEvents.delete(agent.context, record).catch(unlessAlreadyGone)
   }
 
   const folder = chatMediaFolder(connectionId)
