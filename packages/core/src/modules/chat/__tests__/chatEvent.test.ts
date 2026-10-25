@@ -130,11 +130,6 @@ describe('parseChatEvent', () => {
     }
   })
 
-  it('sets the version cap beyond any real use, so it can never refuse a change a person made', () => {
-    // A change every minute, day and night, for a year, is about half the cap; nobody changes a timer that often.
-    expect(MAX_TIMER_VERSION).toBeGreaterThan(365 * 24 * 60)
-  })
-
   it('keeps a message with a timer shorter than an hour, raised to an hour, rather than dropping its text', () => {
     expect(parseChatEvent(message({ expiresIn: 1 }))).toMatchObject({ ok: true, event: { expiresIn: MIN_EXPIRES_IN } })
     expect(parseChatEvent(message({ expiresIn: 2 * 3600 }))).toMatchObject({ ok: true, event: { expiresIn: 2 * 3600 } })

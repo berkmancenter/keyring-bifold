@@ -101,9 +101,9 @@ export async function setChatTimer(agent: Agent, connectionId: string, expiresIn
   if (!TIMER_CHOICES.includes(expiresIn)) throw new Error(`chat: ${expiresIn} is not a timer choice`)
   if (!(await counterpartySpeaksChat(agent, connectionId))) return { carriedAs: 'not-sent' }
   const events = await getChatEventRepository(agent).findByConnection(agent.context, connectionId)
-  const version = nextTimerVersion(events)
-  // The receiver refuses a version over the cap, so this phone never sends one: the change would reach no one.
-  if (version > MAX_TIMER_VERSION) throw new Error("chat: this chat's timer can't be changed any more times")
+  // At the cap every change ties on version and the eventId tie-break decides, so the later change wins. Never a
+  // refusal: one peer event at the cap would otherwise lock the setting on both phones for good.
+  const version = Math.min(nextTimerVersion(events), MAX_TIMER_VERSION)
   const record = await sendEvent(agent, connectionId, {
     ...base(),
     type: 'timer',
