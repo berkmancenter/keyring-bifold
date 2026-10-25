@@ -6,7 +6,7 @@
 # resolve it by hand.
 7	__tests__/components/ChatMessage.test.tsx	TS2353
 1	__tests__/components/ChatMessage.test.tsx	TS2503
-4	__tests__/components/QRScanner.test.tsx	TS2578
+3	__tests__/components/QRScanner.test.tsx	TS2578
 2	__tests__/components/VetterHeaderBackground.test.tsx	TS2698
 2	__tests__/components/chatActionsProps.test.tsx	TS18046
 16	__tests__/components/messageInputComposer.test.tsx	TS18046
