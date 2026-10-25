@@ -14,7 +14,7 @@ let mockService: RoomsService | undefined
 let mockParams: { communityDid?: string } | undefined
 jest.mock('../useRoomsService', () => ({ useRoomsService: () => mockService }))
 jest.mock('@react-navigation/native', () => ({
-  ...jest.requireActual('@react-navigation/native'),
+  ...jest.requireActual('../../../../__mocks__/@react-navigation/native'),
   useRoute: () => ({ params: mockParams }),
 }))
 

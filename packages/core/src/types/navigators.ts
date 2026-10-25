@@ -94,6 +94,7 @@ export enum Screens {
   SignIn = 'Sign in to a community',
   VtaClaim = 'Set up your agent',
   RoomsList = 'Your rooms',
+  Room = 'Room',
 }
 
 export enum Stacks {
@@ -178,6 +179,7 @@ export type MyAgentStackParams = {
   [Screens.EditRCard]: { profileId: string } | undefined
   // Every room and offer, or one community's when opened from its card (rooms flag on only).
   [Screens.RoomsList]: { communityDid?: string } | undefined
+  [Screens.Room]: { roomId: string }
 }
 
 export type OnboardingStackParams = {
