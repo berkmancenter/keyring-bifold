@@ -183,3 +183,6 @@ export async function runTspProbe(run: TspProbeRun): Promise<TspProbeOutcome | '
   }
   return outcome
 }
+
+// CONTROL (reverted below): one planted type error must turn the ratchet red.
+export const __ratchetControl: number = "not a number"
