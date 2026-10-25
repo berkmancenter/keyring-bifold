@@ -64,6 +64,8 @@ export interface ExtendedChatMessage extends IMessage {
   replyTo?: { text: string; author?: string } | { expired: true } | { unavailable: true } | { unread: true }
   /** A photo's size as its header gave it, so its bubble keeps the photo's shape (`image` is its local file URI). */
   imageSize?: { width: number; height: number }
+  /** The text is a label this phone gave it (a photo's), not words anyone wrote: there is nothing to copy. */
+  textIsLabel?: boolean
   /** A disappearing message's timer, in seconds, as it was sent: the chat list shows no text of it. */
   expiresIn?: number
   /** A line about the chat itself (a timer set), not a bubble: never unread, never the chat list's preview. */

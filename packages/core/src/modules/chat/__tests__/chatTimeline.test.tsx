@@ -271,6 +271,10 @@ describe("one chat's events as timeline items", () => {
     expect(c.image).toBe(b.image)
     expect(c.text).toBe('look at this')
     expect(u.image).toBeUndefined()
+    // Only words someone wrote can be copied: a bare photo's text is a label.
+    expect(b.textIsLabel).toBe(true)
+    expect(u.textIsLabel).toBe(true)
+    expect(c.textIsLabel).toBeUndefined()
     // A bare photo draws no words under it; its label stays its text for previews and replies.
     expect(b.text).toBe('📷 Photo')
     expect(render(<View>{b.renderEvent()}</View>).queryByText('📷 Photo')).toBeNull()

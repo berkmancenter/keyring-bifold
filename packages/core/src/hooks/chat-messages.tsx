@@ -826,6 +826,7 @@ export function chatTimelineItems(
       renderEvent: () =>
         photo && !record.content?.text ? <></> : <ThemedText style={textStyleFor(roleOf(record))}>{text}</ThemedText>,
       ...(photo ? { image: photo.uri, imageSize: photo.size } : {}),
+      ...(!record.content?.text && record.attachments?.length ? { textIsLabel: true } : {}),
       createdAt: record.sentTime,
       user: { _id: roleOf(record) },
       chatEventId: record.eventId,
