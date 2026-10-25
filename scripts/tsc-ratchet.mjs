@@ -2,12 +2,12 @@
 /* eslint-disable no-console -- a command-line gate: its output is console output */
 // tsc-ratchet.mjs — a type-check gate for a package that may carry known errors.
 //
-// jest strips types, so nothing in this repository's CI ran tsc before this
-// gate: a type error reached the wallet's Lint+Format+Types job at the next pin
-// bump, in someone else's PR. This runs the package's own `tsc --noEmit` and
+// A package's build type-checks its src, but its tsconfig excludes the test
+// files, and jest strips types, so nothing type-checks the tests. This runs
+// `tsc --noEmit` over a project that includes them (tsconfig.ratchet.json) and
 // compares what it reports with a committed baseline.
 //
-//   node scripts/tsc-ratchet.mjs [--package packages/core] [--write]
+//   node scripts/tsc-ratchet.mjs [--package packages/core] [--project tsconfig.ratchet.json] [--write]
 //
 // A diagnostic's signature is its file, its TS code and its message, with no
 // line or column (those move with unrelated edits). The baseline keeps a COUNT
@@ -21,10 +21,11 @@
 // it says so and asks for the baseline to be updated in the same PR
 // (`--write`), so the ratchet tightens.
 //
-// POLICY: @bifold/core has no type errors, and its baseline is empty. A
-// baseline entry is an exception: it needs a named reason in the PR body and
-// the review lane's explicit agreement. `--write` is for recording fixes;
-// using it to absorb a new error without that is not allowed.
+// POLICY: src has no type errors (the build enforces it). Test files get no
+// new ones: the baseline records the errors they had when the gate arrived and
+// only shrinks. Adding an entry is an exception: it needs a named reason in the
+// PR body and the review lane's explicit agreement. `--write` is for recording
+// fixes; using it to absorb a new error without that is not allowed.
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -60,8 +61,9 @@ export function countDiagnostics(output, pkgDir) {
 export function formatBaseline(counts) {
   const header = [
     '# tsc-ratchet baseline: <count> TAB <file> TAB <TS code> TAB <message>, sorted.',
-    '# Policy: no type errors. Any line here is an exception: it needs a named reason in the',
-    "# PR body and the review lane's explicit agreement. `--write` only to record fixes.",
+    '# Policy: src has no type errors (the build enforces it); test files get no new ones, and',
+    '# this list only shrinks. A new line is an exception: it needs a named reason in the PR',
+    "# body and the review lane's explicit agreement. `--write` only to record fixes.",
   ]
   const lines = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, n]) => `${n}\t${k}`)
   return [...header, ...lines].join('\n') + '\n'
@@ -96,19 +98,15 @@ export function compare(baseline, current) {
 }
 
 /** Run tsc for the package. Judged by exit status first: a failed run with no diagnostic is a failure. */
-export function runTsc(pkgDir, tscPath = process.env.TSC_RATCHET_TSC) {
+export function runTsc(pkgDir, { project = 'tsconfig.json', tscPath = process.env.TSC_RATCHET_TSC } = {}) {
   const tsc = tscPath ?? createRequire(path.join(pkgDir, 'package.json')).resolve('typescript/bin/tsc')
   const args = tscPath ? [] : [tsc]
   const command = tscPath ? tsc : process.execPath
-  const result = spawnSync(
-    command,
-    [...args, '--noEmit', '--pretty', 'false', '-p', path.join(pkgDir, 'tsconfig.json')],
-    {
-      cwd: pkgDir,
-      encoding: 'utf8',
-      maxBuffer: 64 * 1024 * 1024,
-    }
-  )
+  const result = spawnSync(command, [...args, '--noEmit', '--pretty', 'false', '-p', path.join(pkgDir, project)], {
+    cwd: pkgDir,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
   return {
     status: result.status,
     signal: result.signal,
@@ -158,7 +156,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const pkgDir = path.resolve(repoRoot, arg('--package') ?? 'packages/core')
   const baselinePath = path.join(pkgDir, 'tsc-baseline.txt')
   const baseline = existsSync(baselinePath) ? parseBaseline(readFileSync(baselinePath, 'utf8')) : new Map()
-  const result = judge(runTsc(pkgDir), baseline, pkgDir)
+  const result = judge(runTsc(pkgDir, { project: arg('--project') }), baseline, pkgDir)
   for (const line of result.lines) console.log(line)
   if (process.argv.includes('--write')) {
     if (!result.current) {

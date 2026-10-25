@@ -1,3 +1,4 @@
 # tsc-ratchet baseline: <count> TAB <file> TAB <TS code> TAB <message>, sorted.
-# Policy: no type errors. Any line here is an exception: it needs a named reason in the
-# PR body and the review lane's explicit agreement. `--write` only to record fixes.
+# Policy: src has no type errors (the build enforces it); test files get no new ones, and
+# this list only shrinks. A new line is an exception: it needs a named reason in the PR
+# body and the review lane's explicit agreement. `--write` only to record fixes.

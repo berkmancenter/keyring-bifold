@@ -56,7 +56,7 @@ test('fails when tsc exits non-zero with NO output: a crash is not "zero new err
 })
 
 test('a tsc that cannot even start is a failure, by exit status (real spawn)', () => {
-  const r = judge(runTsc(path.resolve('.'), '/usr/bin/false'), new Map(), PKG)
+  const r = judge(runTsc(path.resolve('.'), { tscPath: '/usr/bin/false' }), new Map(), PKG)
   assert.equal(r.ok, false)
 })
 
