@@ -22,6 +22,16 @@ import { ThemedText } from '../components/texts/ThemedText'
 import Button from '../components/buttons/Button'
 import { ButtonType } from '../components/buttons/Button-api'
 
+/** Backups an earlier export made under the caches on iOS (wallet-backup-<time>/), removed before a new one. */
+const removeEarlierBackups = async () => {
+  const entries = await RNFS.readDir(RNFS.CachesDirectoryPath).catch(() => [])
+  await Promise.all(
+    entries
+      .filter((e) => e.isDirectory() && /^wallet-backup-\d+$/.test(e.name))
+      .map((e) => RNFS.unlink(e.path).catch(() => undefined))
+  )
+}
+
 interface ExportWalletProps {
   navigation: any
 }
@@ -116,13 +126,19 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
     const stamp = Date.now()
     const backupFileName = `wallet-backup-${stamp}.db`
     // iOS: the backup is made in a folder of its own under the app's caches and handed to the share sheet ("Save to
-    // Files", AirDrop); the app keeps no copy, shared or not. Android writes to Downloads, as before.
+    // Files", AirDrop). A backup nobody took is removed at once. A shared one stays until the next export sweeps it (or
+    // iOS clears its caches), so a share target that reads its file after the sheet closes still finds it; the
+    // backup is encrypted with the person's password. Android writes to Downloads, as before.
     const iosFolder = `${RNFS.CachesDirectoryPath}/wallet-backup-${stamp}`
     const baseDir = Platform.OS === 'android' ? RNFS.DownloadDirectoryPath : iosFolder
     const backupPath = `${baseDir}/${backupFileName}`
 
+    let shared = false
     try {
-      if (Platform.OS === 'ios') await RNFS.mkdir(iosFolder)
+      if (Platform.OS === 'ios') {
+        await removeEarlierBackups()
+        await RNFS.mkdir(iosFolder)
+      }
 
       await agent.modules.askar.exportStore({
         exportToStore: {
@@ -143,6 +159,7 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
         const url = `file://${fileCount === 1 ? backupPath : iosFolder}`
         const { action } = await Share.share({ url, title: String(t('Settings.ExportWalletShareTitle')) })
         if (action === Share.sharedAction) {
+          shared = true
           Alert.alert(String(t('Global.Success')), String(t('Settings.ExportWalletShared')), [{ text: 'OK' }])
           setPassword('')
           setConfirmPassword('')
@@ -167,7 +184,7 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
       const errorMessage = error?.message || String(t('Settings.ExportWalletError'))
       Alert.alert(String(t('Error.Problem')), errorMessage)
     } finally {
-      if (Platform.OS === 'ios') await RNFS.unlink(iosFolder).catch(() => undefined)
+      if (Platform.OS === 'ios' && !shared) await RNFS.unlink(iosFolder).catch(() => undefined)
       setIsExporting(false)
     }
   }

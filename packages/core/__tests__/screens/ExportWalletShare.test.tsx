@@ -1,7 +1,8 @@
 /**
- * Export on iOS, as the person reads it, through real i18next: the backup is made under the app's caches, handed to
- * the share sheet, and removed afterwards whether it was shared or not. Only a completed share says the backup went
- * anywhere; a dismissed sheet says it was not saved.
+ * Export on iOS, as the person reads it, through real i18next: the backup is made under the app's caches and handed to
+ * the share sheet. Only a completed share says the backup went anywhere; a dismissed sheet says it was not saved, and
+ * a backup nobody took is removed at once. A shared one is left for its share target to read and swept by the next
+ * export, which removes earlier backups and nothing else.
  */
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import i18next from 'i18next'
@@ -24,6 +25,7 @@ jest.mock('@bifold/react-hooks', () => ({
 }))
 
 let mockExisting: string[] = []
+let mockCaches: { name: string; path: string; isDirectory: () => boolean }[] = []
 jest.mock('react-native-fs', () => ({
   CachesDirectoryPath: '/caches',
   DocumentDirectoryPath: '/documents',
@@ -31,6 +33,7 @@ jest.mock('react-native-fs', () => ({
   mkdir: jest.fn(async () => undefined),
   exists: jest.fn(async (p: string) => mockExisting.some((suffix) => p.endsWith(suffix))),
   unlink: jest.fn(async () => undefined),
+  readDir: jest.fn(async () => mockCaches),
 }))
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const RNFS = require('react-native-fs')
@@ -58,13 +61,14 @@ describe('export wallet on iOS', () => {
     expect(Platform.OS).toBe('ios')
     jest.spyOn(Alert, 'alert').mockImplementation(() => undefined)
     mockExisting = []
+    mockCaches = []
   })
   afterEach(() => {
     jest.clearAllMocks()
     jest.restoreAllMocks()
   })
 
-  test('a completed share says it was handed over, and the app keeps no copy', async () => {
+  test('a completed share says it was handed over, and leaves the backup for its share target', async () => {
     const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction })
     await exportWith()
 
@@ -77,7 +81,24 @@ describe('export wallet on iOS', () => {
       "Your backup was handed over. Keep it with its password: you'll need both to restore your wallet.",
       [{ text: 'OK' }]
     )
-    expect(RNFS.unlink).toHaveBeenCalledWith(path.slice(0, path.lastIndexOf('/')))
+    expect(RNFS.unlink).not.toHaveBeenCalledWith(path.slice(0, path.lastIndexOf('/')))
+  })
+
+  test('a new export removes the backups earlier exports left, and nothing else, before it makes its own', async () => {
+    const dir = (name: string) => ({ name, path: `/caches/${name}`, isDirectory: () => true })
+    mockCaches = [
+      dir('wallet-backup-1792886400000'),
+      dir('wallet-backup-1792886500000'),
+      dir('http-cache'),
+      dir('wallet-backup-notes'),
+      { name: 'wallet-backup-1792886600000', path: '/caches/wallet-backup-1792886600000', isDirectory: () => false },
+    ]
+    jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction })
+    await exportWith()
+
+    const removed = RNFS.unlink.mock.calls.map((c: string[]) => c[0])
+    expect(removed).toEqual(['/caches/wallet-backup-1792886400000', '/caches/wallet-backup-1792886500000'])
+    expect(RNFS.unlink.mock.invocationCallOrder[1]).toBeLessThan(RNFS.mkdir.mock.invocationCallOrder[0])
   })
 
   test('a dismissed share says the backup was not saved, never that it was', async () => {
