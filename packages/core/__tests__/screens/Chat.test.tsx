@@ -7,7 +7,7 @@ import {
   DidCommDidExchangeState,
 } from '@credo-ts/didcomm'
 import { useNavigation } from '@react-navigation/native'
-import { act, fireEvent, render } from '@testing-library/react-native'
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
 
 import * as network from '../../src/contexts/network'
@@ -256,7 +256,7 @@ describe('Chat screen draft and over-the-air updates', () => {
     expect(hasOtaApplyBlockers()).toBe(false)
   })
 
-  test('releases the block when the draft is sent', () => {
+  test('releases the block when the draft is sent', async () => {
     const basicMessages = (useAgent as jest.Mock)().agent.modules.didcomm.basicMessages
     const original = basicMessages.sendMessage
     basicMessages.sendMessage = jest.fn(async () => undefined)
@@ -266,8 +266,9 @@ describe('Chat screen draft and over-the-air updates', () => {
       expect(otaApplyBlockerReasons()).toEqual(['chat-draft'])
 
       fireEvent.press(tree.getByTestId('GC_SEND_TOUCHABLE'))
-      expect(basicMessages.sendMessage).toHaveBeenCalledWith('1', 'See you at noon')
       expect(hasOtaApplyBlockers()).toBe(false)
+      // A contact without chat gets a plain BasicMessage (sendChatText decides, after reading its capability).
+      await waitFor(() => expect(basicMessages.sendMessage).toHaveBeenCalledWith('1', 'See you at noon'))
     } finally {
       basicMessages.sendMessage = original
     }

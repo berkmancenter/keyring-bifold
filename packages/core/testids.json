@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "539e81a2a02f205b74d79c672e749d3dad31736f",
+  "generatedFrom": "03f6a1d01e3b238a09f0624291b7e94d41c0af1b",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -249,7 +249,17 @@
     "CardStatusNoticeTryAgain": ["src/modules/trust-tasks/screens/cardStatusNotice.tsx"],
     "Change Pin": ["src/screens/Settings.tsx"],
     "ChangePIN": ["src/screens/PINChange.tsx"],
+    "ChatActionCopy": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionDeleteForMe": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionReply": ["src/components/chat/Chat.ids.ts"],
+    "ChatComposerEmojiButton": ["src/components/chat/Chat.ids.ts"],
     "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
+    "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
+    "ChatReaction": ["src/components/chat/Chat.ids.ts"],
+    "ChatReactionBar": ["src/components/chat/Chat.ids.ts"],
+    "ChatReactionBarMore": ["src/components/chat/Chat.ids.ts"],
     "ClearPastedUrl": ["src/screens/PasteUrl.tsx"],
     "ClearTestContactsButton": ["src/screens/Developer.tsx"],
     "Close": [
@@ -1259,6 +1269,27 @@
   "derived": [
     {
       "src/components/chat/ActionSlider.tsx": "action.text"
+    },
+    {
+      "src/components/chat/ChatMessage.tsx": "ChatIds.reactions"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actions"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actionsBackdrop"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "testID"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "ChatIds.reactionBar"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "ChatIds.reactionMore"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "`${ChatIds.reaction}-${index}`"
     },
     {
       "src/components/misc/CredentialCard11ActionFooter.tsx": "testID"
