@@ -95,7 +95,8 @@ export function installAskarScanListFree(
   options: { scanPrototype?: object; version?: string } = {}
 ): AskarScanFixResult {
   const proto = (options.scanPrototype ?? Scan.prototype) as Record<string | symbol, unknown>
-  if (proto[INSTALLED]) return 'already'
+  // Own property only: a prototype inheriting from an installed one (a subclass) still needs its own.
+  if (Object.prototype.hasOwnProperty.call(proto, INSTALLED)) return 'already'
   const version = options.version ?? installedAskarSharedVersion()
   if (version !== ASKAR_SHARED_VERSION_MIRRORED) return 'skipped-version'
   Object.defineProperty(proto, 'forEachRow', { value: forEachRowFreeingLists, writable: true, configurable: true })
