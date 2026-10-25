@@ -104,6 +104,7 @@ import {
   validateApprovals,
 } from './approvalsPolicy'
 import { EMPTY_APPROVALS, modelFromExt, ruleForWire, withKeySwapped, type ApprovalsModel } from './approvalRules'
+import { registerOtaApplyBlocker } from '../../../utils/otaApply'
 
 const LOG_PREFIX = '[TrustTasks:VtaClient]'
 
@@ -1311,12 +1312,16 @@ export class VtaClient {
     onSent?: () => void
   ): Promise<T> {
     const ticket = ++this.tickets
-    const run = (): Promise<T> =>
-      ticket <= this.droppedThrough
-        ? Promise.reject(new VtaTaskDropped(type))
-        : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
-            this.inFlight = undefined
-          })
+    const run = (): Promise<T> => {
+      if (ticket <= this.droppedThrough) return Promise.reject(new VtaTaskDropped(type))
+      // A reload would lose the pending reply (it lives only in memory), so no
+      // downloaded update applies while a task waits on the VTA (utils/otaApply).
+      const release = registerOtaApplyBlocker(`vta-task:${type}`)
+      return this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
+        this.inFlight = undefined
+        release()
+      })
+    }
     // One task at a time: one queued behind another says what it waits on, so a
     // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
     const ahead = this.inFlight
