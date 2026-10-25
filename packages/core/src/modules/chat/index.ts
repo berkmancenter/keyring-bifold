@@ -19,11 +19,16 @@ export type {
   ChatEventParseResult,
 } from './chatEvent'
 export { ChatEventMessage, CHAT_EVENT_MESSAGE_TYPE } from './messages/ChatEventMessage'
+export { ChatCapabilityMessage, CHAT_CAPABILITY_MESSAGE_TYPE } from './messages/ChatCapabilityMessage'
+export type { ChatCapabilityMessageOptions } from './messages/ChatCapabilityMessage'
+export { ChatPeerRecord } from './records/ChatPeerRecord'
+export type { ChatPeerRecordProps, ChatPeerRecordTags } from './records/ChatPeerRecord'
+export { ChatPeerRepository } from './records/ChatPeerRepository'
 export type { ChatEventMessageOptions, ChatEventV2Plaintext } from './messages/ChatEventMessage'
 export { ChatEventRecord } from './records/ChatEventRecord'
 export type { ChatEventRecordProps, ChatEventRecordTags, ChatEventRole } from './records/ChatEventRecord'
 export { ChatEventRepository } from './records/ChatEventRepository'
-export { ChatModule, getChatEventRepository } from './ChatModule'
+export { ChatModule, getChatEventRepository, getChatPeerRepository } from './ChatModule'
 export { CHAT_MIN_RCE_VERSION, counterpartySpeaksChat } from './capability'
 export { receiveChatEventMessage, setupChatInbound } from './inbound'
 export type { ChatInboundVerdict, ChatInboundMessageContext } from './inbound'
@@ -32,4 +37,21 @@ export type { RandomSource } from './eventId'
 export { ORPHAN_MAX_AGE_MS, ORPHAN_MAX_COUNT, foldChatEvents, prunableOrphans } from './fold'
 export type { ChatReaction, FoldedChat } from './fold'
 export { removeReaction, sendChatText, sendReaction } from './send'
+export { chatMediaFolder, deleteChatMessages } from './history'
+export { useClearChat } from './useClearChat'
+export type { ChatMessageIds } from './history'
 export type { ChatSendOutcome } from './send'
+export {
+  NOTICE_RETRY_MS,
+  receiveCapabilityNotice,
+  receiveChatProblemReport,
+  sendCapabilityNoticeIfNeeded,
+  setupChatCapability,
+} from './notice'
+export type {
+  ChatNoticeMessageContext,
+  ChatNoticeSendOutcome,
+  ChatNoticeVerdict,
+  ChatProblemReportMessageContext,
+  ChatProblemReportVerdict,
+} from './notice'
