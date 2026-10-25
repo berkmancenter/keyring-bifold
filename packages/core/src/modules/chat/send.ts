@@ -16,7 +16,7 @@ import type { Agent } from '@credo-ts/core'
 import { DidCommMessageSender, DidCommOutboundMessageContext } from '@credo-ts/didcomm'
 
 import { counterpartySpeaksChat } from './capability'
-import { CHAT_PROFILE, MAX_TEXT_LENGTH, isUlid } from './chatEvent'
+import { CHAT_PROFILE, MAX_TEXT_LENGTH, MAX_TIMER_VERSION, isUlid } from './chatEvent'
 import type { ChatEvent } from './chatEvent'
 import { getChatEventRepository } from './ChatModule'
 import { newEventId } from './eventId'
@@ -101,10 +101,13 @@ export async function setChatTimer(agent: Agent, connectionId: string, expiresIn
   if (!TIMER_CHOICES.includes(expiresIn)) throw new Error(`chat: ${expiresIn} is not a timer choice`)
   if (!(await counterpartySpeaksChat(agent, connectionId))) return { carriedAs: 'not-sent' }
   const events = await getChatEventRepository(agent).findByConnection(agent.context, connectionId)
+  const version = nextTimerVersion(events)
+  // The receiver refuses a version over the cap, so this phone never sends one: the change would reach no one.
+  if (version > MAX_TIMER_VERSION) throw new Error("chat: this chat's timer can't be changed any more times")
   const record = await sendEvent(agent, connectionId, {
     ...base(),
     type: 'timer',
-    timer: { expiresIn, version: nextTimerVersion(events) },
+    timer: { expiresIn, version },
   })
   return { carriedAs: 'chat', record }
 }
