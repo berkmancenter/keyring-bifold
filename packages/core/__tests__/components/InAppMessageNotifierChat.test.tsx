@@ -74,7 +74,9 @@ const agent = {
 }
 
 let n = 0
-const eventId = () => `01JB3XKX6F8Q2W4E5R6T7Y8Z${String(++n).padStart(2, '0')}`.slice(0, 26)
+// Event ids claim a time at the epoch: jestSetup pins Date.now to 2024-01-01, and a timer event whose id claims
+// more than a day past it is refused as from the future (#579), which would leave the chat with no timer at all.
+const eventId = () => `0000000000${String(++n).padStart(16, '0')}`
 const arrives = (event: Record<string, unknown>) =>
   receiveChatEventMessage(agent as never, {
     message: new ChatEventMessage({ event: { profile: CHAT_PROFILE, eventId: eventId(), ...event } as never }),
@@ -83,7 +85,9 @@ const arrives = (event: Record<string, unknown>) =>
   })
 const message = (text: string, extra: Record<string, unknown> = {}) =>
   arrives({ type: 'message', content: { format: 'text/plain', text }, ...extra })
-const timerSet = (expiresIn: number) => arrives({ type: 'timer', timer: { expiresIn, version: 1 } })
+// A timer the inbound handler refused would leave the chat with none, and these tests would pass for that reason.
+const timerSet = async (expiresIn: number, version = 1) =>
+  expect(await arrives({ type: 'timer', timer: { expiresIn, version } })).toBe('stored')
 
 const settle = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
 const toasted = () => (Toast.show as jest.Mock).mock.calls.map(([options]) => options)
@@ -122,7 +126,7 @@ describe('a received chat message', () => {
 
   test('a timer turned off again: the text shows', async () => {
     await timerSet(86400)
-    await arrives({ type: 'timer', timer: { expiresIn: 0, version: 2 } })
+    await timerSet(0, 2)
     await message('see you at noon')
     await settle()
     expect(toasted()).toEqual([expect.objectContaining({ text2: 'see you at noon' })])
