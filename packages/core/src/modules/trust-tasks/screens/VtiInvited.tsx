@@ -389,7 +389,9 @@ const VtiInvited: React.FC<VtiInvitedProps> = ({ config }) => {
       </SafeAreaView>
     )
   }
-  if (!loaded) {
+  // Nor before it is known whose identity holds this phone's standing here (another agent's read as this one's,
+  // then went). A read that failed falls back to this agent's: possibly wrong, but seen, not a wait on nothing.
+  if (!loaded || (!holding.known && !holding.failed)) {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right']}>
         <View style={[styles.content, { justifyContent: 'center' }]}>
