@@ -126,7 +126,14 @@ describe('chatMediaPath and chatMediaUri', () => {
   it('build the path from the folder when read, and refuse a name this module did not make', () => {
     setPlatform('ios')
     expect(chatMediaPath(CONNECTION, `${EVENT}.jpg`)).toBe(`${chatMediaFolder(CONNECTION)}/${EVENT}.jpg`)
-    expect(chatMediaUri(CONNECTION, `${EVENT}.jpg`)).toBe(`file://${chatMediaFolder(CONNECTION)}/${EVENT}.jpg`)
+    // The iOS folder is under "Application Support": a raw space is not valid in a URI.
+    expect(chatMediaUri(CONNECTION, `${EVENT}.jpg`)).toBe(
+      `file:///lib/Application%20Support/chat-media/${CONNECTION}/${EVENT}.jpg`
+    )
+    expect(chatMediaUri(CONNECTION, `${EVENT}.jpg`)).not.toContain(' ')
+    expect(decodeURIComponent(chatMediaUri(CONNECTION, `${EVENT}.jpg`) as string)).toBe(
+      `file://${chatMediaFolder(CONNECTION)}/${EVENT}.jpg`
+    )
     expect(chatMediaPath(CONNECTION, '../../Documents/wallet.db')).toBeUndefined()
     expect(chatMediaPath(CONNECTION, `/abs/${EVENT}.jpg`)).toBeUndefined()
     expect(chatMediaPath('../x', `${EVENT}.jpg`)).toBeUndefined()

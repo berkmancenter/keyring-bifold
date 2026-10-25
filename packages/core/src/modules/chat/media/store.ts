@@ -60,10 +60,13 @@ export function chatMediaPath(connectionId: string, fileName: string): string | 
   return `${chatMediaFolder(connectionId)}/${fileName}`
 }
 
-/** A `file://` URI for `<Image>`, or undefined as for {@link chatMediaPath}. */
+/**
+ * A `file://` URI for `<Image>`, or undefined as for {@link chatMediaPath}. Each path segment is percent-encoded: the
+ * iOS folder is under "Application Support", and a raw space is not valid in a URI.
+ */
 export function chatMediaUri(connectionId: string, fileName: string): string | undefined {
   const path = chatMediaPath(connectionId, fileName)
-  return path && `file://${path}`
+  return path && `file://${path.split('/').map(encodeURIComponent).join('/')}`
 }
 
 /**
