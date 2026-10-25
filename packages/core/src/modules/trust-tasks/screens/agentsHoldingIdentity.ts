@@ -7,7 +7,7 @@
  * @module trust-tasks/screens/agentsHoldingIdentity
  */
 import { useAgent } from '@bifold/react-hooks'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
 import { vtaAgent } from '../module/vtaAgent'
@@ -28,6 +28,9 @@ export function useAgentsHoldingIdentity(communityDid: string | undefined): {
    * turned into "another agent's".
    */
   known: boolean
+  /** The read failed: not known, and said so, with `retry` to read again (never a wait on nothing). */
+  failed: boolean
+  retry: () => void
   holders: string[]
   current?: string
   onlyOthers: boolean
@@ -41,8 +44,14 @@ export function useAgentsHoldingIdentity(communityDid: string | undefined): {
   const several = (state.agents ?? []).length > 1
   // The holders, with the community they were read for: another community's are not this one's.
   const [read, setRead] = useState<{ communityDid: string; holders: string[] }>()
+  // The community whose read failed, until a read of it succeeds.
+  const [failedFor, setFailedFor] = useState<string>()
   const [tick, setTick] = useState(0)
   useCommunityChanged(() => setTick((n) => n + 1))
+  const retry = useCallback(() => {
+    setFailedFor(undefined)
+    setTick((n) => n + 1)
+  }, [])
   useEffect(() => {
     if (!agent || !communityDid) return
     let live = true
@@ -52,7 +61,9 @@ export function useAgentsHoldingIdentity(communityDid: string | undefined): {
         if (live)
           setRead({ communityDid, holders: all.filter((p) => p.communityDid === communityDid).map((p) => p.vtaDid) })
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (live) setFailedFor(communityDid)
+      })
     return () => {
       live = false
     }
@@ -60,6 +71,7 @@ export function useAgentsHoldingIdentity(communityDid: string | undefined): {
   // Nothing to read without an agent or a community: nothing is held.
   const known = !agent || !communityDid || read?.communityDid === communityDid
   const holders = read && read.communityDid === communityDid ? read.holders : []
+  const failed = !known && failedFor === communityDid
   // A legacy identity kept with no agent counts as the current agent's. Not
   // only with several agents linked: an identity of an agent since unlinked
   // is another agent's too (Alberto's iPhone, 10-06: al-phone's membership
@@ -68,6 +80,8 @@ export function useAgentsHoldingIdentity(communityDid: string | undefined): {
   const linked = new Set((state.agents ?? []).map((a) => a.vtaDid))
   return {
     known,
+    failed,
+    retry,
     holders,
     current,
     onlyOthers,

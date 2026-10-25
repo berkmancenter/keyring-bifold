@@ -86,16 +86,19 @@ const VtiCommunity: React.FC = () => {
   // (UI-smoothness plan, Phase 2b). One that could not be read is said, with
   // a way to read it again.
   const standingUnknown = !heldElsewhere && (join === undefined || !holding.known)
-  const standingFailed = standingUnknown && readFailed(journey, 'join')
+  // Either read can fail: the journey's, or whose identity it is. Both are said, with the way to read again.
+  const standingFailed = standingUnknown && (readFailed(journey, 'join') || holding.failed)
   const [rereading, setRereading] = useState(false)
+  const retryHolders = holding.retry
   const readAgain = useCallback(async () => {
     setRereading(true)
     try {
+      retryHolders()
       await refresh()
     } finally {
       setRereading(false)
     }
-  }, [refresh])
+  }, [refresh, retryHolders])
   // Leaving cannot be undone from the phone, so it asks once, in place, with
   // buttons that say what each does (plan §4.3).
   const [confirmingLeave, setConfirmingLeave] = useState(false)

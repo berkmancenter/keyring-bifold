@@ -43,6 +43,8 @@ let mockPersona: unknown = undefined
 let mockPersonas: unknown[] = []
 // When set, the identities are read only once it settles.
 let mockPersonasRead: Promise<void> | undefined
+// When set, the next read of the identities fails (and clears it).
+let mockPersonasFailOnce = false
 const mockForgetCommunity = jest.fn(async () => undefined)
 const mockForgetPersona = jest.fn(async () => undefined)
 jest.mock('../module/VtiCommunityStore', () => ({
@@ -57,6 +59,10 @@ jest.mock('../module/VtiIdentityStore', () => ({
     getPersona = async () => mockPersona
     listPersonas = async () => {
       if (mockPersonasRead) await mockPersonasRead
+      if (mockPersonasFailOnce) {
+        mockPersonasFailOnce = false
+        throw new Error('store unavailable')
+      }
       return mockPersonas
     }
     forgetPersona = (...a: unknown[]) => mockForgetPersona(...(a as []))
@@ -448,6 +454,19 @@ describe("a community known only through another agent's identity", () => {
     mockPersonasRead = undefined
     expect(frames.filter((f) => f !== 'none' && f !== 'CommunityHeldElsewhereText')).toEqual([])
     expect(frames[frames.length - 1]).toBe('CommunityHeldElsewhereText')
+  })
+
+  // A failed read of whose identity it is was a wait on nothing, for good: the standing stayed "not known" with no
+  // way to read it again. It is said, as a failed journey read is, and reading again reads it.
+  it('a failed read of whose identity it is offers a way to read it again, and reading again reads it', async () => {
+    mockPersonasFailOnce = true
+    const tree = await open()
+    expect(tree.getByTestId(testIdWithKey('CommunityReadAgain'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('CommunityMember'))).toBeNull()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('CommunityReadAgain')))
+    })
+    expect(tree.getByTestId(testIdWithKey('CommunityHeldElsewhereText'))).toHaveTextContent(/Community\.HeldElsewhere/)
   })
 
   it('says whose identity it is, with no "member", no Leave and no Apply', async () => {
