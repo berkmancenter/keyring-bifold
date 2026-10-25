@@ -21,6 +21,15 @@ import {
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 
 jest.mock('../../vrc/vrc-manager', () => ({ RCE_PROTOCOL_VERSION: 6 }))
+// The refusal path deletes through history.ts, which reads the chat's media folder. This chat has no media.
+// Explicit, rather than jest's automock, whose shape follows whichever react-native-fs build is installed.
+jest.mock('react-native-fs', () => ({
+  LibraryDirectoryPath: '/lib',
+  DocumentDirectoryPath: '/files',
+  exists: jest.fn(async () => false),
+  readDir: jest.fn(async () => []),
+  unlink: jest.fn(async () => undefined),
+}))
 
 const NOW = new Date('2026-10-25T10:00:00Z').getTime()
 const EVENT_ID = '01JB3XKX6F8Q2W4E5R6T7Y8Z9V'
