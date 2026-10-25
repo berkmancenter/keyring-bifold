@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react'
 import { AccessibilityInfo } from 'react-native'
 
 let known: boolean | undefined
-let started = false
+let subscription: { remove: () => void } | undefined
 const listeners = new Set<() => void>()
 
 function set(reduce: boolean): void {
@@ -28,10 +28,7 @@ function start(): Promise<boolean> {
       set(false)
       return false
     })
-  if (!started) {
-    started = true
-    AccessibilityInfo.addEventListener('reduceMotionChanged', set)
-  }
+  if (!subscription) subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', set)
   return read
 }
 
@@ -55,6 +52,7 @@ export function useReduceMotion(): boolean | undefined {
 /** Forget what is known (tests). */
 export function resetReduceMotion(): void {
   known = undefined
-  started = false
+  subscription?.remove()
+  subscription = undefined
   listeners.clear()
 }

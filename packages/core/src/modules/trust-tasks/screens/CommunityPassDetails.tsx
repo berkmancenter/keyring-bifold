@@ -75,7 +75,9 @@ export const CommunityPassDetails: React.FC<CommunityPassDetailsProps> = ({
   const face = passFace(card, t, published)
   // Opened in place: the pass starts where it sat in the stack and the rest of the card starts hidden. Values made once,
   // on the first render, so a re-render mid-lift does not restart it.
-  // With Reduce Motion known to be on, the pass starts in its place.
+  // With Reduce Motion known to be on, the pass starts in its place. The very first open after launch cannot know yet
+  // (the system answers asynchronously): with it on, that one open draws the pass at its stack place for a frame, then
+  // sets it in place, rather than holding the frame for the answer.
   const reduceMotion = useReduceMotion()
   const lift = useRef(new Animated.Value(reduceMotion ? 0 : (liftFrom ?? 0))).current
   const reveal = useRef(new Animated.Value(liftFrom === undefined ? 1 : 0)).current

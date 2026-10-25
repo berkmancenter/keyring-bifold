@@ -49,6 +49,18 @@ describe('Reduce Motion', () => {
     expect(read).toHaveBeenCalledTimes(1)
   })
 
+  test('forgetting removes the system subscription, so a later read makes one, not a second', async () => {
+    const remove = jest.fn()
+    added.mockReturnValue({ remove } as never)
+    await readReduceMotion()
+    resetReduceMotion()
+    expect(remove).toHaveBeenCalledTimes(1)
+    await readReduceMotion()
+    expect(added).toHaveBeenCalledTimes(2)
+    resetReduceMotion()
+    expect(remove).toHaveBeenCalledTimes(2)
+  })
+
   test('a system that cannot say counts as off', async () => {
     read.mockRejectedValue(new Error('unavailable'))
     expect(await readReduceMotion()).toBe(false)
