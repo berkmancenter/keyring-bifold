@@ -12,6 +12,8 @@ import { Role } from '../../types/chat'
 import { ModalUsage } from '../../types/remove'
 import { ThemedText } from '../texts/ThemedText'
 import CommonRemoveModal from '../modals/CommonRemoveModal'
+import type { ChatReaction } from '../../modules/chat/fold'
+import type { ChatEventRecord } from '../../modules/chat/records/ChatEventRecord'
 
 // Date separator color as per design
 const DATE_SEPARATOR_COLOR = '#888888'
@@ -47,6 +49,17 @@ export interface ExtendedChatMessage extends IMessage {
   // Collapsible witness message support
   collapsedContent?: () => React.JSX.Element // Content shown when collapsed
   expandedContent?: () => React.JSX.Element // Additional content shown when expanded
+  // A chat event (keyring/chat/1.0), rather than a BasicMessage: only these can be reacted or replied to.
+  chatEventId?: string
+  /** Its current reactions, folded in (at most one per person). */
+  reactions?: ChatReaction[]
+  /** The event it replies to, and what of it is shown: its text, or that it is not on this phone. */
+  inReplyTo?: string
+  replyTo?: { text: string } | { unavailable: true }
+  /** A line about the chat itself (a timer set), not a bubble: never unread, never the chat list's preview. */
+  kind?: 'system'
+  /** A system line's event, for whoever words it. */
+  chatEvent?: ChatEventRecord
 }
 
 const MessageTime: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
