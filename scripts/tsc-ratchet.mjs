@@ -42,12 +42,40 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 // differs between a laptop and the runner; the signature keeps it repo-relative.
 const relativeMessage = (message, root) => message.replaceAll(root + path.sep, '').trim()
 
+// tsc adds "Did you mean ...?" to an error only while it has issued fewer than 10
+// suggestions in the whole program (maximumSuggestionCount in the checker), so an
+// error in an unrelated file can turn an unchanged TS2552 into a TS2304. Each
+// suggesting variant is folded into its plain form so the signature holds still.
+const SUGGESTING = {
+  TS2552: ['TS2304', (m) => m],
+  TS2551: ['TS2339', (m) => m],
+  TS2724: [
+    'TS2305',
+    (m) => m.replace(/^(.*) has no exported member named (.*)\.$/, 'Module $1 has no exported member $2.'),
+  ],
+  TS2561: [
+    'TS2353',
+    (m) =>
+      m.replace(
+        /^Object literal may only specify known properties, but /,
+        'Object literal may only specify known properties, and '
+      ),
+  ],
+}
+
+export function withoutSuggestion(code, message) {
+  const plain = SUGGESTING[code]
+  if (!plain) return { code, message }
+  const stripped = message.replace(/ Did you mean (to write )?'[^']*'\?$/, '')
+  return stripped === message ? { code, message } : { code: plain[0], message: plain[1](stripped) }
+}
+
 /** One diagnostic line of `tsc --pretty false`, or undefined for anything else. */
 export function parseLine(line, pkgDir, root = repoRoot) {
   const withFile = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/.exec(line)
   if (withFile) {
     const file = path.relative(pkgDir, path.resolve(pkgDir, withFile[1])).split(path.sep).join('/')
-    return { file, code: withFile[4], message: relativeMessage(withFile[5], root) }
+    return { file, ...withoutSuggestion(withFile[4], relativeMessage(withFile[5], root)) }
   }
   const global = /^error (TS\d+): (.*)$/.exec(line)
   if (global) return { file: '<global>', code: global[1], message: relativeMessage(global[2], root) }

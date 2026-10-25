@@ -41,6 +41,28 @@ test('an absolute path in a message is made repo-relative, so laptop and runner 
   assert.match(laptop.message, / 'packages\/core\/node_modules\/jsonld\/lib\/index\.js' /)
 })
 
+test("a 'Did you mean' suggestion does not change the signature (tsc caps suggestions per program)", () => {
+  const pairs = [
+    [
+      "a.test.ts(1,1): error TS2552: Cannot find name 'getter'. Did you mean '_getter'?",
+      "a.test.ts(1,1): error TS2304: Cannot find name 'getter'.",
+    ],
+    [
+      "a.test.ts(1,1): error TS2551: Property 'nme' does not exist on type 'User'. Did you mean 'name'?",
+      "a.test.ts(1,1): error TS2339: Property 'nme' does not exist on type 'User'.",
+    ],
+    [
+      "a.test.ts(1,1): error TS2724: '\"m\"' has no exported member named 'Foo'. Did you mean 'Fooo'?",
+      "a.test.ts(1,1): error TS2305: Module '\"m\"' has no exported member 'Foo'.",
+    ],
+    [
+      "a.test.ts(1,1): error TS2561: Object literal may only specify known properties, but 'nme' does not exist in type 'User'. Did you mean to write 'name'?",
+      "a.test.ts(1,1): error TS2353: Object literal may only specify known properties, and 'nme' does not exist in type 'User'.",
+    ],
+  ]
+  for (const [suggesting, plain] of pairs) assert.deepEqual(parseLine(suggesting, PKG), parseLine(plain, PKG))
+})
+
 test('fails on a NEW signature', () => {
   const r = judge({ status: 2, output: out(e1, e2) }, countDiagnostics(out(e1), PKG), PKG)
   assert.equal(r.ok, false)
