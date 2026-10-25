@@ -213,7 +213,11 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
       fresh.push(item.chatEventId)
     }
     if (fresh.length > 0 && current.agent) {
-      void chatEventsShown(current.agent, current.connectionId, fresh).catch(() => undefined)
+      // Marked before the call so a scroll during it does not report twice; un-marked if it fails, so the next
+      // scroll retries instead of leaving a disappearing message's clock unstarted until the chat is reopened.
+      void chatEventsShown(current.agent, current.connectionId, fresh).catch(() => {
+        for (const eventId of fresh) current.ids.delete(eventId)
+      })
     }
   }).current
 

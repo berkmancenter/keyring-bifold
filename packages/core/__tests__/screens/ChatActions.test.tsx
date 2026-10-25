@@ -226,6 +226,16 @@ describe('copy and delete for me', () => {
 })
 
 describe('first display of received chat messages', () => {
+  it('reports a message again on the next scroll when reporting it failed', async () => {
+    ;(chatEventsShown as jest.Mock).mockRejectedValueOnce(new Error('store unavailable'))
+    const tree = renderChat()
+    const list = tree.UNSAFE_root.findAll((node) => typeof node.props.onViewableItemsChanged === 'function')[0]
+    const tokens = [{ item: received, isViewable: true }]
+    await act(async () => list.props.onViewableItemsChanged({ viewableItems: tokens, changed: tokens }))
+    await act(async () => list.props.onViewableItemsChanged({ viewableItems: tokens, changed: tokens }))
+    expect(chatEventsShown).toHaveBeenCalledTimes(2)
+  })
+
   it('reports received chat messages as they become visible, each once, and nothing else', () => {
     const tree = renderChat()
     const list = tree.UNSAFE_root.findAll((node) => typeof node.props.onViewableItemsChanged === 'function')[0]
