@@ -21,16 +21,7 @@ import { testIdWithKey } from '../utils/testable'
 import { ThemedText } from '../components/texts/ThemedText'
 import Button from '../components/buttons/Button'
 import { ButtonType } from '../components/buttons/Button-api'
-
-/** Backups an earlier export made under the caches on iOS (wallet-backup-<time>/), removed before a new one. */
-const removeEarlierBackups = async () => {
-  const entries = await RNFS.readDir(RNFS.CachesDirectoryPath).catch(() => [])
-  await Promise.all(
-    entries
-      .filter((e) => e.isDirectory() && /^wallet-backup-\d+$/.test(e.name))
-      .map((e) => RNFS.unlink(e.path).catch(() => undefined))
-  )
-}
+import { removeWalletBackups } from '../utils/walletBackup'
 
 interface ExportWalletProps {
   navigation: any
@@ -136,7 +127,7 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
     let shared = false
     try {
       if (Platform.OS === 'ios') {
-        await removeEarlierBackups()
+        await removeWalletBackups()
         await RNFS.mkdir(iosFolder)
       }
 
