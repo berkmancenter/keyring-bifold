@@ -20,7 +20,16 @@ import {
 } from '../notice'
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 
-jest.mock('../../vrc/vrc-manager', () => ({ RCE_PROTOCOL_VERSION: 6 }))
+// This phone's version, changed per test to simulate a later bump.
+let mockRceVersion = 6
+jest.mock('../../vrc/vrc-manager', () => ({
+  get RCE_PROTOCOL_VERSION() {
+    return mockRceVersion
+  },
+}))
+beforeEach(() => {
+  mockRceVersion = 6
+})
 // The refusal path deletes through history.ts, which reads the chat's media folder. This chat has no media.
 // Explicit, rather than jest's automock, whose shape follows whichever react-native-fs build is installed.
 jest.mock('react-native-fs', () => ({
@@ -185,6 +194,26 @@ describe('sendCapabilityNoticeIfNeeded', () => {
     expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS - 1)).toBe('recent')
     expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW + NOTICE_RETRY_MS)).toBe('sent')
     expect(fake.sent).toHaveLength(2)
+  })
+
+  it('announces a later version to a contact stored below it, and nothing to one stored at it', async () => {
+    mockRceVersion = 7
+    const atSix = makeAgent({ rceVersion: 6 })
+    expect(await sendCapabilityNoticeIfNeeded(atSix.agent, 'conn-1', NOW)).toBe('sent')
+    expect((atSix.sent[0].message as ChatCapabilityMessage).rceVersion).toBe(7)
+    const atSeven = makeAgent({ rceVersion: 7 })
+    expect(await sendCapabilityNoticeIfNeeded(atSeven.agent, 'conn-1', NOW)).toBe('not-needed')
+  })
+
+  it('notices again a contact that refused a chat event, even one stored at this version', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    fake.addEvent(sentEvent('conn-1', 'reaction'))
+    await receiveChatProblemReport(
+      fake.agent,
+      { message: problemReport(EVENT_ID), connection: fake.connections['conn-1'] } as never,
+      NOW
+    )
+    expect(await sendCapabilityNoticeIfNeeded(fake.agent, 'conn-1', NOW)).toBe('sent')
   })
 
   it('sends nothing to a contact already known to speak chat, or on a DIDComm v2 connection', async () => {

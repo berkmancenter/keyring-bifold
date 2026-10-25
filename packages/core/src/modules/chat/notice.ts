@@ -33,7 +33,6 @@ import {
 
 import { RCE_PROTOCOL_VERSION } from '../vrc/vrc-manager'
 import { RelationshipDidRepository } from '../vrc/repositories/RelationshipDidRepository'
-import { counterpartySpeaksChat } from './capability'
 import { getChatEventRepository, getChatPeerRepository } from './ChatModule'
 import { deleteChatMessages } from './history'
 import { ChatCapabilityMessage } from './messages/ChatCapabilityMessage'
@@ -79,6 +78,19 @@ async function peerRecord(agent: Agent, connectionId: string): Promise<ChatPeerR
   return created
 }
 
+async function knowsThisPhonesVersion(agent: Agent, connection: DidCommConnectionRecord): Promise<boolean> {
+  if (!connection.theirDid) return false
+  try {
+    const relationships = agent.dependencyManager.resolve(RelationshipDidRepository)
+    const relationship = await relationships.findByConnectionDid(agent.context, connection.theirDid)
+    if ((relationship?.counterpartyRceVersion ?? 1) < RCE_PROTOCOL_VERSION) return false
+    const peer = await getChatPeerRepository(agent).findByConnection(agent.context, connection.id)
+    return !peer?.chatRefusedAt
+  } catch {
+    return false
+  }
+}
+
 async function sendNotice(agent: Agent, connection: DidCommConnectionRecord, reply: boolean, now: number) {
   const message = new ChatCapabilityMessage({ rceVersion: RCE_PROTOCOL_VERSION, reply })
   const messageSender = agent.dependencyManager.container.resolve(DidCommMessageSender)
@@ -93,8 +105,15 @@ async function sendNotice(agent: Agent, connection: DidCommConnectionRecord, rep
 
 /**
  * Called when the person opens a chat. Sends this phone's notice when the
- * contact is not known to speak chat and no notice went out in the last
- * {@link NOTICE_RETRY_MS}.
+ * contact may not know this phone's RCE version, and no notice went out in the
+ * last {@link NOTICE_RETRY_MS}.
+ *
+ * A contact stored at this phone's version or newer already knows it: it was
+ * announced in the relationship handshake, or this phone answered that
+ * contact's own notice. Anything lower may not, so every version bump is
+ * announced the way chat was (a later capability, such as photos, reaches
+ * contacts made before it without code of its own). A contact that refused a
+ * chat event is noticed again, as before.
  */
 export async function sendCapabilityNoticeIfNeeded(
   agent: Agent,
@@ -104,7 +123,7 @@ export async function sendCapabilityNoticeIfNeeded(
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   // Chat rides DIDComm v1 only, for now (plan §4.1).
   if (connection.didcommVersion === 'v2') return 'not-v1'
-  if (await counterpartySpeaksChat(agent, connectionId)) return 'not-needed'
+  if (await knowsThisPhonesVersion(agent, connection)) return 'not-needed'
   const existing = await getChatPeerRepository(agent).findByConnection(agent.context, connectionId)
   if (existing?.noticeSentAt && now - existing.noticeSentAt.getTime() < NOTICE_RETRY_MS) return 'recent'
   await sendNotice(agent, connection, false, now)
