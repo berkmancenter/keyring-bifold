@@ -214,6 +214,23 @@ describe("a received message's first display", () => {
     expect(chatEventsShown).toHaveBeenCalledWith(expect.anything(), '1', [RECEIVED_CHAT])
   })
 
+  test('in view before the agent is ready: reported once it is', () => {
+    const ready = (useAgent as jest.Mock)()
+    ;(useAgent as jest.Mock).mockReturnValue({ ...ready, agent: undefined })
+    try {
+      const tree = render(chatScreen())
+      scrollsIntoView(tree)
+      expect(chatEventsShown).not.toHaveBeenCalled()
+
+      ;(useAgent as jest.Mock).mockReturnValue(ready)
+      tree.rerender(chatScreen())
+      expect(chatEventsShown).toHaveBeenCalledTimes(1)
+      expect(chatEventsShown).toHaveBeenCalledWith(ready.agent, '1', [RECEIVED_CHAT])
+    } finally {
+      ;(useAgent as jest.Mock).mockReturnValue(ready)
+    }
+  })
+
   // iOS's app switcher and incoming-call screen leave the app 'inactive': the chat is behind them, not looked at.
   test('in view while the app is inactive: not reported', () => {
     const tree = render(chatScreen())

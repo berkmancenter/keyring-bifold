@@ -230,9 +230,10 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     shownRef.current.viewable = viewableItems
     reportShown()
   }).current
+  // ...and when the agent arrives, for what came into view before it did.
   useEffect(() => {
     if (attended) reportShown()
-  }, [attended, reportShown])
+  }, [attended, agent, reportShown])
 
   useEffect(() => {
     navigation.setOptions({
