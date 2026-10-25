@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "ee1d909e4ba65e253a0e9d5901a42867cfd0d01d",
+  "generatedFrom": "20a7f6249b1566a1ba2f40d5e8f8e3011a207e47",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -277,9 +277,11 @@
     "CommunityNameClaimed": ["src/modules/trust-tasks/screens/VtiCommunity.ids.ts"],
     "CommunityOpenDesk": ["src/modules/trust-tasks/screens/VtiCommunity.ids.ts"],
     "CommunityPass": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
+    "CommunityPassAgent": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
     "CommunityPassLapsing": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
     "CommunityPassLogo": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
     "CommunityPassMark": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
+    "CommunityPassStatus": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
     "CommunityPassTitle": ["src/modules/trust-tasks/components/CommunityPass.tsx"],
     "CommunityReadAgain": ["src/modules/trust-tasks/screens/VtiCommunity.ids.ts"],
     "CommunityReadFailed": ["src/modules/trust-tasks/screens/VtiCommunity.ids.ts"],

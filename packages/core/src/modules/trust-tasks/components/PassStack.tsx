@@ -10,7 +10,9 @@ import React, { useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useWindowDimensions, View } from 'react-native'
 
+import { CredentialErrors } from '../../../types/credentials'
 import { testIdWithKey } from '../../../utils/testable'
+import { useCredentialErrorsFromRegistry } from '../../openid/hooks/useCredentialErrorsFromRegistry'
 import { toRawCredential } from '../../vrc/utils/rcardDisplayUtils'
 import { useCommunityBrand } from '../module/useCommunityBrand'
 import { communityTarget } from '../module/vtiCommunityLink'
@@ -39,11 +41,19 @@ const StackedPass: React.FC<{
   const { t } = useTranslation()
   const published = usePublishedName(communityDid)
   const brand = useCommunityBrand(communityDid, published)
+  // What the card before the pass showed from the credential registry, kept.
+  const revoked = useCredentialErrorsFromRegistry(record).includes(CredentialErrors.Revoked)
   const face = passFace(vc, t, published)
   if (!face) return null
   return (
     <View style={{ marginTop: -overlap }} testID={testIdWithKey('PassStackItem')}>
-      <CommunityPass face={face} brand={brand} front={front} onPress={() => onOpen(record)} />
+      <CommunityPass
+        face={face}
+        brand={brand}
+        front={front}
+        onPress={() => onOpen(record)}
+        status={revoked ? t('CredentialDetails.Revoked') : undefined}
+      />
     </View>
   )
 }

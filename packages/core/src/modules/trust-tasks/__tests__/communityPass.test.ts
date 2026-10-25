@@ -8,6 +8,7 @@ import i18next, { type TFunction } from 'i18next'
 import { COMMUNITY, membershipCard, roleCard } from '../../../../__tests__/helpers/cardVault'
 import { translationResources } from '../../../localization'
 import { localDate } from '../screens/localTime'
+import { setCardAgentNames } from '../screens/communityCardDisplay'
 import { LAPSING_WITHIN_DAYS, passFace } from '../screens/communityPass'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -82,6 +83,21 @@ describe('a community card’s pass', () => {
     expect(passFace(membershipCard, t, 'Guild', NOW)!.accessibilityLabel).toBe(
       `Guild, Member, Member since ${localDate('2026-09-26T09:00:00.000Z')}, 25 days left`
     )
+  })
+
+  test('on a phone with several agents, whose card it is: the agent holding its identity', async () => {
+    const t = await words('en')
+    const subject = (membershipCard.credentialSubject as { id: string }).id
+    setCardAgentNames(new Map([[subject, 'Personal']]))
+    try {
+      const face = passFace(membershipCard, t, 'Guild', NOW)!
+      expect(face.agent).toBe('Personal')
+      expect(face.accessibilityLabel).toContain('Personal')
+    } finally {
+      setCardAgentNames(new Map())
+    }
+    // One agent: nothing added (positive control above).
+    expect(passFace(membershipCard, t, 'Guild', NOW)!.agent).toBeUndefined()
   })
 
   test('any other credential has no pass', async () => {

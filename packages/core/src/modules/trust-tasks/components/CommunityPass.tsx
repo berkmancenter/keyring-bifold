@@ -68,15 +68,17 @@ export interface CommunityPassProps {
   /** The pass in front: its dates show. A pass behind shows its strip only. */
   front: boolean
   onPress: () => void
+  /** A problem with the card the Wallet knows of ("Revoked"), as the card before the pass showed it. */
+  status?: string
 }
 
-export const CommunityPass: React.FC<CommunityPassProps> = ({ face, brand, front, onPress }) => {
+export const CommunityPass: React.FC<CommunityPassProps> = ({ face, brand, front, onPress, status }) => {
   const look = brand.known ? brand.value : undefined
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={face.accessibilityLabel}
+      accessibilityLabel={status ? `${face.accessibilityLabel}, ${status}` : face.accessibilityLabel}
       testID={testIdWithKey('CommunityPass')}
       style={[styles.pass, { backgroundColor: look?.color ?? NEUTRAL }]}
     >
@@ -98,13 +100,21 @@ export const CommunityPass: React.FC<CommunityPassProps> = ({ face, brand, front
           <Text style={styles.title} numberOfLines={1} testID={testIdWithKey('CommunityPassTitle')}>
             {face.title}
           </Text>
-          {front && face.unnamedNote ? (
+          {face.agent ? (
+            <Text style={styles.note} numberOfLines={1} testID={testIdWithKey('CommunityPassAgent')}>
+              {face.agent}
+            </Text>
+          ) : front && face.unnamedNote ? (
             <Text style={styles.note} numberOfLines={1}>
               {face.unnamedNote}
             </Text>
           ) : null}
         </View>
-        {face.lapsing ? (
+        {status ? (
+          <Text style={styles.statusPill} testID={testIdWithKey('CommunityPassStatus')}>
+            {status}
+          </Text>
+        ) : face.lapsing ? (
           <Text style={styles.pill} testID={testIdWithKey('CommunityPassLapsing')}>
             {face.lapsing}
           </Text>
@@ -139,6 +149,8 @@ const styles = StyleSheet.create({
     aspectRatio: PASS_ASPECT,
     borderRadius: 14,
     overflow: 'hidden',
+    // The same elevation on every pass: Android orders siblings by elevation and only falls back to drawing order
+    // when it is equal, so a front pass lifted higher would turn the stack over on Android but not on iOS.
     elevation: 4,
     shadowColor: '#000000',
     shadowOpacity: 0.22,
@@ -163,6 +175,16 @@ const styles = StyleSheet.create({
   pill: {
     backgroundColor: '#FFE8B3',
     color: '#5C3B00',
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  statusPill: {
+    backgroundColor: '#FDE2E4',
+    color: '#8A1020',
     fontSize: 12,
     fontWeight: '700',
     paddingHorizontal: 8,

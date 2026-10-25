@@ -10,6 +10,7 @@ import React from 'react'
 import { useCredentials } from '@bifold/react-hooks'
 
 import ListCredentials from '../../src/screens/ListCredentials'
+import { credentialRegistry } from '../../src/modules/openid/refresh/registry'
 import { Screens } from '../../src/types/navigators'
 import { testIdWithKey } from '../../src/utils/testable'
 import { COMMUNITY, membershipCard, roleCard } from '../helpers/cardVault'
@@ -94,6 +95,19 @@ describe('the Wallet’s community cards', () => {
     const tree = wallet(Array.from({ length: 12 }, (_, i) => cardRecord(i)))
     expect(await tree.findAllByTestId(testIdWithKey('CommunityPass'))).toHaveLength(12)
     expect(tree.getAllByTestId(testIdWithKey('PassStackItem'))).toHaveLength(12)
+  })
+
+  test('a card the credential registry marks invalid still says "Revoked" on its pass, as the card before did', async () => {
+    const records = [cardRecord(1), cardRecord(2)]
+    credentialRegistry.setState({ expired: [records[0].id] })
+    try {
+      const tree = wallet(records)
+      const statuses = await tree.findAllByTestId(testIdWithKey('CommunityPassStatus'))
+      // One pass of two: only the flagged card (the other is the positive control).
+      expect(statuses).toHaveLength(1)
+    } finally {
+      credentialRegistry.setState({ expired: [] })
+    }
   })
 
   test('community cards alone are not "no credentials"', async () => {

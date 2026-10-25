@@ -13,7 +13,7 @@ import type { TFunction } from 'i18next'
 import { classifyCredential, roleNameOf } from '../module/vtiInbox'
 import { isCommunityCard } from '../module/vtiWalletCards'
 
-import { roleWords } from './communityCardDisplay'
+import { cardAgentNameOf, roleWords } from './communityCardDisplay'
 import { unnamedRef } from './communityName'
 import { localDate } from './localTime'
 
@@ -37,6 +37,8 @@ export interface PassFace {
   secondField?: { label: string; value: string }
   /** "19 days left", when the card lapses within {@link LAPSING_WITHIN_DAYS} days. */
   lapsing?: string
+  /** The agent holding this card's identity, when the phone has several: whose card it is. */
+  agent?: string
   /** Read by screen readers: the whole face in one sentence. */
   accessibilityLabel: string
 }
@@ -98,7 +100,8 @@ export function passFace(
   const name = published?.trim() || undefined
   const title = name ?? unnamedRef(communityDid)
   const unnamedNote = name ? undefined : words('Community.PassNoName')
-  const accessibilityLabel = [title, kindWords, field && `${field.label} ${field.value}`, lapsing]
+  const agent = cardAgentNameOf((vc.credentialSubject as { id?: unknown } | undefined)?.id)
+  const accessibilityLabel = [title, kindWords, agent, field && `${field.label} ${field.value}`, lapsing]
     .filter(Boolean)
     .join(', ')
 
@@ -111,6 +114,7 @@ export function passFace(
     field,
     secondField,
     lapsing,
+    agent,
     accessibilityLabel,
   }
 }

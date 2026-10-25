@@ -77,6 +77,32 @@ describe('a community pass', () => {
     expect(passOf(tree).props.accessibilityLabel).toBe(face.accessibilityLabel)
   })
 
+  test('the holding agent, when the phone has several, shows on the strip', () => {
+    const tree = render(
+      <CommunityPass
+        face={{ ...face, agent: 'Personal' }}
+        brand={{ known: true, value: brand }}
+        front={false}
+        onPress={jest.fn()}
+      />
+    )
+    expect(tree.getByTestId(testIdWithKey('CommunityPassAgent'))).toHaveTextContent('Personal')
+  })
+
+  test('a card the Wallet knows is revoked says so on its strip, and to a screen reader', () => {
+    const tree = render(
+      <CommunityPass
+        face={face}
+        brand={{ known: true, value: brand }}
+        front={false}
+        onPress={jest.fn()}
+        status="Revoked"
+      />
+    )
+    expect(tree.getByTestId(testIdWithKey('CommunityPassStatus'))).toHaveTextContent('Revoked')
+    expect(passOf(tree).props.accessibilityLabel).toBe(`${face.accessibilityLabel}, Revoked`)
+  })
+
   test('a tap opens it', () => {
     const onPress = jest.fn()
     const tree = render(<CommunityPass face={face} brand={{ known: true, value: brand }} front onPress={onPress} />)
