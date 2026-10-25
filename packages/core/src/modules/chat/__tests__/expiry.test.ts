@@ -111,6 +111,23 @@ describe('the expiry sweep', () => {
     expect(ids()).toEqual([])
   })
 
+  test('a record the other sweep deleted meanwhile is not a failure: this sweep goes on and deletes what is due', async () => {
+    const gone = message('GONE', 'received', { expiresIn: HOUR })
+    gone.metadata.set('_keyring/chatSeen', { at: at(0).toISOString() })
+    events = [gone, message('DUE', 'sent', { expiresIn: HOUR, expiresAt: at(min(10)) })]
+    repository.update.mockRejectedValueOnce(Object.assign(new Error('gone'), { name: 'RecordNotFoundError' }))
+    await expect(sweepExpired(agent, at(min(20)))).resolves.toBe(1)
+    expect(ids()).toEqual(['GONE'])
+  })
+
+  test('a store that cannot be written still fails the sweep, so it is logged and retried', async () => {
+    const m = message('SEEN', 'received', { expiresIn: HOUR })
+    m.metadata.set('_keyring/chatSeen', { at: at(0).toISOString() })
+    events = [m]
+    repository.update.mockRejectedValueOnce(new Error('the store could not be written'))
+    await expect(sweepExpired(agent, at(min(20)))).rejects.toThrow('could not be written')
+  })
+
   test('a received timed message neither shown nor seen is never deleted by its timer, however old', async () => {
     events = [message('UNREAD', 'received', { expiresIn: HOUR })]
     expect(await sweepExpired(agent, at(min(60 * 24 * 7 * 10)))).toBe(0)

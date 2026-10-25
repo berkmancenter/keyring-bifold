@@ -40,7 +40,11 @@ export async function sweepExpired(agent: Agent, now = new Date()): Promise<numb
     const seen = seenAt(record)
     if (seen === undefined) continue
     record.expiresAt = new Date(seen + record.expiresIn * 1000)
-    await repository.update(agent.context, record)
+    // The Keep messages sweep (retention.ts) runs at the same moments and may have deleted this record since it was
+    // listed: that is what both sweeps want, so it is not a failure, and the rest of this sweep goes on.
+    await repository.update(agent.context, record).catch((error: unknown) => {
+      if ((error as Error | undefined)?.name !== 'RecordNotFoundError') throw error
+    })
   }
 
   const due = new Map<string, string[]>()
