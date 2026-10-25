@@ -37,8 +37,12 @@ export interface EmojiSet {
   groups: { name: string; entries: EmojiEntry[] }[]
   /** Every fully-qualified emoji, by its exact string. */
   byEmoji: ReadonlyMap<string, EmojiEntry>
-  /** Minimally-qualified and unqualified forms, to their fully-qualified emoji. */
-  aliases: Readonly<Record<string, string>>
+  /**
+   * Minimally-qualified and unqualified forms, to their fully-qualified emoji.
+   * A Map, not the parsed JSON object: indexing a plain object also finds
+   * inherited keys, so "toString" or "__proto__" would come back as a match.
+   */
+  aliases: ReadonlyMap<string, string>
 }
 
 let cached: EmojiSet | undefined
@@ -60,7 +64,7 @@ export function toEmojiSet(file: EmojiDataFile): EmojiSet {
       return entry
     }),
   }))
-  return { unicode: file.unicode, groups, byEmoji, aliases: file.aliases }
+  return { unicode: file.unicode, groups, byEmoji, aliases: new Map(Object.entries(file.aliases)) }
 }
 
 /**

@@ -22,7 +22,7 @@ export function normalizeEmoji(input: unknown): string | undefined {
   if (typeof input !== 'string' || input.length === 0 || input.length > MAX_EMOJI_LENGTH) return undefined
   const set = getEmojiSet()
   if (set.byEmoji.has(input)) return input
-  return set.aliases[input]
+  return set.aliases.get(input)
 }
 
 /** The CLDR English name of an emoji in any accepted form, for accessibility labels. */

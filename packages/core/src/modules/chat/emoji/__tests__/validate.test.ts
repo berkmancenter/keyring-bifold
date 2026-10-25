@@ -37,6 +37,17 @@ describe('normalizeEmoji', () => {
     expect(normalizeEmoji('\u{1F1F2}')).toBeUndefined() // half a flag
   })
 
+  // A received reaction is untrusted: a name that exists on every plain object
+  // must not pass as an emoji (review of #552).
+  it.each(['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__', 'isPrototypeOf', 'toLocaleString'])(
+    'rejects %s, which every plain object inherits',
+    (name) => {
+      expect(normalizeEmoji(name)).toBeUndefined()
+      expect(emojiName(name)).toBeUndefined()
+      expect(emojiVersion(name)).toBeUndefined()
+    }
+  )
+
   it('rejects empty, over-long and non-string input', () => {
     expect(normalizeEmoji('')).toBeUndefined()
     expect(normalizeEmoji('👍'.repeat(MAX_EMOJI_LENGTH))).toBeUndefined()
@@ -51,7 +62,7 @@ describe('normalizeEmoji', () => {
       expect(emoji.length).toBeLessThanOrEqual(MAX_EMOJI_LENGTH)
       expect(normalizeEmoji(emoji)).toBe(emoji)
     }
-    for (const [alias, fq] of Object.entries(set.aliases)) expect(normalizeEmoji(alias)).toBe(fq)
+    for (const [alias, fq] of set.aliases) expect(normalizeEmoji(alias)).toBe(fq)
   })
 })
 
