@@ -31,6 +31,7 @@ describe('a rooms operation row', () => {
     ['adminOnly', 'unavailable', 'Rooms.AdminOnly'],
     ['noAgentLinked', 'unavailable', 'Rooms.NoAgentLinked'],
     ['agentUnknown', 'unavailable', 'Rooms.AgentUnknown'],
+    ['communityDoesNotServe', 'unavailable', 'Rooms.CommunityNeedsUpdate'],
   ] as const)('%s: shows "%s" words, disabled, and does nothing when pressed', (reason, status, words) => {
     const { tree, onPress } = show(statusOf(status, reason))
     expect(tree.getByText(words)).toBeTruthy()

@@ -2592,6 +2592,7 @@
     "ComingSoon": "Em breve",
     "NotAvailableYet": "Ainda não disponível",
     "AgentNeedsUpdate": "Seu agente precisa ser atualizado",
+    "CommunityNeedsUpdate": "Esta comunidade precisa de uma atualização",
     "AdminOnly": "Só os administradores da comunidade podem ver isto",
     "NoAgentLinked": "Vincule seu agente primeiro",
     "AgentUnknown": "Não foi possível falar com seu agente. Tente mais tarde."

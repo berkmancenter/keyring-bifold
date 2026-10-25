@@ -2752,6 +2752,7 @@
     "ComingSoon": "Coming soon",
     "NotAvailableYet": "Not available yet",
     "AgentNeedsUpdate": "Your agent needs an update",
+    "CommunityNeedsUpdate": "This community needs an update",
     "AdminOnly": "Only the community's administrators can see this",
     "NoAgentLinked": "Link your agent first",
     "AgentUnknown": "Couldn't reach your agent. Try again later."
