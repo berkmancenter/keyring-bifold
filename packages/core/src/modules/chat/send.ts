@@ -19,9 +19,11 @@ import { counterpartySpeaksChat } from './capability'
 import { CHAT_PROFILE, MAX_TEXT_LENGTH, MAX_TIMER_VERSION, isUlid } from './chatEvent'
 import type { ChatEvent } from './chatEvent'
 import { getChatEventRepository } from './ChatModule'
+import { normalizeEmoji } from './emoji/validate'
 import { newEventId } from './eventId'
 import { ChatEventMessage } from './messages/ChatEventMessage'
 import { ChatEventRecord } from './records/ChatEventRecord'
+import { whileSending } from './sending'
 import { TIMER_CHOICES, currentTimer, nextTimerVersion } from './timer'
 
 /** How a send went out. `not-sent` is a reaction or redaction to a contact without chat. */
@@ -31,6 +33,12 @@ export type ChatSendOutcome =
   | { carriedAs: 'not-sent' }
 
 async function sendEvent(agent: Agent, connectionId: string, event: ChatEvent): Promise<ChatEventRecord> {
+  // Marked from before the send until the record is stored, so a peer cannot slip the same eventId in between
+  // (sending.ts, inbound.ts).
+  return whileSending(connectionId, event.eventId, () => sendAndStore(agent, connectionId, event))
+}
+
+async function sendAndStore(agent: Agent, connectionId: string, event: ChatEvent): Promise<ChatEventRecord> {
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   const messageSender = agent.dependencyManager.container.resolve(DidCommMessageSender)
   await messageSender.sendMessage(
@@ -120,8 +128,16 @@ export async function sendReaction(
   emoji: string
 ): Promise<ChatSendOutcome> {
   if (!isUlid(targetEventId)) throw new Error('chat: reaction target is not an event id')
+  // The receiver accepts only one emoji of the pinned set; send it in the same fully-qualified form.
+  const reaction = normalizeEmoji(emoji)
+  if (!reaction) throw new Error('chat: reaction is not one emoji of the pinned set')
   if (!(await counterpartySpeaksChat(agent, connectionId))) return { carriedAs: 'not-sent' }
-  const record = await sendEvent(agent, connectionId, { ...base(), type: 'reaction', target: targetEventId, emoji })
+  const record = await sendEvent(agent, connectionId, {
+    ...base(),
+    type: 'reaction',
+    target: targetEventId,
+    emoji: reaction,
+  })
   return { carriedAs: 'chat', record }
 }
 
