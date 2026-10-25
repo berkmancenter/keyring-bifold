@@ -49,7 +49,7 @@ async function sendEvent(
   agent: Agent,
   connectionId: string,
   event: ChatOutgoingEvent,
-  stored: { attachments?: ChatStoredAttachment[] } = {}
+  stored: { attachments?: ChatStoredAttachment[]; fallbackText?: string } = {}
 ): Promise<ChatEventRecord> {
   // Marked from before the send until the record is stored, so a peer cannot slip the same eventId in between
   // (sending.ts, inbound.ts).
@@ -60,7 +60,7 @@ async function sendAndStore(
   agent: Agent,
   connectionId: string,
   event: ChatOutgoingEvent,
-  stored: { attachments?: ChatStoredAttachment[] }
+  stored: { attachments?: ChatStoredAttachment[]; fallbackText?: string }
 ): Promise<ChatEventRecord> {
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   const messageSender = agent.dependencyManager.container.resolve(DidCommMessageSender)
@@ -79,6 +79,7 @@ async function sendAndStore(
       ? {
           content: event.content,
           attachments: stored.attachments,
+          fallbackText: stored.fallbackText,
           inReplyTo: event.inReplyTo,
           expiresIn: event.expiresIn,
           // D4: the sender's copy starts its clock at send.
@@ -160,11 +161,10 @@ export async function sendChatPhoto(
   if (caption && caption.length > MAX_TEXT_LENGTH)
     throw new Error(`chat: caption longer than ${MAX_TEXT_LENGTH} characters`)
 
+  // The same words go to a contact without chat now, and to one that refuses the chat event later (notice.ts).
+  const fallbackText = caption ? `${options.fallbackText}\n\n${caption}` : options.fallbackText
   if (!(await counterpartySpeaksChat(agent, connectionId))) {
-    await agent.modules.didcomm.basicMessages.sendMessage(
-      connectionId,
-      caption ? `${options.fallbackText}\n\n${caption}` : options.fallbackText
-    )
+    await agent.modules.didcomm.basicMessages.sendMessage(connectionId, fallbackText)
     return { carriedAs: 'basic' }
   }
 
@@ -180,6 +180,7 @@ export async function sendChatPhoto(
   const { header } = checked.image
   const file = await writeChatMedia(connectionId, event.eventId, header.mediaType, photo.base64)
   const record = await sendEvent(agent, connectionId, event, {
+    fallbackText,
     attachments: [
       {
         id: descriptor.id,

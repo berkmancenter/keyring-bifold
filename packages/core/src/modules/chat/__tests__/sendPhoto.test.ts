@@ -8,7 +8,7 @@ import { writeChatMedia } from '../media/store'
 import { jpegHeader, paddedTo } from '../media/__tests__/fixtures/images'
 import type { ChatEventMessage } from '../messages/ChatEventMessage'
 import type { ChatEventRecord } from '../records/ChatEventRecord'
-import { ChatPhotoRefusedError, sendChatPhoto } from '../send'
+import { ChatPhotoRefusedError, sendChatPhoto, sendChatText } from '../send'
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 
 // The order of the photo's write, the send and the record's save, across all three.
@@ -126,6 +126,8 @@ describe('sendChatPhoto, to a contact that speaks chat', () => {
         file: `${event.eventId}.jpg`,
       },
     ])
+    // What a refusal would resend in its place (notice.ts).
+    expect(fake.stored[0].fallbackText).toBe(`${FALLBACK}\n\nlook`)
     expect(JSON.stringify(fake.stored[0])).not.toContain(photo.base64.slice(0, 40))
     expect(fake.basic).toHaveLength(0)
   })
@@ -166,6 +168,13 @@ describe('sendChatPhoto refuses before anything is sent or written', () => {
       expect(fake.stored).toHaveLength(0)
     }
   })
+})
+
+// Only a photo carries a stand-in: a refused text message resends its own text (notice.ts).
+it('stores no fallbackText for a text message', async () => {
+  const fake = makeAgent({ rceVersion: 6 })
+  await sendChatText(fake.agent, 'conn-1', 'hello')
+  expect(fake.stored[0].fallbackText).toBeUndefined()
 })
 
 describe('sendChatPhoto, to a contact without chat (271 and older)', () => {
