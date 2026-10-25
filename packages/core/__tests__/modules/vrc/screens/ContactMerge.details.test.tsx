@@ -136,10 +136,17 @@ describe('Same person? on a contact', () => {
       fireEvent.press(tree.getByTestId(id('ContactMergeOffer')))
       expect(tree.getByText('ContactDetails.MergeConfirmTitle (count 2)')).toBeTruthy()
       fireEvent.press(tree.getByTestId(id('ContactMergeYes')))
-      // The third relationship's card arriving on this contact is the sign the merge landed; then no offer is left.
+      // First what was stored (did the merge land?), then what the screen shows (did it read the links again?).
+      await waitFor(() => expect(store.records).toHaveLength(2), { timeout: 5000 })
+      expect(tree.queryByTestId(id('ContactMergeFailed'))).toBeNull()
+      expect(new Map(store.records.map((r) => [r.content.issuerDid, r.content.contactId]))).toEqual(
+        new Map([
+          [ALICE_AGAIN.id, ALICE_FIRST.id],
+          [ALICE_THIRD.id, ALICE_FIRST.id],
+        ])
+      )
       await waitFor(() => expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(4), { timeout: 5000 })
       expect(tree.queryByTestId(id('ContactMergeOffer'))).toBeNull()
-      expect(store.records.map((r) => r.content.contactId)).toEqual([ALICE_FIRST.id, ALICE_FIRST.id])
     })
   })
 
