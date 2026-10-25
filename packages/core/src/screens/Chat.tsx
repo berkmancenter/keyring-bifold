@@ -265,7 +265,11 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const notSentNotice = useCallback(
     (outcome: ChatSendOutcome) => {
       if (outcome.carriedAs !== 'not-sent') return
-      Toast.show({ type: ToastType.Info, text1: t('Chat.ReactionNeedsUpdate', { name: theirLabel }) })
+      // A contact's name is shown as typed: i18next would otherwise turn "A/B" into "A&#x2F;B".
+      Toast.show({
+        type: ToastType.Info,
+        text1: t('Chat.ReactionNeedsUpdate', { name: theirLabel, interpolation: { escapeValue: false } }),
+      })
     },
     [t, theirLabel]
   )
