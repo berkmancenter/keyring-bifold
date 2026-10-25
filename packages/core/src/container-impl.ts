@@ -1,5 +1,6 @@
 import { DefaultOCABundleResolver } from '@bifold/oca/build/legacy'
 import { sweepStaleWalletBackupsAtStart } from './utils/walletBackup'
+import { installAskarScanListFree } from './utils/askarScanFreesLists'
 import { getProofRequestTemplates } from '@bifold/verifier'
 import { Agent } from '@credo-ts/core'
 import React, { createContext, useContext } from 'react'
@@ -133,6 +134,8 @@ export class MainContainer implements Container {
     this.log?.info(`Initializing Bifold container`)
     // A wallet backup shared from Export Wallet is left under the caches for its share target; a day is enough.
     sweepStaleWalletBackupsAtStart()
+    // Before any agent opens its store: askar-shared 0.6.0's Scan leaks each query's native result list.
+    this.log?.info(`Askar scan list free: ${installAskarScanListFree()}`)
 
     this._container.registerInstance(TOKENS.SCREEN_PREFACE, Preface)
     this._container.registerInstance(TOKENS.SCREEN_DEVELOPER, Developer)
