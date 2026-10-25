@@ -43,6 +43,8 @@ export type RoomsOperation =
  * - `adminOnly`: only a community's administrators may do it.
  * - `noAgentLinked`: the phone has no agent to ask.
  * - `agentUnknown`: the agent could not be asked what it serves; try again later.
+ * - `communityDoesNotServe`: the community's service is too old for it (reserved: community
+ *   operations are not yet discovered in advance, so today a call to an old community fails instead).
  */
 export type RoomsReason =
   | 'ok'
@@ -53,6 +55,7 @@ export type RoomsReason =
   | 'adminOnly'
   | 'noAgentLinked'
   | 'agentUnknown'
+  | 'communityDoesNotServe'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -128,6 +131,11 @@ export interface WriteDraft {
 /**
  * What the confirmation sheet shows before anything leaves the phone. `confirmWrite(token)` sends
  * exactly this. The identity is named before consent, never after.
+ *
+ * A preview token is single-use and lasts `PREVIEW_TOKEN_TTL_MS`. A token that is spent, too old, or
+ * from before the app restarted gives `RoomsPreviewExpired`, and the sheet says "prepare it again". If
+ * a note being replaced changed since the preview, `confirmWrite` gives `RoomsConflict` with the
+ * current version, and the sheet offers "Re-read". Nothing is sent in either case.
  */
 export interface WritePreview {
   token: string
@@ -203,6 +211,9 @@ export interface AgentGrantRequest {
   expiresAt: string
 }
 
+/** How long a write or offer preview token stays valid. */
+export const PREVIEW_TOKEN_TTL_MS = 10 * 60 * 1000
+
 /** Thrown by an operation whose status is not `available`. */
 export class RoomsUnavailable extends Error {
   public constructor(
@@ -215,9 +226,30 @@ export class RoomsUnavailable extends Error {
   }
 }
 
+/** A preview token that is spent, older than `PREVIEW_TOKEN_TTL_MS`, or unknown. Nothing was sent. */
+export class RoomsPreviewExpired extends Error {
+  public constructor(public readonly token: string) {
+    super('this preview has expired; prepare it again')
+    this.name = 'RoomsPreviewExpired'
+  }
+}
+
+/** The note being replaced changed since the preview. Nothing was sent; re-read it first. */
+export class RoomsConflict extends Error {
+  public constructor(
+    public readonly key: string,
+    public readonly currentVersion: number
+  ) {
+    super(`note ${key} changed since the preview (now version ${currentVersion})`)
+    this.name = 'RoomsConflict'
+  }
+}
+
 export interface RoomsService {
   /** True for the fixture service: every screen it feeds shows the "Sample data" banner. */
   readonly isSample: boolean
+  /** For logs and support. The sample service puts its build marker here, where it is read at runtime. */
+  readonly label: string
   /** One status per operation. Cached per agent; `refresh` asks again. */
   capabilities(options?: { refresh?: boolean }): Promise<RoomsCapabilities>
 
@@ -237,6 +269,11 @@ export interface RoomsService {
 
   listFiles(roomId: string): Promise<RoomFile[]>
   openFile(roomId: string, fileId: string): Promise<OpenedFile>
+  /**
+   * Deletes the protected local copy `openFile` made. Call it when the viewer closes. The service also
+   * deletes any copies left from earlier sessions on its first `openFile` after the app starts.
+   */
+  releaseFile(localUri: string): Promise<void>
 
   /** Administrator-only upstream (`vtc.rooms.manage`); a member gets `adminOnly`. */
   listCommunityMembers(communityDid: string, roomId?: string): Promise<CommunityRoomMember[]>

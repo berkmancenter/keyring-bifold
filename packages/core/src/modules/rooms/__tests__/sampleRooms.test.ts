@@ -1,4 +1,4 @@
-import { RoomsUnavailable } from '../types'
+import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsUnavailable } from '../types'
 import { createSampleRoomsService, ROOMS_SAMPLE_DATA } from '../sample/sampleRooms'
 
 const PLANNING = 'did:webvh:sample:planning'
@@ -8,6 +8,8 @@ describe('the sample rooms service', () => {
     const rooms = createSampleRoomsService()
     expect(rooms.isSample).toBe(true)
     expect(ROOMS_SAMPLE_DATA).toMatch(/^ROOMS_SAMPLE_DATA/)
+    // Read at runtime, so a minifier keeps the marker the store-bundle check looks for.
+    expect(rooms.label).toBe(ROOMS_SAMPLE_DATA)
     expect((await rooms.capabilities()).listMyRooms.reason).toBe('sample')
   })
 
@@ -35,7 +37,26 @@ describe('the sample rooms service', () => {
     expect((await rooms.listNotes(PLANNING)).some((n) => n.title === 'Minutes')).toBe(false)
     const { key } = await rooms.confirmWrite(preview.token)
     expect((await rooms.readNote(PLANNING, key)).body).toBe('Agreed item 3.')
-    await expect(rooms.confirmWrite(preview.token)).rejects.toThrow('expired')
+    await expect(rooms.confirmWrite(preview.token)).rejects.toBeInstanceOf(RoomsPreviewExpired)
+  })
+
+  it('a preview older than its lifetime is expired, and nothing is written', async () => {
+    let clock = 1_000_000
+    const rooms = createSampleRoomsService({ now: () => clock })
+    const preview = await rooms.prepareWrite(PLANNING, { title: 'Late', body: 'too late' })
+    clock += PREVIEW_TOKEN_TTL_MS + 1
+    await expect(rooms.confirmWrite(preview.token)).rejects.toBeInstanceOf(RoomsPreviewExpired)
+    expect((await rooms.listNotes(PLANNING)).some((n) => n.title === 'Late')).toBe(false)
+  })
+
+  it('replacing a note that changed since the preview is a conflict carrying the current version', async () => {
+    const rooms = createSampleRoomsService()
+    const stale = await rooms.prepareWrite(PLANNING, { title: 'Agenda v2', body: 'mine', replaceKey: 'n1' })
+    const other = await rooms.prepareWrite(PLANNING, { title: 'Agenda v3', body: 'theirs', replaceKey: 'n1' })
+    const { version } = await rooms.confirmWrite(other.token)
+    const conflict = rooms.confirmWrite(stale.token)
+    await expect(conflict).rejects.toBeInstanceOf(RoomsConflict)
+    await expect(conflict).rejects.toMatchObject({ key: 'n1', currentVersion: version })
   })
 
   it('an open room tells the writer the host can read it, and a read-only room refuses', async () => {

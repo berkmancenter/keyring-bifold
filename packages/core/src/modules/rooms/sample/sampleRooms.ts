@@ -27,9 +27,9 @@ import type {
   WriteDraft,
   WritePreview,
 } from '../types'
-import { RoomsUnavailable } from '../types'
+import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsUnavailable } from '../types'
 
-/** The marker a store build's bundle must not contain. */
+/** The marker a store build's bundle must not contain. It is read at runtime (the service's label), so a minifier keeps it. */
 export const ROOMS_SAMPLE_DATA = 'ROOMS_SAMPLE_DATA: sample rooms, never in a store build'
 
 const COMMUNITY = { did: 'did:webvh:sample:test-vtc', name: toInertText('Test VTC') }
@@ -154,11 +154,13 @@ const summaryOf = ({ notes: _notes, files: _files, actingAs: _actingAs, ...summa
   summary
 
 /** The fixture service. Writes and accepts change only this in-memory sample. */
-export function createSampleRoomsService(): RoomsService {
+export function createSampleRoomsService(options: { now?: () => number } = {}): RoomsService {
+  const now = options.now ?? (() => Date.now())
   const state = sampleState()
-  const pendingWrites = new Map<string, { roomId: string; draft: WriteDraft }>()
-  const pendingOffers = new Map<string, string>()
+  const pendingWrites = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
+  const pendingOffers = new Map<string, { offerId: string; at: number }>()
   let nextToken = 1
+  const fresh = (at: number) => now() - at <= PREVIEW_TOKEN_TTL_MS
 
   const room = (roomId: string): SampleRoom => {
     const found = state.rooms.find((r) => r.roomId === roomId)
@@ -168,6 +170,7 @@ export function createSampleRoomsService(): RoomsService {
 
   return {
     isSample: true,
+    label: ROOMS_SAMPLE_DATA,
     async capabilities(): Promise<RoomsCapabilities> {
       return sampleCapabilities()
     },
@@ -192,7 +195,8 @@ export function createSampleRoomsService(): RoomsService {
       // A per-room right, not a capability: the screens read it from getRoom's verbs before offering to write.
       if (!r.verbs.includes('write')) throw new Error(`this member may only read ${r.name}`)
       const token = `w${nextToken++}`
-      pendingWrites.set(token, { roomId, draft })
+      const replaced = draft.replaceKey ? r.notes.find((n) => n.key === draft.replaceKey) : undefined
+      pendingWrites.set(token, { roomId, draft, at: now(), replacedVersion: replaced?.version })
       return {
         token,
         roomId,
@@ -209,9 +213,14 @@ export function createSampleRoomsService(): RoomsService {
     },
     async confirmWrite(token) {
       const pending = pendingWrites.get(token)
-      if (!pending) throw new Error('this preview has expired; prepare the note again')
       pendingWrites.delete(token)
+      if (!pending || !fresh(pending.at)) throw new RoomsPreviewExpired(token)
       const r = room(pending.roomId)
+      if (pending.draft.replaceKey) {
+        const current = r.notes.find((n) => n.key === pending.draft.replaceKey)
+        if (current && current.version !== pending.replacedVersion)
+          throw new RoomsConflict(current.key, current.version)
+      }
       const version = Math.max(0, ...r.notes.map((n) => n.version)) + 1
       const key = pending.draft.replaceKey ?? `n${version}`
       r.notes = r.notes.filter((n) => n.key !== key)
@@ -242,13 +251,14 @@ export function createSampleRoomsService(): RoomsService {
       const offer = state.offers.find((o) => o.offerId === offerId)
       if (!offer) throw new Error(`no sample offer ${offerId}`)
       const token = `o${nextToken++}`
-      pendingOffers.set(token, offerId)
+      pendingOffers.set(token, { offerId, at: now() })
       return { token, offer, actingAs: ME }
     },
     async acceptOffer(token) {
-      const offerId = pendingOffers.get(token)
-      if (!offerId) throw new Error('this preview has expired; open the offer again')
+      const pending = pendingOffers.get(token)
       pendingOffers.delete(token)
+      if (!pending || !fresh(pending.at)) throw new RoomsPreviewExpired(token)
+      const { offerId } = pending
       const offer = state.offers.find((o) => o.offerId === offerId)!
       state.offers = state.offers.filter((o) => o.offerId !== offerId)
       state.rooms.push({
@@ -276,6 +286,9 @@ export function createSampleRoomsService(): RoomsService {
       const file = room(roomId).files.find((f) => f.fileId === fileId)
       if (!file) throw new Error(`no sample file ${fileId}`)
       return { localUri: `sample://${fileId}`, mediaType: file.mediaType, size: file.size ?? 0 }
+    },
+    async releaseFile() {
+      // Nothing to delete: the sample makes no local copies.
     },
     async listCommunityMembers(): Promise<CommunityRoomMember[]> {
       throw new RoomsUnavailable(
