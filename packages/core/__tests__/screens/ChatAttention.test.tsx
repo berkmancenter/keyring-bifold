@@ -221,7 +221,6 @@ describe("a received message's first display", () => {
       const tree = render(chatScreen())
       scrollsIntoView(tree)
       expect(chatEventsShown).not.toHaveBeenCalled()
-
       ;(useAgent as jest.Mock).mockReturnValue(ready)
       tree.rerender(chatScreen())
       expect(chatEventsShown).toHaveBeenCalledTimes(1)
