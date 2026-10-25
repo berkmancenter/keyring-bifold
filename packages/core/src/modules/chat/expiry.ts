@@ -22,7 +22,9 @@ import { AppState } from 'react-native'
 import { getChatEventRepository } from './ChatModule'
 import { recordExpired } from './expired'
 import { deleteChatMessages } from './history'
+import type { ChatEventRecord } from './records/ChatEventRecord'
 import { seenAt } from './seen'
+import { effectiveExpiresInMs } from '../../utils/e2eClocks'
 
 /** How often the sweep runs while the app is in the foreground, so an open chat loses its messages on time. */
 export const EXPIRY_SWEEP_INTERVAL_MS = 60_000
@@ -39,25 +41,30 @@ export async function sweepExpired(agent: Agent, now = new Date()): Promise<numb
     if (record.role !== 'received' || record.eventType !== 'message' || !record.expiresIn || record.expiresAt) continue
     const seen = seenAt(record)
     if (seen === undefined) continue
-    record.expiresAt = new Date(seen + record.expiresIn * 1000)
+    record.expiresAt = new Date(seen + effectiveExpiresInMs(record.expiresIn))
     // The Keep messages sweep (retention.ts) runs at the same moments and may have deleted this record since it was
     // listed: that is what both sweeps want, so it is not a failure, and the rest of this sweep goes on.
+    // Detected by the error's name, true of @credo-ts/core 0.7.1 (RecordNotFoundError, error/RecordNotFoundError): a
+    // credo upgrade that renames or wraps it would make this sweep stop for a minute again, so re-check it on a bump.
     await repository.update(agent.context, record).catch((error: unknown) => {
       if ((error as Error | undefined)?.name !== 'RecordNotFoundError') throw error
     })
   }
 
-  const due = new Map<string, string[]>()
+  const due = new Map<string, ChatEventRecord[]>()
   for (const record of events) {
     if (record.eventType !== 'message' || !record.expiresAt || record.expiresAt.getTime() > now.getTime()) continue
-    due.set(record.connectionId, [...(due.get(record.connectionId) ?? []), record.eventId])
+    due.set(record.connectionId, [...(due.get(record.connectionId) ?? []), record])
   }
 
   let deleted = 0
-  for (const [connectionId, eventIds] of due) {
-    await deleteChatMessages(agent, connectionId, { eventIds })
-    await recordExpired(connectionId, eventIds)
-    deleted += eventIds.length
+  for (const [connectionId, records] of due) {
+    await deleteChatMessages(agent, connectionId, { events: records })
+    await recordExpired(
+      connectionId,
+      records.map((r) => r.eventId)
+    )
+    deleted += records.length
   }
   return deleted
 }

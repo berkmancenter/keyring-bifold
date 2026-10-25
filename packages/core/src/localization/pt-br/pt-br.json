@@ -1106,6 +1106,19 @@
     "Confirmed": "Eu confirmo que este app é para mim."
   },
   "Chat": {
+    "Photo": "📷 Foto",
+    "AttachCamera": "Câmera",
+    "AttachLibrary": "Biblioteca de fotos",
+    "PhotoFallback": "📷 Foto — atualize o Keyring para vê-la",
+    "GifAsIsTitle": "Enviar este GIF como está?",
+    "GifAsIsBody": "Um GIF é enviado exatamente como está, então tudo o que estiver no arquivo vai junto.",
+    "SendGif": "Enviar GIF",
+    "PhotoNoPermission": "O Keyring precisa de permissão para usar a câmera ou suas fotos. Você pode permitir nos Ajustes.",
+    "GifTooLarge": "Este GIF é grande demais para enviar",
+    "PhotoTooLarge": "Esta foto é grande demais para enviar",
+    "PhotoUnreadable": "Esta foto não pode ser enviada",
+    "PhotoNotSent": "A foto não foi enviada. Tente novamente.",
+    "UnsupportedAttachment": "Anexo não suportado",
     "OpenPresentation": "Abrir apresentação",
     "ViewRequest": "Ver requisição",
     "ViewOffer": "Ver oferta",
@@ -1192,7 +1205,8 @@
     "DisappearingFailed": "Não foi possível alterar as mensagens temporárias. Tente novamente.",
     "PlainSendTitle": "Enviar sem temporizador?",
     "PlainSendBody": "{{name}} precisa atualizar o Keyring para usar mensagens temporárias, então esta mensagem será enviada sem temporizador, como uma mensagem normal.",
-    "PlainSendConfirm": "Enviar mesmo assim"
+    "PlainSendConfirm": "Enviar mesmo assim",
+    "NewMessage": "Nova mensagem"
   },
   "Verifier": {
     "UseVerifierCapability": "Usar o recurso Verificador?",

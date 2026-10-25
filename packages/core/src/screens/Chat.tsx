@@ -22,8 +22,11 @@ import MessageActions from '../components/chat/MessageActions'
 import { useChatAttended } from '../components/chat/useChatAttended'
 import { useComposerText } from '../components/chat/useComposerText'
 import { ToastType } from '../components/toast/BaseToast'
+import { pickAndSendPhoto } from '../modules/chat/media/compose'
+import type { PhotoSendOutcome } from '../modules/chat/media/compose'
+import type { PhotoSource } from '../modules/chat/media/pick'
 import EmojiPickerSheet from '../modules/chat/emoji/EmojiPickerSheet'
-import { deleteChatMessages } from '../modules/chat/history'
+import { type ChatMessageIds, deleteChatMessages } from '../modules/chat/history'
 import { removeReaction, sendChatText, sendReaction } from '../modules/chat/send'
 import type { ChatSendOutcome } from '../modules/chat/send'
 import { chatEventsShown } from '../modules/chat/shown'
@@ -39,7 +42,7 @@ import { useWitnessConnection } from '../modules/vrc/context/WitnessConnectionPr
 import { Role } from '../types/chat'
 import { markChatEventsSeen } from '../modules/chat/seen'
 import { BasicMessageMetadata, basicMessageCustomMetadata } from '../types/metadata'
-import { setActiveChatConnectionId } from '../utils/activeChatTracker'
+import { getActiveChatConnectionId, setActiveChatConnectionId } from '../utils/activeChatTracker'
 import { sendCapabilityNoticeIfNeeded } from '../modules/chat/notice'
 import { counterpartySpeaksChat } from '../modules/chat/capability'
 import { useChatEvents } from '../modules/chat/chatEventsStore'
@@ -125,6 +128,14 @@ const progressStyles = StyleSheet.create({
 
 type ChatProps = StackScreenProps<ContactStackParams, Screens.Chat> | StackScreenProps<RootStackParams, Screens.Chat>
 
+/** What the person is told when a photo was not sent; 'sent' and 'cancelled' say nothing. */
+const PHOTO_PROBLEMS: ReadonlyMap<PhotoSendOutcome, string> = new Map<PhotoSendOutcome, string>([
+  ['no-permission', 'Chat.PhotoNoPermission'],
+  ['gif-too-large', 'Chat.GifTooLarge'],
+  ['photo-too-large', 'Chat.PhotoTooLarge'],
+  ['unreadable', 'Chat.PhotoUnreadable'],
+  ['not-sent', 'Chat.PhotoNotSent'],
+])
 const Chat: React.FC<ChatProps> = ({ route }) => {
   if (!route?.params) {
     throw new Error('Chat route params were not set properly')
@@ -167,10 +178,16 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     assertNetworkConnected()
   }, [assertNetworkConnected])
 
+  // The chat someone is looking at, so its messages raise no toast: only while attended, so one arriving under a
+  // screen pushed over it, or with the app in the background, still does.
   useEffect(() => {
+    if (!attended) return
     setActiveChatConnectionId(connectionId)
-    return () => setActiveChatConnectionId(undefined)
-  }, [connectionId])
+    // Only its own entry: another chat that has since set itself is left as it is.
+    return () => {
+      if (getActiveChatConnectionId() === connectionId) setActiveChatConnectionId(undefined)
+    }
+  }, [attended, connectionId])
 
   // Opening a chat is when a contact made before chat learns that this phone
   // speaks it (plan §4.5). Best effort: a failed notice is retried next time.
@@ -387,8 +404,10 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     const target = actionTarget
     closeActions()
     if (!target?.chatEventId) return
-    setReplyTarget({ _id: target.chatEventId, text: target.text, user: target.user })
-  }, [actionTarget, closeActions])
+    // Named for the preview above the composer (gifted-chat's ReplyPreview prints `user.name`, or "Unknown").
+    const author = target.user?._id === Role.me ? t('Chat.UserYou') : theirLabel
+    setReplyTarget({ _id: target.chatEventId, text: target.text, user: { _id: `quote:${author}`, name: author } })
+  }, [actionTarget, closeActions, t, theirLabel])
 
   const onCopy = useCallback(() => {
     const target = actionTarget
@@ -402,7 +421,9 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     const target = actionTarget
     closeActions()
     if (!agent || !target) return
-    const ids = target.chatEventId ? { eventIds: [target.chatEventId] } : { basicMessageIds: [target.basicMessageId!] }
+    const ids: ChatMessageIds = target.chatEventId
+      ? { events: [{ role: target.user._id === Role.me ? 'sent' : 'received', eventId: target.chatEventId }] }
+      : { basicMessageIds: [target.basicMessageId!] }
     Alert.alert(t('Chat.DeleteForMeTitle'), t('Chat.DeleteForMeBody'), [
       { text: t('Global.Cancel'), style: 'cancel' },
       {
@@ -425,8 +446,51 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     })
   }, [navigation, connectionId])
 
+  // A photo from the camera or the library (rich-messaging-plan.md §5): fitted to one message and sent, or the reason
+  // it was not. A GIF goes as it is, with whatever it carries, so the person is asked first.
+  const onPhoto = useCallback(
+    async (source: PhotoSource) => {
+      setShowActionSlider(false)
+      if (!agent) return
+      const outcome = await pickAndSendPhoto(agent, connectionId, source, {
+        fallbackText: t('Chat.PhotoFallback'),
+        confirmGif: () =>
+          new Promise<boolean>((resolve) =>
+            Alert.alert(
+              t('Chat.GifAsIsTitle'),
+              t('Chat.GifAsIsBody'),
+              [
+                { text: t('Global.Cancel'), style: 'cancel', onPress: () => resolve(false) },
+                { text: t('Chat.SendGif'), onPress: () => resolve(true) },
+              ],
+              { cancelable: true, onDismiss: () => resolve(false) }
+            )
+          ),
+      })
+      const problem = PHOTO_PROBLEMS.get(outcome)
+      if (problem) Toast.show({ type: ToastType.Error, text1: t(problem) })
+    },
+    [agent, connectionId, t]
+  )
+
   const actions = useMemo(() => {
-    return store.preferences.useVerifierCapability
+    const photo = _isWitnessConnection
+      ? []
+      : [
+          {
+            text: t('Chat.AttachCamera'),
+            testID: ChatIds.attachCamera,
+            onPress: () => void onPhoto('camera'),
+            icon: () => <Icon name="camera-outline" size={30} color={ColorPalette.brand.primary} />,
+          },
+          {
+            text: t('Chat.AttachLibrary'),
+            testID: ChatIds.attachLibrary,
+            onPress: () => void onPhoto('library'),
+            icon: () => <Icon name="image-outline" size={30} color={ColorPalette.brand.primary} />,
+          },
+        ]
+    const proof = store.preferences.useVerifierCapability
       ? [
           {
             text: t('Verifier.SendProofRequest'),
@@ -437,8 +501,10 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
             icon: () => <Assets.svg.iconInfoSentDark height={30} width={30} />,
           },
         ]
-      : undefined
-  }, [store.preferences.useVerifierCapability, t, onSendRequest, Assets])
+      : []
+    const all = [...photo, ...proof]
+    return all.length > 0 ? all : undefined
+  }, [_isWitnessConnection, store.preferences.useVerifierCapability, t, onPhoto, onSendRequest, Assets, ColorPalette])
 
   const onDismiss = useCallback(() => {
     setShowActionSlider(false)
@@ -525,7 +591,8 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           onMoreReactions={actionTarget?.chatEventId ? openReactionPicker : undefined}
           selectedReaction={actionTarget?.reactions?.find((reaction) => reaction.author === 'sent')?.emoji}
           onReply={actionTarget?.chatEventId ? onReply : undefined}
-          onCopy={actionTarget ? onCopy : undefined}
+          // A photo's label is not something anyone wrote, so a photo with no caption has nothing to copy.
+          onCopy={actionTarget && !actionTarget.textIsLabel ? onCopy : undefined}
           onDeleteForMe={actionTarget ? onDeleteForMe : undefined}
         />
         <EmojiPickerSheet visible={picker !== null} onSelect={onPickEmoji} onClose={closePicker} />

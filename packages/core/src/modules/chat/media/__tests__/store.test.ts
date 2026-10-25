@@ -3,7 +3,14 @@ import RNFS from 'react-native-fs'
 
 import { chatMediaFolder, deleteChatMessages } from '../../history'
 import { ChatEventRepository } from '../../records/ChatEventRepository'
-import { CHAT_MEDIA_FILE_PROTECTION, chatMediaFileName, chatMediaPath, chatMediaUri, writeChatMedia } from '../store'
+import {
+  CHAT_MEDIA_FILE_PROTECTION,
+  chatMediaFileName,
+  chatMediaPath,
+  chatMediaUri,
+  removeChatMedia,
+  writeChatMedia,
+} from '../store'
 
 // The package-wide react-native-fs mock is empty on purpose: this suite brings a small file system of its own.
 let mockFiles: Map<string, string>
@@ -122,6 +129,23 @@ describe('writeChatMedia', () => {
   })
 })
 
+describe('removeChatMedia', () => {
+  it('removes a file it wrote, by the name it returned, and leaves the others', async () => {
+    const mine = await writeChatMedia(CONNECTION, EVENT, 'image/jpeg', 'MINE')
+    await writeChatMedia(CONNECTION, OTHER_EVENT, 'image/jpeg', 'OTHER')
+    await removeChatMedia(CONNECTION, mine)
+    expect(mockFiles.has(chatMediaPath(CONNECTION, mine) as string)).toBe(false)
+    expect(mockFiles.has(chatMediaPath(CONNECTION, `${OTHER_EVENT}.jpg`) as string)).toBe(true)
+  })
+
+  it('does nothing for a file already gone, or a name it would not make', async () => {
+    await expect(removeChatMedia(CONNECTION, `${EVENT}.jpg`)).resolves.toBeUndefined()
+    await removeChatMedia(CONNECTION, '../../Documents/wallet.db')
+    await removeChatMedia('../x', `${EVENT}.jpg`)
+    expect(RNFS.unlink).not.toHaveBeenCalled()
+  })
+})
+
 describe('chatMediaPath and chatMediaUri', () => {
   it('build the path from the folder when read, and refuse a name this module did not make', () => {
     setPlatform('ios')
@@ -146,6 +170,7 @@ describe('deleting a message deletes the photo written for it', () => {
     const events = eventIds.map((eventId) => ({
       id: `rec-${eventId}`,
       connectionId: CONNECTION,
+      role: 'sent' as const,
       eventId,
       eventType: 'message',
     }))
@@ -168,7 +193,9 @@ describe('deleting a message deletes the photo written for it', () => {
     setPlatform(os)
     const mine = await writeChatMedia(CONNECTION, EVENT, 'image/webp', 'AAAA')
     const other = await writeChatMedia(CONNECTION, OTHER_EVENT, 'image/jpeg', 'BBBB')
-    await deleteChatMessages(agentWith([EVENT, OTHER_EVENT]), CONNECTION, { eventIds: [EVENT] })
+    await deleteChatMessages(agentWith([EVENT, OTHER_EVENT]), CONNECTION, {
+      events: [{ role: 'sent', eventId: EVENT }],
+    })
     expect(mockFiles.has(chatMediaPath(CONNECTION, mine) as string)).toBe(false)
     expect(mockFiles.has(chatMediaPath(CONNECTION, other) as string)).toBe(true)
   })

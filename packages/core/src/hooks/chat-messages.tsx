@@ -47,7 +47,9 @@ import { derivePseudonym } from '../utils/pseudonym'
 import { useChatEvents } from '../modules/chat/chatEventsStore'
 import { expiredIds } from '../modules/chat/expired'
 import { timerLine } from '../components/chat/disappearing'
+import { messageTextOf } from '../components/chat/messageText'
 import { foldChatEvents, type ChatReaction } from '../modules/chat/fold'
+import { chatMediaUri } from '../modules/chat/media/store'
 import type { ChatEventRecord } from '../modules/chat/records/ChatEventRecord'
 
 /**
@@ -777,6 +779,12 @@ export interface ChatTimelineOptions {
    * they are being read, when such a reply quotes nothing yet. Without it, a missing original is not on this phone.
    */
   expired?: ReadonlySet<string> | 'unread'
+  /** Who a quoted original is by, as a reply shows it: this phone's person, and the contact. */
+  authorNames?: { me: string; them: string }
+  /** What a message with a photo and no text reads as ("📷 Photo"), here and when a reply quotes it. */
+  photoLabel?: string
+  /** What one whose only attachment this phone cannot show reads as ("Unsupported attachment"); never the photo label. */
+  unsupportedLabel?: string
 }
 
 /**
@@ -790,19 +798,35 @@ export function chatTimelineItems(
   textStyleFor: (role: Role) => object,
   options: ChatTimelineOptions = {}
 ): ExtendedChatMessage[] {
-  const { systemLine, expired } = options
+  const { systemLine, expired, photoLabel, unsupportedLabel } = options
+  // A photo with no caption reads as the label, so neither its bubble nor a reply quoting it is empty. Only a photo
+  // this phone kept is called one: an attachment it could not check or save says so instead.
+  const textOf = (record: ChatEventRecord) =>
+    messageTextOf(record, { photo: photoLabel, unsupported: unsupportedLabel })
   const { messages, reactions, systems } = foldChatEvents(events)
   const byEventId = new Map(messages.map((m) => [m.eventId, m]))
   const roleOf = (record: ChatEventRecord) => (record.role === 'sent' ? Role.me : Role.them)
   const missing = (eventId: string): NonNullable<ExtendedChatMessage['replyTo']> =>
     expired === 'unread' ? { unread: true } : expired?.has(eventId) ? { expired: true } : { unavailable: true }
+  // A photo this phone kept, drawn from its file; one it could not check or save is only its label.
+  const photoOf = (record: ChatEventRecord) => {
+    const kept = record.attachments?.find((a) => !('unsupported' in a))
+    if (!kept || 'unsupported' in kept) return undefined
+    const uri = chatMediaUri(record.connectionId, kept.file)
+    return uri ? { uri, size: { width: kept.width, height: kept.height } } : undefined
+  }
   const items: ExtendedChatMessage[] = messages.map((record) => {
-    const text = record.content?.text ?? ''
+    const text = textOf(record)
+    const photo = photoOf(record)
     const target = record.inReplyTo ? byEventId.get(record.inReplyTo) : undefined
     return {
       _id: record.id,
       text,
-      renderEvent: () => <ThemedText style={textStyleFor(roleOf(record))}>{text}</ThemedText>,
+      // A photo with no caption shows only the photo; its label stays the text for previews, replies and readers.
+      renderEvent: () =>
+        photo && !record.content?.text ? <></> : <ThemedText style={textStyleFor(roleOf(record))}>{text}</ThemedText>,
+      ...(photo ? { image: photo.uri, imageSize: photo.size } : {}),
+      ...(!record.content?.text && record.attachments?.length ? { textIsLabel: true } : {}),
       createdAt: record.sentTime,
       user: { _id: roleOf(record) },
       chatEventId: record.eventId,
@@ -810,7 +834,10 @@ export function chatTimelineItems(
       inReplyTo: record.inReplyTo,
       replyTo: record.inReplyTo
         ? target
-          ? { text: target.content?.text ?? '' }
+          ? {
+              text: textOf(target),
+              author: target.role === 'sent' ? options.authorNames?.me : options.authorNames?.them,
+            }
           : missing(record.inReplyTo)
         : undefined,
       ...(record.expiresIn ? { expiresIn: record.expiresIn } : {}),
@@ -835,7 +862,7 @@ export function chatTimelineItems(
 const reactionsKey = (reactions?: ChatReaction[]) =>
   (reactions ?? []).map((r) => `${r.author}:${r.emoji}:${r.eventId}`).join(',')
 const replyKey = (m: ExtendedChatMessage) =>
-  !m.replyTo ? '' : 'text' in m.replyTo ? `text:${m.replyTo.text}` : Object.keys(m.replyTo)[0]
+  !m.replyTo ? '' : 'text' in m.replyTo ? `text:${m.replyTo.author ?? ''}:${m.replyTo.text}` : Object.keys(m.replyTo)[0]
 
 /** Whether two timelines draw the same: the timeline is only replaced when they do not. */
 export const areChatMessagesEqual = (a: ExtendedChatMessage[], b: ExtendedChatMessage[]): boolean => {
@@ -854,7 +881,8 @@ export const areChatMessagesEqual = (a: ExtendedChatMessage[], b: ExtendedChatMe
       current.createdAt?.getTime?.() !== next.createdAt?.getTime?.() ||
       current.kind !== next.kind ||
       reactionsKey(current.reactions) !== reactionsKey(next.reactions) ||
-      replyKey(current) !== replyKey(next)
+      replyKey(current) !== replyKey(next) ||
+      current.image !== next.image
     ) {
       return false
     }
@@ -1320,6 +1348,9 @@ export const useChatMessagesByConnection = (connection: DidCommConnectionRecord)
       ...chatTimelineItems(chatEvents ?? [], (role) => (role === Role.me ? theme.rightText : theme.leftText), {
         systemLine: (record) => timerLine(t, record, theirLabel),
         expired,
+        authorNames: { me: t('Chat.UserYou'), them: theirLabel },
+        photoLabel: t('Chat.Photo'),
+        unsupportedLabel: t('Chat.UnsupportedAttachment'),
       })
     )
 

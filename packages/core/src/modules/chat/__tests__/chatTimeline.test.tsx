@@ -4,7 +4,8 @@
  * agent runs here.
  */
 import { JsonTransformer, RepositoryEventTypes } from '@credo-ts/core'
-import { act, renderHook } from '@testing-library/react-native'
+import { act, render, renderHook } from '@testing-library/react-native'
+import { View } from 'react-native'
 import { Subject } from 'rxjs'
 
 import { useAgent } from '@bifold/react-hooks'
@@ -14,7 +15,7 @@ import { useUnreadMessages } from '../../../hooks/useUnreadMessages'
 import { areChatMessagesEqual, chatTimelineItems, useExpiredOriginals } from '../../../hooks/chat-messages'
 import { expiredIds } from '../expired'
 import { ChatEventRecord, type ChatEventRecordProps } from '../records/ChatEventRecord'
-import { chatEventsStore, useChatEvents } from '../chatEventsStore'
+import { chatEventsStore, READ_RETRY_DELAYS_MS, useChatEvents } from '../chatEventsStore'
 import { isUnreadChatEvent, markChatEventsSeen } from '../seen'
 import { ORPHAN_MAX_AGE_MS } from '../fold'
 import { deleteChatMessages } from '../history'
@@ -57,6 +58,7 @@ jest.mock('../ChatModule', () => ({ getChatEventRepository: () => mockRepository
 
 const agent = {
   context: {},
+  config: { logger: { warn: jest.fn() } },
   events: { observable: (type: string) => (bus[type] ??= new Subject()) },
   // The chat's BasicMessages, for deleting a chat's history: none here.
   dependencyManager: { resolve: () => ({ findByQuery: async () => [], delete: jest.fn() }) },
@@ -114,6 +116,62 @@ describe('every chat event, read once and kept current', () => {
     expect(chatEventsStore.chat('A')?.map((r) => r.id)).toEqual([second.id])
     await act(async () => mockRepository.deleteById({}, second.id))
     expect(chatEventsStore.chat('A')).toEqual([])
+  })
+
+  // Unknown hides a message's text everywhere outside its chat (hidesText), so a read that fails must not leave every
+  // chat unknown without a word: it is logged, and tried again.
+  test('a failed first read is logged and tried again, later each time; the chats are unknown until it succeeds', async () => {
+    jest.useFakeTimers()
+    try {
+      mockRecords = [message('A', 'hi')]
+      mockRepository.getAll.mockRejectedValueOnce(new Error('storage busy')).mockRejectedValueOnce(new Error('again'))
+      await act(async () => chatEventsStore.attach(agent as never))
+      expect(chatEventsStore.chat('A')).toBeUndefined()
+      expect(agent.config.logger.warn).toHaveBeenLastCalledWith(
+        '[chat] reading chat events failed (attempt 1): trying again in 1 s',
+        expect.anything()
+      )
+      await act(async () => jest.advanceTimersByTime(READ_RETRY_DELAYS_MS[0]))
+      expect(chatEventsStore.chat('A')).toBeUndefined()
+      expect(agent.config.logger.warn).toHaveBeenLastCalledWith(
+        '[chat] reading chat events failed (attempt 2): trying again in 5 s',
+        expect.anything()
+      )
+      await act(async () => jest.advanceTimersByTime(READ_RETRY_DELAYS_MS[1]))
+      expect(chatEventsStore.chat('A')?.map((r) => r.content?.text)).toEqual(['hi'])
+      expect(mockRepository.getAll).toHaveBeenCalledTimes(3)
+    } finally {
+      // The store tells its watchers on the next tick: run it, or a later test's notice is never sent.
+      act(() => jest.runOnlyPendingTimers())
+      jest.useRealTimers()
+    }
+  })
+
+  test('after the last try it says it gives up, and tries no more', async () => {
+    jest.useFakeTimers()
+    try {
+      mockRepository.getAll.mockRejectedValue(new Error('storage gone'))
+      await act(async () => chatEventsStore.attach(agent as never))
+      for (const delay of READ_RETRY_DELAYS_MS) await act(async () => jest.advanceTimersByTime(delay))
+      expect(agent.config.logger.warn).toHaveBeenLastCalledWith(
+        `[chat] reading chat events failed (attempt ${READ_RETRY_DELAYS_MS.length + 1}): not trying again until the wallet reconnects`,
+        expect.anything()
+      )
+      await act(async () => jest.advanceTimersByTime(10 * 60 * 1000))
+      expect(mockRepository.getAll).toHaveBeenCalledTimes(READ_RETRY_DELAYS_MS.length + 1)
+      expect(chatEventsStore.chat('A')).toBeUndefined()
+    } finally {
+      mockRepository.getAll.mockImplementation(async () => mockRecords)
+      act(() => jest.runOnlyPendingTimers())
+      jest.useRealTimers()
+    }
+  })
+
+  test('an agent with no chat storage: the chats stay unknown, and the log says why', async () => {
+    const warn = jest.fn()
+    await act(async () => chatEventsStore.attach({ context: {}, config: { logger: { warn } } } as never))
+    expect(chatEventsStore.chat('A')).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith('[chat] no chat storage on this agent: chats stay unknown', expect.anything())
   })
 
   test('an event saved while the first read runs is kept', async () => {
@@ -183,6 +241,60 @@ describe("one chat's events as timeline items", () => {
     const items = chatTimelineItems([original, reply, lost], style)
     expect(items.find((i) => i.text === 'the answer')?.replyTo).toEqual({ text: 'the question' })
     expect(items.find((i) => i.text === 'to something gone')?.replyTo).toEqual({ unavailable: true })
+  })
+
+  // A photo with no caption must not draw an empty bubble, nor a reply quoting it an empty quote (S3-3a, before the
+  // image bubble lands). With a caption, the caption is its text.
+  test('a photo with no caption reads as the photo label, and so does a reply quoting it', () => {
+    const photo = { id: 'a1', mediaType: 'image/jpeg' as const, byteCount: 1000, width: 10, height: 10, file: 'x.jpg' }
+    const bare = event({ connectionId: 'A', eventType: 'message', attachments: [photo] })
+    const captioned = message('A', 'look at this', { attachments: [photo] })
+    const reply = message('A', 'nice', { inReplyTo: bare.eventId })
+    const items = chatTimelineItems([bare, captioned, reply], style, { photoLabel: '📷 Photo' })
+    expect(items.map((i) => i.text)).toEqual(['📷 Photo', 'look at this', 'nice'])
+    expect(items.find((i) => i.text === 'nice')?.replyTo).toEqual({ text: '📷 Photo' })
+    // Without the label, nothing is invented.
+    expect(chatTimelineItems([bare], style)[0].text).toBe('')
+  })
+
+  // A kept photo is drawn from its file; its URI is built now from the chat's folder, percent-encoded (media/store.ts).
+  test('a kept photo carries its file URI and size for the bubble; an unsupported one carries none', () => {
+    const file = '01JB3XKX6F8Q2W4E5R6T7Y8Z9P.jpg'
+    const kept = { id: 'a1', mediaType: 'image/jpeg' as const, byteCount: 1000, width: 1600, height: 1200, file }
+    const bare = event({ connectionId: 'A', eventType: 'message', attachments: [kept] })
+    const captioned = message('A', 'look at this', { attachments: [kept] })
+    const unsupported = event({ connectionId: 'A', eventType: 'message', attachments: [{ unsupported: 'too-large' }] })
+    const [b, c, u] = chatTimelineItems([bare, captioned, unsupported], style, { photoLabel: '📷 Photo' })
+    expect(b.image).toMatch(new RegExp(`^file://.*/Application%20Support/chat-media/A/${file}$`))
+    expect(b.imageSize).toEqual({ width: 1600, height: 1200 })
+    expect(c.image).toBe(b.image)
+    expect(c.text).toBe('look at this')
+    expect(u.image).toBeUndefined()
+    // Only words someone wrote can be copied: a bare photo's text is a label.
+    expect(b.textIsLabel).toBe(true)
+    expect(u.textIsLabel).toBe(true)
+    expect(c.textIsLabel).toBeUndefined()
+    // A bare photo draws no words under it; its label stays its text for previews and replies.
+    expect(b.text).toBe('📷 Photo')
+    expect(render(<View>{b.renderEvent()}</View>).queryByText('📷 Photo')).toBeNull()
+    expect(render(<View>{c.renderEvent()}</View>).getByText('look at this')).toBeTruthy()
+  })
+
+  // An attachment this phone could not check or save is not a photo it can show: calling it one would be false.
+  test('an attachment this phone cannot show reads as unsupported, never as a photo', () => {
+    const unsupported = event({ connectionId: 'A', eventType: 'message', attachments: [{ unsupported: 'too-large' }] })
+    const notSaved = event({
+      connectionId: 'A',
+      eventType: 'message',
+      attachments: [{ id: 'a1', unsupported: 'not-saved' }],
+    })
+    const captioned = message('A', 'see this', { attachments: [{ unsupported: 'type-mismatch' }] })
+    const labels = { photoLabel: '📷 Photo', unsupportedLabel: 'Unsupported attachment' }
+    expect(chatTimelineItems([unsupported, notSaved, captioned], style, labels).map((i) => i.text)).toEqual([
+      'Unsupported attachment',
+      'Unsupported attachment',
+      'see this',
+    ])
   })
 
   test('a reply to an original that disappeared on its timer says so; one never here says it is not on this phone', () => {
@@ -261,6 +373,23 @@ describe('the timeline is redrawn when what a chat item shows changes', () => {
   const hello = message('A', 'hello')
   const original = message('A', 'the question')
 
+  test('a photo arriving in an item, or its file changing, is a change', () => {
+    const kept = { id: 'a1', mediaType: 'image/jpeg' as const, byteCount: 1, width: 10, height: 10 }
+    // The same record each time (id and time fixed), so only the photo can differ.
+    const photo = (file: string) =>
+      event({
+        id: 'rec-photo',
+        connectionId: 'A',
+        eventType: 'message',
+        eventId: '01JB3XKX6F8Q2W4E5R6T7Y8Z9Q',
+        sentTime: new Date(Date.UTC(2026, 9, 25, 12)),
+        attachments: [{ ...kept, file }],
+      })
+    const one = chatTimelineItems([photo('01JB3XKX6F8Q2W4E5R6T7Y8Z9Q.jpg')], style)
+    expect(areChatMessagesEqual(one, chatTimelineItems([photo('01JB3XKX6F8Q2W4E5R6T7Y8Z9Q.jpg')], style))).toBe(true)
+    expect(areChatMessagesEqual(one, chatTimelineItems([photo('01JB3XKX6F8Q2W4E5R6T7Y8Z9Q.png')], style))).toBe(false)
+  })
+
   test('a reaction added, changed or removed is a change', () => {
     const reaction = event({ connectionId: 'A', eventType: 'reaction', target: hello.eventId, emoji: '👍' })
     const changed = event({ connectionId: 'A', eventType: 'reaction', target: hello.eventId, emoji: '🎉' })
@@ -324,7 +453,7 @@ describe("a chat's history deleted", () => {
     mockRecords = [gone, kept, onGone]
     await attach()
     await act(async () => {
-      await deleteChatMessages(agent as never, 'A', { eventIds: [gone.eventId] })
+      await deleteChatMessages(agent as never, 'A', { events: [gone] })
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
     expect(chatTimelineItems(chatEventsStore.chat('A') ?? [], () => ({})).map((i) => i.text)).toEqual(['kept'])
@@ -380,7 +509,7 @@ describe('a message that disappears on its timer', () => {
     expect(preview()).toBe('the door code is 4512')
 
     await act(async () => {
-      await deleteChatMessages(agent as never, 'A', { eventIds: [timed.eventId] })
+      await deleteChatMessages(agent as never, 'A', { events: [timed] })
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
     expect(preview()).toBe('see you at noon')

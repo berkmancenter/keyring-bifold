@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "f91bb47fbd6c9d13b6f26d1e93db319350a7c6f3",
+  "generatedFrom": "c95a747cb5763151df6d09bc8cc33d345852685e",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -251,6 +251,9 @@
     "ChatActionCopy": ["src/components/chat/Chat.ids.ts"],
     "ChatActionDeleteForMe": ["src/components/chat/Chat.ids.ts"],
     "ChatActionReply": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionsButton": ["src/components/chat/Chat.ids.ts"],
+    "ChatAttachCamera": ["src/components/chat/Chat.ids.ts"],
+    "ChatAttachLibrary": ["src/components/chat/Chat.ids.ts"],
     "ChatComposerEmojiButton": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCancel": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCurrent": ["src/components/chat/Chat.ids.ts"],
@@ -260,6 +263,7 @@
     "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
     "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageImage": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
     "ChatReaction": ["src/components/chat/Chat.ids.ts"],
     "ChatReactionBar": ["src/components/chat/Chat.ids.ts"],
@@ -480,6 +484,7 @@
     "Done": ["src/components/modals/ProofCancelModal.tsx", "src/screens/CredentialOfferAccept.tsx"],
     "E2EAutoLockMinutes": ["src/components/misc/E2EClockRows.tsx"],
     "E2EClocksMode": ["src/components/misc/E2EClockRows.tsx"],
+    "E2EDisappearHourSeconds": ["src/components/misc/E2EClockRows.tsx"],
     "E2EGrantWindowSeconds": ["src/components/misc/E2EClockRows.tsx"],
     "E2EPhoneGrantWindowSeconds": ["src/components/misc/E2EClockRows.tsx"],
     "EmojiPicker": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
@@ -1288,7 +1293,13 @@
   },
   "derived": [
     {
-      "src/components/chat/ActionSlider.tsx": "action.text"
+      "src/components/chat/ActionSlider.tsx": "action.testID ?? action.text"
+    },
+    {
+      "src/components/chat/ChatActions.tsx": "ChatIds.actionsButton"
+    },
+    {
+      "src/components/chat/ChatMessage.tsx": "ChatIds.image"
     },
     {
       "src/components/chat/ChatMessage.tsx": "ChatIds.reactions"

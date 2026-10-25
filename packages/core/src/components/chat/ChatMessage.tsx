@@ -5,7 +5,7 @@ import { View, Text } from 'react-native'
 // gesture-handler touchables: RN's own touchables miss taps inside GiftedChat's
 // inverted list + GestureHandlerRootView on Android with the new architecture
 import { TouchableOpacity } from 'react-native-gesture-handler'
-import { Bubble, IMessage, MessageProps } from 'react-native-gifted-chat'
+import { Bubble, IMessage, MessageImage, MessageImageProps, MessageProps } from 'react-native-gifted-chat'
 import moment from 'moment'
 
 import { useTheme } from '../../contexts/theme'
@@ -61,7 +61,11 @@ export interface ExtendedChatMessage extends IMessage {
    * this phone; or nothing yet, while which originals disappeared is being read.
    */
   inReplyTo?: string
-  replyTo?: { text: string } | { expired: true } | { unavailable: true } | { unread: true }
+  replyTo?: { text: string; author?: string } | { expired: true } | { unavailable: true } | { unread: true }
+  /** A photo's size as its header gave it, so its bubble keeps the photo's shape (`image` is its local file URI). */
+  imageSize?: { width: number; height: number }
+  /** The text is a label this phone gave it (a photo's), not words anyone wrote: there is nothing to copy. */
+  textIsLabel?: boolean
   /** A disappearing message's timer, in seconds, as it was sent: the chat list shows no text of it. */
   expiresIn?: number
   /** A line about the chat itself (a timer set), not a bubble: never unread, never the chat list's preview. */
@@ -326,6 +330,38 @@ const quoteOf = (replyTo: NonNullable<ExtendedChatMessage['replyTo']>, t: TFunct
   return ''
 }
 
+/**
+ * What gifted-chat's MessageReply shows above a quote: the original's author, or, when the original is not on this
+ * phone, why (there is no author to name). MessageReply prints `user.name`, or "Unknown" without one, and its own
+ * English "You" whenever the quoted author's id equals the replying message's, so the id here never equals a real
+ * author's.
+ */
+const quotedAuthor = (replyTo: NonNullable<ExtendedChatMessage['replyTo']>, t: TFunction) =>
+  'text' in replyTo
+    ? { _id: `quote:${replyTo.author ?? ''}`, name: replyTo.author }
+    : { _id: 'quote:', name: quoteOf(replyTo, t) }
+
+/** The largest a photo is drawn in its bubble; tapping it opens it full screen with pinch-zoom (gifted-chat's own). */
+const IMAGE_MAX = { width: 220, height: 280 }
+
+export const bubbleImageSize = (size?: { width: number; height: number }): { width: number; height: number } => {
+  if (!size || size.width <= 0 || size.height <= 0) return { width: IMAGE_MAX.width, height: IMAGE_MAX.width }
+  const scale = Math.min(IMAGE_MAX.width / size.width, IMAGE_MAX.height / size.height, 1)
+  return { width: Math.round(size.width * scale), height: Math.round(size.height * scale) }
+}
+
+const ChatImage: React.FC<MessageImageProps<IMessage> & { label: string }> = ({ label, ...props }) => (
+  <MessageImage
+    {...props}
+    imageStyle={{
+      ...bubbleImageSize((props.currentMessage as ExtendedChatMessage).imageSize),
+      borderRadius: 8,
+      margin: 0,
+    }}
+    imageProps={{ testID: testIdWithKey(ChatIds.image), accessibilityLabel: label }}
+  />
+)
+
 export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
   const { ChatTheme: theme } = useTheme()
   const { t } = useTranslation()
@@ -386,20 +422,23 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
             {...messageProps}
             // A reply shows what it answers, through gifted-chat's own MessageReply: the original's text, or that it
             // expired, or that it is not on this phone.
+            // 'unread' is a reply whose original is still being read: nothing to quote yet, so no quote (an empty one
+            // would read "Unknown").
             currentMessage={
-              message.replyTo
+              message.replyTo && !('unread' in message.replyTo)
                 ? {
                     ...message,
                     replyMessage: {
                       _id: message.inReplyTo ?? '',
-                      text: quoteOf(message.replyTo, t),
-                      user: { _id: '' },
+                      text: 'text' in message.replyTo ? message.replyTo.text : '',
+                      user: quotedAuthor(message.replyTo, t),
                     },
                   }
                 : message
             }
             isUsernameVisible={false}
             renderMessageText={() => message.renderEvent()}
+            renderMessageImage={(props) => <ChatImage {...props} label={t('Chat.Photo')} />}
             containerStyle={{
               left: { margin: 0 },
               right: { margin: 0 },
