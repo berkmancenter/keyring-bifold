@@ -215,11 +215,29 @@ describe("a contact's hardware verification", () => {
     contactOver(['did:a'])
     await settle()
     mockCredential = { 'did:a': { id: 'urn:vrc:a2', evidence: true } }
+    // The new credential's check is held, so what it owes is visible: unknown, and being checked.
+    mockVerify.mockImplementation(() => new Promise(() => undefined))
     await act(async () => contactFacts.load(fakeAgent(relationships(['did:a'])).agent, []))
+    await settle()
     expect(contactFacts.hardware('did:a')).toEqual({ known: false })
-    contactOver(['did:a'])
+    expect(mockVerify).toHaveBeenCalledTimes(2)
+  })
+
+  // A card re-issued while a screen is open (the re-scan refresh does this) is a new credential: its check is owed,
+  // and the open screen runs it — not left on "checking" until it remounts.
+  it('a credential re-issued while a screen is open is checked again by that screen, and the badge comes back', async () => {
+    mockCredential = { 'did:a': { id: 'urn:vrc:a1', evidence: true } }
+    await contactFacts.load(fakeAgent(relationships(['did:a'])).agent, [])
+    const { result } = contactOver(['did:a'])
+    await settle()
+    await settle()
+    expect(result.current.hwVerified).toEqual({ known: true, value: true })
+    mockCredential = { 'did:a': { id: 'urn:vrc:a2', evidence: true } }
+    await act(async () => contactFacts.load(fakeAgent(relationships(['did:a'])).agent, []))
+    await settle()
     await settle()
     expect(mockVerify).toHaveBeenCalledTimes(2)
+    expect(result.current.hwVerified).toEqual({ known: true, value: true })
   })
 
   it('over several relationships: verified when one verifies; not verified only when every one is known not to', async () => {

@@ -465,8 +465,17 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
                   <ThemedText style={styles.hardwareAttestationBadgeText}>Secure Exchange</ThemedText>
                 </View>
               ) : hwChecking ? (
-                <View testID="SecureExchangeChecking">
+                // The badge's own shape, so nothing shifts when it fills in: an outline, and its words kept but not
+                // shown — it does not say "Secure Exchange" before that is checked.
+                <View style={styles.hardwareAttestationBadge} testID="SecureExchangeChecking">
                   <Icon name="shield-outline" size={14} color="#BBBBBB" />
+                  <ThemedText
+                    style={[styles.hardwareAttestationBadgeText, { opacity: 0 }]}
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                  >
+                    Secure Exchange
+                  </ThemedText>
                 </View>
               ) : null}
               {witnessRecords.length > 0 && (

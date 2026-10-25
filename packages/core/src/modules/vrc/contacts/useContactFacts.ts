@@ -232,9 +232,11 @@ export function useContactFacts(relationshipDids: string[]): ContactFacts {
   const loaded = contactFacts.relationship(relationshipDids[0] ?? '') !== NOT_READ
   const dids = useRef(relationshipDids)
   dids.current = relationshipDids
+  // And whenever the verification is owed again: a credential re-issued while the screen is open makes it unknown
+  // (the frozen UNKNOWN), and asking then re-checks it; once known, verify() asks for nothing, so no loop.
   useEffect(() => {
     contactFacts.verify(dids.current)
-  }, [key, loaded])
+  }, [key, loaded, facts.hwVerified])
   return facts
 }
 
