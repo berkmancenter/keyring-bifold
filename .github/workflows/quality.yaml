@@ -149,3 +149,41 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
         if: always()
+
+  typecheck:
+    runs-on: ubuntu-22.04
+    # Not a required check yet: it is watched for about a week before that is decided.
+    name: Type check (ratchet)
+    steps:
+      - name: Checkout aries-mobile-agent-react-native
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.11'
+
+      - name: Setup NodeJS
+        uses: ./.github/actions/setup-node
+
+      # A fresh install, so tsc checks against the dependencies that ship (a
+      # developer checkout can hold stale nested copies that change the result).
+      - name: Install dependencies
+        run: |
+          yarn install --immutable
+
+      - name: Build Workspace
+        run: |
+          yarn build
+
+      - name: tsc-ratchet tests
+        run: |
+          node --test scripts/tsc-ratchet.test.mjs
+
+      - name: No new type errors in @bifold/core
+        run: |
+          # jest strips types, so this is the only tsc run in this repository's CI.
+          # It fails on a type error the baseline (packages/core/tsc-baseline.txt)
+          # does not hold, on a count that rises, and on a tsc run that fails without
+          # a diagnostic. Raising the baseline needs the entry named in the PR body
+          # and the reviewer's explicit agreement (see scripts/tsc-ratchet.mjs).
+          node scripts/tsc-ratchet.mjs --package packages/core
