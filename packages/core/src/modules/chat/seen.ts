@@ -22,15 +22,23 @@ export function isUnreadChatEvent(record: ChatEventRecord): boolean {
 
 /**
  * Mark every unread received message of one chat seen: called while the chat is
- * open. Only the unseen ones are written, so a chat opened again writes nothing.
- * Each is its own write: a failure part-way leaves some still unread, which the
- * next open marks; nothing else depends on them being marked together.
+ * open, again whenever its timeline changes. Only the unseen ones are written,
+ * and that filter is what ends it: a write updates the store, the timeline
+ * changes, and the chat marks again, which then writes nothing. (Filtered on the
+ * message's role and type alone, it would write and redraw for ever.)
+ *
+ * The writes are made together, so the store's updates land close and are told
+ * as one. Each is its own write: a failure part-way leaves some still unread,
+ * which the next open marks; nothing else depends on them being marked together.
  */
 export async function markChatEventsSeen(agent: Agent, connectionId: string): Promise<void> {
   const repository = getChatEventRepository(agent)
   const unseen = (await repository.findByConnection(agent.context, connectionId)).filter(isUnreadChatEvent)
-  for (const record of unseen) {
-    record.metadata.set(SEEN_METADATA_KEY, { at: new Date().toISOString() })
-    await repository.update(agent.context, record)
-  }
+  const at = new Date().toISOString()
+  await Promise.all(
+    unseen.map((record) => {
+      record.metadata.set(SEEN_METADATA_KEY, { at })
+      return repository.update(agent.context, record)
+    })
+  )
 }

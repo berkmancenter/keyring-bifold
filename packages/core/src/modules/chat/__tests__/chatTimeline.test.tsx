@@ -3,7 +3,7 @@
  * chat's events as timeline items, and what counts as unread. Against a fake repository and event bus, so no
  * agent runs here.
  */
-import { RepositoryEventTypes } from '@credo-ts/core'
+import { JsonTransformer, RepositoryEventTypes } from '@credo-ts/core'
 import { act, renderHook } from '@testing-library/react-native'
 import { Subject } from 'rxjs'
 
@@ -187,6 +187,21 @@ describe("one chat's events as timeline items", () => {
   })
 })
 
+describe('records as storage gives them back', () => {
+  // Storage turns a record into JSON and back (AskarStorageService's recordToInstance). On main, `sentTime` comes
+  // back a string, so the timeline's sort throws on every chat read from the phone; built in memory, as every other
+  // test here does, it never shows. Marked failing until ChatEventRecord revives `sentTime` as a Date (the Step 1
+  // owner's fix): when that lands this test goes red, and `.failing` comes off.
+  test.failing('a chat read back from storage folds into the timeline, in order', () => {
+    const stored = [
+      message('A', 'second', { sentTime: new Date(Date.UTC(2026, 9, 25, 11)) }),
+      message('A', 'first', { sentTime: new Date(Date.UTC(2026, 9, 25, 10)) }),
+    ]
+    const readBack = stored.map((r) => JsonTransformer.deserialize(JsonTransformer.serialize(r), ChatEventRecord))
+    expect(chatTimelineItems(readBack, () => ({})).map((i) => i.text)).toEqual(['first', 'second'])
+  })
+})
+
 describe('the timeline is redrawn when what a chat item shows changes', () => {
   const style = () => ({})
   const hello = message('A', 'hello')
@@ -237,6 +252,21 @@ describe('what counts as unread', () => {
     expect(mockRepository.update).not.toHaveBeenCalled()
   })
 
+  test("marking a chat's unread messages seen tells the store's watchers once, not once per message", async () => {
+    mockRecords = [message('A', 'one'), message('A', 'two'), message('A', 'three')]
+    await attach()
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
+    const told = jest.fn()
+    const stop = chatEventsStore.subscribe(told)
+    await act(async () => {
+      await markChatEventsSeen(agent as never, 'A')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    stop()
+    expect(mockRepository.update).toHaveBeenCalledTimes(3)
+    expect(told).toHaveBeenCalledTimes(1)
+  })
+
   test('the unread counts take received chat messages, and drop them once seen', async () => {
     mockRecords = [
       message('A', 'one'),
@@ -244,10 +274,14 @@ describe('what counts as unread', () => {
       event({ connectionId: 'A', eventType: 'reaction', target: 'x', emoji: '👍' }),
     ]
     const { result } = renderHook(() => ({ unread: useUnreadMessages(), events: useChatEvents('A') }))
-    await act(async () => undefined)
+    // The store tells its watchers on the next tick (changes that land together are told once).
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
     // No BasicMessage of the test agent is in chat A: what counts here is the chat events alone.
     expect(result.current.unread.unreadByConnection.A).toBe(2)
-    await act(async () => markChatEventsSeen(agent as never, 'A'))
+    await act(async () => {
+      await markChatEventsSeen(agent as never, 'A')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
     expect(result.current.unread.unreadByConnection.A ?? 0).toBe(0)
   })
 })

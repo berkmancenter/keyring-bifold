@@ -33,7 +33,17 @@ const listeners = new Set<() => void>()
 // Each chat's events are pruned of stale orphans once per run, when first read.
 const pruned = new Set<string>()
 
-const notify = () => listeners.forEach((listener) => listener())
+// Changes that land together are told once, on the next tick (as useCommunityChanged does): marking a chat's
+// fifty unread messages seen is one redraw of the timeline and of the rows watching it, not fifty.
+let queued = false
+const notify = () => {
+  if (queued) return
+  queued = true
+  setTimeout(() => {
+    queued = false
+    listeners.forEach((listener) => listener())
+  }, 0)
+}
 
 /** The chat events among a repository event's records, as Credo emits them (a deleted one may be `{ id, type }`). */
 const follow = (agent: Agent, type: string, on: (record: ChatEventRecord) => void): Unsubscribe =>
