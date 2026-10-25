@@ -160,6 +160,19 @@ describe('an eventId this phone sent', () => {
     expect(fake.stored).toHaveLength(1)
   })
 
+  it.each([
+    ['a reaction', { type: 'reaction', target: '01JB3XKX6F8Q2W4E5R6T7Y8Z9W', emoji: '👍' }],
+    ['a redaction', { type: 'redaction', target: '01JB3XKX6F8Q2W4E5R6T7Y8Z9W' }],
+    ['a timer', { type: 'timer', timer: { expiresIn: 3600, version: 1 } }],
+  ])('is refused whatever the event, here %s', async (_label, fields) => {
+    const fake = makeFakeAgent()
+    fake.stored.push(sentHere('conn-1'))
+    expect(
+      await receiveChatEventMessage(fake.agent, inbound({ profile: CHAT_PROFILE, eventId: EVENT_ID, ...fields }))
+    ).toBe('reused-event-id')
+    expect(fake.stored).toHaveLength(1)
+  })
+
   it('is no concern when it was sent on another connection', async () => {
     const fake = makeFakeAgent()
     fake.stored.push(sentHere('conn-2'))
