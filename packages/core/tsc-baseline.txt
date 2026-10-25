@@ -2,6 +2,8 @@
 # Policy: src has no type errors (the build enforces it); test files get no new ones, and
 # this list only shrinks. A new line is an exception: it needs a named reason in the PR
 # body and the review lane's explicit agreement. `--write` only to record fixes.
+# On a merge conflict here, rebase and regenerate (node scripts/tsc-ratchet.mjs --write); never
+# resolve it by hand.
 7	__tests__/components/ChatMessage.test.tsx	TS2353
 1	__tests__/components/ChatMessage.test.tsx	TS2503
 4	__tests__/components/QRScanner.test.tsx	TS2578

@@ -188,5 +188,6 @@ jobs:
           # ones, and packages/core/tsc-baseline.txt only shrinks. A new entry needs
           # a named reason in the PR body and the review lane's explicit agreement
           # (scripts/tsc-ratchet.mjs). It fails on a new error, on a count that
-          # rises, and on a tsc run that fails without a diagnostic.
+          # rises, on a count that falls without the baseline being rewritten in
+          # the same PR, and on a tsc run that fails without a diagnostic.
           node scripts/tsc-ratchet.mjs --package packages/core --project tsconfig.ratchet.json

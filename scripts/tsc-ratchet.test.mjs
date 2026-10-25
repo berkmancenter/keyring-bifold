@@ -155,19 +155,22 @@ test('a missing tsconfig (TS5058) is a new signature, so it fails', () => {
   assert.equal(r.ok, false)
 })
 
-test('passes when errors are fixed, and asks for the baseline to be updated in the same PR', () => {
+test('fails when errors are fixed but the baseline is stale, naming the command that rewrites it', () => {
   const baseline = countDiagnostics(out(e1, e1Moved, e2), PKG)
   const r = judge({ status: 2, output: out(e1) }, baseline, PKG)
-  assert.equal(r.ok, true)
+  assert.equal(r.ok, false)
   assert.match(r.lines.join('\n'), /FIXED 2 -> 1/)
   assert.match(r.lines.join('\n'), /FIXED 1 -> 0/)
-  assert.match(r.lines.join('\n'), /Update the baseline in this PR/)
-  // The reminder names the command that ran, project included, so following it
+  assert.match(r.lines.join('\n'), /the baseline is stale/)
+  assert.match(r.lines.join('\n'), /never resolve it by hand/)
+  // The message names the command that ran, project included, so following it
   // cannot record a baseline from a different project.
   const named = judge({ status: 2, output: out(e1) }, baseline, PKG, 'node x --project p.json --write')
-  assert.match(named.lines.join('\n'), /Update the baseline in this PR: node x --project p\.json --write/)
-  // All fixed: tsc exits 0 with nothing to say, and that passes too.
-  assert.equal(judge({ status: 0, output: '' }, baseline, PKG).ok, true)
+  assert.match(named.lines.join('\n'), /Run node x --project p\.json --write and commit the baseline/)
+  // All fixed: tsc exits 0, and the baseline still lists errors, so that is stale too.
+  assert.equal(judge({ status: 0, output: '' }, baseline, PKG).ok, false)
+  // With the baseline rewritten to match, it passes.
+  assert.equal(judge({ status: 2, output: out(e1) }, countDiagnostics(out(e1), PKG), PKG).ok, true)
 })
 
 test('clean and baseline empty: passes quietly', () => {

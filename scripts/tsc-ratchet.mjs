@@ -24,11 +24,16 @@
 //
 // Fails (exit 1) when:
 //   - a signature appears that the baseline does not have, or a count rises;
+//   - a count falls or a signature goes away: the baseline is stale, and the
+//     PR that fixed the errors must record it (`--write`), so every fix lowers
+//     the floor rather than leaving room for the error to come back;
 //   - tsc exits non-zero but reports no diagnostic (a crash, a missing tsc):
 //     judged by tsc's exit status, so "no output" never reads as "no errors".
-// Passes (exit 0) when nothing rose. If counts fell or signatures went away,
-// it says so and asks for the baseline to be updated in the same PR
-// (`--write`), so the ratchet tightens.
+// Passes (exit 0) only when the counts equal the baseline.
+//
+// The baseline is one signature per line, sorted, so fixes in neighbouring files
+// can conflict. On a conflict, rebase and regenerate with --write; never resolve
+// it by hand.
 //
 // POLICY: src has no type errors (the build enforces it). Test files get no
 // new ones: the baseline records the errors they had when the gate arrived and
@@ -43,13 +48,24 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-// tsc adds "Did you mean ...?" to an error only while it has issued fewer than 10
-// suggestions in the whole program (maximumSuggestionCount in the checker), and
-// the suggesting form has its own code, so an error in an unrelated file can turn
-// an unchanged TS2552 into a TS2304. Each suggesting code counts as its plain one.
-// TS2552 and TS2833 (a namespace) are the codes that budget controls; the property,
-// export and object-literal variants are folded too, for the same kind of drift.
-const SUGGESTING = { TS2552: 'TS2304', TS2833: 'TS2503', TS2551: 'TS2339', TS2724: 'TS2305', TS2561: 'TS2353' }
+// Where tsc looks up a similar name and finds one, it reports a different code
+// ("Did you mean ...?") than when it finds none, and what it finds can depend on
+// other files: the name lookups stop after the first 10 failed ones in the whole
+// program (maximumSuggestionCount; in this tree those are spent on `JSX` lookups
+// in dependencies' .d.ts files), and member, export and base-class lookups depend
+// on declarations elsewhere. So each suggesting code counts as its plain one. The
+// table is every such pair in the TypeScript 5.9 checker, found from its suggestion
+// lookup sites; the JS-only pairs (2568, 2570) are not errors in a .ts file, and
+// the parser, regex and lib-option suggestions look up fixed lists.
+const SUGGESTING = {
+  TS2552: 'TS2304', // Cannot find name
+  TS2833: 'TS2503', // Cannot find namespace
+  TS2551: 'TS2339', // Property does not exist on type
+  TS2561: 'TS2353', // Object literal may only specify known properties
+  TS2724: 'TS2305', // Module has no exported member
+  TS4117: 'TS4113', // override modifier: not declared in the base class
+  TS4123: 'TS4122', // JSDoc @override: not declared in the base class
+}
 
 /** One diagnostic line of `tsc --pretty false`, or undefined for anything else. */
 export function parseLine(line, pkgDir) {
@@ -92,6 +108,8 @@ export function formatBaseline(counts) {
     '# Policy: src has no type errors (the build enforces it); test files get no new ones, and',
     '# this list only shrinks. A new line is an exception: it needs a named reason in the PR',
     "# body and the review lane's explicit agreement. `--write` only to record fixes.",
+    '# On a merge conflict here, rebase and regenerate (node scripts/tsc-ratchet.mjs --write); never',
+    '# resolve it by hand.',
   ]
   const lines = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, n]) => `${n}\t${k}`)
   return [...header, ...lines].join('\n') + '\n'
@@ -178,11 +196,18 @@ export function judge(
     lines.push(
       "tsc-ratchet: new type errors. Fix them. A baseline exception needs a named reason in the PR body and the review lane's agreement.",
       'tsc-ratchet: if a file above is one your change does not touch, the error did not come from you: tsc moved an' +
-        " existing error's signature, which is a bug in this gate. Tell the review lane rather than re-running."
+        " existing error's signature (for example a code that changes with a suggestion and is missing from" +
+        ' SUGGESTING), which is a bug in this gate. Tell the review lane rather than re-running.'
     )
     return { ok: false, lines, current }
   }
-  if (fell.length) lines.push(`tsc-ratchet: errors were fixed. Update the baseline in this PR: ${writeCommand}`)
+  if (fell.length) {
+    lines.push(
+      `tsc-ratchet: the baseline is stale: errors were fixed. Run ${writeCommand} and commit the baseline in this PR.`,
+      'tsc-ratchet: on a conflict in the baseline, rebase and run that command again; never resolve it by hand.'
+    )
+    return { ok: false, lines, current }
+  }
   return { ok: true, lines, current }
 }
 
