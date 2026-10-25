@@ -1372,6 +1372,7 @@
     "PassTechnical": "Technical details",
     "PassCommunityId": "Community ID",
     "PassYourId": "Your ID in this community",
+    "PassAllCards": "All cards",
     "CardFromCommunity": "This card comes from {{community}}. To give it up, leave the community.",
     "CardRoleMember": "Role: member",
     "CardOpenCommunity": "Open {{community}}",
@@ -2508,6 +2509,8 @@
   },
   "SignIn": {
     "ConfirmTitle": "Sign in to {{name}}?",
+    "ConfirmTitleUnread": "Sign in with this community?",
+    "ReadingCommunity": "Reading the community",
     "ConfirmBody": "A website is asking to sign you in with this community. Nothing is sent until you continue.",
     "CommunityLabel": "Community",
     "HostLabel": "Community's address",
