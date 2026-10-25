@@ -167,10 +167,13 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     assertNetworkConnected()
   }, [assertNetworkConnected])
 
+  // The chat someone is looking at, so its messages raise no toast: only while attended, so one arriving under a
+  // screen pushed over it, or with the app in the background, still does.
   useEffect(() => {
+    if (!attended) return
     setActiveChatConnectionId(connectionId)
     return () => setActiveChatConnectionId(undefined)
-  }, [connectionId])
+  }, [attended, connectionId])
 
   // Opening a chat is when a contact made before chat learns that this phone
   // speaks it (plan §4.5). Best effort: a failed notice is retried next time.
