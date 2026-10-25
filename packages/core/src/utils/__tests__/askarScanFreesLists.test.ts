@@ -94,6 +94,38 @@ describe('installAskarScanListFree', () => {
     expect(native.scansFreed()).toBe(1)
   })
 
+  it('with the store patch also present, each list is still freed once: the shim replaces, never wraps', async () => {
+    // 273's .yarn patch frees inside forEachRow and keeps the version at 0.6.0, so a build that forgot to remove
+    // the shim has both. The patched method must never run, or every list would be freed twice.
+    let patchedCalls = 0
+    class PatchedScan extends Scan {
+      public async forEachRow(cb: Parameters<Scan['forEachRow']>[0]): Promise<void> {
+        patchedCalls++
+        const fields = this as unknown as { _handle?: unknown }
+        const native = NativeAskar.instance
+        fields._handle ??= await native.scanStart({ storeHandle: 'store-1' as never, category: 'DidRecord' })
+        for (;;) {
+          const listHandle = await native.scanNext({ scanHandle: fields._handle as never })
+          if (!listHandle) break
+          const { EntryList } = jest.requireActual('@openwallet-foundation/askar-shared')
+          const list = new EntryList({ handle: listHandle })
+          for (let index = 0; index < list.length; index++) cb(list.getEntryByIndex(index))
+          listHandle.free()
+        }
+        native.scanFree({ scanHandle: fields._handle as never })
+      }
+    }
+    expect(
+      installAskarScanListFree({ scanPrototype: PatchedScan.prototype, version: ASKAR_SHARED_VERSION_MIRRORED })
+    ).toBe('installed')
+    const native = fakeNative([{ rows: [row(1), row(2)] }, { rows: [row(3)] }])
+    const rows = await new PatchedScan({ store: { handle: 'store-1' } as never, category: 'DidRecord' }).fetchAll()
+    expect(rows).toHaveLength(3)
+    expect(patchedCalls).toBe(0)
+    expect(native.freed).toEqual(['list-0', 'list-1'])
+    expect(native.scansFreed()).toBe(1)
+  })
+
   it('stops at the limit, as 0.6.0 does, and frees what it read', async () => {
     installAskarScanListFree()
     const native = fakeNative([{ rows: [row(1), row(2)] }, { rows: [row(3)] }])
