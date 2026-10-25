@@ -2,3 +2,112 @@
 # Policy: src has no type errors (the build enforces it); test files get no new ones, and
 # this list only shrinks. A new line is an exception: it needs a named reason in the PR
 # body and the review lane's explicit agreement. `--write` only to record fixes.
+7	__tests__/components/ChatMessage.test.tsx	TS2353	Object literal may only specify known properties, and 'key' does not exist in type 'MessageProps<ExtendedChatMessage>'.
+1	__tests__/components/ChatMessage.test.tsx	TS2503	Cannot find namespace 'JSX'.
+4	__tests__/components/QRScanner.test.tsx	TS2578	Unused '@ts-expect-error' directive.
+2	__tests__/components/VetterHeaderBackground.test.tsx	TS2698	Spread types may only be created from object types.
+2	__tests__/components/chatActionsProps.test.tsx	TS18046	'el.props' is of type 'unknown'.
+13	__tests__/components/messageInputComposer.test.tsx	TS18046	'composer.props' is of type 'unknown'.
+1	__tests__/components/messageInputComposer.test.tsx	TS18046	'empty.props' is of type 'unknown'.
+1	__tests__/components/messageInputComposer.test.tsx	TS18046	'enabled.props' is of type 'unknown'.
+1	__tests__/components/messageInputComposer.test.tsx	TS18046	'send.props' is of type 'unknown'.
+1	__tests__/modules/openid/proofPresentationFirstFrame.test.tsx	TS2698	Spread types may only be created from object types.
+6	__tests__/modules/vrc/EvidenceBuilder.test.ts	TS18048	'result.evidence.biometricMethod' is possibly 'undefined'.
+1	__tests__/modules/vrc/components/LocalityPreflightModal.test.tsx	TS2556	A spread argument must either have a tuple type or be passed to a rest parameter.
+1	__tests__/modules/vrc/continuityCrypto.test.ts	TS2353	Object literal may only specify known properties, and 'label' does not exist in type 'InitConfig'.
+1	__tests__/modules/vrc/hooks/useDeleteContact.chatHistory.test.tsx	TS2345	Argument of type '(id: string) => Promise<void>' is not assignable to parameter of type '() => Promise<undefined>'.
+3	__tests__/modules/vrc/useContactLinks.test.tsx	TS18046	'result.current' is of type 'unknown'.
+2	__tests__/modules/vrc/useContactLinks.test.tsx	TS2345	Argument of type '({ refresh }: { refresh: any; }) => ContactLinks' is not assignable to parameter of type '(props: unknown) => ContactLinks'.
+7	__tests__/modules/vrc/vrc-exchange-flow.test.ts	TS2551	Property 'ConnectionStateChanged' does not exist on type 'typeof DidCommConnectionEventTypes'. Did you mean 'DidCommConnectionStateChanged'?
+20	__tests__/modules/vrc/vrc-exchange-flow.test.ts	TS2551	Property 'CredentialStateChanged' does not exist on type 'typeof DidCommCredentialEventTypes'. Did you mean 'DidCommCredentialStateChanged'?
+2	__tests__/modules/vrc/vrc-witness-reporting-flow.test.ts	TS2304	Cannot find name 'witnessStateGetter'.
+3	__tests__/modules/vrc/vrc-witness-reporting-flow.test.ts	TS2304	Cannot find name 'witnessValidationCallback'.
+1	__tests__/modules/vrc/vrc-witness-reporting-flow.test.ts	TS2552	Cannot find name 'witnessStateGetter'. Did you mean '_witnessStateGetter'?
+1	__tests__/modules/vrc/vrcSignedContentKeyOrder.test.ts	TS7006	Parameter 'a' implicitly has an 'any' type.
+3	__tests__/screens/ExportWallet.test.tsx	TS2741	Property 'navigation' is missing in type '{}' but required in type 'ExportWalletProps'.
+3	__tests__/screens/ImportWallet.test.tsx	TS2741	Property 'navigation' is missing in type '{}' but required in type 'ImportWalletProps'.
+2	__tests__/screens/ProofChangeCredential.test.tsx	TS2578	Unused '@ts-expect-error' directive.
+12	__tests__/screens/ProofRequest.test.tsx	TS2578	Unused '@ts-expect-error' directive.
+1	__tests__/screens/Scan.test.tsx	TS2578	Unused '@ts-expect-error' directive.
+1	__tests__/screens/TrustTaskApprovalModal.test.tsx	TS2353	Object literal may only specify known properties, and 'register' does not exist in type 'ITrustTaskDisplayRegistry'.
+8	__tests__/screens/W3cProofRequest.test.tsx	TS2578	Unused '@ts-expect-error' directive.
+2	__tests__/services/rCardCredential.test.ts	TS2339	Property 'templateId' does not exist on type 'Tags<DefaultW3cCredentialTags, CustomW3cCredentialTags>'.
+1	src/modules/trust-tasks/__tests__/BleDeviceLocalityProvider.test.ts	TS2345	Argument of type '"passcode"' is not assignable to parameter of type '"biometric" | Promise<"biometric">'.
+1	src/modules/trust-tasks/__tests__/MyAgentScreen.test.tsx	TS2353	Object literal may only specify known properties, and 'communityDid' does not exist in type '{ vtaDid: string; did: string; createdAt: string; }'.
+1	src/modules/trust-tasks/__tests__/SignInScreen.test.tsx	TS2322	Type 'Mock<Promise<{ requester: {}; claimed: ClaimedSignIn; step2: Record<string, unknown>; sessionKey: string; identifiedAs: string; persona: SignInPersona; version: OobVersion; signingScope?: string[] | undefined; }>, [], any>' is not assignable to type '(claimed: ClaimedSignIn, enteredNumber: string, identity?: SignInIdentity | undefined) => Promise<ProvedSignIn>'.
+1	src/modules/trust-tasks/__tests__/SignInScreen.test.tsx	TS2322	Type '{}' is not assignable to type 'string'.
+1	src/modules/trust-tasks/__tests__/SignInScreen.test.tsx	TS2352	Conversion of type '({ Global: { Enter: string; Submit: string; "NoneYet!": string; Cancel: string; Save: string; Confirm: string; Accept: string; Reject: string; NotNow: string; Share: string; Decline: string; Back: string; ... 38 more ...; AppName: string; }; ... 75 more ...; Relationship: { ...; }; } | { ...; } | { ...; })[]' to type 'Record<string, Record<string, string>>[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+1	src/modules/trust-tasks/__tests__/SignInScreen.test.tsx	TS2741	Property 'createdAt' is missing in type '{ browser: string; os: string; location: string; sameNetwork: true; }' but required in type 'SignInRequester'.
+2	src/modules/trust-tasks/__tests__/VtaAgentHomeScreen.test.tsx	TS2339	Property 'getState' does not exist on type 'Setter'.
+2	src/modules/trust-tasks/__tests__/VtaAgentHomeScreen.test.tsx	TS2550	Property 'at' does not exist on type 'any[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/VtaAskMeScreen.test.tsx	TS2339	Property 'genericRecords' does not exist on type 'never'.
+1	src/modules/trust-tasks/__tests__/agentKeysPieces.test.tsx	TS2339	Property 'color' does not exist on type 'never'.
+1	src/modules/trust-tasks/__tests__/cardConformance.test.ts	TS2345	Argument of type '{ config: { logger: { info: () => undefined; warn: () => undefined; debug: () => undefined; }; }; genericRecords: { findAllByQuery: () => Promise<never[]>; }; dids: { resolveDidDocument: (d: string) => Promise<DidDocument>; getCreatedDids: () => Promise<...>; }; dependencyManager: { ...; }; }' is not assignable to parameter of type 'Agent<any>'.
+3	src/modules/trust-tasks/__tests__/cardConformance.test.ts	TS2550	Property 'at' does not exist on type 'Produced[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+3	src/modules/trust-tasks/__tests__/cardConformance.test.ts	TS2550	Property 'at' does not exist on type 'Record<string, unknown>[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+6	src/modules/trust-tasks/__tests__/cardConformance.test.ts	TS2550	Property 'at' does not exist on type '[][]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+4	src/modules/trust-tasks/__tests__/cardSessionCredentials.test.ts	TS2550	Property 'at' does not exist on type '{ to: string; type: string; body: Record<string, unknown>; options?: unknown; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/cardVault.test.ts	TS2550	Property 'at' does not exist on type '{ found: number; restored: number; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/ceremonyRegistry.test.ts	TS2339	Property 'config' does not exist on type 'never'.
+1	src/modules/trust-tasks/__tests__/ceremonyRegistry.test.ts	TS2352	Conversion of type 'undefined' to type '{ type: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+1	src/modules/trust-tasks/__tests__/ceremonyRegistry.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '2'.
+1	src/modules/trust-tasks/__tests__/ceremonyRegistry.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '3'.
+1	src/modules/trust-tasks/__tests__/deliveredCardKept.test.ts	TS7006	Parameter '_item' implicitly has an 'any' type.
+1	src/modules/trust-tasks/__tests__/deliveredCardKept.test.ts	TS7006	Parameter 'why' implicitly has an 'any' type.
+1	src/modules/trust-tasks/__tests__/deviceWords.test.ts	TS2339	Property 'date' does not exist on type 'LastSeen'.
+2	src/modules/trust-tasks/__tests__/getCardsFromAgent.test.tsx	TS2550	Property 'at' does not exist on type '{ found: number; restored: number; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '2'.
+2	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '3'.
+2	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '4'.
+4	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2556	A spread argument must either have a tuple type or be passed to a rest parameter.
+2	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2698	Spread types may only be created from object types.
+4	src/modules/trust-tasks/__tests__/hiddenAttestation.test.ts	TS2741	Property 'updatedAt' is missing in type '{ vetterDid: string; requestDocumentId: string; status: "cardSent"; session: { documentId: string; challenge: string; domain: string; requiredClaims: string[]; method: "inPerson"; expiresAt: string; matchCode: string; }; }' but required in type 'VettingApplicationRequest'.
+1	src/modules/trust-tasks/__tests__/hiddenSeamsSurviveInlineRequires.test.ts	TS7016	Could not find a declaration file for module 'metro-transform-plugins'. 'packages/core/node_modules/metro-transform-plugins/src/index.js' implicitly has an 'any' type.
+2	src/modules/trust-tasks/__tests__/hiddenVetterDesk.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '0'.
+4	src/modules/trust-tasks/__tests__/inboundProofs.test.ts	TS2550	Property 'at' does not exist on type '{ to: string; type: string; body: Record<string, unknown>; options?: unknown; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/keyringLinkOpen.test.ts	TS2550	Property 'at' does not exist on type 'KeyringLinkNotice[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/mintIdempotency.test.ts	TS2345	Argument of type '{ keyId: string; curve: "Ed25519"; }' is not assignable to parameter of type '{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; } | Promise<{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; }>'.
+1	src/modules/trust-tasks/__tests__/personaContext.test.ts	TS2345	Argument of type '{ keyId: string; curve: "Ed25519"; }' is not assignable to parameter of type '{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; } | Promise<{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; }>'.
+1	src/modules/trust-tasks/__tests__/personaHost.test.ts	TS2345	Argument of type '{ keyId: string; curve: "Ed25519"; }' is not assignable to parameter of type '{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; } | Promise<{ keyId: string; curve: "Ed25519" | "X25519"; publicKeyMultibase: string; }>'.
+1	src/modules/trust-tasks/__tests__/rejoinAfterRemoval.test.ts	TS2741	Property 'updatedAt' is missing in type '{ vetterDid: string; requestDocumentId: string; status: "attested"; }' but required in type 'VettingApplicationRequest'.
+1	src/modules/trust-tasks/__tests__/signInScanNavigation.test.tsx	TS2322	Type '{}' is not assignable to type 'string'.
+1	src/modules/trust-tasks/__tests__/signInScanNavigation.test.tsx	TS2741	Property 'createdAt' is missing in type '{ browser: string; os: string; location: string; sameNetwork: true; }' but required in type 'SignInRequester'.
+1	src/modules/trust-tasks/__tests__/slowMintAnswer.test.ts	TS2550	Property 'at' does not exist on type '[][]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/statementBypass.test.ts	TS2322	Type '(m: never) => Promise<void>' is not assignable to type '(plaintext: DidCommV2PlaintextMessage) => Promise<void>'.
+1	src/modules/trust-tasks/__tests__/tspControl.test.ts	TS2305	Module '"@bifold/trust-tasks"' has no exported member 'SigningKey'.
+1	src/modules/trust-tasks/__tests__/tspControl.test.ts	TS2307	Cannot find module '@openvtc/vti-tsp-js/unsafe-testing' or its corresponding type declarations.
+1	src/modules/trust-tasks/__tests__/tspInvite.test.ts	TS2305	Module '"@bifold/trust-tasks"' has no exported member 'SigningKey'.
+1	src/modules/trust-tasks/__tests__/tspInvite.test.ts	TS2307	Cannot find module '@openvtc/vti-tsp-js/unsafe-testing' or its corresponding type declarations.
+1	src/modules/trust-tasks/__tests__/tspReplyBreaker.test.ts	TS2352	Conversion of type '({ Global: { Enter: string; Submit: string; "NoneYet!": string; Cancel: string; Save: string; Confirm: string; Accept: string; Reject: string; NotNow: string; Share: string; Decline: string; Back: string; ... 38 more ...; AppName: string; }; ... 75 more ...; Relationship: { ...; }; } | { ...; } | { ...; })[]' to type 'Record<string, Record<string, string>>[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+1	src/modules/trust-tasks/__tests__/tspReplyBreaker.test.ts	TS2352	Conversion of type '{ Global: { Enter: string; Submit: string; "NoneYet!": string; Cancel: string; Save: string; Confirm: string; Accept: string; Reject: string; NotNow: string; Share: string; Decline: string; Back: string; ... 38 more ...; AppName: string; }; ... 75 more ...; Relationship: { ...; }; }' to type 'Record<string, Record<string, string>>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+1	src/modules/trust-tasks/__tests__/tspV1.test.ts	TS2307	Cannot find module '@openvtc/vti-tsp-js-v1/unsafe-testing' or its corresponding type declarations.
+1	src/modules/trust-tasks/__tests__/turnedDownNotice.test.ts	TS2741	Property 'needs' is missing in type '{ requestId: string; effect: string; }' but required in type 'VtiVerdict'.
+1	src/modules/trust-tasks/__tests__/useTakingLong.test.ts	TS2345	Argument of type '({ active }: { active: any; }) => boolean' is not assignable to parameter of type '(props: unknown) => boolean'.
+1	src/modules/trust-tasks/__tests__/vetterOutstandingTicket.test.ts	TS2339	Property 'saveTicket' does not exist on type 'never'.
+1	src/modules/trust-tasks/__tests__/vettingFirstFrames.test.tsx	TS2801	This condition will always return true since this 'Promise<void>' is always defined.
+2	src/modules/trust-tasks/__tests__/vtaAgentHostLink.test.ts	TS2550	Property 'at' does not exist on type 'string[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtaAgentHostLink.test.ts	TS2550	Property 'at' does not exist on type '{ url: string; method: string; body?: unknown; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/vtaAgentLink.test.ts	TS2322	Type '() => { get: () => Promise<never>; set: (l: Record<string, unknown>) => Promise<void>; clear: () => Promise<undefined>; list: () => Promise<never>; current: () => Promise<...>; }' is not assignable to type '(agent: Agent<any>) => VtaLinkStore'.
+1	src/modules/trust-tasks/__tests__/vtaAgentLink.test.ts	TS2352	Conversion of type 'undefined' to type '{ keyId: string; }' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+1	src/modules/trust-tasks/__tests__/vtaAgentLink.test.ts	TS2493	Tuple type '[]' of length '0' has no element at index '0'.
+1	src/modules/trust-tasks/__tests__/vtaAgentLink.test.ts	TS2769	No overload matches this call.
+1	src/modules/trust-tasks/__tests__/vtaClientDropQueued.test.ts	TS2550	Property 'at' does not exist on type '[][]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/vtaClientRegreet.test.ts	TS2550	Property 'at' does not exist on type 'Record<string, unknown>[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/trust-tasks/__tests__/vtaClientRegreet.test.ts	TS2550	Property 'at' does not exist on type 'string[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtaClientTspCarriage.test.ts	TS2550	Property 'at' does not exist on type 'string[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+3	src/modules/trust-tasks/__tests__/vtaClientTspCarriage.test.ts	TS2550	Property 'at' does not exist on type '{ carriage: "didcomm" | "tsp"; doc: Record<string, unknown>; revision?: string | undefined; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+4	src/modules/trust-tasks/__tests__/vtaOwnAgent.test.ts	TS2322	Type 'Mock<Promise<OwnerConfirmation>, [], any>' is not assignable to type 'Mock<Promise<OwnerConfirmation>, [string], any>'.
+1	src/modules/trust-tasks/__tests__/vtiAgentAnswers.test.ts	TS2550	Property 'at' does not exist on type 'Record<string, unknown>[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtiAgentAnswers.test.ts	TS2550	Property 'at' does not exist on type '{ did: string; mediator: string; onMessage: (m: unknown) => void; onTspFrame?: ((bytes: Uint8Array<ArrayBufferLike>) => Promise<void>) | undefined; tsp: Uint8Array<...>[]; didcomm: unknown[]; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtiAgentLegs.test.ts	TS2550	Property 'at' does not exist on type 'Record<string, unknown>[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+14	src/modules/trust-tasks/__tests__/vtiAgentLegs.test.ts	TS2550	Property 'at' does not exist on type '{ did: string; mediator: string; onMessage: (m: unknown) => void; onTspFrame?: ((bytes: Uint8Array<ArrayBufferLike>) => Promise<void>) | undefined; tsp: Uint8Array<...>[]; didcomm: unknown[]; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtiMediatorExpiry.test.ts	TS2550	Property 'at' does not exist on type '{ close: () => void; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtiMediatorExpiry.test.ts	TS2550	Property 'at' does not exist on type '{ token: string; frame: unknown; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/trust-tasks/__tests__/vtiPersonaInbox.test.ts	TS2550	Property 'at' does not exist on type 'string[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+3	src/modules/trust-tasks/__tests__/writeVettedV1.test.ts	TS2550	Property 'at' does not exist on type '{ to: string; type: string; body: Record<string, unknown>; options?: unknown; }[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+1	src/modules/vrc/__tests__/unit/dtgRegistryContextV1.test.ts	TS7016	Could not find a declaration file for module 'jsonld'. 'packages/core/node_modules/jsonld/lib/index.js' implicitly has an 'any' type.
+1	src/modules/vrc/__tests__/unit/hardwareEvidenceVocabulary.test.ts	TS7016	Could not find a declaration file for module 'jsonld'. 'packages/core/node_modules/jsonld/lib/index.js' implicitly has an 'any' type.
+1	src/modules/vrc/__tests__/unit/localityVocabulary.test.ts	TS7016	Could not find a declaration file for module 'jsonld'. 'packages/core/node_modules/jsonld/lib/index.js' implicitly has an 'any' type.
+1	src/modules/vrc/__tests__/unit/witnessConnectionProvider.test.tsx	TS2550	Property 'at' does not exist on type 'any[]'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.
+2	src/modules/vrc/__tests__/unit/witnessConnectionProvider.test.tsx	TS2556	A spread argument must either have a tuple type or be passed to a rest parameter.
+1	src/modules/vrc/__tests__/unit/witnessCredentialUtils.test.ts	TS2339	Property 'type' does not exist on type 'string | W3cJsonCredential'.
