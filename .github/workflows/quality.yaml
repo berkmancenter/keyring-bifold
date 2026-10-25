@@ -182,8 +182,9 @@ jobs:
       - name: No new type errors in @bifold/core
         run: |
           # jest strips types, so this is the only tsc run in this repository's CI.
-          # It fails on a type error the baseline (packages/core/tsc-baseline.txt)
-          # does not hold, on a count that rises, and on a tsc run that fails without
-          # a diagnostic. Raising the baseline needs the entry named in the PR body
-          # and the reviewer's explicit agreement (see scripts/tsc-ratchet.mjs).
+          # Policy: @bifold/core has no type errors. The baseline
+          # (packages/core/tsc-baseline.txt) is empty; an entry there is an exception
+          # that needs a named reason in the PR body and the review lane's explicit
+          # agreement (scripts/tsc-ratchet.mjs). It fails on a new error, on a count
+          # that rises, and on a tsc run that fails without a diagnostic.
           node scripts/tsc-ratchet.mjs --package packages/core

@@ -1,3 +1,3 @@
 # tsc-ratchet baseline: <count> TAB <file> TAB <TS code> TAB <message>, sorted.
-# Regenerate with `node scripts/tsc-ratchet.mjs --write` only to record fixes.
-# Raising a count or adding a line needs it named in the PR body and the reviewer's agreement.
+# Policy: no type errors. Any line here is an exception: it needs a named reason in the
+# PR body and the review lane's explicit agreement. `--write` only to record fixes.

@@ -21,9 +21,10 @@
 // it says so and asks for the baseline to be updated in the same PR
 // (`--write`), so the ratchet tightens.
 //
-// POLICY: raising the baseline (adding a signature or a count) needs the entry
-// named in the PR body and the reviewer's explicit agreement. `--write` is for
-// recording fixes; using it to absorb a new error without that is not allowed.
+// POLICY: @bifold/core has no type errors, and its baseline is empty. A
+// baseline entry is an exception: it needs a named reason in the PR body and
+// the review lane's explicit agreement. `--write` is for recording fixes;
+// using it to absorb a new error without that is not allowed.
 import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -59,8 +60,8 @@ export function countDiagnostics(output, pkgDir) {
 export function formatBaseline(counts) {
   const header = [
     '# tsc-ratchet baseline: <count> TAB <file> TAB <TS code> TAB <message>, sorted.',
-    '# Regenerate with `node scripts/tsc-ratchet.mjs --write` only to record fixes.',
-    "# Raising a count or adding a line needs it named in the PR body and the reviewer's agreement.",
+    '# Policy: no type errors. Any line here is an exception: it needs a named reason in the',
+    "# PR body and the review lane's explicit agreement. `--write` only to record fixes.",
   ]
   const lines = [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, n]) => `${n}\t${k}`)
   return [...header, ...lines].join('\n') + '\n'
@@ -140,7 +141,7 @@ export function judge({ status, signal, error, output }, baseline, pkgDir) {
   for (const f of fell) lines.push(`FIXED ${f.was} -> ${f.now}  ${f.signature.replace(/\t/g, '  ')}`)
   if (rose.length) {
     lines.push(
-      "tsc-ratchet: new type errors. Fix them; raising the baseline needs the entry named in the PR body and the reviewer's agreement."
+      "tsc-ratchet: new type errors. Fix them. A baseline exception needs a named reason in the PR body and the review lane's agreement."
     )
     return { ok: false, lines, current }
   }
