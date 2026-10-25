@@ -9,6 +9,10 @@
 //
 //   node scripts/tsc-ratchet.mjs [--package packages/core] [--project tsconfig.ratchet.json] [--write]
 //
+// --project defaults to the package's tsconfig.ratchet.json when it has one, else
+// its tsconfig.json, so a bare `--write` cannot record a baseline from the wrong
+// project.
+//
 // A diagnostic's signature is its file, its TS code and its message, with no
 // line or column (those move with unrelated edits). The baseline keeps a COUNT
 // per signature, so a second error of a kind a file already has is still seen.
@@ -119,7 +123,12 @@ export function runTsc(pkgDir, { project = 'tsconfig.json', tscPath = process.en
   }
 }
 
-export function judge({ status, signal, error, output }, baseline, pkgDir) {
+export function judge(
+  { status, signal, error, output },
+  baseline,
+  pkgDir,
+  writeCommand = 'node scripts/tsc-ratchet.mjs --write'
+) {
   if (error) return { ok: false, lines: [`tsc-ratchet: tsc could not be started: ${error.message}`] }
   if (signal) return { ok: false, lines: [`tsc-ratchet: tsc was killed by ${signal}`] }
   const current = countDiagnostics(output, pkgDir)
@@ -147,8 +156,7 @@ export function judge({ status, signal, error, output }, baseline, pkgDir) {
     )
     return { ok: false, lines, current }
   }
-  if (fell.length)
-    lines.push('tsc-ratchet: errors were fixed. Update the baseline in this PR: node scripts/tsc-ratchet.mjs --write')
+  if (fell.length) lines.push(`tsc-ratchet: errors were fixed. Update the baseline in this PR: ${writeCommand}`)
   return { ok: true, lines, current }
 }
 
@@ -160,7 +168,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const pkgDir = path.resolve(repoRoot, arg('--package') ?? 'packages/core')
   const baselinePath = path.join(pkgDir, 'tsc-baseline.txt')
   const baseline = existsSync(baselinePath) ? parseBaseline(readFileSync(baselinePath, 'utf8')) : new Map()
-  const result = judge(runTsc(pkgDir, { project: arg('--project') }), baseline, pkgDir)
+  const project =
+    arg('--project') ??
+    (existsSync(path.join(pkgDir, 'tsconfig.ratchet.json')) ? 'tsconfig.ratchet.json' : 'tsconfig.json')
+  const writeCommand = `node scripts/tsc-ratchet.mjs --package ${path.relative(repoRoot, pkgDir)} --project ${project} --write`
+  const result = judge(runTsc(pkgDir, { project }), baseline, pkgDir, writeCommand)
   for (const line of result.lines) console.log(line)
   if (process.argv.includes('--write')) {
     if (!result.current) {

@@ -81,6 +81,10 @@ test('passes when errors are fixed, and asks for the baseline to be updated in t
   assert.match(r.lines.join('\n'), /FIXED 2 -> 1/)
   assert.match(r.lines.join('\n'), /FIXED 1 -> 0/)
   assert.match(r.lines.join('\n'), /Update the baseline in this PR/)
+  // The reminder names the command that ran, project included, so following it
+  // cannot record a baseline from a different project.
+  const named = judge({ status: 2, output: out(e1) }, baseline, PKG, 'node x --project p.json --write')
+  assert.match(named.lines.join('\n'), /Update the baseline in this PR: node x --project p\.json --write/)
   // All fixed: tsc exits 0 with nothing to say, and that passes too.
   assert.equal(judge({ status: 0, output: '' }, baseline, PKG).ok, true)
 })
