@@ -1,11 +1,10 @@
 {
-  "generatedFrom": "7ebf419ff101ec9b62cb2aaa4c6c084616e74712",
+  "generatedFrom": "37877716c5f84a8dd465f51cfd7ff4dc09f2d280",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
     "Accept": ["src/screens/Terms.tsx"],
     "AcceptCredentialOffer": [
-      "src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx",
       "src/modules/openid/screens/OpenIDCredentialOffer.tsx",
       "src/screens/CredentialOffer.tsx"
     ],
@@ -249,6 +248,17 @@
     "CardStatusNoticeTryAgain": ["src/modules/trust-tasks/screens/cardStatusNotice.tsx"],
     "Change Pin": ["src/screens/Settings.tsx"],
     "ChangePIN": ["src/screens/PINChange.tsx"],
+    "ChatActionCopy": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionDeleteForMe": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionReply": ["src/components/chat/Chat.ids.ts"],
+    "ChatComposerEmojiButton": ["src/components/chat/Chat.ids.ts"],
+    "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
+    "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
+    "ChatReaction": ["src/components/chat/Chat.ids.ts"],
+    "ChatReactionBar": ["src/components/chat/Chat.ids.ts"],
+    "ChatReactionBarMore": ["src/components/chat/Chat.ids.ts"],
     "ClearPastedUrl": ["src/screens/PasteUrl.tsx"],
     "ClearTestContactsButton": ["src/screens/Developer.tsx"],
     "Close": [
@@ -337,6 +347,10 @@
     "ContactMergeYes": ["src/modules/vrc/components/ContactMergeSection.tsx"],
     "ContactMergedByYou": ["src/modules/vrc/components/ContactMergeSection.tsx"],
     "ContactOnTheWay": ["src/screens/CredentialOfferAccept.tsx"],
+    "ContactPhoto": ["src/modules/vrc/components/ContactPhoto.tsx"],
+    "ContactPhotoImage": ["src/modules/vrc/components/ContactPhoto.tsx"],
+    "ContactPhotoInitial": ["src/modules/vrc/components/ContactPhoto.tsx"],
+    "ContactPhotoLogo": ["src/modules/vrc/components/ContactPhoto.tsx"],
     "ContactRemove": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactRemoveMerged": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactRemoveMergedBack": ["src/modules/vrc/screens/ContactDetails.tsx"],
@@ -430,7 +444,6 @@
     "DataRetention": ["src/screens/Settings.tsx"],
     "Decline": ["src/screens/ProofRequest.tsx"],
     "DeclineCredentialOffer": [
-      "src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx",
       "src/modules/openid/screens/OpenIDCredentialOffer.tsx",
       "src/screens/CredentialOffer.tsx"
     ],
@@ -457,14 +470,16 @@
       "src/components/modals/DismissiblePopupModal.tsx",
       "src/components/modals/ImageModal.tsx"
     ],
-    "DismissCredentialOffer": [
-      "src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx"
-    ],
     "Done": ["src/components/modals/ProofCancelModal.tsx", "src/screens/CredentialOfferAccept.tsx"],
     "E2EAutoLockMinutes": ["src/components/misc/E2EClockRows.tsx"],
     "E2EClocksMode": ["src/components/misc/E2EClockRows.tsx"],
     "E2EGrantWindowSeconds": ["src/components/misc/E2EClockRows.tsx"],
     "E2EPhoneGrantWindowSeconds": ["src/components/misc/E2EClockRows.tsx"],
+    "EmojiPicker": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
+    "EmojiPickerClearSearch": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
+    "EmojiPickerNoResults": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
+    "EmojiPickerRecent": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
+    "EmojiPickerSearch": ["src/modules/chat/emoji/EmojiPicker.ids.ts"],
     "EnableWalletNamingSwitchElement": ["src/screens/Developer.tsx"],
     "Enter": ["src/screens/AttemptLockout.tsx", "src/screens/PINEnter.tsx"],
     "EnterOldPIN": ["src/screens/PINChange.tsx", "src/screens/PINVerify.tsx"],
@@ -747,6 +762,13 @@
     "Okay": ["src/components/misc/InfoBox.tsx", "src/components/modals/DismissiblePopupModal.tsx"],
     "OpenIDNotificationPressable": ["src/modules/openid/features/notifications/OpenIDNotificationCard.tsx"],
     "OpenIDNotificationXButton": ["src/modules/openid/features/notifications/OpenIDNotificationCard.tsx"],
+    "OpenIDProofDecline": [
+      "src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx"
+    ],
+    "OpenIDProofDismiss": [
+      "src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx"
+    ],
+    "OpenIDProofSend": ["src/modules/openid/features/OpenIDProofPresentation/components/OpenIDProofRequestFooter.tsx"],
     "PassOpenClose": ["src/modules/trust-tasks/screens/CommunityPassDetails.tsx"],
     "PassOpenLift": ["src/modules/trust-tasks/screens/CommunityPassDetails.tsx"],
     "PassStack": ["src/modules/trust-tasks/components/PassStack.tsx"],
@@ -1204,6 +1226,7 @@
     "DenyConsentButton_": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "DirectoryDisclosureField_": ["src/modules/trust-tasks/screens/DirectoryDisclosureCard.tsx"],
     "Dismiss": ["src/components/listItems/NotificationListItem.tsx", "src/components/misc/InfoBox.tsx"],
+    "EmojiPickerEmoji_": ["src/modules/chat/emoji/EmojiPicker.tsx"],
     "JoinPrivateVettingRefused_": ["src/modules/trust-tasks/screens/PrivateVettingStart.tsx"],
     "JoinPrivateVettingStart_": ["src/modules/trust-tasks/screens/PrivateVettingStart.tsx"],
     "JoinWayCannotUse_": ["src/modules/trust-tasks/screens/JoinWaysCard.tsx"],
@@ -1256,6 +1279,27 @@
       "src/components/chat/ActionSlider.tsx": "action.text"
     },
     {
+      "src/components/chat/ChatMessage.tsx": "ChatIds.reactions"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actions"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actionsBackdrop"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "testID"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "ChatIds.reactionBar"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "ChatIds.reactionMore"
+    },
+    {
+      "src/components/chat/ReactionBar.tsx": "`${ChatIds.reaction}-${index}`"
+    },
+    {
       "src/components/misc/CredentialCard11ActionFooter.tsx": "testID"
     },
     {
@@ -1275,6 +1319,21 @@
     },
     {
       "src/components/texts/Link.tsx": "testIdForAccessabilityLabel(linkText)"
+    },
+    {
+      "src/modules/chat/emoji/EmojiPicker.tsx": "EmojiPickerIds.clearSearch"
+    },
+    {
+      "src/modules/chat/emoji/EmojiPicker.tsx": "EmojiPickerIds.noResults"
+    },
+    {
+      "src/modules/chat/emoji/EmojiPicker.tsx": "EmojiPickerIds.root"
+    },
+    {
+      "src/modules/chat/emoji/EmojiPicker.tsx": "EmojiPickerIds.search"
+    },
+    {
+      "src/modules/chat/emoji/EmojiPicker.tsx": "section.testID"
     },
     {
       "src/modules/trust-tasks/screens/DidDetails.tsx": "`${testIdStem}Copy`"

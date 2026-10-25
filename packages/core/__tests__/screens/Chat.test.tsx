@@ -6,7 +6,8 @@ import {
   DidCommDidExchangeRole,
   DidCommDidExchangeState,
 } from '@credo-ts/didcomm'
-import { act, fireEvent, render } from '@testing-library/react-native'
+import { useNavigation } from '@react-navigation/native'
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
 
 import * as network from '../../src/contexts/network'
@@ -103,6 +104,32 @@ describe('Chat Screen', () => {
     const tree = render(element)
 
     expect(tree).toMatchSnapshot()
+  })
+
+  test('the title is their photo beside their name, for this connection', () => {
+    jest.spyOn(network, 'useNetwork').mockImplementation(() => ({
+      silentAssertConnectedNetwork: () => true,
+      assertNetworkConnected: () => true,
+      assertInternetReachable: jest.fn(),
+      assertMediatorReachable: jest.fn(),
+      displayNetInfoModal: jest.fn(),
+      hideNetInfoModal: jest.fn(),
+    }))
+    render(
+      <BasicAppContext>
+        <Chat navigation={navigationContext} route={props as any} />
+      </BasicAppContext>
+    )
+    // Chat sets its options on the navigation it reads with useNavigation (the shared mock's), not on its prop.
+    const setOptions = (useNavigation() as unknown as { setOptions: jest.Mock }).setOptions
+    const options = setOptions.mock.calls.map(([o]: [Record<string, unknown>]) => o)
+    const last = options.filter((o: Record<string, unknown>) => o.headerTitle).pop() as {
+      title: string
+      headerTitle: (p: object) => React.ReactElement<{ connectionId: string; label: string }>
+    }
+    // The plain title stays (Back and the OS name the screen by it); the header shows the photo and the name.
+    expect(last.title).toBe('Alice')
+    expect(last.headerTitle({}).props).toMatchObject({ connectionId: '1', label: 'Alice' })
   })
 })
 
@@ -229,7 +256,7 @@ describe('Chat screen draft and over-the-air updates', () => {
     expect(hasOtaApplyBlockers()).toBe(false)
   })
 
-  test('releases the block when the draft is sent', () => {
+  test('releases the block when the draft is sent', async () => {
     const basicMessages = (useAgent as jest.Mock)().agent.modules.didcomm.basicMessages
     const original = basicMessages.sendMessage
     basicMessages.sendMessage = jest.fn(async () => undefined)
@@ -239,8 +266,9 @@ describe('Chat screen draft and over-the-air updates', () => {
       expect(otaApplyBlockerReasons()).toEqual(['chat-draft'])
 
       fireEvent.press(tree.getByTestId('GC_SEND_TOUCHABLE'))
-      expect(basicMessages.sendMessage).toHaveBeenCalledWith('1', 'See you at noon')
       expect(hasOtaApplyBlockers()).toBe(false)
+      // A contact without chat gets a plain BasicMessage (sendChatText decides, after reading its capability).
+      await waitFor(() => expect(basicMessages.sendMessage).toHaveBeenCalledWith('1', 'See you at noon'))
     } finally {
       basicMessages.sendMessage = original
     }
