@@ -8,6 +8,9 @@ describe('event ids', () => {
     const id = newEventId()
     expect(isUlid(id)).toBe(true)
     expect(id).toHaveLength(26)
+    // CONTROL (reverted next): a new type error in a test file must turn the ratchet red.
+    const planted: number = id
+    expect(planted).toBeDefined()
   })
 
   it('encode the time so later ids sort after earlier ones', () => {
