@@ -38,6 +38,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { registerOtaApplyBlocker } from '../../../utils/otaApply'
 import { testIdWithKey } from '../../../utils/testable'
 import type { ClaimedSignIn } from '../module/oobSignIn'
 import { GRANT_LIFETIME_SECONDS } from '../module/oobSignInAgent'
@@ -85,6 +86,12 @@ type Step =
 
 /** Steps on which the decision deadline is watched. */
 const WATCHED: Step['kind'][] = ['number', 'checking', 'review']
+
+/**
+ * Steps of a request under way: from Continue to its end. An update must not reload the app over one (the
+ * claim, the number and the answer live only in this screen), so it holds the update back while it lasts.
+ */
+const IN_REQUEST: Step['kind'][] = ['claiming', 'number', 'checking', 'review', 'approving', 'declining']
 
 /** The words for an ending, as a localization key. */
 export function signInEndKey(end: SignInEnd): string {
@@ -210,6 +217,10 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
   useEffect(() => {
     if (watching && deadline !== undefined && clock >= deadline) end({ kind: 'timedOut' })
   }, [watching, deadline, clock, end])
+
+  // No update is applied over a request under way (utils/otaApply); released at its end, or when the screen goes.
+  const inRequest = IN_REQUEST.includes(step.kind)
+  useEffect(() => (inRequest ? registerOtaApplyBlocker('sign-in') : undefined), [inRequest])
 
   // Leaving after a claim and before Approve gives the request up, so the
   // browser stops waiting. Never after Approve: the community would cancel a
