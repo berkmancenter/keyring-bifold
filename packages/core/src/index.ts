@@ -125,7 +125,7 @@ export {
   onReturnLocked,
   otaApplyBlockerReasons,
   registerOtaApplyBlocker,
-  resetOtaReturnLockedListeners,
+  resetOtaReturnLockedListenersForTests,
 } from './utils/otaApply'
 export { getCredentialIdentifiers, isValidAnonCredsCredential } from './utils/credential'
 export {

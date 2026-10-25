@@ -4,7 +4,7 @@ import {
   onReturnLocked,
   otaApplyBlockerReasons,
   registerOtaApplyBlocker,
-  resetOtaReturnLockedListeners,
+  resetOtaReturnLockedListenersForTests,
 } from '../otaApply'
 
 describe('otaApply', () => {
@@ -52,7 +52,7 @@ describe('otaApply', () => {
   test('resetting forgets every return-locked listener', () => {
     const heard: number[] = []
     onReturnLocked((awayMs) => heard.push(awayMs))
-    resetOtaReturnLockedListeners()
+    resetOtaReturnLockedListenersForTests()
     notifyReturnLocked(1_000)
     expect(heard).toEqual([])
   })
