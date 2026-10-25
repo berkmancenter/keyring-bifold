@@ -1,4 +1,14 @@
-import type { OperationStatus, RoomsCapabilities, RoomsOperation, RoomsReason, RoomsStatus } from './types'
+import type {
+  OperationStatus,
+  RoomCapabilities,
+  RoomOperation,
+  RoomsCapabilities,
+  RoomsOperation,
+  RoomsReason,
+  RoomsStatus,
+  RoomSummary,
+  RoomVerb,
+} from './types'
 
 const SPEC = 'https://trusttasks.org/spec/'
 
@@ -58,6 +68,8 @@ const STATUS_OF: Record<RoomsReason, RoomsStatus> = {
   noAgentLinked: 'unavailable',
   agentUnknown: 'unavailable',
   communityDoesNotServe: 'unavailable',
+  detailsNotLoaded: 'unavailable',
+  noRight: 'unavailable',
 }
 
 const status = (reason: RoomsReason, detail: string): OperationStatus => ({ status: STATUS_OF[reason], reason, detail })
@@ -99,6 +111,43 @@ export function sampleCapabilities(): RoomsCapabilities {
     if (need.from === 'nowhere') out[op] = status('notBuiltUpstream', need.why)
     else if (need.from === 'adminOnly') out[op] = status('adminOnly', need.why)
     else out[op] = status('sample', 'sample data, nothing is sent')
+  }
+  return out
+}
+
+/** The right each room operation needs, from the room's authority credential (vti-rooms `Action`). */
+const ROOM_OPERATION_RIGHT: Record<RoomOperation, RoomVerb | undefined> = {
+  listNotes: 'read',
+  readNote: 'read',
+  write: 'write',
+  curate: 'curate',
+  listFiles: 'read',
+  openFile: 'read',
+  agentAccess: 'read',
+  // Its status is already adminOnly service-wide; a room cannot widen it.
+  listCommunityMembers: undefined,
+}
+
+export const ROOM_OPERATIONS = Object.keys(ROOM_OPERATION_RIGHT) as RoomOperation[]
+
+/**
+ * A room's operation statuses: the service-wide status where that already says no; otherwise
+ * `detailsNotLoaded` for a custody-only room, `noRight` where the member's rights lack the one needed,
+ * and the service-wide status (ok or sample) where they have it.
+ */
+export function deriveRoomCapabilities(
+  service: RoomsCapabilities,
+  room: Pick<RoomSummary, 'source' | 'verbs'>
+): RoomCapabilities {
+  const out = {} as RoomCapabilities
+  for (const op of ROOM_OPERATIONS) {
+    const base = service[op]
+    const right = ROOM_OPERATION_RIGHT[op]
+    if (base.status !== 'available' || right === undefined) out[op] = base
+    else if (room.source === 'custody' || room.verbs === undefined)
+      out[op] = status('detailsNotLoaded', 'the community’s record of this room has not been loaded')
+    else if (!room.verbs.includes(right)) out[op] = status('noRight', `this member's rights do not include ${right}`)
+    else out[op] = base
   }
   return out
 }
