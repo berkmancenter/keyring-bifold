@@ -180,6 +180,9 @@ jobs:
           node --test scripts/tsc-ratchet.test.mjs
 
       - name: No new type errors in @bifold/core
+        # CONTROL (reverted next): a tsc that exits non-zero with no output must not pass.
+        env:
+          TSC_RATCHET_TSC: /usr/bin/false
         run: |
           # Build Workspace already type-checks core's src (bob's typescript target),
           # but core's tsconfig excludes the test files and jest strips types, so
