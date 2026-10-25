@@ -1,7 +1,7 @@
 /**
  * Image fixtures for the media checks. The `REAL` images were made by real
  * encoders (zlib for the PNG, macOS `sips` for the JPEG and GIF, `cwebp` and
- * `gif2webp` for the WebPs, ImageMagick for the animated GIF), so the header
+ * `gif2webp` for the WebPs, ImageMagick for the animated GIF and the APNG), so the header
  * readers are proven against encoder output, not only against bytes written to
  * match them. The builders below make headers no encoder would: enormous
  * canvases, truncations, wrong chunks.
@@ -26,6 +26,8 @@ export const REAL = {
   // anim.webp: 6 × 4, 3 frame(s)
   webpAnimated:
     'UklGRrQAAABXRUJQVlA4WAoAAAACAAAABQAAAwAAQU5JTQYAAAAAAP//AABBTk1GKAAAAAAAAAAAAAUAAAMAAGQAAAJWUDhMDwAAAC8FwAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAUAAAMAAGQAAABWUDhMDwAAAC8FwAAAB1DAiP4HIqL/AQBBTk1GKAAAAAAAAAAAAAUAAAMAAGQAAABWUDhMDwAAAC8FwAAABxDR//4HIqL/AQA=',
+  // anim-apng.png (ImageMagick APNG): 6 × 4, 3 frames, acTL before the first IDAT
+  apng: 'iVBORw0KGgoAAAANSUhEUgAAAAYAAAAECAIAAAAiZtkUAAAACXBIWXMAAAAAAAAAAQCEeRdzAAAACGFjVEwAAAADAAAAAM7tusAAAAAaZmNUTAAAAAAAAAAGAAAABAAAAAAAAAAAAAEAGQAAPaYYOQAAABRJREFUeJxj/MvAyIAKWBgwAHFCAEzIAQxHVKsnAAAAGmZjVEwAAAABAAAABgAAAAQAAAAAAAAAAAABABkAAKbV8u0AAAAXZmRBVAAAAAJ4nGNkrGNAAyzoAsQKAQAnFwCNBGKJMwAAABpmY1RMAAAAAwAAAAYAAAAEAAAAAAAAAAAAAQAZAABLQyEEAAAAGGZkQVQAAAAEeJxjZGT4y4AKWBgwAHFCAErQAQyqJ1fWAAAAAElFTkSuQmCC',
 } as const
 
 export const bytesOf = (base64: string): Uint8Array => new Uint8Array(Buffer.from(base64, 'base64'))
@@ -37,8 +39,11 @@ const le24 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff]
 const le32 = (n: number) => [n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff]
 const text = (s: string) => [...s].map((c) => c.charCodeAt(0))
 
-/** A PNG signature and IHDR claiming `width` × `height` (no image data follows). */
-export const pngHeader = (width: number, height: number): Uint8Array =>
+/**
+ * A PNG signature, an IHDR claiming `width` × `height`, and an empty IDAT; with `animated`, an acTL chunk (3 frames)
+ * before the IDAT, as an APNG has. CRCs are zero: the readers do not check them.
+ */
+export const pngHeader = (width: number, height: number, { animated = false } = {}): Uint8Array =>
   new Uint8Array([
     0x89,
     ...text('PNG'),
@@ -55,6 +60,13 @@ export const pngHeader = (width: number, height: number): Uint8Array =>
     0,
     0,
     0,
+    0,
+    0,
+    0,
+    0,
+    ...(animated ? [...be32(8), ...text('acTL'), ...be32(3), ...be32(0), 0, 0, 0, 0] : []),
+    ...be32(0),
+    ...text('IDAT'),
     0,
     0,
     0,

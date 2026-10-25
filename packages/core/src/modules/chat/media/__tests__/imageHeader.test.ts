@@ -35,8 +35,32 @@ describe('readImageHeader, on built headers', () => {
   })
 })
 
+// An APNG has a still PNG's signature, and its frames are compressed, so hundreds fit in the byte limit: refused, not
+// read as one frame (found in review).
+describe('readImageHeader refuses an animated PNG', () => {
+  it('made by ImageMagick, and built, while the same PNG still is read', () => {
+    expect(readImageHeader(bytesOf(REAL.apng))).toBeUndefined()
+    expect(readImageHeader(pngHeader(1000, 1000, { animated: true }))).toBeUndefined()
+    expect(readImageHeader(pngHeader(1000, 1000))).toEqual({
+      mediaType: 'image/png',
+      width: 1000,
+      height: 1000,
+      frames: 1,
+    })
+  })
+})
+
 describe('readImageHeader refuses what it cannot read', () => {
   it.each([
+    [
+      'a PNG whose IHDR is not 13 bytes',
+      (() => {
+        const b = pngHeader(10, 10)
+        b[11] = 12
+        return b
+      })(),
+    ],
+    ['a PNG whose chunks end before any IDAT', pngHeader(10, 10).slice(0, 33)],
     ['a PNG cut inside IHDR', pngHeader(10, 10).subarray(0, 20)],
     [
       'a PNG whose first chunk is not IHDR',

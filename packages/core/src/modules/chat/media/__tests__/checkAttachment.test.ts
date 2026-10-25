@@ -57,6 +57,14 @@ describe('checkImageAttachment refuses', () => {
     expect(checkImageAttachment(raw)).toEqual({ ok: false, reason })
   })
 
+  it('an animated PNG, whose frames would escape the animation budget, as unreadable', () => {
+    const bytes = bytesOf(REAL.apng)
+    expect(checkImageAttachment(descriptorFor(bytes, { mediaType: 'image/png', width: 6, height: 4 }))).toEqual({
+      ok: false,
+      reason: 'unreadable-header',
+    })
+  })
+
   it('a PNG whose IHDR is missing, as unreadable', () => {
     const bytes = pngHeader(5, 3)
     bytes.set([0x49, 0x44, 0x41, 0x54], 12) // "IDAT" where IHDR belongs

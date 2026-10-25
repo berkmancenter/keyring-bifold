@@ -33,7 +33,15 @@ const ascii = (b: Uint8Array, i: number, n: number) => String.fromCharCode(...b.
 
 /** The type the magic bytes name, or undefined for anything else. */
 export function sniffMediaType(b: Uint8Array): ImageMediaType | undefined {
-  if (b.length >= 8 && b[0] === 0x89 && ascii(b, 1, 3) === 'PNG' && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a)
+  if (
+    b.length >= 8 &&
+    b[0] === 0x89 &&
+    ascii(b, 1, 3) === 'PNG' &&
+    b[4] === 0x0d &&
+    b[5] === 0x0a &&
+    b[6] === 0x1a &&
+    b[7] === 0x0a
+  )
     return 'image/png'
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg'
   if (b.length >= 6 && (ascii(b, 0, 6) === 'GIF87a' || ascii(b, 0, 6) === 'GIF89a')) return 'image/gif'
@@ -57,10 +65,20 @@ export function readImageHeader(b: Uint8Array): ImageHeader | undefined {
   }
 }
 
-// The first chunk is IHDR: length, "IHDR", width and height as big-endian 32-bit.
+// The first chunk is IHDR (13 bytes): width and height as big-endian 32-bit. An animated PNG has the same signature,
+// and its frames are compressed, so hundreds fit in the byte limit: one with an acTL chunk before its first IDAT is
+// refused rather than counted. Senders produce still PNGs, so nothing a Keyring phone sends is lost.
 function readPng(b: Uint8Array): ImageHeader | undefined {
-  if (b.length < 24 || ascii(b, 12, 4) !== 'IHDR') return undefined
-  return { mediaType: 'image/png', width: u32be(b, 16), height: u32be(b, 20), frames: 1 }
+  if (b.length < 24 || u32be(b, 8) !== 13 || ascii(b, 12, 4) !== 'IHDR') return undefined
+  let i = 8
+  while (i + 8 <= b.length) {
+    const type = ascii(b, i + 4, 4)
+    if (type === 'acTL') return undefined
+    if (type === 'IDAT') return { mediaType: 'image/png', width: u32be(b, 16), height: u32be(b, 20), frames: 1 }
+    // Length, type, data, CRC.
+    i += 12 + u32be(b, i)
+  }
+  return undefined
 }
 
 // The first start-of-frame marker (C0–CF, except C4 DHT, C8 JPG and CC DAC) holds the height, then the width.
