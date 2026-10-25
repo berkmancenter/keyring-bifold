@@ -455,3 +455,31 @@ describe("a vetter's desk on the agent home", () => {
     expect(tree.queryByTestId(id('AgentOpenDesk'))).toBeNull()
   })
 })
+
+// 271, a vetter's cold launch: with nothing read yet the page drew the step bar ("Linked › Join › Member") and then
+// jumped to the vetter's page. Unknown is not "nothing joined".
+describe('the agent home before anything is read', () => {
+  beforeEach(() => {
+    jest.useFakeTimers()
+    forgetAgentHoldings()
+    communityTarget.clear()
+    controller.set({ introSeen: true, activity: [], approvals: [], switchingTo: undefined, link: linkedTo(VTA_A) })
+  })
+  afterEach(() => jest.useRealTimers())
+  const strip = (t: ReturnType<typeof render>) => Boolean(t.queryByTestId(id('AgentJourneyRow')))
+
+  it('no frame shows the step bar while nothing is read', async () => {
+    ;(useAgent as jest.Mock).mockReturnValue(fakeAgent([persona(COMMUNITY, VTA_A), membership(COMMUNITY)], () => true))
+    const { frames } = renderWithFrames(strip)
+    await settle()
+    expect(frames.length).toBeGreaterThan(0)
+    expect(frames).not.toContain(true)
+  })
+
+  it('…and a phone known to have joined nothing gets it (the control)', async () => {
+    ;(useAgent as jest.Mock).mockReturnValue(fakeAgent([]))
+    const { tree } = renderWithFrames(() => false)
+    await settle()
+    expect(strip(tree)).toBe(true)
+  })
+})

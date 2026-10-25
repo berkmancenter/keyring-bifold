@@ -800,8 +800,10 @@ const VtaAgentHome: React.FC = () => {
           ) : null}
           {/* The step bar teaches the first setup, so it shows only until the
               first membership; after that a status line says where this agent
-              stands (233). */}
-          {holdings && everMemberOf.size > 0 ? (
+              stands (233). Neither until what the agent holds is read: a
+              vetter's cold launch drew the step bar, "Join" next, until the
+              read came back, then jumped to the vetter's page (271). */}
+          {!holdings ? null : everMemberOf.size > 0 ? (
             isMember ? (
               // The id the vetting e2e has always read as "this phone is a member".
               <ThemedText variant="bold" testID={testIdWithKey(VtaAgentHomeIds.journeyJoined)}>
