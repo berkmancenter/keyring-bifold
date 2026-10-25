@@ -124,7 +124,11 @@ test("core's ratchet tsconfig excludes what core's tsconfig does, apart from the
   const testFiles = ['**/*.test.ts', '**/*.test.tsx']
   assert.deepEqual(
     exclude('tsconfig.ratchet.json'),
-    exclude('tsconfig.json').filter((e) => !testFiles.includes(e))
+    exclude('tsconfig.json').filter((e) => !testFiles.includes(e)),
+    'packages/core/tsconfig.json and tsconfig.ratchet.json exclude different paths. If you added an exclusion to ' +
+      'tsconfig.json, add the same entry to tsconfig.ratchet.json. If it is a new test-file pattern the ratchet ' +
+      'should still check, add it to testFiles in this test. Do not delete this test: without it the ratchet ' +
+      'keeps checking the path and the next PR gets the errors.'
   )
 })
 
