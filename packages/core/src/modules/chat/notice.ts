@@ -175,11 +175,18 @@ export async function receiveChatProblemReport(
   const record = peer ?? (await peerRecord(agent, connection.id))
   record.chatRefusedAt = new Date(now)
   await peers.update(agent.context, record)
+
+  // Resend before deleting: if the resend fails, the chat copy stays (sent but
+  // not delivered, still visible) instead of the message vanishing from both
+  // phones. A failed delete after a good resend only leaves a visible duplicate.
+  if (refused.eventType === 'message') {
+    const text = refused.content?.text
+    // Nothing to resend: keep the event rather than delete it with nothing sent.
+    if (!text) return 'chat-refused'
+    await agent.modules.didcomm.basicMessages.sendMessage(connection.id, text)
+  }
   // The other phone never showed it, so it leaves this phone's timeline too.
   await events.delete(agent.context, refused)
-  if (refused.eventType === 'message' && refused.content?.text) {
-    await agent.modules.didcomm.basicMessages.sendMessage(connection.id, refused.content.text)
-  }
   return 'chat-refused'
 }
 

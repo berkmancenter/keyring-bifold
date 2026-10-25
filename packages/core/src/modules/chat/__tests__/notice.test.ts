@@ -22,7 +22,9 @@ const EVENT_ID = '01JB3XKX6F8Q2W4E5R6T7Y8Z9V'
 
 type Connection = { id: string; theirDid?: string; did: string; didcommVersion?: 'v1' | 'v2' }
 
-function makeAgent(options: { rceVersion?: number; noRelationship?: boolean; didcommVersion?: 'v1' | 'v2' } = {}) {
+function makeAgent(
+  options: { rceVersion?: number; noRelationship?: boolean; didcommVersion?: 'v1' | 'v2'; basicFails?: boolean } = {}
+) {
   const records = new Map<string, BaseRecord[]>()
   const sent: { message: unknown; connectionId: string }[] = []
   const basic: { connectionId: string; text: string }[] = []
@@ -103,6 +105,7 @@ function makeAgent(options: { rceVersion?: number; noRelationship?: boolean; did
         connections: { getById: async (id: string) => connections[id] },
         basicMessages: {
           sendMessage: async (connectionId: string, text: string) => {
+            if (options.basicFails) throw new Error('mediator unreachable')
             basic.push({ connectionId, text })
           },
         },
@@ -256,6 +259,25 @@ describe('receiveChatProblemReport', () => {
     expect(fake.events()).toHaveLength(0)
     expect(fake.peers()[0].chatRefusedAt?.getTime()).toBe(NOW)
     expect(await counterpartySpeaksChat(fake.agent, 'conn-1')).toBe(false)
+  })
+
+  it('keeps the chat copy when the resend fails, so the message never vanishes unsent', async () => {
+    const fake = makeAgent({ rceVersion: 6, basicFails: true })
+    fake.addEvent(sentEvent('conn-1', 'message'))
+    await expect(receiveChatProblemReport(fake.agent, ctx(fake, problemReport(EVENT_ID)), NOW)).rejects.toThrow(
+      'mediator unreachable'
+    )
+    expect(fake.events()).toHaveLength(1)
+  })
+
+  it('keeps a refused message that has no text, since there is nothing to resend', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    const textless = sentEvent('conn-1', 'message')
+    textless.content = undefined
+    fake.addEvent(textless)
+    expect(await receiveChatProblemReport(fake.agent, ctx(fake, problemReport(EVENT_ID)), NOW)).toBe('chat-refused')
+    expect(fake.events()).toHaveLength(1)
+    expect(fake.basic).toHaveLength(0)
   })
 
   it('drops a refused reaction without sending anything in its place', async () => {
