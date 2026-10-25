@@ -1,8 +1,10 @@
 /**
  * The pinned emoji set, generated from Unicode's emoji-test.txt and CLDR's
  * English annotations by scripts/emoji/generate-emoji-data.mjs. The JSON is
- * about 380 KB, so it is loaded on first use (opening the picker, or checking
- * a received reaction), not at app start.
+ * about 380 KB (64 KB gzipped). Metro puts it in the JS bundle regardless,
+ * so it adds that much to the bundle and to every OTA update; what is
+ * deferred to first use (opening the picker, or checking a received reaction)
+ * is its parse, not its download.
  */
 
 /** A base emoji: shown in the picker and searchable. */
@@ -64,7 +66,8 @@ export function toEmojiSet(file: EmojiDataFile): EmojiSet {
 /**
  * The emoji set, parsed once and kept. A `require` rather than a static
  * import, so the JSON is evaluated on first use instead of when the chat
- * module loads; a dynamic import() would make Metro split the bundle.
+ * module loads (it is in the bundle either way); a dynamic import() would
+ * make Metro split the bundle.
  */
 export function getEmojiSet(): EmojiSet {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
