@@ -1256,7 +1256,11 @@ export class VtaClient {
      */
     sendOptions: { waitForConsent?: boolean } = {}
   ): Promise<T> {
-    return this.enqueue<T>(type, payload, timeoutMs, documentExtras, onSent).catch(async (error: unknown) => {
+    // A reload would lose all of this (the queue, a step-up, a wait for consent
+    // that can last minutes, the re-submits): none of it is stored. So no
+    // downloaded update applies until the task ends (utils/otaApply).
+    const release = registerOtaApplyBlocker(`vta-task:${type}`)
+    const done = this.enqueue<T>(type, payload, timeoutMs, documentExtras, onSent).catch(async (error: unknown) => {
       const stepUp = this.managerDid ? stepUpRequestOf(error, { vtaDid: this.vtaDid, me: this.managerDid }) : undefined
       if (stepUp)
         return this.answerStepUp<T>(stepUp, error, type, () =>
@@ -1301,6 +1305,7 @@ export class VtaClient {
       }
       throw lastError instanceof Error ? lastError : new Error(String(lastError))
     })
+    return done.finally(release)
   }
 
   /** One send in the queue, behind whatever is in flight — no step-up or consent handling. */
@@ -1312,16 +1317,12 @@ export class VtaClient {
     onSent?: () => void
   ): Promise<T> {
     const ticket = ++this.tickets
-    const run = (): Promise<T> => {
-      if (ticket <= this.droppedThrough) return Promise.reject(new VtaTaskDropped(type))
-      // A reload would lose the pending reply (it lives only in memory), so no
-      // downloaded update applies while a task waits on the VTA (utils/otaApply).
-      const release = registerOtaApplyBlocker(`vta-task:${type}`)
-      return this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
-        this.inFlight = undefined
-        release()
-      })
-    }
+    const run = (): Promise<T> =>
+      ticket <= this.droppedThrough
+        ? Promise.reject(new VtaTaskDropped(type))
+        : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
+            this.inFlight = undefined
+          })
     // One task at a time: one queued behind another says what it waits on, so a
     // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
     const ahead = this.inFlight

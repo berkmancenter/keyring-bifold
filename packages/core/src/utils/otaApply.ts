@@ -32,7 +32,8 @@ export const hasOtaApplyBlockers = (): boolean => blockers.size > 0
 /** Why applying is blocked right now, for logs. */
 export const otaApplyBlockerReasons = (): string[] => [...blockers.values()]
 
-type ReturnLockedListener = (awayMs: number) => void
+// unknown, not void: an async listener's promise is caught below.
+type ReturnLockedListener = (awayMs: number) => unknown
 const returnLockedListeners = new Set<ReturnLockedListener>()
 
 /** Called when the app returns from the background and locks the person out for inactivity. */
@@ -47,7 +48,8 @@ export const onReturnLocked = (listener: ReturnLockedListener): (() => void) => 
 export const notifyReturnLocked = (awayMs: number): void => {
   for (const listener of [...returnLockedListeners]) {
     try {
-      listener(awayMs)
+      // An async listener's rejection is caught too, not left unhandled.
+      Promise.resolve(listener(awayMs)).catch(() => undefined)
     } catch {
       // A listener's failure must never stop the lock.
     }

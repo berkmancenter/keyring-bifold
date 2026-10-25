@@ -35,6 +35,19 @@ describe('otaApply', () => {
     expect(heard).toEqual([31 * 60_000])
   })
 
+  test('an async listener that rejects is caught, not left unhandled', async () => {
+    const off = onReturnLocked(async () => {
+      throw new Error('async listener bug')
+    })
+    const unhandled = jest.fn()
+    process.on('unhandledRejection', unhandled)
+    notifyReturnLocked(1_000)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    process.off('unhandledRejection', unhandled)
+    expect(unhandled).not.toHaveBeenCalled()
+    off()
+  })
+
   test('a failing listener neither throws nor stops the others', () => {
     const heard: number[] = []
     const offBad = onReturnLocked(() => {
