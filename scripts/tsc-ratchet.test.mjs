@@ -116,6 +116,18 @@ test('real tsc: errors added in one file flip an untouched file from TS2552 to T
   }
 })
 
+test("core's ratchet tsconfig excludes what core's tsconfig does, apart from the test files", () => {
+  // "exclude" is replaced, not merged, so a new exclusion in tsconfig.json must be mirrored.
+  const ts = createRequire(import.meta.url)('typescript')
+  const core = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'packages', 'core')
+  const exclude = (file) => ts.readConfigFile(path.join(core, file), ts.sys.readFile).config.exclude
+  const testFiles = ['**/*.test.ts', '**/*.test.tsx']
+  assert.deepEqual(
+    exclude('tsconfig.ratchet.json'),
+    exclude('tsconfig.json').filter((e) => !testFiles.includes(e))
+  )
+})
+
 test('fails on a NEW signature', () => {
   const r = judge({ status: 2, output: out(e1, e2) }, countDiagnostics(out(e1), PKG), PKG)
   assert.equal(r.ok, false)
