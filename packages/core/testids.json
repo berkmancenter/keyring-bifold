@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "3c791069f468dd47783a19d30f88df529772e355",
+  "generatedFrom": "d6e18e1ac0da9197445aa6eadb77cf827109152a",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -743,6 +743,8 @@
     "Okay": ["src/components/misc/InfoBox.tsx", "src/components/modals/DismissiblePopupModal.tsx"],
     "OpenIDNotificationPressable": ["src/modules/openid/features/notifications/OpenIDNotificationCard.tsx"],
     "OpenIDNotificationXButton": ["src/modules/openid/features/notifications/OpenIDNotificationCard.tsx"],
+    "PassOpenClose": ["src/modules/trust-tasks/screens/CommunityPassDetails.tsx"],
+    "PassOpenLift": ["src/modules/trust-tasks/screens/CommunityPassDetails.tsx"],
     "PassStack": ["src/modules/trust-tasks/components/PassStack.tsx"],
     "PassStackItem": ["src/modules/trust-tasks/components/PassStack.tsx"],
     "PasteFromClipboard": ["src/screens/PasteUrl.tsx"],
