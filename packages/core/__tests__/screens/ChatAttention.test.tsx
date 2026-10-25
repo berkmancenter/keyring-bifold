@@ -26,7 +26,7 @@ import { markChatEventsSeen } from '../../src/modules/chat/seen'
 import { chatEventsShown } from '../../src/modules/chat/shown'
 import Chat from '../../src/screens/Chat'
 import { Role } from '../../src/types/chat'
-import { getActiveChatConnectionId } from '../../src/utils/activeChatTracker'
+import { getActiveChatConnectionId, setActiveChatConnectionId } from '../../src/utils/activeChatTracker'
 import navigationContext from '../contexts/navigation'
 import { BasicAppContext } from '../helpers/app'
 
@@ -205,6 +205,14 @@ describe('the chat someone is looking at', () => {
     expect(getActiveChatConnectionId()).toBeUndefined()
     appGoes('active')
     expect(getActiveChatConnectionId()).toBe('1')
+  })
+
+  test('closing one chat leaves another chat that has since set itself', () => {
+    const tree = render(chatScreen())
+    setActiveChatConnectionId('2')
+    tree.unmount()
+    expect(getActiveChatConnectionId()).toBe('2')
+    setActiveChatConnectionId(undefined)
   })
 
   test('closed: it is not', () => {
