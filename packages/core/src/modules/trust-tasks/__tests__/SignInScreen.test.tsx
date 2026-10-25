@@ -13,10 +13,11 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import en from '../../../localization/en/en.json'
 import fr from '../../../localization/fr/fr.json'
 import ptBr from '../../../localization/pt-br/pt-br.json'
+import { hasOtaApplyBlockers, otaApplyBlockerReasons } from '../../../utils/otaApply'
 import { testIdWithKey } from '../../../utils/testable'
 import { SIGN_IN_FAILURE_MESSAGES, SignInError, type ClaimedSignIn } from '../module/oobSignIn'
 import { GRANT_LIFETIME_SECONDS } from '../module/oobSignInAgent'
-import { pendingSignInLink, type ProvedSignIn, type SignInIdentity, type SignInSteps } from '../module/signInSteps'
+import { type ProvedSignIn, type SignInIdentity, type SignInSteps } from '../module/signInSteps'
 import SignIn, { SignInFlow } from '../screens/SignIn'
 import { SignInIds } from '../screens/SignIn.ids'
 
@@ -504,21 +505,61 @@ describe('leaving the screen', () => {
   })
 })
 
+// A reload into a downloaded update would lose a request under way: the claim, the number and the answer live only
+// in this screen. From Continue to the request's end, the sign-in holds the update back (utils/otaApply).
+describe('an update waits while a request is under way', () => {
+  test('held from Continue, through the number and the review, and released when it ends', async () => {
+    const steps = fakeSteps()
+    const tree = await show(steps)
+    expect(hasOtaApplyBlockers()).toBe(false)
+    await press(tree, SignInIds.continue)
+    expect(otaApplyBlockerReasons()).toEqual(['sign-in'])
+    await typeNumber(tree, '42')
+    await press(tree, SignInIds.numberContinue)
+    expect(tree.getByTestId(id(SignInIds.review))).toBeTruthy()
+    expect(otaApplyBlockerReasons()).toEqual(['sign-in'])
+    await press(tree, SignInIds.approve)
+    expect(tree.getByTestId(id(SignInIds.result))).toBeTruthy()
+    expect(hasOtaApplyBlockers()).toBe(false)
+  })
+
+  test('released when the person declines', async () => {
+    const tree = await toReview(fakeSteps())
+    expect(hasOtaApplyBlockers()).toBe(true)
+    await press(tree, SignInIds.decline)
+    expect(hasOtaApplyBlockers()).toBe(false)
+  })
+
+  test('released when the screen goes mid-request', async () => {
+    const tree = await show(fakeSteps())
+    await press(tree, SignInIds.continue)
+    expect(hasOtaApplyBlockers()).toBe(true)
+    tree.unmount()
+    expect(hasOtaApplyBlockers()).toBe(false)
+  })
+
+  test('never held for a code only read, or only confirmed', async () => {
+    const tree = await show(fakeSteps())
+    expect(tree.getByTestId(id(SignInIds.confirm))).toBeTruthy()
+    expect(hasOtaApplyBlockers()).toBe(false)
+    tree.unmount()
+    expect(hasOtaApplyBlockers()).toBe(false)
+  })
+})
+
 describe('the screen in the stack', () => {
-  test('takes the code the scanner held, and lets it go', async () => {
-    pendingSignInLink.set(LINK)
+  test('takes the code its route carries', async () => {
     clock = NOW
     jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000)
     const steps = fakeSteps()
     const tree = render(
       <BasicAppContext>
-        <SignIn steps={steps} />
+        <SignIn steps={steps} route={{ params: { link: LINK } }} />
       </BasicAppContext>
     )
     await act(async () => undefined)
     expect(steps.community).toHaveBeenCalledWith(VTC)
     expect(tree.getByTestId(id(SignInIds.confirm))).toBeTruthy()
-    expect(pendingSignInLink.peek()).toBeUndefined()
     ;(Date.now as jest.Mock).mockRestore()
   })
 })
