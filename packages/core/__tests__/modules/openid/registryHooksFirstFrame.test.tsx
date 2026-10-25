@@ -11,7 +11,10 @@ import React, { useLayoutEffect } from 'react'
 import { BasicAppContext } from '../../helpers/app'
 import { useCredentialErrorsFromRegistry } from '../../../src/modules/openid/hooks/useCredentialErrorsFromRegistry'
 import { useExpiredNotifications } from '../../../src/modules/openid/hooks/useExpiredNotifications'
-import { useReplacementNotifications } from '../../../src/modules/openid/hooks/useReplacementNotifications'
+import {
+  resetReplacementFirstSeen,
+  useReplacementNotifications,
+} from '../../../src/modules/openid/hooks/useReplacementNotifications'
 import { credentialRegistry } from '../../../src/modules/openid/refresh/registry'
 import { CredentialErrors } from '../../../src/types/credentials'
 
@@ -33,7 +36,10 @@ function frames<T>(use: () => T) {
 
 const card = (id: string) => ({ id }) as never
 
-beforeEach(() => credentialRegistry.getState().reset())
+beforeEach(() => {
+  credentialRegistry.getState().reset()
+  resetReplacementFirstSeen()
+})
 
 describe('Revoked, from the registry', () => {
   test('a credential the registry has flagged is Revoked in the first frame', () => {

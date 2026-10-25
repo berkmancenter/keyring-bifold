@@ -11,8 +11,15 @@ import { useOpenIdReplacementNavigation } from './useOpenIdReplacementNavigation
  */
 
 // When each (oldId -> replId) was first seen, for the whole app: every screen
-// listing a replacement gives it the same time, and a rebuild keeps it.
+// listing a replacement gives it the same time, and a rebuild keeps it. Never
+// forgotten: the same replacement offered again after a decline keeps its first
+// time and sorts as older, which is accepted (the same offer, seen before).
 const firstSeen: Record<string, string> = {}
+
+/** Tests only: forget the first-seen times, so one test's never depends on another's. */
+export const resetReplacementFirstSeen = (): void => {
+  for (const key of Object.keys(firstSeen)) delete firstSeen[key]
+}
 
 export const useReplacementNotifications = (): OpenIDNotificationData[] => {
   const openReplacementOffer = useOpenIdReplacementNavigation()

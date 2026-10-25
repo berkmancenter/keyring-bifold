@@ -214,11 +214,6 @@ export const credentialRegistry = createStore<RegistryStore>()(
 
 // Non-React helpers for workers/services
 export const readRegistry = () => credentialRegistry.getState()
-export const mutateRegistry = (updater: (s: RegistryStore) => void) =>
-  credentialRegistry.setState((s) => {
-    updater(s)
-    return s
-  })
 
 export const selectOldIdByReplacementId = (replacementId: string): string | undefined => {
   const { replacements } = credentialRegistry.getState()
