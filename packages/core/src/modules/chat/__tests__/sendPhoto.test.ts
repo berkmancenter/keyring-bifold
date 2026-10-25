@@ -4,7 +4,7 @@ import { Buffer } from 'buffer'
 
 import { MAX_IMAGE_BYTES } from '../media'
 import type { PreparedPhoto } from '../media/prepare'
-import { writeChatMedia } from '../media/store'
+import { removeChatMedia, writeChatMedia } from '../media/store'
 import { jpegHeader, paddedTo } from '../media/__tests__/fixtures/images'
 import type { ChatEventMessage } from '../messages/ChatEventMessage'
 import type { ChatEventRecord } from '../records/ChatEventRecord'
@@ -18,10 +18,14 @@ jest.mock('../media/store', () => ({
     mockOrder.push('write')
     return `${eventId}.jpg`
   }),
+  removeChatMedia: jest.fn(async () => {
+    mockOrder.push('remove')
+  }),
 }))
 const write = writeChatMedia as jest.Mock
+const remove = removeChatMedia as jest.Mock
 
-function makeAgent(options: { rceVersion?: number }) {
+function makeAgent(options: { rceVersion?: number; sendFails?: boolean }) {
   const stored: ChatEventRecord[] = []
   const sent: ChatEventMessage[] = []
   const basic: { connectionId: string; text: string }[] = []
@@ -52,6 +56,7 @@ function makeAgent(options: { rceVersion?: number }) {
   const messageSender = {
     sendMessage: jest.fn(async (outbound: { message: ChatEventMessage }) => {
       mockOrder.push('send')
+      if (options.sendFails) throw new Error('mediator unreachable')
       sent.push(outbound.message)
     }),
   }
@@ -91,6 +96,7 @@ const FALLBACK = '📷 Photo — update Keyring to see it'
 beforeEach(() => {
   mockOrder.length = 0
   write.mockClear()
+  remove.mockClear()
 })
 
 describe('sendChatPhoto, to a contact that speaks chat', () => {
@@ -130,6 +136,32 @@ describe('sendChatPhoto, to a contact that speaks chat', () => {
     expect(fake.stored[0].fallbackText).toBe(`${FALLBACK}\n\nlook`)
     expect(JSON.stringify(fake.stored[0])).not.toContain(photo.base64.slice(0, 40))
     expect(fake.basic).toHaveLength(0)
+  })
+
+  // No record is stored when the send fails, so nothing would ever lead a deletion to the file written for it.
+  it('removes this phone’s copy again when the send fails, and stores nothing', async () => {
+    const fake = makeAgent({ rceVersion: 6, sendFails: true })
+    await expect(sendChatPhoto(fake.agent, 'conn-1', photoOf(200_000), { fallbackText: FALLBACK })).rejects.toThrow(
+      'mediator unreachable'
+    )
+    const written = await write.mock.results[0].value
+    expect(remove).toHaveBeenCalledWith('conn-1', written)
+    expect(mockOrder).toEqual(['write', 'send', 'remove'])
+    expect(fake.stored).toHaveLength(0)
+  })
+
+  it('reports the send’s own error even when removing the copy fails too', async () => {
+    const fake = makeAgent({ rceVersion: 6, sendFails: true })
+    remove.mockRejectedValueOnce(new Error('EACCES'))
+    await expect(sendChatPhoto(fake.agent, 'conn-1', photoOf(200_000), { fallbackText: FALLBACK })).rejects.toThrow(
+      'mediator unreachable'
+    )
+  })
+
+  it('leaves the copy in place when the send succeeds', async () => {
+    const fake = makeAgent({ rceVersion: 6 })
+    await sendChatPhoto(fake.agent, 'conn-1', photoOf(200_000), { fallbackText: FALLBACK })
+    expect(remove).not.toHaveBeenCalled()
   })
 
   it('sends a photo of exactly the limit', async () => {

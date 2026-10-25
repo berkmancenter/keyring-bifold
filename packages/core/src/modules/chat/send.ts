@@ -32,7 +32,7 @@ import { ChatEventMessage } from './messages/ChatEventMessage'
 import { checkImageAttachment } from './media/checkAttachment'
 import type { ImageAttachmentDescriptor, ImageCheckFailure } from './media/checkAttachment'
 import type { PreparedPhoto } from './media/prepare'
-import { writeChatMedia } from './media/store'
+import { removeChatMedia, writeChatMedia } from './media/store'
 import { ChatEventRecord } from './records/ChatEventRecord'
 import type { ChatStoredAttachment } from './records/ChatEventRecord'
 import { whileSending } from './sending'
@@ -178,20 +178,28 @@ export async function sendChatPhoto(
   }
   // The type and size the check read from the bytes, as a receiver keeps them.
   const { header } = checked.image
+  // Written first, so a stored record never names a file that is not there; removed again if the send fails, since no
+  // record is stored then and nothing would ever lead a deletion to it.
   const file = await writeChatMedia(connectionId, event.eventId, header.mediaType, photo.base64)
-  const record = await sendEvent(agent, connectionId, event, {
-    fallbackText,
-    attachments: [
-      {
-        id: descriptor.id,
-        mediaType: header.mediaType,
-        byteCount: photo.byteCount,
-        width: header.width,
-        height: header.height,
-        file,
-      },
-    ],
-  })
+  let record: ChatEventRecord
+  try {
+    record = await sendEvent(agent, connectionId, event, {
+      fallbackText,
+      attachments: [
+        {
+          id: descriptor.id,
+          mediaType: header.mediaType,
+          byteCount: photo.byteCount,
+          width: header.width,
+          height: header.height,
+          file,
+        },
+      ],
+    })
+  } catch (error) {
+    await removeChatMedia(connectionId, file).catch(() => undefined)
+    throw error
+  }
   return { carriedAs: 'chat', record }
 }
 
