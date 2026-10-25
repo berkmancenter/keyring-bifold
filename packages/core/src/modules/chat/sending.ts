@@ -7,6 +7,12 @@
  * inbound's check for a reused eventId would not see it. inbound.ts checks
  * this set as well as the stored records.
  *
+ * The set lives in memory only, on purpose. If the app stops after a send
+ * succeeds but before its record is stored, the mark goes with it and a later
+ * copy of that eventId would be accepted. That is harmless: this phone kept no
+ * copy of its own message to lose, the same gap storing after the send already
+ * accepts. Do not persist it.
+ *
  * @module chat/sending
  */
 
