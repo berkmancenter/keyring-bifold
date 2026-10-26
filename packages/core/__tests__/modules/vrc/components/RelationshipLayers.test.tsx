@@ -39,7 +39,9 @@ const card = (when: string, id: string, hardwareEvidence = true): RelationshipLa
   hardwareEvidence,
   raw: { id },
 })
+// A record as extractWitnessInfo makes one: credentialId is always set (the sheet does not read it).
 const record = (over: Partial<WitnessRecord> = {}): WitnessRecord => ({
+  credentialId: 'urn:uuid:witness-1',
   witnessDid: 'did:example:witness',
   witnessName: 'keyring-witness',
   issuanceDate: at(15, 10),
