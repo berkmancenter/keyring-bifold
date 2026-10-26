@@ -334,3 +334,32 @@ describe('the day marker', () => {
     expect(tree.getByText('Timer set')).toBeTruthy()
   })
 })
+
+describe("a message's time", () => {
+  const item = (overrides: Partial<ExtendedChatMessage>): MessageProps<ExtendedChatMessage> => ({
+    user,
+    position: 'left',
+    currentMessage: {
+      _id: 't',
+      user: { _id: Role.them },
+      renderEvent: () => <></>,
+      text: 'hello',
+      createdAt: new Date(2026, 9, 15, 16, 1),
+      ...overrides,
+    },
+  })
+
+  test('a text message shows its time, and only the time', () => {
+    const tree = render(<ChatMessage messageProps={item({})} />)
+    expect(tree.getByText('4:01 PM')).toBeTruthy()
+  })
+
+  test('a photo with no caption still shows its time', () => {
+    const tree = render(
+      <ChatMessage
+        messageProps={item({ text: 'Chat.Photo', image: 'file:///photo.jpg', imageSize: { width: 800, height: 600 } })}
+      />
+    )
+    expect(tree.getByText('4:01 PM')).toBeTruthy()
+  })
+})

@@ -6,6 +6,8 @@
  * One function for the marker in the list and the one that floats while scrolling, so the two never say
  * the same day differently (272 showed "15 October" over "October 15, 2026 4:01 PM").
  *
+ * `timeLabel` is the matching time of day for a message's bubble.
+ *
  * @module chat/dayLabel
  */
 import type { TFunction } from 'i18next'
@@ -27,4 +29,14 @@ export function dayLabel(date: Date, t: TFunction, locale: string | undefined, n
   if (date.getFullYear() === now.getFullYear())
     return date.toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'short' })
   return date.toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+/**
+ * A message's time of day, as its bubble shows it: "4:01 PM" in English, "16:01" in French and Portuguese, the
+ * clock each language uses. The day is the pill's to say, so no date here.
+ *
+ * @param locale the app's language (`i18n.language`); undefined uses the phone's.
+ */
+export function timeLabel(date: Date, locale: string | undefined): string {
+  return date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' })
 }

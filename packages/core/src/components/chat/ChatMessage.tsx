@@ -18,6 +18,7 @@ import type { ChatEventRecord } from '../../modules/chat/records/ChatEventRecord
 import { testIdWithKey } from '../../utils/testable'
 import { ChatIds } from './Chat.ids'
 import { DayPill } from './DayPill'
+import { timeLabel } from '../../modules/chat/dayLabel'
 
 // Date separator color as per design
 const DATE_SEPARATOR_COLOR = '#888888'
@@ -124,9 +125,10 @@ export const MessageReactions: React.FC<{ reactions: ChatReaction[]; isMe: boole
 
 const MessageTime: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
   const { ChatTheme: theme } = useTheme()
+  const { i18n } = useTranslation()
 
-  // Show only time (e.g., "9:22 AM") - date is shown in day separator
-  const timeOnly = moment(message.createdAt).format('h:mm A')
+  // Only the time, in the app's language and its clock ("4:01 PM", "16:01"); the day pill says the day.
+  const timeOnly = timeLabel(new Date(message.createdAt), i18n.language)
 
   return (
     <ThemedText style={message.user._id === Role.me ? theme.timeStyleRight : theme.timeStyleLeft}>

@@ -9,7 +9,7 @@
  */
 import type { TFunction } from 'i18next'
 
-import { dayLabel, daysAgo } from '../dayLabel'
+import { dayLabel, daysAgo, timeLabel } from '../dayLabel'
 
 const t = ((key: string) => key) as unknown as TFunction
 // Saturday 25 October 2026, 09:00 local.
@@ -55,5 +55,16 @@ describe('a chat day', () => {
     const label = dayLabel(new Date(2026, 9, 18, 9, 0), t, 'en', now)
     expect(label).not.toBe('Saturday')
     expect(label).toMatch(/18/)
+  })
+})
+
+describe("a message's time", () => {
+  const at = new Date(2026, 9, 15, 16, 1)
+
+  test('each language its own clock, and no date', () => {
+    expect(timeLabel(at, 'en')).toBe('4:01 PM')
+    expect(timeLabel(at, 'fr')).toBe('16:01')
+    expect(timeLabel(at, 'pt-BR')).toBe('16:01')
+    expect(timeLabel(at, 'en')).not.toMatch(/Oct|15|2026/)
   })
 })
