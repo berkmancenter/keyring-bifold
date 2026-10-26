@@ -12,6 +12,7 @@ import {
   contactFacts,
   knownName,
   useConnectionFacts,
+  useConnectionRelationships,
   useContactFacts,
 } from '../../../src/modules/vrc/contacts/useContactFacts'
 
@@ -29,8 +30,11 @@ const mockRecords: unknown[] = []
 
 /** What each relationship's cards say, set per test. */
 let mockDisplay: Record<string, { name?: string; photo?: string }> = {}
-/** Each relationship's credential, and whether it carries hardware evidence. */
-let mockCredential: Record<string, { id: string; evidence: boolean } | undefined> = {}
+/**
+ * Each relationship's credential, and whether it carries hardware evidence. A peer card has no top-level `id`
+ * (vrc-manager builds only `credentialSubject.id`), so `id` is optional here and a card may carry only its date.
+ */
+let mockCredential: Record<string, { id?: string; validFrom?: string; evidence: boolean } | undefined> = {}
 const mockVerify = jest.fn(async (_credential: unknown): Promise<{ valid: boolean } | null> => ({ valid: true }))
 
 jest.mock('../../../src/modules/vrc/utils/rcardDisplayUtils', () => ({
@@ -39,7 +43,7 @@ jest.mock('../../../src/modules/vrc/utils/rcardDisplayUtils', () => ({
 jest.mock('../../../src/modules/vrc/utils/witnessCredentialUtils', () => ({
   getVrcCredentialJsonForSubject: (_records: unknown, did: string) => {
     const c = mockCredential[did]
-    return c ? { id: c.id } : null
+    return c ? { ...(c.id ? { id: c.id } : {}), ...(c.validFrom ? { validFrom: c.validFrom } : {}) } : null
   },
   hasVrcHardwareAttestation: (_records: unknown, did: string) => Boolean(mockCredential[did]?.evidence),
 }))
@@ -152,6 +156,31 @@ describe("a connection's facts", () => {
   })
 })
 
+describe("each connection's relationship, for grouping the chat list by contact", () => {
+  test('unknown until read, then each connection with a relationship; one without is absent, not hidden', async () => {
+    const { agent } = fakeAgent([
+      { connectionId: 'conn-1', counterpartyRelationshipDid: 'did:bob:1' },
+      { connectionId: 'conn-2', counterpartyRelationshipDid: 'did:bob:2' },
+      { counterpartyRelationshipDid: 'did:nobody' },
+    ])
+    const { result } = renderHook(() => useConnectionRelationships())
+    expect(result.current).toBeUndefined()
+    await act(async () => contactFacts.load(agent, []))
+    expect(result.current && [...result.current]).toEqual([
+      ['conn-1', 'did:bob:1'],
+      ['conn-2', 'did:bob:2'],
+    ])
+  })
+
+  test('the same map while nothing moved, so the list does not regroup on every read', async () => {
+    const { agent } = fakeAgent([{ connectionId: 'conn-1', counterpartyRelationshipDid: 'did:bob:1' }])
+    await act(async () => contactFacts.load(agent, []))
+    const first = contactFacts.relationships()
+    await act(async () => contactFacts.load(agent, []))
+    expect(contactFacts.relationships()).toBe(first)
+  })
+})
+
 describe("a contact's hardware verification", () => {
   /** A contact's facts, with every committed frame's hwVerified kept in order. */
   function contactOver(dids: string[]) {
@@ -254,6 +283,44 @@ describe("a contact's hardware verification", () => {
     expect(result.current.hwVerified).toEqual({ known: false })
     await act(async () => answer({ valid: false }))
     expect(result.current.hwVerified).toEqual({ known: true, value: false })
+  })
+
+  // A peer card has no `id`. A check made before the store read the card (its records lag the screen's) must not
+  // stand for the card once it is read: on 272 every Contacts row lost its shield this way.
+  it('a card with no id, already read: verified', async () => {
+    mockCredential = { 'did:a': { validFrom: '2026-10-15T10:00:00Z', evidence: true } }
+    await contactFacts.load(fakeAgent(relationships(['did:a'])).agent, [])
+    const { result } = contactOver(['did:a'])
+    await settle()
+    await settle()
+    expect(result.current.hwVerified).toEqual({ known: true, value: true })
+  })
+
+  it('a card with no id read one load later: checked then, and verified, not left at "not verified"', async () => {
+    await contactFacts.load(fakeAgent(relationships(['did:a'])).agent, [])
+    const { result } = contactOver(['did:a'])
+    await settle()
+    // Asked before the card was read: nothing to check yet.
+    expect(result.current.hwVerified).toEqual({ known: true, value: false })
+    mockCredential = { 'did:a': { validFrom: '2026-10-15T10:00:00Z', evidence: true } }
+    await act(async () => contactFacts.load(fakeAgent(relationships(['did:a'])).agent, []))
+    await settle()
+    await settle()
+    expect(mockVerify).toHaveBeenCalledTimes(1)
+    expect(result.current.hwVerified).toEqual({ known: true, value: true })
+  })
+
+  it('a card with no id, re-issued with a new date, is checked again', async () => {
+    mockCredential = { 'did:a': { validFrom: '2026-10-15T10:00:00Z', evidence: true } }
+    await contactFacts.load(fakeAgent(relationships(['did:a'])).agent, [])
+    contactOver(['did:a'])
+    await settle()
+    await settle()
+    mockCredential = { 'did:a': { validFrom: '2026-10-20T10:00:00Z', evidence: true } }
+    await act(async () => contactFacts.load(fakeAgent(relationships(['did:a'])).agent, []))
+    await settle()
+    await settle()
+    expect(mockVerify).toHaveBeenCalledTimes(2)
   })
 
   it('a check that throws is "not verified", as the screens took it', async () => {
