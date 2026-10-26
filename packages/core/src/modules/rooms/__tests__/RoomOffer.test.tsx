@@ -13,7 +13,7 @@ import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { requestBiometricConfirmationWithUI } from '../../vrc/vrc-biometric'
 import { createSampleRoomsService } from '../sample/sampleRooms'
-import { PREVIEW_TOKEN_TTL_MS, type RoomsService } from '../types'
+import { PREVIEW_TOKEN_TTL_MS, RoomsUnavailable, type RoomsService } from '../types'
 
 let mockService: RoomsService | undefined
 jest.mock('../useRoomsService', () => ({ useRoomsService: () => mockService }))
@@ -131,6 +131,20 @@ describe('RoomOffer', () => {
     expect(tree.getByTestId(testIdWithKey('RoomOfferFailed'))).toHaveTextContent('Rooms.OfferAcceptFailed')
     expect(navigation.replace).not.toHaveBeenCalled()
     expect(tree.getByTestId(testIdWithKey('RoomOfferTitle'))).toBeTruthy()
+  })
+
+  test('an accept the community refuses says why, without "try again"', async () => {
+    mockService = sample()
+    jest
+      .spyOn(mockService, 'acceptOffer')
+      .mockRejectedValue(new RoomsUnavailable('acceptOffer', 'communityDoesNotServe', 'offers/accept not served'))
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeTruthy())
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('RoomOfferAccept')))
+    })
+    expect(tree.getByTestId(testIdWithKey('RoomOfferFailed'))).toHaveTextContent('Rooms.CommunityNeedsUpdate')
+    expect(navigation.replace).not.toHaveBeenCalled()
   })
 
   test('Not now hides the offer on this phone and goes back, without asking or accepting', async () => {

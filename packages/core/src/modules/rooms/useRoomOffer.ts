@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
-import type { OfferPreview, OperationStatus, RoomsService } from './types'
+import type { OfferPreview, OperationStatus, RoomsReason, RoomsService } from './types'
 
 export type OfferStep = 'reading' | 'ready' | 'accepting' | 'hiding'
 
@@ -25,6 +25,8 @@ export interface RoomOfferState {
   readFailed: boolean
   /** The last accept or hide failed; nothing changed. */
   actFailed?: 'accept' | 'hide'
+  /** Why the last accept was refused, when the service said (`RoomsUnavailable`), e.g. the community no longer serves it. */
+  refusedFor?: RoomsReason
   /** The preview was stale and has been read again: ask the person to check it once more. */
   refreshed: boolean
   reload: () => void
@@ -36,6 +38,9 @@ export interface RoomOfferState {
 
 const isExpired = (e: unknown): boolean => e instanceof Error && e.name === 'RoomsPreviewExpired'
 
+const refusalOf = (e: unknown): RoomsReason | undefined =>
+  e instanceof Error && e.name === 'RoomsUnavailable' ? (e as Error & { reason?: RoomsReason }).reason : undefined
+
 export function useRoomOffer(service: RoomsService | undefined, offerRef: string): RoomOfferState {
   const [acceptStatus, setAcceptStatus] = useState<OperationStatus>()
   const [hideStatus, setHideStatus] = useState<OperationStatus>()
@@ -43,6 +48,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
   const [step, setStep] = useState<OfferStep>('reading')
   const [readFailed, setReadFailed] = useState(false)
   const [actFailed, setActFailed] = useState<'accept' | 'hide'>()
+  const [refusedFor, setRefusedFor] = useState<RoomsReason>()
   const [refreshed, setRefreshed] = useState(false)
   const [generation, setGeneration] = useState(0)
   const reload = useCallback(() => setGeneration((g) => g + 1), [])
@@ -78,6 +84,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
   const accept = useCallback(async () => {
     if (!service || !preview) return undefined
     setActFailed(undefined)
+    setRefusedFor(undefined)
     setRefreshed(false)
     setStep('accepting')
     try {
@@ -94,6 +101,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
         }
       } else {
         setActFailed('accept')
+        setRefusedFor(refusalOf(e))
       }
       setStep('ready')
       return undefined
@@ -115,5 +123,5 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
     }
   }, [service, offerRef])
 
-  return { acceptStatus, hideStatus, preview, step, readFailed, actFailed, refreshed, reload, accept, hide }
+  return { acceptStatus, hideStatus, preview, step, readFailed, actFailed, refusedFor, refreshed, reload, accept, hide }
 }

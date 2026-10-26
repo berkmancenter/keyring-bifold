@@ -156,7 +156,12 @@ const RoomOffer: React.FC = () => {
         ) : null}
         {state.actFailed ? (
           <ThemedText style={styles.error} accessibilityLiveRegion="polite" testID={testIdWithKey('RoomOfferFailed')}>
-            {t(state.actFailed === 'accept' ? 'Rooms.OfferAcceptFailed' : 'Rooms.OfferHideFailed')}
+            {state.actFailed === 'hide'
+              ? t('Rooms.OfferHideFailed')
+              : // Refused for a reason the service named: say that, not "try again".
+                ((state.refusedFor &&
+                  roomsStatusText(t, { status: 'unavailable', reason: state.refusedFor, detail: '' }, 'acceptOffer')) ??
+                t('Rooms.OfferAcceptFailed'))}
           </ThemedText>
         ) : null}
         <View style={styles.actions}>
