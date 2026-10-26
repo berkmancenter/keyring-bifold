@@ -12,7 +12,8 @@ const Base = require(require.resolve('react-native/jest/react-native-env.js'))
 const BaseEnv = Base.default ?? Base
 
 const MODE = process.env.KEYRING_DETECTOR
-const DELAY_MS = 1200
+// 1200 by default (past waitFor's 1 s); a small value separates tests coupled to promise order from time-budget waits.
+const DELAY_MS = Number(process.env.KEYRING_DETECTOR_DELAY_MS || 1200)
 
 class DetectorEnv extends BaseEnv {
   constructor(config, context) {
