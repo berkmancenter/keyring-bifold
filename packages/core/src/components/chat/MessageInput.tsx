@@ -216,7 +216,9 @@ export const renderSend = (
           justifyContent: 'center',
           alignItems: 'center',
         }}
-        testID={testIdWithKey(ChatIds.composerSend)}
+        // No testID here: the accessible touchable around it folds this view away on iOS, so an id on it is
+        // unreachable there (C2's simulator check). Send is found by gifted-chat's GC_SEND_TOUCHABLE, as the pair
+        // runner's sendChat does; an id passed in sendButtonProps would replace that one.
       >
         <Icon name="arrow-up" size={22} color="white" />
       </View>

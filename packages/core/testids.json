@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "2831e18041a0d4da7612417abd3140567c49cc49",
+  "generatedFrom": "e8cd34c73fdf592bd892ce768dfb829318f12c06",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -257,7 +257,6 @@
     "ChatComposerCamera": ["src/components/chat/Chat.ids.ts"],
     "ChatComposerEmojiButton": ["src/components/chat/Chat.ids.ts"],
     "ChatComposerField": ["src/components/chat/Chat.ids.ts"],
-    "ChatComposerSend": ["src/components/chat/Chat.ids.ts"],
     "ChatDayPill": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCancel": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCurrent": ["src/components/chat/Chat.ids.ts"],
@@ -1343,9 +1342,6 @@
     },
     {
       "src/components/chat/MessageInput.tsx": "ChatIds.composerField"
-    },
-    {
-      "src/components/chat/MessageInput.tsx": "ChatIds.composerSend"
     },
     {
       "src/components/chat/ReactionBar.tsx": "ChatIds.reactionBar"
