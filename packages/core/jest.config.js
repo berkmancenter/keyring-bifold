@@ -1,8 +1,13 @@
 process.env.TZ = 'UTC'
 
+// DO NOT MERGE: detector run (jest/detectorEnv.js).
+process.env.KEYRING_DETECTOR = process.env.KEYRING_DETECTOR || 'MODE_PLACEHOLDER'
+const DETECTOR_TIMEOUT = { slow: 120000, hang: 4000, refusal: 12000 }[process.env.KEYRING_DETECTOR]
+
 module.exports = {
   preset: 'react-native',
-  testTimeout: 12000,
+  testEnvironment: '<rootDir>/jest/detectorEnv.js',
+  testTimeout: DETECTOR_TIMEOUT ?? 12000,
   extensionsToTreatAsEsm: ['.ts', '.tsx'],
   setupFiles: [],
   setupFilesAfterEnv: [
