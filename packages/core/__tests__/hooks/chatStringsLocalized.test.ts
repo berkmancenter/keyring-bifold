@@ -55,6 +55,14 @@ describe('the chat speaks every language it is set to', () => {
     for (const key of named) expect([key, resolve(LOCALES[language], key)]).not.toEqual([key, undefined])
   })
 
+  // The wallet's e2e drivers find the confirmation overlay and its button by their English words (e2e/lib/flows.js:
+  // "Relationship confirmed", "View contacts"), so the English stays word for word until they move to testIDs.
+  test('the English the e2e drivers look for is unchanged', () => {
+    expect(resolve(en, 'Chat.RelationshipConfirmed')).toMatch(/^Relationship confirmed/)
+    expect(resolve(en, 'Chat.RelationshipConfirmedWith')).toMatch(/^Relationship confirmed/)
+    expect(resolve(en, 'Chat.ViewContacts')).toBe('View contacts')
+  })
+
   // The check above is only as good as the keys it finds: these must be among them.
   test('the scan finds the keys it is there for', () => {
     expect(named).toEqual(
