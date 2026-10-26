@@ -14,6 +14,7 @@ import {
   roleVac,
 } from '../../../../__tests__/helpers/cardVault'
 import type { VtaMintedDid } from '../module/VtaClient'
+import { fetchAgentCards } from '../module/vtiCardVault'
 import {
   adoptAgentIdentities,
   keyIdsFromDocument,
@@ -52,17 +53,21 @@ async function vaultWith(...cards: Record<string, unknown>[]) {
   return vault
 }
 
-const adopt = (
+const holdsUp = async () => undefined
+
+const adopt = async (
   store: VtiIdentityStore,
   task: ReturnType<typeof fakeVault>['task'],
   dids: VtaMintedDid[] = [ofPersona],
   held: string[] = [],
-  keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined> = async (did) => keysOf(did)
+  keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined> = async (did) => keysOf(did),
+  check: (credential: Record<string, unknown>, issuer: string) => Promise<string | undefined> = holdsUp
 ) =>
   adoptAgentIdentities({
     identities: store,
     vtaDid: VTA,
-    task,
+    cards: await fetchAgentCards(task),
+    check,
     listDids: async () => dids,
     keyIdsOf,
     held,
@@ -175,12 +180,31 @@ describe("taking on the agent's identities", () => {
     expect(map.get(`${VTA}|${COMMUNITY}`)).toBe(persona)
   })
 
-  it('an agent with no DIDs takes nothing on, and asks its vault nothing', async () => {
+  it('an agent with no DIDs takes nothing on', async () => {
     const { store } = identities()
     const vault = await vaultWith(membershipCard)
-    const before = vault.calls.length
     expect(await adopt(store, vault.task, [])).toMatchObject({ adopted: [], otherIdentities: 0 })
-    expect(vault.calls.length).toBe(before)
+    expect(store.setPersona).not.toHaveBeenCalled()
+  })
+
+  // #401 Farm run: an identity was taken on from a lab community's card the wallet then refused to keep.
+  it('a card that does not hold up takes no identity on, and is reported', async () => {
+    const { store } = identities()
+    const vault = await vaultWith(membershipCard)
+    const report = await adopt(store, vault.task, [ofPersona], [], undefined, async () => 'revoked')
+    expect(report.adopted).toEqual([])
+    expect(report.failedCheck).toEqual([{ credentialId: membershipCard.id, communityDid: COMMUNITY }])
+    expect(store.setPersona).not.toHaveBeenCalled()
+  })
+
+  it('a membership card that does not hold up gives way to a role card that does', async () => {
+    const { store } = identities()
+    const vault = await vaultWith(membershipCard, roleCard)
+    const check = async (credential: Record<string, unknown>) =>
+      credential.id === membershipCard.id ? 'revoked' : undefined
+    const report = await adopt(store, vault.task, [ofPersona], [], undefined, check)
+    expect(report.adopted.map((p) => p.communityDid)).toEqual([COMMUNITY])
+    expect(report.failedCheck.map((f) => f.credentialId)).toEqual([membershipCard.id])
   })
 
   it('an agent that does not answer throws, and nothing is recorded', async () => {
@@ -189,7 +213,8 @@ describe("taking on the agent's identities", () => {
       adoptAgentIdentities({
         identities: store,
         vtaDid: VTA,
-        task: fakeVault().task,
+        cards: [],
+        check: holdsUp,
         listDids: async () => {
           throw new Error('the VTA did not answer')
         },

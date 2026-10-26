@@ -19,21 +19,18 @@
  * `save_entity_key_records_with_ids`). A DID whose document cannot be read is
  * skipped and reported, never guessed at.
  *
+ * Nor is an identity taken on from a card that does not hold up: the card that
+ * names the community must pass the same check a delivered card does
+ * (vtiDeliveredCheck), or the person would hold an identity in a community on
+ * a card the wallet then refuses to keep.
+ *
  * @module trust-tasks/module/vtiAdoptIdentities
  */
 
 import type { VtaMintedDid } from './VtaClient'
-import { VAULT_GET, VAULT_QUERY, type VaultTask } from './vtiCardVault'
+import type { AgentCard } from './vtiCardVault'
 import type { VtiIdentityStore, VtiPersona } from './VtiIdentityStore'
 import { classifyCredential } from './vtiInbox'
-
-/** What the vault is asked for: the cards that say a DID is in a community (as `recoverCardsFromAgent`). */
-const COMMUNITY_CARD_QUERIES: Record<string, string>[] = [
-  { purpose: 'membership' },
-  { purpose: 'role' },
-  { purpose: 'endorsement' },
-  { type: 'AuthorityCredential' },
-]
 
 export interface AdoptionKeyIds {
   signing: string
@@ -50,6 +47,8 @@ export interface AdoptionReport {
   cardsForOthers: number
   /** Identities with a community card whose DID document could not be read: not taken on. */
   unreadable: string[]
+  /** Cards that named a community for an identity but did not hold up: no identity taken on from them. */
+  failedCheck: { credentialId: string; communityDid: string }[]
 }
 
 type DocumentLike = Record<string, unknown> | undefined
@@ -83,57 +82,66 @@ export function keyIdsFromDocument(did: string, document: DocumentLike): Adoptio
 /**
  * Record, on this phone, each of `vtaDid`'s identities that a community card in
  * its vault is about and that this phone does not hold yet for that community.
- * A membership card wins over a role or vetter grant for the same community, and the
- * newer card over the older. What the vault cannot answer for is skipped; an
- * agent that does not answer at all throws.
+ * `cards` are the agent's cards, already fetched (`fetchAgentCards`): the run
+ * that then restores every identity's cards reads the vault once for both.
+ * A membership card wins over a role or vetter grant for the same community,
+ * and the newer card over the older; one that fails its check gives way to the
+ * next. An agent that does not answer throws.
  */
 export async function adoptAgentIdentities(options: {
   identities: VtiIdentityStore
   vtaDid: string
-  task: VaultTask
+  cards: AgentCard[]
   listDids: () => Promise<VtaMintedDid[]>
+  /** Why a card does not hold up (vtiDeliveredCheck), or undefined when it does. */
+  check: (credential: Record<string, unknown>, issuer: string) => Promise<string | undefined>
   /** The identity's key ids, from its DID document; undefined when it cannot be read. */
   keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined>
   /** The DIDs of the identities this phone already holds. */
   held?: string[]
   now?: () => number
 }): Promise<AdoptionReport> {
-  const { identities, vtaDid, task } = options
+  const { identities, vtaDid, cards } = options
   const now = options.now ?? Date.now
   const held = new Set(options.held ?? [])
   const minted = new Map((await options.listDids()).map((d) => [d.did, d]))
   const otherIdentities = [...minted.keys()].filter((did) => !held.has(did)).length
-  const report: AdoptionReport = { adopted: [], otherIdentities, cardsForOthers: 0, unreadable: [] }
+  const report: AdoptionReport = { adopted: [], otherIdentities, cardsForOthers: 0, unreadable: [], failedCheck: [] }
   if (minted.size === 0) return report
 
-  const ids = new Set<string>()
-  for (const query of COMMUNITY_CARD_QUERIES) {
-    const answer = await task<{ credentials?: { id?: string }[] }>(VAULT_QUERY, query).catch(() => undefined)
-    for (const d of answer?.credentials ?? []) if (typeof d.id === 'string' && d.id) ids.add(d.id)
-  }
-
-  // One identity per community: the best card found for it.
-  const best = new Map<string, { did: string; membership: boolean; from: string }>()
-  for (const id of ids) {
-    const got = await task<{ credential?: Record<string, unknown> }>(VAULT_GET, { id }).catch(() => undefined)
-    const credential = got?.credential
+  // Each community's cards about one of the agent's DIDs, best first.
+  const byCommunity = new Map<
+    string,
+    { id: string; did: string; membership: boolean; from: string; credential: Record<string, unknown> }[]
+  >()
+  for (const { id, credential } of cards) {
     if (!credential) continue
     const item = classifyCredential(credential)
     // The cards a community gives an identity in it: membership, a role, a vetter grant.
     if (item.kind !== 'membership' && item.kind !== 'role' && item.kind !== 'vetter-grant') continue
     if (!item.communityDid || !minted.has(item.subjectDid)) continue
     if (!held.has(item.subjectDid)) report.cardsForOthers += 1
-    const membership = item.kind === 'membership'
     const from = typeof credential.validFrom === 'string' ? credential.validFrom : ''
-    const kept = best.get(item.communityDid)
-    const better =
-      !kept || (membership && !kept.membership) || (membership === kept.membership && from.localeCompare(kept.from) > 0)
-    if (better) best.set(item.communityDid, { did: item.subjectDid, membership, from })
+    const list = byCommunity.get(item.communityDid) ?? []
+    list.push({ id, did: item.subjectDid, membership: item.kind === 'membership', from, credential })
+    byCommunity.set(item.communityDid, list)
   }
 
-  for (const [communityDid, { did }] of best) {
+  for (const [communityDid, list] of byCommunity) {
     // An identity this phone already holds for the community is kept as it is.
     if (await identities.getPersona(communityDid, vtaDid)) continue
+    list.sort((a, b) => Number(b.membership) - Number(a.membership) || b.from.localeCompare(a.from))
+    let chosen: (typeof list)[number] | undefined
+    for (const candidate of list) {
+      const failed = await options.check(candidate.credential, communityDid).catch(() => 'unreadable')
+      if (!failed) {
+        chosen = candidate
+        break
+      }
+      report.failedCheck.push({ credentialId: candidate.id, communityDid })
+    }
+    if (!chosen) continue
+    const { did } = chosen
     const keyIds = await options.keyIdsOf(did).catch(() => undefined)
     if (!keyIds) {
       if (!report.unreadable.includes(did)) report.unreadable.push(did)

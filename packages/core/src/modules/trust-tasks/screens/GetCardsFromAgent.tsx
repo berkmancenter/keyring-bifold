@@ -12,7 +12,7 @@
  */
 
 import type { Agent } from '@credo-ts/core'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, StyleSheet, View } from 'react-native'
 
@@ -28,7 +28,15 @@ import {
   visibleContextsOf,
   type AdoptionReport,
 } from '../module/vtiAdoptIdentities'
-import { recoverCardsFromAgent, type RecoveredRefusal, type VaultTask } from '../module/vtiCardVault'
+import {
+  fetchAgentCards,
+  recoverCardsFromAgent,
+  type AgentCard,
+  type RecoveredRefusal,
+  type VaultTask,
+} from '../module/vtiCardVault'
+import { checkDeliveredCard } from '../module/vtiDeliveredCheck'
+import { classifyCredential } from '../module/vtiInbox'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 
@@ -61,27 +69,31 @@ export type AdoptionFound = AdoptionReport & { visibleContexts?: string[] }
 export interface GetCardsDeps {
   recover: typeof recoverCardsFromAgent
   store: (agent: Agent) => VtiCommunityStore
-  /** The persona's agent, connected, as a task sender. */
-  taskFor: (agent: Agent, persona: VtiPersona) => Promise<VaultTask>
-  /** Take on the agent's identities this phone does not hold yet (`held`: the DIDs it does). */
-  adopt: (agent: Agent, vtaDid: string, held: string[]) => Promise<AdoptionFound>
+  /** The agent, connected, as a task sender. */
+  taskFor: (agent: Agent, vtaDid: string) => Promise<VaultTask>
+  /** Every card the agent keeps, each fetched once. */
+  fetchCards: (task: VaultTask) => Promise<AgentCard[]>
+  /** Take on the agent's identities this phone does not hold yet (`held`: the DIDs it does), from its `cards`. */
+  adopt: (agent: Agent, vtaDid: string, held: string[], cards: AgentCard[]) => Promise<AdoptionFound>
 }
 
 const defaultDeps: GetCardsDeps = {
   recover: recoverCardsFromAgent,
   store: (agent) => new GenericRecordsCommunityStore(agent),
-  taskFor: async (agent, persona) => {
-    await vtaAgent.connect(agent, persona.vtaDid)
-    const client = vtaAgent.client(agent, persona.vtaDid)
+  taskFor: async (agent, vtaDid) => {
+    await vtaAgent.connect(agent, vtaDid)
+    const client = vtaAgent.client(agent, vtaDid)
     return <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload)
   },
-  adopt: async (agent, vtaDid, held) => {
+  fetchCards: fetchAgentCards,
+  adopt: async (agent, vtaDid, held, cards) => {
     await vtaAgent.connect(agent, vtaDid)
     const client = vtaAgent.client(agent, vtaDid)
     const report = await adoptAgentIdentities({
       identities: new GenericRecordsIdentityStore(agent),
       vtaDid,
-      task: <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload),
+      cards,
+      check: (credential, issuer) => checkDeliveredCard(agent, credential, issuer),
       listDids: () => client.listDids(),
       keyIdsOf: async (did) => {
         const { didDocument } = await agent.dids.resolve(did)
@@ -107,19 +119,21 @@ export async function bringBackFromAgent(
   onProgress: (p: { found: number; restored: number }) => void,
   deps: GetCardsDeps = defaultDeps
 ): Promise<CardsBack> {
+  const read = vaultReader(agent, deps)
   let silent = false
-  const found = vtaDid
-    ? await deps
-        .adopt(
-          agent,
-          vtaDid,
-          personas.filter((p) => p.vtaDid === vtaDid).map((p) => p.did)
-        )
-        .catch(() => {
-          silent = true
-          return undefined
-        })
-    : undefined
+  const vault = vtaDid ? await read(vtaDid) : undefined
+  const found =
+    vtaDid && vault
+      ? await deps
+          .adopt(
+            agent,
+            vtaDid,
+            personas.filter((p) => p.vtaDid === vtaDid).map((p) => p.did),
+            vault.cards
+          )
+          .catch(() => undefined)
+      : undefined
+  if (vtaDid && !found) silent = true
   const adopted = found?.adopted ?? []
   const held = new Set(personas.map((p) => `${p.vtaDid}|${p.communityDid}`))
   const fresh = adopted.filter((p) => !held.has(`${p.vtaDid}|${p.communityDid}`))
@@ -128,7 +142,7 @@ export async function bringBackFromAgent(
   if (silent && all.length === 0)
     return { found: 0, restored: 0, refused: [], unreachable: 1, adopted: 0, asked: 1, taken: [] }
   for (const p of fresh) emitCommunityChanged(p.communityDid, 'membership')
-  const got = await getCardsFromAgent(agent, all, onProgress, deps)
+  const got = await getCardsFromAgent(agent, all, onProgress, deps, read, found?.failedCheck)
   const noneBecause =
     !found || fresh.length > 0 || found.unreadable.length > 0
       ? undefined
@@ -148,32 +162,77 @@ export async function bringBackFromAgent(
   }
 }
 
+type VaultRead = { task: VaultTask; cards: AgentCard[] }
+
+/** Each agent's vault, read once per run however many identities it holds; undefined when it does not answer. */
+function vaultReader(agent: Agent, deps: GetCardsDeps): (vtaDid: string) => Promise<VaultRead | undefined> {
+  const reads = new Map<string, Promise<VaultRead | undefined>>()
+  return (vtaDid) => {
+    let read = reads.get(vtaDid)
+    if (!read) {
+      read = (async () => {
+        const task = await deps.taskFor(agent, vtaDid)
+        return { task, cards: await deps.fetchCards(task) }
+      })().catch(() => undefined)
+      reads.set(vtaDid, read)
+    }
+    return read
+  }
+}
+
 /**
  * Every identity on this phone, one after another (the agent answers one task
- * at a time); a count across all of them as it goes. An identity whose agent
- * does not answer is counted, and the others still run.
+ * at a time); a count across all of them as it goes. Each agent's vault is
+ * read once and each card goes to the identity it is about; a card about none
+ * of them is counted once. An agent that does not answer counts each of its
+ * identities, and the others still run. `failedCheck`: cards adoption already
+ * found do not hold up, counted as such rather than as another identity's.
  */
 export async function getCardsFromAgent(
   agent: Agent,
   personas: VtiPersona[],
   onProgress: (p: { found: number; restored: number }) => void,
-  deps: GetCardsDeps = defaultDeps
+  deps: GetCardsDeps = defaultDeps,
+  read: (vtaDid: string) => Promise<VaultRead | undefined> = vaultReader(agent, deps),
+  failedCheck: { credentialId: string; communityDid: string }[] = []
 ): Promise<CardsBack> {
   const store = deps.store(agent)
   const total: CardsBack = { found: 0, restored: 0, refused: [], unreachable: 0 }
-  for (const persona of personas) {
-    const before = { found: total.found, restored: total.restored }
-    try {
-      const task = await deps.taskFor(agent, persona)
-      const got = await deps.recover(agent, store, persona, task, {
-        onProgress: (p) => onProgress({ found: before.found + p.found, restored: before.restored + p.restored }),
-      })
-      total.found += got.found
-      total.restored += got.restored.length
-      total.refused.push(...got.refused)
-      if (got.restored.length) emitCommunityChanged(persona.communityDid, 'membership')
-    } catch {
-      total.unreachable += 1
+  const failed = new Set(failedCheck.map((f) => f.credentialId))
+  const byAgent = new Map<string, VtiPersona[]>()
+  for (const p of personas) byAgent.set(p.vtaDid, [...(byAgent.get(p.vtaDid) ?? []), p])
+  for (const [vtaDid, theirs] of byAgent) {
+    const vault = await read(vtaDid)
+    if (!vault) {
+      total.unreachable += theirs.length
+      continue
+    }
+    total.found += vault.cards.length
+    onProgress({ found: total.found, restored: total.restored })
+    const dids = new Set(theirs.map((p) => p.did))
+    const mine = new Map<string, AgentCard[]>()
+    for (const card of vault.cards) {
+      const subject = card.credential ? classifyCredential(card.credential).subjectDid : undefined
+      if (subject && dids.has(subject)) mine.set(subject, [...(mine.get(subject) ?? []), card])
+      else if (!card.credential) total.refused.push({ credentialId: card.id, reason: 'unreadable' })
+      else if (failed.has(card.id)) {
+        const f = failedCheck.find((x) => x.credentialId === card.id)
+        total.refused.push({ credentialId: card.id, communityDid: f?.communityDid, reason: 'failedCheck' })
+      } else total.refused.push({ credentialId: card.id, reason: 'notOurs' })
+    }
+    for (const persona of theirs) {
+      const before = total.restored
+      try {
+        const got = await deps.recover(agent, store, persona, vault.task, {
+          cards: mine.get(persona.did) ?? [],
+          onProgress: (p) => onProgress({ found: total.found, restored: before + p.restored }),
+        })
+        total.restored += got.restored.length
+        total.refused.push(...got.refused)
+        if (got.restored.length) emitCommunityChanged(persona.communityDid, 'membership')
+      } catch {
+        total.unreachable += 1
+      }
     }
   }
   return total
@@ -186,6 +245,31 @@ export const REFUSED_WORDS: Record<RecoveredRefusal['reason'], string> = {
   unreadable: 'VtaLink.CardsBackUnreadable',
 }
 
+/**
+ * The run in progress, app-wide. The screen opened again while one runs
+ * follows its count and shows its result, rather than starting a second run
+ * that reads the vault alongside it (#401 Farm run: a tap made after leaving
+ * and coming back overlapped the first).
+ */
+type Run = {
+  progress: { found: number; restored: number }
+  listeners: Set<(p: { found: number; restored: number }) => void>
+  done: Promise<CardsBack>
+}
+let current: Run | undefined
+
+function startRun(run: (onProgress: (p: { found: number; restored: number }) => void) => Promise<CardsBack>): Run {
+  const started = { progress: { found: 0, restored: 0 }, listeners: new Set() } as Run
+  started.done = run((p) => {
+    started.progress = p
+    for (const listen of started.listeners) listen(p)
+  }).finally(() => {
+    if (current === started) current = undefined
+  })
+  current = started
+  return started
+}
+
 export const GetCardsFromAgent: React.FC<{
   agent: Agent
   personas: VtiPersona[]
@@ -195,10 +279,30 @@ export const GetCardsFromAgent: React.FC<{
 }> = ({ agent, personas, vtaDid, deps }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
-  const [progress, setProgress] = useState<{ found: number; restored: number }>()
+  const [progress, setProgress] = useState<{ found: number; restored: number } | undefined>(current?.progress)
   const [result, setResult] = useState<CardsBack>()
   // Identities taken on by an earlier tap: the screen's list was read before them.
   const [taken, setTaken] = useState<VtiPersona[]>([])
+  const [run, setRun] = useState<Run | undefined>(current)
+
+  // Follow the run, this screen's or one started before it was opened again.
+  useEffect(() => {
+    if (!run) return
+    let live = true
+    run.listeners.add(setProgress)
+    setProgress(run.progress)
+    run.done
+      .then((got) => {
+        if (!live) return
+        if (got.taken?.length) setTaken((before) => [...before, ...(got.taken ?? [])])
+        setResult(got)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+      run.listeners.delete(setProgress)
+    }
+  }, [run])
   const running = progress !== undefined && result === undefined
   const styles = StyleSheet.create({
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 8 },
@@ -207,12 +311,10 @@ export const GetCardsFromAgent: React.FC<{
   })
   if (personas.length === 0 && !vtaDid) return null
 
-  const start = async () => {
+  const start = () => {
+    if (current) return
     setResult(undefined)
-    setProgress({ found: 0, restored: 0 })
-    const got = await bringBackFromAgent(agent, vtaDid, [...personas, ...taken], setProgress, deps)
-    if (got.taken?.length) setTaken((before) => [...before, ...(got.taken ?? [])])
-    setResult(got)
+    setRun(startRun((onProgress) => bringBackFromAgent(agent, vtaDid, [...personas, ...taken], onProgress, deps)))
   }
 
   const refusedBy = (reason: RecoveredRefusal['reason']) =>
@@ -280,7 +382,7 @@ export const GetCardsFromAgent: React.FC<{
         title={t('VtaLink.GetCardsButton')}
         buttonType={ButtonType.Secondary}
         disabled={running}
-        onPress={() => void start()}
+        onPress={start}
         testID={testIdWithKey('AgentGetCardsButton')}
       />
       {/* When to use it: it copies the agent's cards back to this phone, and
