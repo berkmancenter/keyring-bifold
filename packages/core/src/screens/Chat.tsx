@@ -215,7 +215,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   // and block applying while there is any. gifted-chat reports '' after a send.
   // `composer.insert` puts text at the caret (the emoji button).
   const composer = useComposerText()
-  const { hasDraft } = composer
+  const { hasDraft, focusAtCaret } = composer
   useEffect(() => {
     if (!hasDraft) return
     return registerOtaApplyBlocker('chat-draft')
@@ -243,15 +243,19 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const closePicker = useCallback(() => {
     if (picker?.for === 'composer') {
       if (Platform.OS === 'ios') refocusComposer.current = true
-      else composer.focusAtCaret()
+      else focusAtCaret()
     }
     setPicker(null)
-  }, [composer, picker])
+  }, [focusAtCaret, picker])
   const onPickerClosed = useCallback(() => {
     if (!refocusComposer.current) return
     refocusComposer.current = false
-    composer.focusAtCaret()
-  }, [composer])
+    focusAtCaret()
+  }, [focusAtCaret])
+  // A picker opened before the last one's onDismiss came is not the composer's to refocus after.
+  useEffect(() => {
+    if (picker) refocusComposer.current = false
+  }, [picker])
 
   // Received chat messages as they scroll into view, each reported once while someone is looking at this chat
   // (plan §4.6, D4). What is in view while nobody is (another screen over it, the app in the background) is

@@ -209,6 +209,21 @@ describe('the composer’s emoji button', () => {
     expect(field.focus).not.toHaveBeenCalled()
   })
 
+  it('leaves the field alone when a reaction picker opens before the composer’s sheet said it had closed', async () => {
+    const tree = renderChat()
+    const field = composerField(tree)
+    fireEvent.press(tree.getByTestId(id('ChatComposerEmojiButton')))
+    await act(async () => fireEvent.press(tree.getByTestId(emojiId('😀'))))
+    fireEvent.press(tree.getByTestId(id('EmojiPickerSheetClose')))
+
+    fireEvent(tree.getByText('see you at noon'), 'longPress')
+    fireEvent.press(tree.getByTestId(id('ChatReactionBarMore')))
+    fireEvent.press(tree.getByTestId(id('EmojiPickerSheetClose')))
+    await sheetClosed(tree)
+
+    expect(field.focus).not.toHaveBeenCalled()
+  })
+
   it('is disabled while the chat cannot send', () => {
     jest.spyOn(network, 'useNetwork').mockImplementation(() => ({
       silentAssertConnectedNetwork: () => false,
