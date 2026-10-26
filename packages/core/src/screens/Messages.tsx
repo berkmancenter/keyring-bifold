@@ -95,7 +95,8 @@ const Messages: React.FC<MessagesProps> = ({ navigation }) => {
 
   useEffect(() => {
     navigation.setOptions({
-      title: 'Secure Connection Messaging',
+      // The tab's own name, in the app's language: encryption is said once, in the empty state.
+      title: t('MessagesList.Title'),
       headerTitleAlign: 'center',
     })
 
