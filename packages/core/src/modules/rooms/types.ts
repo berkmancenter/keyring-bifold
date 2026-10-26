@@ -258,19 +258,36 @@ export interface CommunityRoomMember {
   verbs: RoomVerb[]
 }
 
+/**
+ * What an AI agent's grant lets it do in the rooms it covers: the capabilities its ACL entry on the
+ * person's agent is narrowed to (VTI `vti-common` acl; docs/02-vta/personal-ai-agents.md).
+ * - `roomPresent`: obtain short-lived, one-action presentations (`rooms/keys/present`, at most 4 h)
+ *   for what the member may do, so it can read open text and act as itself, never as the member.
+ * - `roomOpen`: also read sealed text, through the member's agent (`rooms/keys/open`). No key is ever
+ *   handed to the AI agent.
+ */
+export type AgentRoomCapability = 'roomPresent' | 'roomOpen'
+
+/**
+ * An AI agent's access, as its grant scopes it upstream: by the person's persona **context**, covering
+ * every room held by personas in it. Upstream cannot narrow an agent to one room, so the interface
+ * does not pretend to. Withdrawing it stops new presentations; ones already issued last up to 4 h
+ * unless the room's owner revokes them at the host.
+ */
 export interface AgentGrant {
   grantId: string
-  roomId: string
-  agentLabel: InertText
   agentDid: string
-  verbs: RoomVerb[]
+  agentLabel: InertText
+  contextId: string
+  contextLabel?: InertText
+  capabilities: AgentRoomCapability[]
   expiresAt?: string
 }
 
 export interface AgentGrantRequest {
-  roomId: string
   agentDid: string
-  verbs: RoomVerb[]
+  contextId: string
+  capabilities: AgentRoomCapability[]
   expiresAt: string
 }
 
@@ -343,7 +360,8 @@ export interface RoomsService {
   /** Administrator-only upstream (`vtc.rooms.manage`); a member gets `adminOnly`. */
   listCommunityMembers(communityDid: string, roomId?: string): Promise<CommunityRoomMember[]>
 
-  listAgentAccess(roomId?: string): Promise<AgentGrant[]>
+  /** The AI agents allowed into rooms, in one persona context or in all of them. */
+  listAgentAccess(contextId?: string): Promise<AgentGrant[]>
   grantAgentAccess(request: AgentGrantRequest): Promise<AgentGrant>
   withdrawAgentAccess(grantId: string): Promise<void>
 

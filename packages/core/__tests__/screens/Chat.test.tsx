@@ -196,14 +196,14 @@ describe('Chat screen while an exchange waits on the other phone', () => {
     act(() => {
       vrcFlowStore.setStatus('1', 'proposed', false)
     })
-    expect(tree.getByText('Waiting for your contact to accept...')).toBeTruthy()
+    expect(tree.getByText('Chat.Flow.Proposed')).toBeTruthy()
 
     act(() => {
       jest.advanceTimersByTime(FLOW_TIMEOUT_MS_NON_WITNESSED)
     })
     // Translations render as their keys here.
     expect(tree.getByText('Relationship.WaitingForAnswer')).toBeTruthy()
-    expect(tree.queryByText(/didn't complete/)).toBeNull()
+    expect(tree.queryByText('Chat.Flow.DidNotComplete')).toBeNull()
 
     fireEvent.press(tree.getByText('Global.Dismiss'))
     expect(tree.queryByText('Relationship.WaitingForAnswer')).toBeNull()
@@ -243,7 +243,7 @@ describe('Chat screen draft and over-the-air updates', () => {
 
   test('blocks applying an update while a draft is unsent, and not otherwise', () => {
     const tree = renderWithComposer()
-    const input = tree.getByPlaceholderText('Contacts.TypeHere')
+    const input = tree.getByPlaceholderText('Chat.MessagePlaceholder')
     expect(hasOtaApplyBlockers()).toBe(false)
 
     fireEvent.changeText(input, '   ')
@@ -262,7 +262,7 @@ describe('Chat screen draft and over-the-air updates', () => {
     basicMessages.sendMessage = jest.fn(async () => undefined)
     try {
       const tree = renderWithComposer()
-      fireEvent.changeText(tree.getByPlaceholderText('Contacts.TypeHere'), 'See you at noon')
+      fireEvent.changeText(tree.getByPlaceholderText('Chat.MessagePlaceholder'), 'See you at noon')
       expect(otaApplyBlockerReasons()).toEqual(['chat-draft'])
 
       fireEvent.press(tree.getByTestId('GC_SEND_TOUCHABLE'))
@@ -276,7 +276,7 @@ describe('Chat screen draft and over-the-air updates', () => {
 
   test('releases the block when the screen closes', () => {
     const tree = renderWithComposer()
-    fireEvent.changeText(tree.getByPlaceholderText('Contacts.TypeHere'), 'See you at noon')
+    fireEvent.changeText(tree.getByPlaceholderText('Chat.MessagePlaceholder'), 'See you at noon')
     expect(hasOtaApplyBlockers()).toBe(true)
 
     tree.unmount()

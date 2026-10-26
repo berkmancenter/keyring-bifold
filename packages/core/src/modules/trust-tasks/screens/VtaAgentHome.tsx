@@ -57,6 +57,7 @@ import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
+import { absoluteDate, appDateWords } from '../../../utils/localDay'
 
 interface Holdings {
   personas: VtiPersona[]
@@ -615,7 +616,7 @@ const VtaAgentHome: React.FC = () => {
     : vettingFor
       ? { kind: 'vetting', communityDid: vettingFor }
       : undefined
-  const day = (iso: string) => new Date(iso).toLocaleDateString()
+  const day = (iso: string) => absoluteDate(new Date(iso), appDateWords())
   const lapsedText = (communityDid: string, grant: Holdings['lapsed'][number]['grant']) => {
     const community = communityLabelOf(communityDid, t)
     const opts = { community, interpolation: { escapeValue: false } }
