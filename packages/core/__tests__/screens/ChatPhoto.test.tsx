@@ -93,7 +93,6 @@ describe('the composer’s "+"', () => {
   it.each([
     ['photo-too-large', 'Chat.PhotoTooLarge'],
     ['gif-too-large', 'Chat.GifTooLarge'],
-    ['no-permission', 'Chat.PhotoNoPermission'],
     ['not-sent', 'Chat.PhotoNotSent'],
   ])('says why when the photo was not sent (%s)', async (outcome, words) => {
     send.mockResolvedValueOnce(outcome)
@@ -101,6 +100,18 @@ describe('the composer’s "+"', () => {
     await openPlus(tree)
     await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachCamera'))))
     await waitFor(() => expect(Toast.show).toHaveBeenCalledWith(expect.objectContaining({ text1: words })))
+  })
+
+  it('asks about a missing permission with a way to Settings, not a passing toast', async () => {
+    send.mockResolvedValueOnce('no-permission')
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined)
+    const tree = renderChat()
+    await openPlus(tree)
+    await act(async () => fireEvent.press(tree.getByTestId(id('ChatAttachLibrary'))))
+    await waitFor(() =>
+      expect(alert).toHaveBeenCalledWith('Chat.PhotoNoPermissionTitle', 'Chat.PhotoNoPermission', expect.any(Array))
+    )
+    expect(Toast.show).not.toHaveBeenCalled()
   })
 
   it('says nothing when the person cancels', async () => {
@@ -132,5 +143,70 @@ describe('the composer’s "+"', () => {
     ;(useWitnessConnection as jest.Mock).mockReturnValueOnce({ connectedWitness: { connectionId: '1' } })
     const tree = renderChat()
     expect(tree.UNSAFE_queryByType(Actions)).toBeNull()
+  })
+})
+
+// Chat redesign C2: the composer's right-hand button is Camera while the field is empty, Send once it holds text.
+describe('the composer (Option A)', () => {
+  it('one field: the short placeholder in a pill, and no decorative icon in it', () => {
+    const tree = renderChat()
+    expect(tree.getByPlaceholderText('Chat.MessagePlaceholder')).toBeTruthy()
+    expect(tree.getByTestId(id('ChatComposerField'))).toBeTruthy()
+    expect(tree.UNSAFE_queryAllByProps({ name: 'message-text-outline' })).toHaveLength(0)
+    // The emoji button stays, inside the field, by its testID (the e2e drivers tap it).
+    expect(tree.getByTestId(id('ChatComposerEmojiButton'))).toBeTruthy()
+  })
+
+  it('a plain "+" in a full tap target, not the boxed 40-point icon', () => {
+    const tree = renderChat()
+    const plus = tree.UNSAFE_getByType(Actions)
+    // buttonStyle, not wrapperStyle: with an icon of our own, v3 sizes only the touchable (chatActionsProps).
+    expect(plus.props.buttonStyle.width).toBeGreaterThanOrEqual(44)
+    expect(plus.props.buttonStyle.height).toBeGreaterThanOrEqual(44)
+    const icon = render(<>{(plus.props.icon as () => React.ReactElement)()}</>)
+    expect(icon.UNSAFE_getByProps({ name: 'plus' }).props.size).toBe(26)
+    expect(icon.UNSAFE_queryAllByProps({ name: 'plus-box-outline' })).toHaveLength(0)
+  })
+
+  it('empty: Camera, which takes a photo for this chat; Send is not offered', async () => {
+    const tree = renderChat()
+    expect(tree.queryByTestId('GC_SEND_TOUCHABLE')).toBeNull()
+    await act(async () => fireEvent.press(tree.getByTestId(id('ChatComposerCamera'))))
+    expect(send).toHaveBeenCalledWith(expect.anything(), '1', 'camera', expect.anything())
+  })
+
+  it('with text: Send, and Camera goes (the control above shows Camera)', () => {
+    const tree = renderChat()
+    fireEvent.changeText(tree.getByPlaceholderText('Chat.MessagePlaceholder'), 'See you at noon')
+    // gifted-chat's Send, by its own testID: under jest its mocked touchable renders no children (ours included).
+    expect(tree.getByTestId('GC_SEND_TOUCHABLE')).toBeTruthy()
+    expect(tree.queryByTestId(id('ChatComposerCamera'))).toBeNull()
+  })
+
+  it('offline, Camera is disabled with the field: it takes no photo', async () => {
+    ;(network.useNetwork as jest.Mock).mockImplementation(() => ({
+      silentAssertConnectedNetwork: () => false,
+      assertNetworkConnected: () => false,
+      assertInternetReachable: jest.fn(),
+      assertMediatorReachable: jest.fn(),
+      displayNetInfoModal: jest.fn(),
+      hideNetInfoModal: jest.fn(),
+    }))
+    const tree = renderChat()
+    const camera = tree.getByTestId(id('ChatComposerCamera'))
+    expect(camera.props.accessibilityState).toEqual({ disabled: true })
+    await act(async () => fireEvent.press(camera))
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('a chat that takes no photos (the witness chat) shows Send greyed, never Camera', () => {
+    ;(useWitnessConnection as jest.Mock).mockReturnValue({ connectedWitness: { connectionId: '1' } })
+    try {
+      const tree = renderChat()
+      expect(tree.queryByTestId(id('ChatComposerCamera'))).toBeNull()
+      expect(tree.getByTestId('GC_SEND_TOUCHABLE')).toBeTruthy()
+    } finally {
+      ;(useWitnessConnection as jest.Mock).mockReturnValue({ connectedWitness: undefined })
+    }
   })
 })
