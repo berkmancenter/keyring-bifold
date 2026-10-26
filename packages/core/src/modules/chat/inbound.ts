@@ -1,3 +1,4 @@
+import { detectorRefusal } from './chatEvent'
 /**
  * Receiving `keyring/chat/1.0` events (rich-messaging-plan.md §4).
  *
@@ -45,6 +46,16 @@ export interface ChatInboundMessageContext {
 
 /** Validate one inbound chat message and store its event. Never throws on bad input. */
 export async function receiveChatEventMessage(
+  agent: Agent,
+  ctx: ChatInboundMessageContext
+): Promise<ChatInboundVerdict> {
+  // DO NOT MERGE: the refusal probe.
+  const verdict = await receiveChatEventMessageInner(agent, ctx)
+  if (verdict !== 'stored' && verdict !== 'duplicate') detectorRefusal('verdict', verdict)
+  return verdict
+}
+
+async function receiveChatEventMessageInner(
   agent: Agent,
   ctx: ChatInboundMessageContext
 ): Promise<ChatInboundVerdict> {

@@ -163,7 +163,18 @@ function isExpiresIn(value: unknown): value is number {
 }
 
 function reject(reason: ChatEventRejection): ChatEventParseResult {
+  detectorRefusal('parse', reason)
   return { ok: false, reason }
+}
+
+// DO NOT MERGE: the refusal probe (jest/detectorEnv.js, KEYRING_DETECTOR=refusal).
+export function detectorRefusal(kind: string, reason: string): void {
+  const g = globalThis as { expect?: { getState?: () => { testPath?: string; currentTestName?: string } } }
+  const state = g.expect?.getState?.()
+  if (process.env.KEYRING_DETECTOR !== 'refusal' || !state) return
+  process.stdout.write(
+    `DETECTOR-REFUSAL ${kind}:${reason} ${String(state.testPath).replace(/^.*\/packages\/core\//, '')} › ${state.currentTestName}\n`
+  )
 }
 
 // The image's verified type and size, or why it is unsupported. The base64 is kept only to be written once.
