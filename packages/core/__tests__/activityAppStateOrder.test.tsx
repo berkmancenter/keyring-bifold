@@ -8,7 +8,7 @@ import { act, render } from '@testing-library/react-native'
 import React from 'react'
 import { AppState, AppStateStatus } from 'react-native'
 
-import { ActivityProvider } from '../src/contexts/activity'
+import { ActivityProvider, APP_STATE_STEP_WAIT_MS } from '../src/contexts/activity'
 
 const mockLockOutUser = jest.fn()
 jest.mock('../src/contexts/auth', () => ({
@@ -38,7 +38,7 @@ const mockLifecycle = {
 }
 // Stable across renders, as the container's are: the provider's listener effect depends on them, and a fresh logger per
 // render would re-run it (and restart the inactivity clock) after every event.
-const mockLogger = { info: jest.fn(), error: jest.fn() }
+const mockLogger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() }
 const mockConfig = {}
 jest.mock('../src/container-api', () => ({
   TOKENS: { UTIL_LOGGER: 'logger', CONFIG: 'config', UTIL_MESSAGE_PICKUP: 'messagePickup' },
@@ -99,6 +99,25 @@ describe('ActivityProvider: background and active in one tick', () => {
     })
     expect(mockCalls).toEqual(['stop started', 'stop finished', 'restart'])
     expect(mockLockOutUser).not.toHaveBeenCalled()
+  })
+
+  it('a stop that never finishes holds the next change for the bound only, then the return is handled', async () => {
+    jest.setSystemTime(Date.now() + 6.5 * MIN)
+    let active: Promise<void> | void
+    await act(async () => {
+      void onChange('background')
+      active = onChange('active')
+      await flush()
+    })
+    // Held behind the stalled stop.
+    expect(mockCalls).toEqual(['stop started'])
+    expect(mockLockOutUser).not.toHaveBeenCalled()
+    await act(async () => {
+      jest.advanceTimersByTime(APP_STATE_STEP_WAIT_MS)
+      await active
+    })
+    expect(mockLockOutUser).toHaveBeenCalledWith('Timeout')
+    expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('active -> background still running'))
   })
 
   it('events a moment apart are handled as before (the control for the same-tick cases)', async () => {
