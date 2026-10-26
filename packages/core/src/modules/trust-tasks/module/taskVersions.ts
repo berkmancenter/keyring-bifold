@@ -46,6 +46,15 @@ export function versionAfterRefusal(
   return uris.slice(uris.indexOf(tried) + 1).find((uri) => !alreadyTried.has(uri))
 }
 
+/** A report (a log line) never decides a call: one that throws is dropped, the answer or step-down kept. */
+const report = (fn: () => void) => {
+  try {
+    fn()
+  } catch {
+    // Reporting only.
+  }
+}
+
 export class TaskVersions {
   /** Family → the URI this agent was found to serve. */
   private readonly served = new Map<string, string>()
@@ -78,7 +87,7 @@ export class TaskVersions {
       tried.add(uri)
       try {
         const answer = await send(uri)
-        if (this.served.get(family) !== uri) this.onServed?.(family, uri)
+        if (this.served.get(family) !== uri) report(() => this.onServed?.(family, uri))
         this.served.set(family, uri)
         return { uri, answer }
       } catch (error) {
@@ -86,7 +95,7 @@ export class TaskVersions {
         this.served.delete(family)
         const next = versionAfterRefusal(uris, uri, error, tried)
         if (!next) throw error
-        this.onStepDown?.(family, uri, next)
+        report(() => this.onStepDown?.(family, uri, next))
         uri = next
       }
     }

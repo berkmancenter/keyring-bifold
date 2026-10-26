@@ -138,6 +138,7 @@ export const VTA_TASK = {
   contextsCreate: 'https://trusttasks.org/spec/vta/contexts/create/1.0',
   didsList: 'https://trusttasks.org/spec/vta/webvh/dids/list/1.0',
   didsCreate: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.0',
+  didsCreate11: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.1',
   keysExportSecret: 'https://trusttasks.org/spec/keys/export-secret/0.1',
   serversList: 'https://trusttasks.org/spec/vta/webvh/servers/list/1.0',
   consentRequest: 'https://trusttasks.org/spec/task-consent/request/0.1',
@@ -210,6 +211,12 @@ export const VTA_TASK_VERSIONS = {
   // (vti-common vault/mod.rs:300-322).
   vaultList: [VTA_TASK.vaultList03, VTA_TASK.vaultList02, VTA_TASK.vaultList],
   vaultUpsert: [VTA_TASK.vaultUpsert03, VTA_TASK.vaultUpsert02, VTA_TASK.vaultUpsert],
+  // 1.1 first: vta-service has served it since v0.49.0 (2026-10-02), and v0.60.0 and v0.64.0 serve 1.0 and 1.1
+  // (vta-sdk trust_tasks.rs TASK_WEBVH_DIDS_CREATE_*). 1.0 is withdrawn in the 2027-01-01 batch and 1.1 in
+  // 2027-04-01's. 1.2 is served from v0.65.0 (2026-10-26) on, ahead of the VTAs in use, so it is added once they
+  // serve it rather than asked of every agent and refused. The payload is the same in both; 1.1's answer adds
+  // `serverless`.
+  didsCreate: [VTA_TASK.didsCreate11, VTA_TASK.didsCreate],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -323,6 +330,8 @@ export interface VtaMintedDid {
   scid: string
   signingKeyId: string
   kaKeyId: string
+  /** From dids/create 1.1 on: the VTA serves the DID's log itself. */
+  serverless?: boolean
   didDocument?: unknown
   [key: string]: unknown
 }
@@ -1047,7 +1056,7 @@ export class VtaClient {
         `${LOG_PREFIX} ${agentNamedFor(from, this.vtaDid)} does not serve ${from}; asking ${to} (${family})`
       ),
     // The version in use, once per family: what shows when an older one's fallback can go.
-    (family, uri) => this.agent.config.logger.info(`${LOG_PREFIX} ${family} answered in ${uri}`)
+    (family, uri) => this.agent.config?.logger?.info(`${LOG_PREFIX} ${family} answered in ${uri}`)
   )
 
   constructor(
@@ -2167,30 +2176,36 @@ export class VtaClient {
     if (!options.serverId && !options.didUrl) {
       throw new Error(`${LOG_PREFIX} mintPersona needs a registered server id or a serverless DID URL`)
     }
-    return this.task<VtaMintedDid>(
-      VTA_TASK.didsCreate,
-      {
-        contextId: options.contextId,
-        ...(options.serverId ? { serverId: options.serverId } : {}),
-        // Serverless: the VTA mints and serves the log itself at this URL.
-        ...(options.didUrl ? { url: options.didUrl } : {}),
-        label: options.label,
-        addMediatorService: true,
-        // DIDComm only. A VTA adds `#tsp` by default when it and its mediator
-        // speak TSP (VTI vta-service did_webvh/document.rs:47-67), and a
-        // community then pushes to the persona over TSP first. Across two
-        // mediators that push never reached the phone (227 gate, VTA Farm),
-        // and the community falls back to DIDComm only after an hour. Over
-        // DIDComm the same pushes arrive.
-        addTspService: false,
-        setPrimary: false,
-      },
-      MINT_TIMEOUT_MS,
-      // A mint whose answer is lost still succeeds at the VTA; retried with the
-      // same key within 24 h the VTA returns that first mint instead of minting
-      // an orphan (VTI-Q17, answered by the maintainers 2026-09-23).
-      options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}
-    )
+    const payload = {
+      contextId: options.contextId,
+      ...(options.serverId ? { serverId: options.serverId } : {}),
+      // Serverless: the VTA mints and serves the log itself at this URL.
+      ...(options.didUrl ? { url: options.didUrl } : {}),
+      label: options.label,
+      addMediatorService: true,
+      // DIDComm only. A VTA adds `#tsp` by default when it and its mediator
+      // speak TSP (VTI vta-service did_webvh/document.rs:47-67), and a
+      // community then pushes to the persona over TSP first. Across two
+      // mediators that push never reached the phone (227 gate, VTA Farm),
+      // and the community falls back to DIDComm only after an hour. Over
+      // DIDComm the same pushes arrive.
+      addTspService: false,
+      setPrimary: false,
+    }
+    // A step down happens only on a version refusal, when the VTA minted nothing, so the same key goes with each try.
+    return this.versions
+      .ask('didsCreate', VTA_TASK_VERSIONS.didsCreate, (type) =>
+        this.task<VtaMintedDid>(
+          type,
+          payload,
+          MINT_TIMEOUT_MS,
+          // A mint whose answer is lost still succeeds at the VTA; retried with the
+          // same key within 24 h the VTA returns that first mint instead of minting
+          // an orphan (VTI-Q17, answered by the maintainers 2026-09-23).
+          options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}
+        )
+      )
+      .then(({ answer }) => answer)
   }
 
   /**

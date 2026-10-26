@@ -100,6 +100,48 @@ describe('the version step-down', () => {
 // vta-service 0.53.1 and 0.54.0 serve acl/* only at 0.1 (trust_tasks/mod.rs:2245-2255),
 // and a refused 0.2 never reached the phone over TSP (al-phone, 10-05: Add another
 // device "didn't answer"). 0.1 goes first: one message, answered.
+describe('reporting the version in use', () => {
+  const A = 'https://t/x/0.2'
+  const B = 'https://t/x/0.1'
+
+  it('reports a family once when its version is learned, and again only when it changes', async () => {
+    const served = jest.fn()
+    const versions = new TaskVersions(undefined, served)
+    await versions.ask('x', [A, B], async () => 'ok')
+    await versions.ask('x', [A, B], async () => 'ok')
+    expect(served.mock.calls).toEqual([['x', A]])
+    // The agent now serves only B: one step down, one new report.
+    let first = true
+    await versions.ask('x', [A, B], async (uri) => {
+      if (first && uri === A) {
+        first = false
+        throw new VtiRefusal('unsupportedVersion', 'no', { servedVersions: [B] })
+      }
+      return 'ok'
+    })
+    expect(served.mock.calls).toEqual([
+      ['x', A],
+      ['x', B],
+    ])
+  })
+
+  it('a report that throws never fails the answer or stops the step down', async () => {
+    const boom = () => {
+      throw new Error('no logger')
+    }
+    const versions = new TaskVersions(boom, boom)
+    let first = true
+    const { uri, answer } = await versions.ask('x', [A, B], async (u) => {
+      if (first) {
+        first = false
+        throw new VtiRefusal('unsupportedVersion', 'no')
+      }
+      return `answered at ${u}`
+    })
+    expect({ uri, answer }).toEqual({ uri: B, answer: `answered at ${B}` })
+  })
+})
+
 describe('the access list, against an agent that serves only 0.1 (v0.52.0 to v0.54.0)', () => {
   it('asks list in 0.1, in one message each time', async () => {
     const { vta, sent } = agentServing(V01, () => ({ entries: [{ subject: PHONE, role: 'admin' }], truncated: false }))
