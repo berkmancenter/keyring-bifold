@@ -22,11 +22,17 @@ import { hidesText } from '../chat/disappearing'
 import { ThemedText } from '../texts/ThemedText'
 
 export interface ContactListItemProps {
+  /** The connection the row shows and opens. */
   contact: DidCommConnectionRecord
+  /**
+   * Every connection of the contact the row stands for (a merged contact has one per exchange), `contact`'s among
+   * them: the unread count is summed over them. Absent, the row is `contact` alone.
+   */
+  connectionIds?: string[]
   navigation: StackNavigationProp<ContactStackParams, Screens.Contacts>
 }
 
-const ContactListItem: React.FC<ContactListItemProps> = ({ contact, navigation }) => {
+const ContactListItem: React.FC<ContactListItemProps> = ({ contact, connectionIds, navigation }) => {
   const { ColorPalette } = useTheme()
   const { t } = useTranslation()
   const messages = useChatMessagesByConnection(contact)
@@ -41,7 +47,7 @@ const ContactListItem: React.FC<ContactListItemProps> = ({ contact, navigation }
   const [_store] = useStore()
   const [{ enableChat }] = useServices([TOKENS.CONFIG])
   const { unreadByConnection } = useUnreadMessages()
-  const unreadCount = unreadByConnection[contact.id] ?? 0
+  const unreadCount = (connectionIds ?? [contact.id]).reduce((sum, id) => sum + (unreadByConnection[id] ?? 0), 0)
 
   const styles = StyleSheet.create({
     container: {
