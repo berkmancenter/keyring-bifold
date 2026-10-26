@@ -2933,7 +2933,7 @@
     "FileDownload": "Download",
     "FileFailed": "Couldn't download the file.",
     "FileShare": "Share or save",
-    "FileShareSoon": "Downloaded. Sharing files from Keyring on Android is coming soon.",
+    "FileShareUnavailable": "Downloaded, but this device can't share files from Keyring.",
     "SizeKB": "{{n}} KB",
     "SizeMB": "{{n}} MB"
   }

@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "0e134a1847b9573c01430a0a5a9a1dba1f688b20",
+  "generatedFrom": "1ac60da4c12d71f1ee5538198e250905e13a1233",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -910,7 +910,7 @@
     "RoomFileName": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileProgress": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileShare": ["src/modules/rooms/components/RoomFileSheet.tsx"],
-    "RoomFileShareSoon": ["src/modules/rooms/components/RoomFileSheet.tsx"],
+    "RoomFileShareUnavailable": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheet": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheetClose": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomHeader": ["src/modules/rooms/screens/Room.tsx"],

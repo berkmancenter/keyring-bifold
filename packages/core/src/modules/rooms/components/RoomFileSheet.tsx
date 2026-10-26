@@ -3,14 +3,16 @@
  * shared it and when, then Download, with progress and Cancel, then Share. The type is only what the post claims;
  * the sheet says so, and that Keyring can't check what a file holds.
  *
- * The downloaded copy is the service's protected local copy, released when the sheet closes. Sharing hands it to
- * the system share sheet on iOS; Android has no file-sharing path in the app yet, so there it says "Coming soon".
+ * The downloaded copy is the service's protected local copy, released when the sheet closes. Share hands it to the
+ * system share sheet (expo-sharing, which the app already carries for problem reports), on iOS and Android alike;
+ * on a device that can't share files, the sheet says so instead of offering a button that would fail.
  *
  * @module rooms/components/RoomFileSheet
  */
-import React from 'react'
+import * as Sharing from 'expo-sharing'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Modal, Platform, Pressable, Share, StyleSheet, View } from 'react-native'
+import { Modal, Pressable, StyleSheet, View } from 'react-native'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
@@ -47,6 +49,17 @@ const SheetBody: React.FC<
   const { t, i18n } = useTranslation()
   const { ColorPalette } = useTheme()
   const { state, download, cancel } = useRoomFile(service, roomId, file)
+  // Unknown until asked; asked once per sheet.
+  const [canShare, setCanShare] = useState<boolean>()
+  useEffect(() => {
+    let live = true
+    Sharing.isAvailableAsync()
+      .then((available) => live && setCanShare(available))
+      .catch(() => live && setCanShare(false))
+    return () => {
+      live = false
+    }
+  }, [])
   const styles = StyleSheet.create({
     // The chat's sheets' scrim.
     backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.35)' },
@@ -75,7 +88,10 @@ const SheetBody: React.FC<
   const share = async () => {
     if (state.step !== 'ready') return
     try {
-      await Share.share({ url: state.opened.localUri, title: String(file.name) })
+      await Sharing.shareAsync(state.opened.localUri, {
+        mimeType: state.opened.mediaType ?? file.mediaType,
+        dialogTitle: String(file.name),
+      })
     } catch {
       // The share sheet was dismissed or refused: the copy stays until the sheet closes.
     }
@@ -132,7 +148,7 @@ const SheetBody: React.FC<
             />
           </View>
         ) : state.step === 'ready' ? (
-          Platform.OS === 'ios' ? (
+          canShare ? (
             <Button
               title={t('Rooms.FileShare')}
               buttonType={ButtonType.Primary}
@@ -140,8 +156,8 @@ const SheetBody: React.FC<
               testID={testIdWithKey('RoomFileShare')}
             />
           ) : (
-            <ThemedText style={styles.muted} testID={testIdWithKey('RoomFileShareSoon')}>
-              {t('Rooms.FileShareSoon')}
+            <ThemedText style={styles.muted} testID={testIdWithKey('RoomFileShareUnavailable')}>
+              {t('Rooms.FileShareUnavailable')}
             </ThemedText>
           )
         ) : (

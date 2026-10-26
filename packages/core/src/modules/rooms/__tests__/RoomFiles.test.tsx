@@ -1,12 +1,12 @@
 /**
  * A post's files (R6a): a chip under the post; a tap opens the attachment sheet with the type and size the sharer
- * gave; Download shows progress and can be cancelled (nothing kept); a finished copy can be shared on iOS and is
- * released when the sheet closes; a failed download says so and can be tried again. Where files can't be opened,
- * no chip offers to.
+ * gave; Download shows progress and can be cancelled (nothing kept); a finished copy is shared through the system
+ * sheet and released when the sheet closes; a failed download says so and can be tried again. Where files can't be
+ * opened, no chip offers to.
  */
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
-import { Platform, Share } from 'react-native'
+import * as Sharing from 'expo-sharing'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
@@ -50,13 +50,13 @@ const press = async (tree: ReturnType<typeof show>, key: string) => {
   })
 }
 
-let os: typeof Platform.OS
+const shareAsync = Sharing.shareAsync as jest.Mock
+const isAvailableAsync = Sharing.isAvailableAsync as jest.Mock
+
 beforeEach(() => {
-  os = Platform.OS
   mockService = createSampleRoomsService()
-})
-afterEach(() => {
-  Platform.OS = os
+  shareAsync.mockClear()
+  isAvailableAsync.mockResolvedValue(true)
 })
 
 describe("a post's files", () => {
@@ -76,7 +76,6 @@ describe("a post's files", () => {
   test('Download shows progress, then Share hands the copy to the system; closing releases it', async () => {
     const service = mockService as RoomsService
     const releaseFile = jest.spyOn(service, 'releaseFile')
-    const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction })
     let release: () => void = () => undefined
     const real = service.openFile.bind(service)
     jest.spyOn(service, 'openFile').mockImplementation(async (roomId, fileId, options) => {
@@ -84,7 +83,6 @@ describe("a post's files", () => {
       await new Promise<void>((resolve) => (release = resolve))
       return real(roomId, fileId, options)
     })
-    Platform.OS = 'ios'
     const tree = show()
     await openSheet(tree)
     await press(tree, 'RoomFileDownload')
@@ -94,7 +92,7 @@ describe("a post's files", () => {
     await act(async () => {
       fireEvent.press(shareButton)
     })
-    expect(share).toHaveBeenCalledWith(expect.objectContaining({ url: 'sample://f1' }))
+    expect(shareAsync).toHaveBeenCalledWith('sample://f1', expect.objectContaining({ mimeType: 'application/pdf' }))
     expect(releaseFile).not.toHaveBeenCalled()
 
     await act(async () => {
@@ -130,7 +128,6 @@ describe("a post's files", () => {
   test('a download that fails says so, and Try again downloads it', async () => {
     const service = mockService as RoomsService
     const openFile = jest.spyOn(service, 'openFile').mockRejectedValueOnce(new Error('host unreachable'))
-    Platform.OS = 'ios'
     const tree = show()
     await openSheet(tree)
     await press(tree, 'RoomFileDownload')
@@ -140,12 +137,12 @@ describe("a post's files", () => {
     expect(openFile).toHaveBeenCalledTimes(2)
   })
 
-  test('on Android a downloaded file says sharing is coming, and offers no Share', async () => {
-    Platform.OS = 'android'
+  test("a device that can't share files says so, and offers no Share (control: Share above)", async () => {
+    isAvailableAsync.mockResolvedValue(false)
     const tree = show()
     await openSheet(tree)
     await press(tree, 'RoomFileDownload')
-    await waitFor(() => expect(tree.getByTestId(id('RoomFileShareSoon'))).toBeTruthy())
+    await waitFor(() => expect(tree.getByTestId(id('RoomFileShareUnavailable'))).toBeTruthy())
     expect(tree.queryByTestId(id('RoomFileShare'))).toBeNull()
   })
 
