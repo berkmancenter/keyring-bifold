@@ -26,7 +26,7 @@ exports[`ChatMessage Credential offer renders correctly 1`] = `
     >
       <Text
         accessibilityRole="header"
-        maxFontSizeMultiplier={1.5}
+        maxFontSizeMultiplier={2}
         style={
           Object {
             "color": "#4A4A4A",
@@ -202,7 +202,7 @@ exports[`ChatMessage Proof request renders correctly 1`] = `
     >
       <Text
         accessibilityRole="header"
-        maxFontSizeMultiplier={1.5}
+        maxFontSizeMultiplier={2}
         style={
           Object {
             "color": "#4A4A4A",
@@ -378,7 +378,7 @@ exports[`ChatMessage Reporting DID renders correctly 1`] = `
     >
       <Text
         accessibilityRole="header"
-        maxFontSizeMultiplier={1.5}
+        maxFontSizeMultiplier={2}
         style={
           Object {
             "color": "#4A4A4A",
@@ -483,7 +483,7 @@ exports[`ChatMessage Sent presentation renders correctly 1`] = `
     >
       <Text
         accessibilityRole="header"
-        maxFontSizeMultiplier={1.5}
+        maxFontSizeMultiplier={2}
         style={
           Object {
             "color": "#4A4A4A",

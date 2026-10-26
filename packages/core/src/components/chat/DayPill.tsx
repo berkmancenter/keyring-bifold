@@ -48,7 +48,8 @@ export const DayPill: React.FC<DayPillProps> = ({ date, floating = false }) => {
       >
         <Text
           style={styles.text}
-          maxFontSizeMultiplier={1.5}
+          // The theme's cap for text (keyring-theme maxFontSizeMultiplier).
+          maxFontSizeMultiplier={2}
           accessibilityRole="header"
           testID={testIdWithKey(floating ? ChatIds.dayPillFloating : ChatIds.dayPill)}
         >
