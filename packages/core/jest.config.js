@@ -1,7 +1,7 @@
 process.env.TZ = 'UTC'
 
 // DO NOT MERGE: detector run (jest/detectorEnv.js).
-process.env.KEYRING_DETECTOR = process.env.KEYRING_DETECTOR || 'MODE_PLACEHOLDER'
+process.env.KEYRING_DETECTOR = process.env.KEYRING_DETECTOR || 'slow'
 const DETECTOR_TIMEOUT = { slow: 120000, hang: 4000, refusal: 12000 }[process.env.KEYRING_DETECTOR]
 
 module.exports = {
