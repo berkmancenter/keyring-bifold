@@ -69,6 +69,8 @@ describe('posting to a room', () => {
     expect(chatMessageText(draft.body)).toBe('See you Thursday.')
     expect(confirmWrite).toHaveBeenCalledTimes(1)
     expect(tree.getByTestId(id('RoomComposerInput')).props.value).toBe('')
+    // Who the member posts as is in view at the composer, not only in the header.
+    expect(tree.getByTestId(id('RoomComposerPostingAs'))).toHaveTextContent('Rooms.PostingAs')
 
     // The room's list carries it, as the member's own, and nothing is left sending.
     await waitFor(() => expect(tree.getByText('See you Thursday.')).toBeTruthy())
@@ -138,6 +140,7 @@ describe('posting to a room', () => {
     const tree = show(WELCOME_DESK)
     await waitFor(() => expect(tree.getByTestId(id('RoomComposerUnavailable'))).toHaveTextContent('Rooms.NoRightWrite'))
     expect(tree.queryByTestId(id('RoomComposerInput'))).toBeNull()
+    expect(tree.queryByTestId(id('RoomComposerPostingAs'))).toBeNull()
   })
 
   test("a room known only from the agent's keys: details not loaded, and no field", async () => {

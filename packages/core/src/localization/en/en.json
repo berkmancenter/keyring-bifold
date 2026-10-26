@@ -2924,6 +2924,7 @@
     "OfferKeyHolderRefused": "The community couldn't add you right now. Try again later.",
     "Send": "Send",
     "PostSending": "Sending…",
-    "PostNotSent": "Not sent. Tap to try again."
+    "PostNotSent": "Not sent. Tap to try again.",
+    "PostingAs": "Posting as {{who}}"
   }
 }

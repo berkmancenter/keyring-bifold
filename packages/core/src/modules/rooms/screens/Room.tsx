@@ -252,7 +252,9 @@ const Room: React.FC = () => {
             ) : null
           }
         />
-        {unavailable ? null : <RoomComposer onSend={outbox.send} unavailable={cannotPost} />}
+        {unavailable ? null : (
+          <RoomComposer onSend={outbox.send} unavailable={cannotPost} postingAs={identityText(room.actingAs)} />
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   )

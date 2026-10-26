@@ -2774,6 +2774,7 @@
     "OfferKeyHolderRefused": "A comunidade não conseguiu adicionar você agora. Tente mais tarde.",
     "Send": "Enviar",
     "PostSending": "Enviando…",
-    "PostNotSent": "Não enviado. Toque para tentar de novo."
+    "PostNotSent": "Não enviado. Toque para tentar de novo.",
+    "PostingAs": "Publicando como {{who}}"
   }
 }

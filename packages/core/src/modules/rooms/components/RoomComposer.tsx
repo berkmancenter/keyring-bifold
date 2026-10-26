@@ -3,6 +3,9 @@
  * at a time to five, then scrolls, and a 44-point Send) with the theme's colours. The chat's own composer leaves are
  * gifted-chat renderers and need its state, so a room, whose list is its own, uses this plain field instead.
  *
+ * Above the field, who the member posts as: a room's audience differs from a one-to-one chat's, and the identity
+ * differs per room, so it is in view at the moment of posting, not only in the header.
+ *
  * Where the member may not post, the composer is replaced by the reason, in the rooms screens' usual words
  * ("You can't post here", "Coming soon"), never by a field that would fail on Send.
  *
@@ -30,9 +33,11 @@ export interface RoomComposerProps {
   onSend: (text: string) => boolean
   /** Why the member can't post here; the composer shows this instead of a field. */
   unavailable?: string
+  /** Who the member posts as, in words ("…negative-weird"). */
+  postingAs?: string
 }
 
-export const RoomComposer: React.FC<RoomComposerProps> = ({ onSend, unavailable }) => {
+export const RoomComposer: React.FC<RoomComposerProps> = ({ onSend, unavailable, postingAs }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const [text, setText] = useState('')
@@ -76,6 +81,13 @@ export const RoomComposer: React.FC<RoomComposerProps> = ({ onSend, unavailable 
       backgroundColor: hasText ? ColorPalette.brand.primary : ColorPalette.grayscale.lightGrey,
     },
     unavailable: { padding: 16, color: ColorPalette.grayscale.mediumGrey, textAlign: 'center' },
+    postingAs: {
+      paddingHorizontal: 22,
+      paddingTop: 6,
+      fontSize: 12,
+      color: ColorPalette.grayscale.mediumGrey,
+      backgroundColor: ColorPalette.brand.secondaryBackground,
+    },
   })
 
   if (unavailable)
@@ -92,35 +104,42 @@ export const RoomComposer: React.FC<RoomComposerProps> = ({ onSend, unavailable 
   }
 
   return (
-    <View style={styles.bar} testID={testIdWithKey('RoomComposer')}>
-      <View style={styles.field}>
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          multiline
-          maxLength={MAX_POST_LENGTH}
-          maxFontSizeMultiplier={1.5}
-          placeholder={t('Chat.MessagePlaceholder')}
-          placeholderTextColor={ColorPalette.grayscale.mediumGrey}
-          accessibilityLabel={t('Chat.MessagePlaceholder')}
-          testID={testIdWithKey('RoomComposerInput')}
-        />
-      </View>
-      <Pressable
-        onPress={send}
-        disabled={!hasText}
-        style={TAP_TARGET}
-        accessibilityRole="button"
-        accessibilityLabel={t('Rooms.Send')}
-        accessibilityState={{ disabled: !hasText }}
-        testID={testIdWithKey('RoomComposerSend')}
-      >
-        <View style={styles.sendDot}>
-          <Icon name="arrow-up" size={22} color={ColorPalette.grayscale.white} />
+    <>
+      {postingAs ? (
+        <ThemedText style={styles.postingAs} numberOfLines={1} testID={testIdWithKey('RoomComposerPostingAs')}>
+          {t('Rooms.PostingAs', { who: postingAs, interpolation: { escapeValue: false } })}
+        </ThemedText>
+      ) : null}
+      <View style={styles.bar} testID={testIdWithKey('RoomComposer')}>
+        <View style={styles.field}>
+          <TextInput
+            style={styles.input}
+            value={text}
+            onChangeText={setText}
+            multiline
+            maxLength={MAX_POST_LENGTH}
+            maxFontSizeMultiplier={1.5}
+            placeholder={t('Chat.MessagePlaceholder')}
+            placeholderTextColor={ColorPalette.grayscale.mediumGrey}
+            accessibilityLabel={t('Chat.MessagePlaceholder')}
+            testID={testIdWithKey('RoomComposerInput')}
+          />
         </View>
-      </Pressable>
-    </View>
+        <Pressable
+          onPress={send}
+          disabled={!hasText}
+          style={TAP_TARGET}
+          accessibilityRole="button"
+          accessibilityLabel={t('Rooms.Send')}
+          accessibilityState={{ disabled: !hasText }}
+          testID={testIdWithKey('RoomComposerSend')}
+        >
+          <View style={styles.sendDot}>
+            <Icon name="arrow-up" size={22} color={ColorPalette.grayscale.white} />
+          </View>
+        </Pressable>
+      </View>
+    </>
   )
 }
 
