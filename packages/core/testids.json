@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "f13d5b345cd7d1b8c6faa505aefcab45c73b54db",
+  "generatedFrom": "836a7c51ba3c8017323c2df5cb2072ac1719527a",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -898,6 +898,10 @@
     "RevokedDate": ["src/screens/CredentialDetails.tsx"],
     "RevokedOrNotAvailable": ["src/components/misc/Card11Pure.tsx"],
     "RoomActingAs": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomComposer": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerInput": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerSend": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerUnavailable": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomHeader": ["src/modules/rooms/screens/Room.tsx"],
     "RoomHostConflict": ["src/modules/rooms/screens/Room.tsx"],
     "RoomLoadOlder": ["src/modules/rooms/screens/Room.tsx"],
@@ -918,7 +922,10 @@
     "RoomOfferUntil": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOffers": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomPostAgent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostNotSent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostRemoved": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostRetry": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostSending": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostUnread": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPosts": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsFailed": ["src/modules/rooms/screens/Room.tsx"],
