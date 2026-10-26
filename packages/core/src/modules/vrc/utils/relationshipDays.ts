@@ -9,6 +9,8 @@
  *
  * @module vrc/utils/relationshipDays
  */
+import { localDayKey } from '../../../utils/localDay'
+
 import type { RelationshipLayer } from './relationshipLayers'
 
 export interface RelationshipDay {
@@ -32,15 +34,11 @@ export interface RelationshipDay {
   layers: RelationshipLayer[]
 }
 
-const pad = (n: number) => String(n).padStart(2, '0')
-
-/** A timestamp's local calendar day, or '' when it has none or cannot be read. */
+/** A timestamp's local calendar day (utils/localDay's key), or '' when it has none or cannot be read. */
 export function localDay(at?: string): string {
   if (!at) return ''
   const time = Date.parse(at)
-  if (!Number.isFinite(time)) return ''
-  const date = new Date(time)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return Number.isFinite(time) ? localDayKey(new Date(time)) : ''
 }
 
 /**
