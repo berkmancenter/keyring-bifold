@@ -111,6 +111,15 @@ describe('Keep messages', () => {
     expect(store.basic.map((b) => b.id)).toEqual(['b-new'])
   })
 
+  // A fixture right at the cutoff decides on milliseconds; a day either side keeps what each one tests unambiguous.
+  test('every fixture is at least a day from the 30-day cutoff', () => {
+    const DAY = 24 * 60 * 60 * 1000
+    const cutoff = daysAgo(30).getTime()
+    for (const { createdAt } of [...events, ...basics]) {
+      expect(Math.abs(createdAt.getTime() - cutoff)).toBeGreaterThanOrEqual(DAY)
+    }
+  })
+
   describe('the sweep, as the app runs it', () => {
     let onChange: ((state: string) => void) | undefined
     beforeEach(() => {
@@ -138,6 +147,12 @@ describe('Keep messages', () => {
     afterEach(() => {
       jest.useRealTimers()
       jest.restoreAllMocks()
+    })
+
+    // The guard on the pin: without it this file passes until the calendar reaches its fixtures, then fails for
+    // everyone at once, in whatever PR runs next.
+    test('runs on NOW, the clock its fixtures are dated from', () => {
+      expect(Date.now()).toBe(NOW.getTime())
     })
 
     test('runs once unlocked and again on each return to the foreground', async () => {
