@@ -12,6 +12,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import { useNavigation, useRoute } from '@react-navigation/native'
 import { StackNavigationProp } from '@react-navigation/stack'
+import type { TFunction } from 'i18next'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native'
@@ -29,8 +30,34 @@ import { roomsStatusText } from '../components/roomsStatusText'
 import { accessText, identityText, tierHint } from '../components/roomWords'
 import { SampleDataBanner } from '../components/SampleDataBanner'
 import TierBadge from '../components/TierBadge'
-import { useRoomOffer } from '../useRoomOffer'
+import { type AcceptRefusal, useRoomOffer } from '../useRoomOffer'
 import { useRoomsService } from '../useRoomsService'
+
+/** The community's refusal codes this screen words; any other code, or none, is the plain "try again". */
+const REFUSAL_KEY: Record<string, string> = {
+  notFound: 'Rooms.OfferGone',
+  offerExpired: 'Rooms.OfferGone',
+  notAMember: 'Rooms.OfferNotAMember',
+  alreadyAccepted: 'Rooms.OfferAlreadyAccepted',
+  admissionPending: 'Rooms.OfferAdmissionPending',
+  keyHolderRefused: 'Rooms.OfferKeyHolderRefused',
+}
+
+/**
+ * What a failed accept says, and whether it is final for this offer (Join is then not offered again). A refusal the
+ * service named is said in its words; a Keyring fault (a key package the community rejected) or a failure with no
+ * answer is the plain "Couldn't join the room. Try again."
+ */
+export function acceptFailureText(t: TFunction, refusal?: AcceptRefusal): { text: string; final: boolean } {
+  const generic = { text: t('Rooms.OfferAcceptFailed') as string, final: false }
+  if (!refusal) return generic
+  if ('reason' in refusal) {
+    const text = roomsStatusText(t, { status: 'unavailable', reason: refusal.reason, detail: '' }, 'acceptOffer')
+    return text ? { text, final: true } : generic
+  }
+  const key = REFUSAL_KEY[refusal.code]
+  return key ? { text: t(key) as string, final: !refusal.retryable } : generic
+}
 
 const RoomOffer: React.FC = () => {
   const { t } = useTranslation()
@@ -42,6 +69,7 @@ const RoomOffer: React.FC = () => {
   const state = useRoomOffer(service, offerRef)
   const { preview, step } = state
   const busy = step === 'accepting' || step === 'hiding'
+  const final = state.actFailed === 'accept' && acceptFailureText(t, state.refusal).final
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
     content: { flexGrow: 1, padding: 20, gap: 16 },
@@ -156,12 +184,7 @@ const RoomOffer: React.FC = () => {
         ) : null}
         {state.actFailed ? (
           <ThemedText style={styles.error} accessibilityLiveRegion="polite" testID={testIdWithKey('RoomOfferFailed')}>
-            {state.actFailed === 'hide'
-              ? t('Rooms.OfferHideFailed')
-              : // Refused for a reason the service named: say that, not "try again".
-                ((state.refusedFor &&
-                  roomsStatusText(t, { status: 'unavailable', reason: state.refusedFor, detail: '' }, 'acceptOffer')) ??
-                t('Rooms.OfferAcceptFailed'))}
+            {state.actFailed === 'hide' ? t('Rooms.OfferHideFailed') : acceptFailureText(t, state.refusal).text}
           </ThemedText>
         ) : null}
         <View style={styles.actions}>
@@ -169,7 +192,7 @@ const RoomOffer: React.FC = () => {
             title={t('Rooms.OfferAccept')}
             buttonType={ButtonType.Primary}
             onPress={onAccept}
-            disabled={busy}
+            disabled={busy || final}
             testID={testIdWithKey('RoomOfferAccept')}
           >
             {step === 'accepting' ? <ActivityIndicator color={ColorPalette.brand.text} /> : null}

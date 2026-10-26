@@ -25,8 +25,8 @@ export interface RoomOfferState {
   readFailed: boolean
   /** The last accept or hide failed; nothing changed. */
   actFailed?: 'accept' | 'hide'
-  /** Why the last accept was refused, when the service said (`RoomsUnavailable`), e.g. the community no longer serves it. */
-  refusedFor?: RoomsReason
+  /** Why the last accept was refused, when the service said; undefined for a failure with no reason (try again). */
+  refusal?: AcceptRefusal
   /** The preview was stale and has been read again: ask the person to check it once more. */
   refreshed: boolean
   reload: () => void
@@ -38,8 +38,22 @@ export interface RoomOfferState {
 
 const isExpired = (e: unknown): boolean => e instanceof Error && e.name === 'RoomsPreviewExpired'
 
-const refusalOf = (e: unknown): RoomsReason | undefined =>
-  e instanceof Error && e.name === 'RoomsUnavailable' ? (e as Error & { reason?: RoomsReason }).reason : undefined
+/**
+ * A refused accept, as the service reports it:
+ * - `RoomsUnavailable`: the operation is not served (its `reason`, worded as every rooms screen words it);
+ * - `RoomsRefused`: the community answered with a refusal `code` (vtc/rooms/offers/accept/0.1, without the task
+ *   prefix), and whether trying again can help.
+ */
+export type AcceptRefusal = { reason: RoomsReason } | { code: string; retryable: boolean }
+
+const refusalOf = (e: unknown): AcceptRefusal | undefined => {
+  if (!(e instanceof Error)) return undefined
+  const fields = e as Error & { reason?: RoomsReason; code?: unknown; retryable?: unknown }
+  if (e.name === 'RoomsUnavailable' && fields.reason) return { reason: fields.reason }
+  if (e.name === 'RoomsRefused' && typeof fields.code === 'string')
+    return { code: fields.code, retryable: fields.retryable === true }
+  return undefined
+}
 
 export function useRoomOffer(service: RoomsService | undefined, offerRef: string): RoomOfferState {
   const [acceptStatus, setAcceptStatus] = useState<OperationStatus>()
@@ -48,7 +62,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
   const [step, setStep] = useState<OfferStep>('reading')
   const [readFailed, setReadFailed] = useState(false)
   const [actFailed, setActFailed] = useState<'accept' | 'hide'>()
-  const [refusedFor, setRefusedFor] = useState<RoomsReason>()
+  const [refusal, setRefusal] = useState<AcceptRefusal>()
   const [refreshed, setRefreshed] = useState(false)
   const [generation, setGeneration] = useState(0)
   const reload = useCallback(() => setGeneration((g) => g + 1), [])
@@ -84,7 +98,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
   const accept = useCallback(async () => {
     if (!service || !preview) return undefined
     setActFailed(undefined)
-    setRefusedFor(undefined)
+    setRefusal(undefined)
     setRefreshed(false)
     setStep('accepting')
     try {
@@ -101,7 +115,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
         }
       } else {
         setActFailed('accept')
-        setRefusedFor(refusalOf(e))
+        setRefusal(refusalOf(e))
       }
       setStep('ready')
       return undefined
@@ -123,5 +137,5 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
     }
   }, [service, offerRef])
 
-  return { acceptStatus, hideStatus, preview, step, readFailed, actFailed, refusedFor, refreshed, reload, accept, hide }
+  return { acceptStatus, hideStatus, preview, step, readFailed, actFailed, refusal, refreshed, reload, accept, hide }
 }

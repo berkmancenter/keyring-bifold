@@ -2864,6 +2864,11 @@
     "OfferReadFailed": "Impossible de lire cette invitation. Réessayez plus tard.",
     "OfferRefreshed": "L'invitation a été relue, car la version affichée n'était plus à jour. Vérifiez-la, puis rejoignez.",
     "OfferAcceptFailed": "Impossible de rejoindre le salon. Réessayez.",
-    "OfferHideFailed": "Impossible de masquer l'invitation. Réessayez."
+    "OfferHideFailed": "Impossible de masquer l'invitation. Réessayez.",
+    "OfferGone": "Cette invitation n'est plus disponible.",
+    "OfferNotAMember": "Vous n'êtes plus membre actif de cette communauté : vous ne pouvez pas rejoindre ses salons.",
+    "OfferAlreadyAccepted": "Cette invitation a déjà été acceptée et ne peut pas l'être de nouveau. Demandez à la communauté de vous retirer du salon et de vous inviter à nouveau.",
+    "OfferAdmissionPending": "La communauté n'a pas encore confirmé. Réessayez dans une minute.",
+    "OfferKeyHolderRefused": "La communauté ne peut pas vous ajouter pour le moment. Réessayez plus tard."
   }
 }

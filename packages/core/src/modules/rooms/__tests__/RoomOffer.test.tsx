@@ -147,6 +147,33 @@ describe('RoomOffer', () => {
     expect(navigation.replace).not.toHaveBeenCalled()
   })
 
+  const refused = (code: string, retryable: boolean) =>
+    Object.assign(new Error(`refused: ${code}`), { name: 'RoomsRefused', operation: 'acceptOffer', code, retryable })
+
+  test('an offer the community no longer has: says so, and Join is not offered again', async () => {
+    mockService = sample()
+    jest.spyOn(mockService, 'acceptOffer').mockRejectedValue(refused('notFound', false))
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeTruthy())
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('RoomOfferAccept')))
+    })
+    expect(tree.getByTestId(testIdWithKey('RoomOfferFailed'))).toHaveTextContent('Rooms.OfferGone')
+    expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeDisabled()
+  })
+
+  test('an admission not confirmed yet: says to try again, and Join stays (control for the test above)', async () => {
+    mockService = sample()
+    jest.spyOn(mockService, 'acceptOffer').mockRejectedValue(refused('admissionPending', true))
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeTruthy())
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('RoomOfferAccept')))
+    })
+    expect(tree.getByTestId(testIdWithKey('RoomOfferFailed'))).toHaveTextContent('Rooms.OfferAdmissionPending')
+    expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).not.toBeDisabled()
+  })
+
   test('Not now hides the offer on this phone and goes back, without asking or accepting', async () => {
     mockService = sample()
     const acceptOffer = jest.spyOn(mockService, 'acceptOffer')
@@ -194,5 +221,33 @@ describe('RoomOffer', () => {
     const tree = show()
     expect(tree.getByTestId(testIdWithKey('RoomsOff'))).toBeTruthy()
     expect(tree.queryByTestId(testIdWithKey('RoomOfferScreen'))).toBeNull()
+  })
+})
+
+describe('acceptFailureText', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { acceptFailureText } = require('../screens/RoomOffer')
+  const t = ((key: string) => key) as never
+
+  test.each([
+    ['notFound', false, 'Rooms.OfferGone', true],
+    ['offerExpired', false, 'Rooms.OfferGone', true],
+    ['notAMember', false, 'Rooms.OfferNotAMember', true],
+    ['alreadyAccepted', false, 'Rooms.OfferAlreadyAccepted', true],
+    ['admissionPending', true, 'Rooms.OfferAdmissionPending', false],
+    ['keyHolderRefused', true, 'Rooms.OfferKeyHolderRefused', false],
+    // A Keyring fault, and a code this screen does not know: the plain "try again".
+    ['keyPackageInvalid', false, 'Rooms.OfferAcceptFailed', false],
+    ['somethingNew', false, 'Rooms.OfferAcceptFailed', false],
+  ])('%s', (code, retryable, text, final) => {
+    expect(acceptFailureText(t, { code, retryable })).toEqual({ text, final })
+  })
+
+  test("not served: the rooms screens' reason, final; no reason: try again", () => {
+    expect(acceptFailureText(t, { reason: 'communityDoesNotServe' })).toEqual({
+      text: 'Rooms.CommunityNeedsUpdate',
+      final: true,
+    })
+    expect(acceptFailureText(t, undefined)).toEqual({ text: 'Rooms.OfferAcceptFailed', final: false })
   })
 })
