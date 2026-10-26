@@ -15,6 +15,7 @@ import { Platform } from 'react-native'
 import RNFS from 'react-native-fs'
 
 import { getChatEventRepository } from './ChatModule'
+import { clearChatDraft } from './draft'
 import { forgetExpired } from './expired'
 import type { ChatEventRecord, ChatEventRole } from './records/ChatEventRecord'
 
@@ -84,6 +85,8 @@ export async function deleteChatMessages(agent: Agent, connectionId: string, ids
     // Housekeeping only: a stale tombstone can change nothing but the wording for an id that no longer exists, so it
     // never fails a clear.
     await forgetExpired(connectionId).catch(() => undefined)
+    // Unsent text is the chat's too: Clear chat and removing the contact leave none of it behind.
+    await clearChatDraft(agent, connectionId)
     return
   }
   // A media file is named by its message's eventId alone, so a file whose name a kept message shares is kept with it.
