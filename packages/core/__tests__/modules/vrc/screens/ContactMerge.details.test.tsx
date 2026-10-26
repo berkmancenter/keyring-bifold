@@ -67,21 +67,27 @@ const open = (issuer: { id: string; name: string }) =>
 const id = testIdWithKey
 
 /**
- * The screen's links reads made after the last save (its re-read once a merge or separation has been stored), waited
- * for and then settled inside act, so what it shows is asserted after that read rather than within a time budget a
- * loaded CI worker can run out of (CI, 10-25: "expected 4, received 3"). Waiting for the read to be *made* is only a
- * render away (no I/O); the read itself is awaited, not timed.
+ * The screen's links reads made after the last write (its re-read once a merge is saved or a separation deletes the
+ * links), waited for and then settled inside act, so what it shows is asserted after that read rather than within a
+ * time budget a loaded CI worker can run out of (CI, 10-25: "expected 4, received 3"; 10-26: ContactMergedByYou not
+ * found within the 1 s default). Waiting for the read to be *made* is only a render away (no I/O); the read itself is
+ * awaited, not timed.
  */
 const reReadSettled = async () => {
-  const readsAfterSave = () => {
-    const saved = Math.max(0, ...store.save.mock.invocationCallOrder)
+  const readsAfterWrite = () => {
+    const written = Math.max(
+      0,
+      ...store.save.mock.invocationCallOrder,
+      ...store.update.mock.invocationCallOrder,
+      ...store.deleteById.mock.invocationCallOrder
+    )
     return store.findAllByQuery.mock.invocationCallOrder.flatMap((order, i) =>
-      order > saved ? [store.findAllByQuery.mock.results[i].value] : []
+      order > written ? [store.findAllByQuery.mock.results[i].value] : []
     )
   }
-  await waitFor(() => expect(readsAfterSave().length).toBeGreaterThan(0), { timeout: 5000 })
+  await waitFor(() => expect(readsAfterWrite().length).toBeGreaterThan(0), { timeout: 5000 })
   await act(async () => {
-    await Promise.all(readsAfterSave())
+    await Promise.all(readsAfterWrite())
   })
 }
 
@@ -131,7 +137,10 @@ describe('Same person? on a contact', () => {
       expect(tree.getByText('ContactDetails.MergeAllConfirmTitle (count 3)')).toBeTruthy()
       fireEvent.press(tree.getByTestId(id('ContactMergeYes')))
 
-      await tree.findByTestId(id('ContactMergedByYou'))
+      // First what was stored (did the merge land?), then what the screen shows once it has read the links again.
+      await waitFor(() => expect(store.records).toHaveLength(2), { timeout: 5000 })
+      await reReadSettled()
+      expect(tree.getByTestId(id('ContactMergedByYou'))).toBeTruthy()
       // Alice's first contact has two cards, the other two one each: all four on one contact, under the oldest.
       expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(4)
       expect(new Map(store.records.map((r) => [r.content.issuerDid, r.content.contactId]))).toEqual(
@@ -191,7 +200,9 @@ describe('Same person? on a contact', () => {
     fireEvent.press(await tree.findByTestId(id('ContactMergeOffer')))
     fireEvent.press(tree.getByTestId(id('ContactMergeYes')))
 
-    const label = await tree.findByTestId(id('ContactMergedByYou'))
+    await waitFor(() => expect(store.records).toHaveLength(1), { timeout: 5000 })
+    await reReadSettled()
+    const label = tree.getByTestId(id('ContactMergedByYou'))
     expect(label.props.children).toBe('ContactDetails.MergedByYou')
     expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(3)
     expect(store.records).toHaveLength(1)
@@ -201,8 +212,9 @@ describe('Same person? on a contact', () => {
     expect(tree.getByText('ContactDetails.SeparateLink')).toBeTruthy()
     fireEvent.press(tree.getByTestId(id('ContactSeparate')))
     expect(tree.queryByTestId(id('ContactSeparateConfirm'))).toBeNull()
-    await waitFor(() => expect(tree.getByTestId(id('ContactMergeOffer'))).toBeTruthy())
-    expect(store.records).toHaveLength(0)
+    await waitFor(() => expect(store.records).toHaveLength(0), { timeout: 5000 })
+    await reReadSettled()
+    expect(tree.getByTestId(id('ContactMergeOffer'))).toBeTruthy()
     expect(tree.getAllByTestId(id('RelationshipLayer'))).toHaveLength(1)
   })
 
