@@ -53,9 +53,12 @@ describe('the offers badge poll', () => {
 
   test('stops when the agent is unlinked, and keeps the count it had', async () => {
     const service = serviceWith(1)
-    const { result, rerender } = renderHook(({ linked }) => useRoomOffersCount(service, linked), {
-      initialProps: { linked: true },
-    })
+    const { result, rerender } = renderHook<number | undefined, { linked: boolean }>(
+      ({ linked }) => useRoomOffersCount(service, linked),
+      {
+        initialProps: { linked: true },
+      }
+    )
     await flush()
     expect(service.listOffers).toHaveBeenCalledTimes(1)
     rerender({ linked: false })
