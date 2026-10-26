@@ -1,7 +1,8 @@
 /**
- * "How you know <name>", one entry per day, read through the real locale files: three exchanges on one day are one
- * entry; a day partly signed with secure hardware says "2 of 3"; a witness on the same day joins it; and a day opens
- * a sheet with the witness's record and each exchange. Before, each set of cards was its own line, the same words and
+ * "How you know <name>", one entry per day, read through the real locale files and the app's default escaping: three
+ * exchanges on one day are one entry; a day partly signed with secure hardware says "2 of 3"; a witness on the same
+ * day joins it; a day opens a sheet with the witness's record and each exchange; and a name reads as given, never
+ * HTML-escaped. Before, each set of cards was its own line, the same words and
  * date two or three times, and the witness record sat in another block in another date format.
  */
 import { act, fireEvent, render } from '@testing-library/react-native'
@@ -53,10 +54,10 @@ const witnessed = (when: string, w: WitnessRecord = record()): RelationshipLayer
   record: w,
 })
 
-const show = async (layers: RelationshipLayer[]) => {
+const show = async (layers: RelationshipLayer[], name = 'Bob') => {
   const tree = render(
     <BasicAppContext>
-      <RelationshipLayers name="Bob" layers={layers} />
+      <RelationshipLayers name={name} layers={layers} />
     </BasicAppContext>
   )
   await act(async () => undefined)
@@ -144,6 +145,28 @@ describe("a day's sheet", () => {
     expect(tree.getByText('Declined')).toBeTruthy()
     // A witness with no name is said in the app's words, never as an English placeholder.
     expect(tree.getByText('A witness')).toBeTruthy()
+  })
+
+  // The real instance escapes by default, as the app's does: names must read as given, never as "&amp;" or "&#x2F;".
+  test('a name or a witness with characters the default escaping rewrites reads as given', async () => {
+    const tree = await show([witnessed(at(15, 10), record({ witnessName: 'Wit <Ness> & Co' }))], "Bob O'Brien & Co")
+    const section = tree.getByTestId(testIdWithKey('RelationshipLayers'))
+    expect(section).toHaveTextContent("How you know Bob O'Brien & Co", { exact: false })
+    expect(tree.getByText('Witnessed by Wit <Ness> & Co.')).toBeTruthy()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RelationshipLayer')))
+    expect(tree.getByText("15 Oct 2026 with Bob O'Brien & Co")).toBeTruthy()
+    expect(tree.getByText('Wit <Ness> & Co')).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('RelationshipDaySheet'))).not.toHaveTextContent(/&#|&amp;|&lt;|&gt;|&quot;/)
+    expect(section).not.toHaveTextContent(/&#|&amp;|&lt;|&gt;|&quot;/)
+  })
+
+  test('records with no date are a day of their own, last, said as having no date', async () => {
+    const tree = await show([card(at(15, 9), 'a'), { kind: 'card', hardwareEvidence: false, raw: {} }])
+    const rows = tree.getAllByTestId(testIdWithKey('RelationshipLayer'))
+    expect(rows).toHaveLength(2)
+    expect(rows[1]).toHaveTextContent('No date', { exact: false })
+    fireEvent.press(rows[1])
+    expect(tree.getByText('No date with Bob')).toBeTruthy()
   })
 
   test('in French, the day, the sheet and the record read in French', async () => {
