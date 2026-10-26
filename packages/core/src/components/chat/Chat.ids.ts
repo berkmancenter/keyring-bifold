@@ -31,7 +31,6 @@ export const ChatIds = {
   disappearingCurrent: 'ChatDisappearingCurrent',
   disappearingSave: 'ChatDisappearingSave',
   disappearingCancel: 'ChatDisappearingCancel',
-  // A day's marker in the list ("Today", "Wed 15 Oct"), and the same marker floating at the top while scrolling.
+  // A day's marker ("Today", "Wed 15 Oct"): above its first message, and floating at the top while scrolling.
   dayPill: 'ChatDayPill',
-  dayPillFloating: 'ChatDayPillFloating',
 } as const
