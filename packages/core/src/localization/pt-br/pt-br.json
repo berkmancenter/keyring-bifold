@@ -2783,7 +2783,7 @@
     "FileDownload": "Baixar",
     "FileFailed": "Não foi possível baixar o arquivo.",
     "FileShare": "Compartilhar ou salvar",
-    "FileShareSoon": "Baixado. Compartilhar arquivos pelo Keyring no Android chega em breve.",
+    "FileShareUnavailable": "Baixado, mas este aparelho não consegue compartilhar arquivos pelo Keyring.",
     "SizeKB": "{{n}} KB",
     "SizeMB": "{{n}} MB",
     "FileAttach": "Anexar um arquivo",

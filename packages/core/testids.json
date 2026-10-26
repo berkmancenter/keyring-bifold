@@ -914,7 +914,7 @@
     "RoomFileName": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileProgress": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileShare": ["src/modules/rooms/components/RoomFileSheet.tsx"],
-    "RoomFileShareSoon": ["src/modules/rooms/components/RoomFileSheet.tsx"],
+    "RoomFileShareUnavailable": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheet": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheetClose": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomHeader": ["src/modules/rooms/screens/Room.tsx"],
