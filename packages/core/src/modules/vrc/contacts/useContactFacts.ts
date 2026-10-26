@@ -55,6 +55,8 @@ class ContactFactsStore {
   /** Display facts per connection and per relationship DID, once read. */
   private byConnection = new Map<string, ConnectionFacts>()
   private byRelationship = new Map<string, ConnectionFacts>()
+  /** Each connection's relationship DID (the counterparty's), read with the rest; never stored anywhere else. */
+  private relationshipOfConnection: ReadonlyMap<string, string> = new Map()
   private loaded = false
   private seq = 0
   private records: W3cCredentialRecord[] = []
@@ -98,9 +100,11 @@ class ContactFactsStore {
     if (seq !== this.seq) return
     const byConnection = new Map<string, ConnectionFacts>()
     const byRelationship = new Map<string, ConnectionFacts>()
+    const relationshipOfConnection = new Map<string, string>()
     for (const r of relationships) {
       const did = r.counterpartyRelationshipDid
       if (!did) continue
+      if (r.connectionId) relationshipOfConnection.set(r.connectionId, did)
       const info = resolveContactDisplayInfo(records, did)
       const name = info.name || undefined
       const photo = info.photo || undefined
@@ -117,6 +121,10 @@ class ContactFactsStore {
     this.records = records
     this.byConnection = byConnection
     this.byRelationship = byRelationship
+    // The same map while nothing moved, so a list grouped by it does not regroup on every credential change.
+    if (!sameEntries(this.relationshipOfConnection, relationshipOfConnection)) {
+      this.relationshipOfConnection = relationshipOfConnection
+    }
     this.loaded = true
     this.changed()
   }
@@ -125,6 +133,14 @@ class ContactFactsStore {
   connection(connectionId: string | undefined): ConnectionFacts {
     if (!connectionId || !this.loaded) return NOT_READ
     return this.byConnection.get(connectionId) ?? NOTHING
+  }
+
+  /**
+   * Each connection's relationship DID, or undefined until the first read lands. A connection missing from it has no
+   * relationship record: it is its own contact, never hidden.
+   */
+  relationships(): ReadonlyMap<string, string> | undefined {
+    return this.loaded ? this.relationshipOfConnection : undefined
   }
 
   /** A relationship's display facts. */
@@ -136,8 +152,7 @@ class ContactFactsStore {
   /** Whether a relationship's hardware evidence verifies: not read yet until it has been checked. */
   hardware(relationshipDid: string): Known<boolean> {
     if (!this.loaded) return UNKNOWN
-    const credential = getVrcCredentialJsonForSubject(this.records, relationshipDid)
-    const credentialId = String(credential?.id ?? '')
+    const credentialId = credentialKey(getVrcCredentialJsonForSubject(this.records, relationshipDid))
     const entry = this.hw.get(relationshipDid)
     return entry && entry.credentialId === credentialId ? entry.verified : UNKNOWN
   }
@@ -153,7 +168,7 @@ class ContactFactsStore {
     for (const did of relationshipDids) {
       if (this.hardware(did).known || this.verifying.has(did)) continue
       const credential = getVrcCredentialJsonForSubject(this.records, did)
-      const credentialId = String(credential?.id ?? '')
+      const credentialId = credentialKey(credential)
       if (!credential || !hasVrcHardwareAttestation(this.records, did)) {
         this.hw.set(did, { credentialId, verified: known(false) })
         this.changed()
@@ -175,6 +190,7 @@ class ContactFactsStore {
 
   /** For tests: forget everything read. */
   forget(): void {
+    this.relationshipOfConnection = new Map()
     this.byConnection = new Map()
     this.byRelationship = new Map()
     this.hw = new Map()
@@ -186,7 +202,27 @@ class ContactFactsStore {
   }
 }
 
+/**
+ * What a relationship's cached check is for: its credential, or none read yet. A peer card carries no top-level `id`
+ * (vrc-manager builds only `credentialSubject.id`), so a card is named by its id, else by the date it was signed with.
+ * "None read yet" has a key of its own: the store's records can lag a screen's, and a check made before the card was
+ * read must not stand for the card once it is.
+ */
+function credentialKey(credential: Record<string, unknown> | null): string {
+  if (!credential) return 'none'
+  const name = credential.id ?? credential.validFrom ?? credential.issuanceDate
+  return `card:${typeof name === 'string' ? name : ''}`
+}
+
 export const contactFacts = new ContactFactsStore()
+
+const sameEntries = (a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean =>
+  a.size === b.size && [...a].every(([key, value]) => b.get(key) === value)
+
+/** Each connection's relationship DID, for grouping the chat list by contact: undefined until read. */
+export function useConnectionRelationships(): ReadonlyMap<string, string> | undefined {
+  return useSyncExternalStore(contactFacts.subscribe, () => contactFacts.relationships())
+}
 
 /** A connection's name and photo, for the chat list and the chat screen. */
 export function useConnectionFacts(connectionId: string | undefined): ConnectionFacts {

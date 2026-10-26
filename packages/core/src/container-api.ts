@@ -38,6 +38,7 @@ import { IVersionCheckService } from './types/version-check'
 import { ICredentialDisplayRegistry } from './types/credential-display'
 import { ITrustTaskDisplayRegistry } from './types/trust-task-display'
 import type { RoomsService } from './modules/rooms/types'
+import { MessagePickupLifecycle } from './utils/messagePickupLifecycle'
 
 export type FN_ONBOARDING_DONE = (
   dispatch: React.Dispatch<ReducerAction<unknown>>,
@@ -167,6 +168,7 @@ export const UTILITY_TOKENS = {
   UTIL_CREDENTIAL_DISPLAY_REGISTRY: 'utility.credential-display-registry',
   UTIL_TRUST_TASK_DISPLAY_REGISTRY: 'utility.trust-task-display-registry',
   UTIL_ROOMS_SERVICE: 'utility.rooms-service',
+  UTIL_MESSAGE_PICKUP: 'utility.message-pickup',
 } as const
 
 export const CONFIG_TOKENS = {
@@ -285,6 +287,7 @@ export type TokenMapping = {
   [TOKENS.UTIL_CREDENTIAL_DISPLAY_REGISTRY]: ICredentialDisplayRegistry | undefined
   [TOKENS.UTIL_TRUST_TASK_DISPLAY_REGISTRY]: ITrustTaskDisplayRegistry | undefined
   [TOKENS.UTIL_ROOMS_SERVICE]: RoomsService | undefined
+  [TOKENS.UTIL_MESSAGE_PICKUP]: MessagePickupLifecycle
 }
 
 export interface Container {

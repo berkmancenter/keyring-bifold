@@ -9,7 +9,6 @@ import React, {
   useState,
 } from 'react'
 import { AppState, AppStateStatus, PanResponder, View } from 'react-native'
-import { DidCommMediatorPickupStrategy } from '@credo-ts/didcomm'
 import { TOKENS, useServices } from '../container-api'
 import { LockoutReason, useAuth } from './auth'
 import { useStore } from './store'
@@ -29,6 +28,25 @@ export const AutoLockTime = {
   Never: 0,
 } as const
 
+/**
+ * How long one app-state change's work holds back the changes after it. Its work is a message pickup stop or
+ * restart, local or one mediator round trip, well under a second on a healthy connection; 10 s leaves a slow network
+ * room. Past it the change is let go and the next one is handled, so a stalled stop can never keep a later return
+ * from being handled; the stalled one may then overlap the next, as every change could before they were ordered.
+ */
+export const APP_STATE_STEP_WAIT_MS = 10_000
+
+/** Whether `work` settled within `ms`. `work` must not reject. */
+const settledWithin = async (work: Promise<void>, ms: number): Promise<boolean> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const settled = await Promise.race([
+    work.then(() => true),
+    new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), ms))),
+  ])
+  clearTimeout(timer)
+  return settled
+}
+
 export interface ActivityContext {
   appStateStatus: AppStateStatus
   /**
@@ -46,7 +64,11 @@ export interface ActivityContext {
 export const ActivityContext = createContext<ActivityContext>(null as unknown as ActivityContext)
 
 export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
-  const [logger, { customAutoLockTimes }] = useServices([TOKENS.UTIL_LOGGER, TOKENS.CONFIG])
+  const [logger, { customAutoLockTimes }, messagePickup] = useServices([
+    TOKENS.UTIL_LOGGER,
+    TOKENS.CONFIG,
+    TOKENS.UTIL_MESSAGE_PICKUP,
+  ])
   const [store] = useStore()
   const { agent } = useAppAgent()
   const { lockOutUser } = useAuth()
@@ -117,13 +139,13 @@ export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
 
   useEffect(() => {
     // listener for backgrounding / foregrounding
-    const eventSubscription = AppState.addEventListener('change', async (nextAppState) => {
+    const onAppStateChange = async (prevAppState: AppStateStatus, nextAppState: AppStateStatus) => {
       // if going into the background
-      if (['active', 'inactive'].includes(prevAppStateStatusRef.current) && nextAppState === 'background') {
+      if (['active', 'inactive'].includes(prevAppState) && nextAppState === 'background') {
         // remove timeout when backgrounded as timeout refs can be lost when app is backgrounded
         clearInactivityTimeoutIfExists()
         try {
-          await agent.modules.didcomm.mediationRecipient.stopMessagePickup()
+          await messagePickup.onBackground(agent)
           logger.info('Stopped agent message pickup')
         } catch (err) {
           logger.error(`Error stopping agent message pickup, ${err}`)
@@ -131,7 +153,7 @@ export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
       }
 
       // if coming to the foreground
-      if (prevAppStateStatusRef.current === 'background' && ['active', 'inactive'].includes(nextAppState)) {
+      if (prevAppState === 'background' && ['active', 'inactive'].includes(nextAppState)) {
         // if app was in background for longer than allowed time, lock out user
         if (
           lastActiveTimeRef.current &&
@@ -143,21 +165,10 @@ export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
           // downloaded update (utils/otaApply).
           notifyReturnLocked(Date.now() - lastActiveTimeRef.current)
         } else {
-          // otherwise restart message pickup
+          // otherwise restart message pickup, the way the app picks up
+          // (TOKENS.UTIL_MESSAGE_PICKUP; utils/messagePickupLifecycle.ts)
           try {
-            // Stop before starting, and name the strategy explicitly. Both matter:
-            // initiateMessagePickup SUBSCRIBES A NEW polling loop rather than
-            // replacing the running one, so without the stop every foreground
-            // resume accumulates another loop for the life of the process; and
-            // without an explicit strategy credo resolves
-            // `mediationRecord.pickupStrategy ?? moduleConfig`, letting a value
-            // persisted in the wallet decide whether this agent can receive at
-            // all. See docs/spikes/e2e-vrc-connect-findings.md.
-            await agent.modules.didcomm.mediationRecipient.stopMessagePickup()
-            await agent.modules.didcomm.mediationRecipient.initiateMessagePickup(
-              undefined,
-              DidCommMediatorPickupStrategy.PickUpV2
-            )
+            await messagePickup.onForeground(agent)
             logger.info('Restarted agent message pickup')
           } catch (err) {
             logger.error(`Error restarting agent message pickup, ${err}`)
@@ -168,8 +179,26 @@ export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
         resetInactivityTimeout(timeoutInMilliseconds.current)
       }
 
-      prevAppStateStatusRef.current = nextAppState
       setAppStateStatus(nextAppState)
+    }
+
+    // One event at a time, in the order they arrive, each against the state it found. Background and active can
+    // arrive in one tick: with the previous state read after the background handler's await, the active one still
+    // saw 'active' and skipped the foreground branch; run side by side, a pickup restart could finish before the
+    // stop it follows. Each event holds the next for APP_STATE_STEP_WAIT_MS at most.
+    let handled: Promise<void> = Promise.resolve()
+    const eventSubscription = AppState.addEventListener('change', (nextAppState) => {
+      const prevAppState = prevAppStateStatusRef.current
+      prevAppStateStatusRef.current = nextAppState
+      handled = handled.then(async () => {
+        const work = onAppStateChange(prevAppState, nextAppState).catch((err) =>
+          logger.error(`Error handling app state ${prevAppState} -> ${nextAppState}, ${err}`)
+        )
+        if (!(await settledWithin(work, APP_STATE_STEP_WAIT_MS))) {
+          logger.warn(`App state ${prevAppState} -> ${nextAppState} still running after ${APP_STATE_STEP_WAIT_MS} ms`)
+        }
+      })
+      return handled
     })
 
     // initial timeout setup
@@ -179,7 +208,7 @@ export const ActivityProvider: React.FC<PropsWithChildren> = ({ children }) => {
       clearInactivityTimeoutIfExists()
       eventSubscription.remove()
     }
-  }, [clearInactivityTimeoutIfExists, lockOutUser, resetInactivityTimeout, agent, logger])
+  }, [clearInactivityTimeoutIfExists, lockOutUser, resetInactivityTimeout, agent, logger, messagePickup])
 
   useEffect(() => {
     // user has updated settings for auto lock time
