@@ -1,3 +1,6 @@
+import React from 'react'
+import { Composer } from 'react-native-gifted-chat'
+
 import { renderComposer, renderSend } from '../../src/components/chat/MessageInput'
 
 /**
@@ -11,11 +14,11 @@ import { renderComposer, renderSend } from '../../src/components/chat/MessageInp
 describe('renderComposer textInputProps', () => {
   const theme = { inputText: {} }
 
-  const composerFrom = (props: Record<string, unknown>, disabled = false) => {
-    const tree = renderComposer(props, theme, 'Type here', disabled) as React.ReactElement
-    const children = (tree.props as { children: React.ReactElement[] }).children
-    // [icon, composer]
-    return children[1]
+  const composerFrom = (props: Record<string, unknown>, disabled = false, withTheme: object = theme) => {
+    const tree = renderComposer(props, withTheme, 'Type here', disabled) as React.ReactElement
+    const children = React.Children.toArray((tree.props as { children: React.ReactNode }).children)
+    // Found by type, not position: the field holds the composer and, optionally, an accessory (the emoji button).
+    return children.find((child) => React.isValidElement(child) && child.type === Composer) as React.ReactElement
   }
 
   test("keeps gifted-chat's onChangeText and ref", () => {
@@ -31,8 +34,10 @@ describe('renderComposer textInputProps', () => {
     const onChangeText = jest.fn()
     const composer = composerFrom({ textInputProps: { onChangeText } })
 
-    expect(composer.props.textInputProps.accessibilityLabel).toBe('')
-    expect(composer.props.textInputProps.maxFontSizeMultiplier).toBe(1.2)
+    // The field is named by its placeholder ("Message"), so a screen reader says what it is (C2).
+    expect(composer.props.textInputProps.accessibilityLabel).toBe('Type here')
+    // The theme's cap for text in the composer (C2 raised it from 1.2).
+    expect(composer.props.textInputProps.maxFontSizeMultiplier).toBe(1.5)
     expect(composer.props.textInputProps.editable).toBe(true)
   })
 
@@ -61,8 +66,7 @@ describe('renderComposer textInputProps', () => {
    */
   test('carries the theme text colour through textInputProps.style', () => {
     const themed = { inputText: { color: '#010B13', fontWeight: '500' } }
-    const tree = renderComposer({ textInputProps: {} }, themed, 'Type here', false) as React.ReactElement
-    const composer = (tree.props as { children: React.ReactElement[] }).children[1]
+    const composer = composerFrom({ textInputProps: {} }, false, themed)
 
     const styles = composer.props.textInputProps.style
     expect(Array.isArray(styles)).toBe(true)
@@ -73,7 +77,8 @@ describe('renderComposer textInputProps', () => {
     const composer = composerFrom({ textInputProps: {} })
 
     expect(composer.props.textInputProps.placeholder).toBe('Type here')
-    expect(composer.props.textInputProps.placeholderTextColor).toBe('#888888')
+    // #666666 on the field's white is 5.7:1; #888888 was 3.5:1, under the 4.5:1 minimum (C2).
+    expect(composer.props.textInputProps.placeholderTextColor).toBe('#666666')
   })
 
   test('a caller-supplied style still wins over ours', () => {
