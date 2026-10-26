@@ -1008,7 +1008,8 @@
   },
   "RootStack": {
     "Contacts": "Contacts",
-    "Settings": "Paramètres"
+    "Settings": "Paramètres",
+    "LastSessionNotClosed": "Le portefeuille de la dernière session ne s'est pas fermé à temps. Fermez Keyring, puis rouvrez-le."
   },
   "QRCodeExchange": {
     "Title": "Échange de code QR",
@@ -1204,6 +1205,35 @@
   },
   "Chat": {
     "Photo": "📷 Photo",
+    "MessagePlaceholder": "Message",
+    "Today": "Aujourd'hui",
+    "Yesterday": "Hier",
+    "Dates": {
+      "WeekdaysLong": ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"],
+      "WeekdaysShort": ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."],
+      "MonthsShort": [
+        "janv.",
+        "févr.",
+        "mars",
+        "avr.",
+        "mai",
+        "juin",
+        "juil.",
+        "août",
+        "sept.",
+        "oct.",
+        "nov.",
+        "déc."
+      ],
+      "DayMonth": "{{day}} {{month}}",
+      "ThisYear": "{{weekday}} {{day}} {{month}}",
+      "OtherYear": "{{day}} {{month}} {{year}}",
+      "DateTime": "{{date}} à {{time}}",
+      "Time12": "{{hour}}:{{minute}} {{period}}",
+      "Time24": "{{hour}}:{{minute}}",
+      "Am": "AM",
+      "Pm": "PM"
+    },
     "AttachCamera": "Appareil photo",
     "AttachLibrary": "Photothèque",
     "PhotoFallback": "📷 Photo — mettez Keyring à jour pour la voir",
@@ -1211,6 +1241,8 @@
     "GifAsIsBody": "Un GIF est envoyé exactement tel quel : tout ce que contient le fichier part avec lui.",
     "SendGif": "Envoyer le GIF",
     "PhotoNoPermission": "Keyring a besoin d'accéder à l'appareil photo ou à vos photos. Vous pouvez l'autoriser dans les Réglages.",
+    "PhotoNoPermissionTitle": "Accès nécessaire",
+    "OpenSettings": "Ouvrir les paramètres",
     "GifTooLarge": "Ce GIF est trop volumineux pour être envoyé",
     "PhotoTooLarge": "Cette photo est trop volumineuse pour être envoyée",
     "PhotoUnreadable": "Cette photo ne peut pas être envoyée",
