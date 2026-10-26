@@ -10,6 +10,7 @@ import IconButton, { ButtonLocation } from '../components/buttons/IconButton'
 import EmptyListConnections from '../modules/vrc/components/EmptyListConnections'
 import { useStore } from '../contexts/store'
 import { useAllChatEvents } from '../modules/chat/chatEventsStore'
+import { useUnreadMessages } from '../hooks/useUnreadMessages'
 import { messageRows } from '../modules/vrc/contacts/messageRows'
 import { useConnectionRelationships } from '../modules/vrc/contacts/useContactFacts'
 import { useContactLinks } from '../modules/vrc/contacts/useContactLinks'
@@ -60,8 +61,10 @@ const Messages: React.FC<MessagesProps> = ({ navigation }) => {
   const relationshipOf = useConnectionRelationships()
   const { records: basicMessages } = useBasicMessages()
   const chatEvents = useAllChatEvents()
+  const { unreadByConnection } = useUnreadMessages()
   const rows = useMemo(() => {
-    // A connection's newest activity: its newest message of either kind, else when it was made.
+    // A connection's newest activity: its newest message of either kind, else when it was made. Only messages: a
+    // reaction or a timer change is no reason to open that chat over another.
     const newest = new Map<string, number>()
     const note = (connectionId: string, at: Date | string | undefined) => {
       const time = at ? new Date(at).getTime() : NaN
@@ -70,10 +73,14 @@ const Messages: React.FC<MessagesProps> = ({ navigation }) => {
     for (const message of basicMessages) note(message.connectionId, message.createdAt)
     for (const [connectionId, events] of chatEvents ?? [])
       for (const event of events) if (event.eventType === 'message') note(connectionId, event.sentTime)
-    return messageRows(connections, relationshipOf, contactLinks, (connection) =>
-      Math.max(newest.get(connection.id) ?? -Infinity, new Date(connection.createdAt).getTime())
+    return messageRows(
+      connections,
+      relationshipOf,
+      contactLinks,
+      (connection) => Math.max(newest.get(connection.id) ?? -Infinity, new Date(connection.createdAt).getTime()),
+      (connection) => unreadByConnection[connection.id] ?? 0
     )
-  }, [connections, relationshipOf, contactLinks, basicMessages, chatEvents])
+  }, [connections, relationshipOf, contactLinks, basicMessages, chatEvents, unreadByConnection])
 
   // Only show empty state if we have data but no connections (not during initial load)
   const shouldShowEmptyState = connectionRecords.length > 0 && connections.length === 0

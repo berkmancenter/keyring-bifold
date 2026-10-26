@@ -22,7 +22,10 @@ import { hidesText } from '../chat/disappearing'
 import { ThemedText } from '../texts/ThemedText'
 
 export interface ContactListItemProps {
-  /** The connection the row shows and opens. */
+  /**
+   * The connection the row shows and opens; its preview and time are this connection's (for a merged contact, the
+   * one holding unread messages, else the newest: messageRows' connectionToOpen).
+   */
   contact: DidCommConnectionRecord
   /**
    * Every connection of the contact the row stands for (a merged contact has one per exchange), `contact`'s among

@@ -116,13 +116,26 @@ describe('one row per contact', () => {
     expect(opened(list(false))).toEqual(['conn-a', 'conn-b', 'conn-c', 'conn-ada'])
   })
 
-  test("the row opens the contact's newest conversation, though an older one holds the unread messages", () => {
+  // A chat shows, and marks seen, only its own connection's messages: a row whose badge counts messages on an older
+  // connection must open that one, or they could never be read.
+  test("unread on an older connection: the row opens that one, where its badge's messages are", () => {
     mockLinks = bobMerged
     mockUnread = { 'conn-a': 2 }
     const tree = list(false)
-    // The unread on the oldest exchange counts on the one row.
     expect(tree.getAllByText('2')).toHaveLength(1)
-    expect(opened(tree)[0]).toBe('conn-c')
+    expect(opened(tree)[0]).toBe('conn-a')
+  })
+
+  test('once those are read, the row opens the newest conversation again', () => {
+    mockLinks = bobMerged
+    mockUnread = {}
+    expect(opened(list(false))[0]).toBe('conn-c')
+  })
+
+  test('unread on two connections: the row opens the newer of them', () => {
+    mockLinks = bobMerged
+    mockUnread = { 'conn-a': 2, 'conn-b': 1 }
+    expect(opened(list(false))[0]).toBe('conn-b')
   })
 
   test("unread on several of a contact's connections is summed on its row", () => {
