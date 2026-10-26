@@ -114,12 +114,31 @@ describe('Keep messages', () => {
   describe('the sweep, as the app runs it', () => {
     let onChange: ((state: string) => void) | undefined
     beforeEach(() => {
+      // The hook reads the real clock (new Date()), and the fixtures are dated from NOW, so the clock is set to NOW.
+      // Unpinned, the fixtures aged with the calendar: from 2026-10-26 12:00Z NEW2 (NOW - 29 days) was past the
+      // 30-day cutoff, and the sweep deleted it. Only Date is faked; timers and microtasks run as usual for act().
+      jest.useFakeTimers({
+        now: NOW,
+        doNotFake: [
+          'nextTick',
+          'setImmediate',
+          'clearImmediate',
+          'queueMicrotask',
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+        ],
+      })
       jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type: string, handler: (s: string) => void) => {
         onChange = handler
         return { remove: jest.fn() }
       }) as never)
     })
-    afterEach(() => jest.restoreAllMocks())
+    afterEach(() => {
+      jest.useRealTimers()
+      jest.restoreAllMocks()
+    })
 
     test('runs once unlocked and again on each return to the foreground', async () => {
       const { agent, store } = makeAgent(events, basics)
