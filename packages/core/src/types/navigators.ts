@@ -36,6 +36,7 @@ export enum Screens {
   Tours = 'Tours',
   Contacts = 'Contacts',
   Messages = 'Messages',
+  NewMessage = 'New Message',
   ContactDetails = 'Contact Details',
   WhatAreContacts = 'What Are Contacts',
   WhatAreConnections = 'What Are Connections',
@@ -222,6 +223,7 @@ export type ContactStackParams = {
 
 export type MessageStackParams = {
   [Screens.Messages]: undefined
+  [Screens.NewMessage]: undefined
   [Screens.Chat]: { connectionId: string }
   [Screens.ContactDetails]: { contact: ContactCredentialDetails }
   [Screens.RenameContact]: { connectionId: string }
