@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react-native'
 import React from 'react'
-import { StyleSheet } from 'react-native'
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native'
 // gifted-chat's own touchable, the element a press lands on. Coupled to gifted's internals on purpose: asserting on the
 // props we pass it stays green while gifted ignores them (wrapperStyle was 44 while the target was 40, C2's check).
 import { TouchableOpacity } from 'react-native-gifted-chat/lib/components/TouchableOpacity'
@@ -26,7 +26,8 @@ describe('renderActions uses v3 prop names', () => {
   // a 40-point target (C2's simulator check).
   test('the touchable itself is the full tap target, with none of its own padding', () => {
     const tree = render(<>{renderActions({ onPressActionButton: () => undefined }, theme, actions)}</>)
-    const style = StyleSheet.flatten(tree.UNSAFE_getByType(TouchableOpacity).props.style)
+    const touchable = tree.UNSAFE_getByType(TouchableOpacity)
+    const style = StyleSheet.flatten((touchable.props as { style?: StyleProp<ViewStyle> }).style)
 
     expect(style).toMatchObject({ width: COMPOSER_BUTTON, height: COMPOSER_BUTTON })
     expect([style.paddingLeft, style.paddingRight, style.paddingVertical]).toEqual([0, 0, 0])
@@ -38,7 +39,7 @@ describe('renderActions uses v3 prop names', () => {
   })
 
   test('sets the action-sheet tint by its v3 name', () => {
-    const el = renderActions({}, theme, actions) as React.ReactElement
+    const el = renderActions({}, theme, actions) as React.ReactElement<{ actionSheetOptionTintColor?: string }>
 
     expect(el.props.actionSheetOptionTintColor).toBe('#222222')
     expect(el.props).not.toHaveProperty('optionTintColor')

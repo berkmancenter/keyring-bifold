@@ -1,7 +1,7 @@
 import React from 'react'
 import { Composer } from 'react-native-gifted-chat'
 
-import { StyleSheet } from 'react-native'
+import { StyleSheet, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native'
 // gifted-chat's own touchable, the element a press lands on. Coupled to gifted's internals on purpose: asserting on the
 // props we pass it stays green while gifted ignores them (wrapperStyle, min/maxComposerHeight, C2's simulator check).
 import { TouchableOpacity } from 'react-native-gifted-chat/lib/components/TouchableOpacity'
@@ -15,6 +15,15 @@ import {
   renderComposer,
   renderSend,
 } from '../../src/components/chat/MessageInput'
+
+/** What these tests read off gifted-chat's Composer and Send elements: typed once here, so each read is checked. */
+type ComposerElement = React.ReactElement<{
+  textInputProps: Omit<TextInputProps, 'style'> & { ref?: unknown; style: StyleProp<TextStyle>[] }
+}>
+type SendElement = React.ReactElement<{
+  isSendButtonAlwaysVisible?: boolean
+  children: React.ReactElement<{ style: ViewStyle }>
+}>
 
 /**
  * gifted-chat's composer TextInput is fully controlled (value={text}), and the
@@ -31,7 +40,7 @@ describe('renderComposer textInputProps', () => {
     const tree = renderComposer(props, withTheme, 'Type here', disabled) as React.ReactElement
     const children = React.Children.toArray((tree.props as { children: React.ReactNode }).children)
     // Found by type, not position: the field holds the composer and, optionally, an accessory (the emoji button).
-    return children.find((child) => React.isValidElement(child) && child.type === Composer) as React.ReactElement
+    return children.find((child) => React.isValidElement(child) && child.type === Composer) as ComposerElement
   }
 
   test("keeps gifted-chat's onChangeText and ref", () => {
@@ -124,14 +133,14 @@ describe('renderSend uses v3 prop names', () => {
   const theme = { sendEnabled: '#123456' }
 
   test('asks for an always-visible send button by its v3 name', () => {
-    const send = renderSend({ text: 'hi' }, theme) as React.ReactElement
+    const send = renderSend({ text: 'hi' }, theme) as SendElement
 
     expect(send.props.isSendButtonAlwaysVisible).toBe(true)
     expect(send.props).not.toHaveProperty('alwaysShowSend')
   })
 
   test('does not pass a `disabled` prop v3 would ignore', () => {
-    const send = renderSend({ text: '' }, theme) as React.ReactElement
+    const send = renderSend({ text: '' }, theme) as SendElement
 
     // v3's Send already refuses to fire on empty text; `disabled` was v2-era
     // and silently dropped, so passing it only misleads the reader.
@@ -142,14 +151,15 @@ describe('renderSend uses v3 prop names', () => {
   // measured 36 dp on Android (C2's simulator check). The touchable itself fills the square.
   test('the touchable itself is the full tap target', () => {
     const tree = render(<>{renderSend({ text: 'hi', onSend: () => undefined }, theme)}</>)
-    const style = StyleSheet.flatten(tree.UNSAFE_getByType(TouchableOpacity).props.style)
+    const touchable = tree.UNSAFE_getByType(TouchableOpacity)
+    const style = StyleSheet.flatten((touchable.props as { style?: StyleProp<ViewStyle> }).style)
 
     expect(style).toMatchObject({ width: COMPOSER_BUTTON, height: COMPOSER_BUTTON })
   })
 
   test('still styles the button from the theme', () => {
-    const enabled = renderSend({ text: 'hi' }, theme) as React.ReactElement
-    const empty = renderSend({ text: '' }, theme) as React.ReactElement
+    const enabled = renderSend({ text: 'hi' }, theme) as SendElement
+    const empty = renderSend({ text: '' }, theme) as SendElement
 
     expect(enabled.props.children.props.style.backgroundColor).toBe('#123456')
     expect(empty.props.children.props.style.backgroundColor).toBe('#E0E0E0')
