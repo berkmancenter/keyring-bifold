@@ -171,6 +171,22 @@ describe('the composer (Option A)', () => {
     expect(tree.queryByTestId(id('ChatComposerCamera'))).toBeNull()
   })
 
+  it('offline, Camera is disabled with the field: it takes no photo', async () => {
+    ;(network.useNetwork as jest.Mock).mockImplementation(() => ({
+      silentAssertConnectedNetwork: () => false,
+      assertNetworkConnected: () => false,
+      assertInternetReachable: jest.fn(),
+      assertMediatorReachable: jest.fn(),
+      displayNetInfoModal: jest.fn(),
+      hideNetInfoModal: jest.fn(),
+    }))
+    const tree = renderChat()
+    const camera = tree.getByTestId(id('ChatComposerCamera'))
+    expect(camera.props.accessibilityState).toEqual({ disabled: true })
+    await act(async () => fireEvent.press(camera))
+    expect(send).not.toHaveBeenCalled()
+  })
+
   it('a chat that takes no photos (the witness chat) shows Send greyed, never Camera', () => {
     ;(useWitnessConnection as jest.Mock).mockReturnValue({ connectedWitness: { connectionId: '1' } })
     try {

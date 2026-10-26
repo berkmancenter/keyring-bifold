@@ -570,7 +570,12 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
               theme,
               _isWitnessConnection
                 ? undefined
-                : { label: t('Chat.AttachCamera'), onPress: () => void onPhoto('camera') }
+                : {
+                    label: t('Chat.AttachCamera'),
+                    onPress: () => void onPhoto('camera'),
+                    // As the field and the emoji button: not offline, nor during a VRC exchange.
+                    disabled: !silentAssertConnectedNetwork() || vrcFlowInProgress,
+                  }
             )
           }
           minComposerHeight={COMPOSER_MIN_HEIGHT}

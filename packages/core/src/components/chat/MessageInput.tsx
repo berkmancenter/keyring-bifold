@@ -140,17 +140,30 @@ export const ComposerEmojiButton: React.FC<{ label: string; disabled?: boolean; 
 
 /**
  * Send once the field holds text; until then, Camera when the chat takes photos (`camera`), else Send greyed out.
+ * Camera is disabled whenever the field is (offline, or a VRC exchange under way), as the emoji button is.
  * gifted-chat's Send refuses to fire on empty text by itself (onSend runs only when trimmedText.length ||
  * isTextOptional), so the greyed Send needs no guard of its own.
  */
-export const renderSend = (props: any, theme: any, camera?: { label: string; onPress: () => void }) => {
+export const renderSend = (
+  props: any,
+  theme: any,
+  camera?: { label: string; onPress: () => void; disabled?: boolean }
+) => {
   const hasText = !!props.text?.trim()
   if (!hasText && camera)
     return (
       <Pressable
         onPress={camera.onPress}
-        style={{ width: COMPOSER_BUTTON, height: COMPOSER_BUTTON, alignItems: 'center', justifyContent: 'center' }}
+        disabled={camera.disabled}
+        style={{
+          width: COMPOSER_BUTTON,
+          height: COMPOSER_BUTTON,
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: camera.disabled ? 0.4 : 1,
+        }}
         accessibilityRole="button"
+        accessibilityState={{ disabled: !!camera.disabled }}
         accessibilityLabel={camera.label}
         testID={testIdWithKey(ChatIds.composerCamera)}
       >
