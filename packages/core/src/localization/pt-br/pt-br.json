@@ -446,6 +446,22 @@
     "UnknownContact": "Contact Desconhecido"
   },
   "ContactDetails": {
+    "QuickMessage": "Mensagem",
+    "BadgeVerified": "Verificado",
+    "BadgeInPerson": "Pessoalmente",
+    "BadgeSecureHardware": "Hardware seguro",
+    "TrustTitle": "Por que você pode confiar",
+    "TrustWitnessed": "Verificado por uma testemunha",
+    "TrustWitnessUnnamed": "Uma testemunha",
+    "TrustInPerson": "Encontro presencial",
+    "TrustInPersonCaption": "A testemunha confirmou que vocês estavam perto",
+    "TrustHardwareCaption": "Verificado neste telefone",
+    "TrustNone": "Ainda não verificado",
+    "TrustNoneCaption": "Nenhuma testemunha e nenhuma evidência de hardware",
+    "TrustIdentifier": "Identificador da relação",
+    "ContactTitle": "Contato",
+    "Email": "E-mail",
+    "LinkedProfile": "Seu perfil vinculado",
     "Created": "Criado",
     "ConnectionState": "Estado da conexão",
     "AContact": "Um Contato",
@@ -913,6 +929,7 @@
     "QRCode": "Código QR",
     "Credentials": "Credenciais",
     "Wallet": "Carteira",
+    "Contacts": "Contatos",
     "MyAgent": "Meu agente",
     "RequestsWaiting_one": "1 pedido aguardando",
     "RequestsWaiting_other": "{{count}} pedidos aguardando"
@@ -1088,7 +1105,8 @@
     "DeleteWithContactsTitle": "Excluir este perfil?",
     "DeleteWithContactsMessage_one": "Este perfil foi compartilhado com {{count}} contato. Ele continuará vendo o perfil como estava no momento do compartilhamento; você não poderá mais atualizá-lo para ele.",
     "DeleteWithContactsMessage_other": "Este perfil foi compartilhado com {{count}} contatos. Eles continuarão vendo o perfil como estava no momento do compartilhamento; você não poderá mais atualizá-lo para eles.",
-    "DeleteAnyway": "Excluir mesmo assim"
+    "DeleteAnyway": "Excluir mesmo assim",
+    "DefaultLabel": "Meu perfil"
   },
   "RenameContact": {
     "ThisContactName": "Este nome de contato só é visualizado em sua Lista de Contatos.",
@@ -1233,7 +1251,38 @@
     "PlainSendTitle": "Enviar sem temporizador?",
     "PlainSendBody": "{{name}} precisa atualizar o Keyring para usar mensagens temporárias, então esta mensagem será enviada sem temporizador, como uma mensagem normal.",
     "PlainSendConfirm": "Enviar mesmo assim",
-    "NewMessage": "Nova mensagem"
+    "NewMessage": "Nova mensagem",
+    "Flow": {
+      "Connecting": "Estabelecendo conexão...",
+      "VerifyingWithWitness": "Verificando com a testemunha...",
+      "WitnessVerifying": "Verificação da testemunha em andamento...",
+      "Reporting": "Relatório em andamento...",
+      "WitnessFallback": "Testemunha indisponível. Emitindo a credencial...",
+      "BiometricFallback": "Emitindo a credencial sem atestação de hardware...",
+      "Discovering": "Verificando o que seu contato suporta...",
+      "Proposed": "Aguardando seu contato aceitar...",
+      "WitnessedSendingCredential": "Testemunha verificada. Enviando sua credencial de relacionamento...",
+      "PreparingCredential": "Preparando sua credencial de relacionamento...",
+      "WitnessedPreparingOffer": "Testemunha verificada. Preparando a oferta...",
+      "PreparingOffer": "Preparando a oferta de credencial...",
+      "SharingWitnessRecord": "Compartilhando o registro da testemunha...",
+      "WaitingForCredential": "Aguardando a credencial do seu contato...",
+      "WaitingForCounterparty": "Aguardando a outra parte...",
+      "InProgress": "Troca em andamento...",
+      "ExchangingCards": "Trocando cartões de contato...",
+      "TookTooLong": "A troca demorou demais. Talvez você precise se reconectar e tentar de novo.",
+      "DidNotComplete": "A troca não foi concluída. Talvez você precise tentar se conectar de novo."
+    },
+    "Connected": {
+      "Text": "Você se conectou com {{name}} e agora pode trocar mensagens com segurança",
+      "Before": "Você se conectou com ",
+      "After": " e agora pode trocar mensagens com segurança"
+    },
+    "UnknownIssuer": "Desconhecido ...{{suffix}}",
+    "RelationshipConfirmedWith": "Relação confirmada — {{name}} adicionado aos Contatos",
+    "RelationshipConfirmed": "Relação confirmada — contato adicionado",
+    "ViewContacts": "Ver contatos",
+    "AcceptOfferQuestion": "Deseja aceitá-la?"
   },
   "Verifier": {
     "UseVerifierCapability": "Usar o recurso Verificador?",
@@ -2568,6 +2617,8 @@
     "Fetching": "Buscando novas mensagens…"
   },
   "Relationship": {
+    "ResignUnavailable": "Assinar de novo: seus cartões já estão assinados com hardware seguro.",
+    "WitnessUnavailable": "Adicionar uma testemunha: conecte-se primeiro a uma testemunha. Toque no escudo no topo de Contatos.",
     "WaitingForAnswer": "Aguardando a resposta de {{name}}.",
     "UpgradeTitle": "Adicionar a esta relação",
     "Resign": "Assinar de novo",
