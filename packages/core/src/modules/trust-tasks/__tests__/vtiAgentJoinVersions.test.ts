@@ -47,8 +47,12 @@ const answer = (type: string, payload: unknown) => ({ type: `${type}#response`, 
 const verdict = (effect: string) => ({ requestId: 'r-1', verdict: { effect, with: {} } })
 
 let community = 0
-/** A community no other test has spoken to: the agent remembers the version each one answered in. */
-const nextCommunity = () => `did:webvh:QmCommunity${++community}:vtc.example.org`
+/**
+ * A community no other test has spoken to: the agent remembers the version each one answered in, by DID. Each is the
+ * recorded community (its SCID, as the answers name it) at a host of its own: a did:webvh is one community wherever
+ * it is hosted, and an answer naming another community is not learned from (vtiAgent `sameCommunity`).
+ */
+const nextCommunity = () => `did:webvh:QmVtcScid:vtc${++community}.example.org`
 
 function fakeAgent(communityDid: string) {
   return {
@@ -160,9 +164,13 @@ describe('reading the manifest over REST', () => {
     restServing({ [`${MANIFEST}/0.3`]: restRefuses(['0.1', '0.2']), [`${MANIFEST}/0.2`]: rest02 })
     await vtiAgent.fetchManifest(communityDid, fakeAgent(communityDid))
 
+    // The upgraded service's recorded answers, as this community gives them (the recording names its own test DID).
     const asked = restServing({
       [`${MANIFEST}/0.2`]: { status: vtc1907.manifest02Refused.status, body: vtc1907.manifest02Refused },
-      [`${MANIFEST}/0.3`]: { status: 200, body: vtc1907.manifest03 },
+      [`${MANIFEST}/0.3`]: {
+        status: 200,
+        body: { ...vtc1907.manifest03, payload: { ...vtc1907.manifest03.payload, communityDid } },
+      },
     })
     const manifest = await vtiAgent.fetchManifest(communityDid, fakeAgent(communityDid))
     expect(manifest.wire).toBe('0.3')
