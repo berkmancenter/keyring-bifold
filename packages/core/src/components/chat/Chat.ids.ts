@@ -31,4 +31,8 @@ export const ChatIds = {
   disappearingCurrent: 'ChatDisappearingCurrent',
   disappearingSave: 'ChatDisappearingSave',
   disappearingCancel: 'ChatDisappearingCancel',
+  // The composer's field (the pill), and the button on its right: Camera while it is empty, Send once it holds text.
+  composerField: 'ChatComposerField',
+  composerCamera: 'ChatComposerCamera',
+  composerSend: 'ChatComposerSend',
 } as const

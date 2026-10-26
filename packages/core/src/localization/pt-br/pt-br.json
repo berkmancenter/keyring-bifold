@@ -1107,6 +1107,7 @@
   },
   "Chat": {
     "Photo": "📷 Foto",
+    "MessagePlaceholder": "Mensagem",
     "AttachCamera": "Câmera",
     "AttachLibrary": "Biblioteca de fotos",
     "PhotoFallback": "📷 Foto — atualize o Keyring para vê-la",

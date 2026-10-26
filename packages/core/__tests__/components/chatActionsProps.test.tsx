@@ -1,6 +1,7 @@
 import React from 'react'
 
 import { renderActions } from '../../src/components/chat/ChatActions'
+import { COMPOSER_BUTTON } from '../../src/components/chat/MessageInput'
 
 /**
  * gifted-chat v3's Actions accepts (Actions.d.ts): action,
@@ -18,7 +19,8 @@ describe('renderActions uses v3 prop names', () => {
   test('styles the wrapper by its v3 name', () => {
     const el = renderActions({}, theme, actions) as React.ReactElement
 
-    expect(el.props.wrapperStyle).toMatchObject({ width: 40, height: 40 })
+    // A full tap target (44 pt, 48 dp on Android), the "+" no longer a boxed 40-point icon (chat redesign C2).
+    expect(el.props.wrapperStyle).toMatchObject({ width: COMPOSER_BUTTON, height: COMPOSER_BUTTON })
     expect(el.props).not.toHaveProperty('containerStyle')
   })
 

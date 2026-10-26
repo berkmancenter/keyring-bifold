@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "c95a747cb5763151df6d09bc8cc33d345852685e",
+  "generatedFrom": "47df85b862e810abfbff82f2ea006e674f1a1406",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -254,7 +254,10 @@
     "ChatActionsButton": ["src/components/chat/Chat.ids.ts"],
     "ChatAttachCamera": ["src/components/chat/Chat.ids.ts"],
     "ChatAttachLibrary": ["src/components/chat/Chat.ids.ts"],
+    "ChatComposerCamera": ["src/components/chat/Chat.ids.ts"],
     "ChatComposerEmojiButton": ["src/components/chat/Chat.ids.ts"],
+    "ChatComposerField": ["src/components/chat/Chat.ids.ts"],
+    "ChatComposerSend": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCancel": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingCurrent": ["src/components/chat/Chat.ids.ts"],
     "ChatDisappearingOption": ["src/components/chat/Chat.ids.ts"],
@@ -1327,6 +1330,18 @@
     },
     {
       "src/components/chat/MessageActions.tsx": "testID"
+    },
+    {
+      "src/components/chat/MessageInput.tsx": "ChatIds.composerCamera"
+    },
+    {
+      "src/components/chat/MessageInput.tsx": "ChatIds.composerEmoji"
+    },
+    {
+      "src/components/chat/MessageInput.tsx": "ChatIds.composerField"
+    },
+    {
+      "src/components/chat/MessageInput.tsx": "ChatIds.composerSend"
     },
     {
       "src/components/chat/ReactionBar.tsx": "ChatIds.reactionBar"
@@ -2578,9 +2593,6 @@
     },
     {
       "src/screens/AutoLock.tsx": "testID"
-    },
-    {
-      "src/screens/Chat.tsx": "ChatIds.composerEmoji"
     },
     {
       "src/screens/ConfigureMediator.tsx": "mediator"

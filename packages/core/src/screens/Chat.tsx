@@ -16,6 +16,7 @@ import InfoIcon from '../modules/vrc/components/InfoIcon'
 // Temporarily removed for cleaner witness chat UI
 // import { WitnessChatBanner } from '../modules/vrc/components/WitnessChatBanner'
 import { renderComposer, renderInputToolbar, renderSend } from '../components/chat'
+import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT, ComposerEmojiButton } from '../components/chat/MessageInput'
 import ActionSlider from '../components/chat/ActionSlider'
 import { ChatIds } from '../components/chat/Chat.ids'
 import MessageActions from '../components/chat/MessageActions'
@@ -49,19 +50,7 @@ import { useChatEvents } from '../modules/chat/chatEventsStore'
 import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
-import { testIdWithKey } from '../utils/testable'
-import {
-  Alert,
-  Animated,
-  Easing,
-  Platform,
-  Pressable,
-  View,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  ViewToken,
-} from 'react-native'
+import { Alert, Animated, Easing, Platform, View, StyleSheet, Text, TouchableOpacity, ViewToken } from 'react-native'
 
 const PROGRESS_BAR_WIDTH = 200
 
@@ -574,25 +563,30 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           messageIdGenerator={(msg) => msg?._id.toString() || '0'}
           renderMessage={renderMessage}
           renderInputToolbar={(props) => renderInputToolbar(props, theme)}
-          renderSend={(props) => renderSend(props, theme)}
+          // Camera while the field is empty, where the chat takes photos; Send once it holds text.
+          renderSend={(props) =>
+            renderSend(
+              props,
+              theme,
+              _isWitnessConnection
+                ? undefined
+                : { label: t('Chat.AttachCamera'), onPress: () => void onPhoto('camera') }
+            )
+          }
+          minComposerHeight={COMPOSER_MIN_HEIGHT}
+          maxComposerHeight={COMPOSER_MAX_HEIGHT}
           renderComposer={(props) => {
             const disabled = !silentAssertConnectedNetwork() || vrcFlowInProgress
             return renderComposer(
               props,
               theme,
-              t('Contacts.TypeHere'),
+              t('Chat.MessagePlaceholder'),
               disabled,
-              <Pressable
-                onPress={() => setPicker({ for: 'composer' })}
+              <ComposerEmojiButton
+                label={t('Emoji.Open')}
                 disabled={disabled}
-                hitSlop={8}
-                style={{ paddingHorizontal: 8 }}
-                accessibilityRole="button"
-                accessibilityLabel={t('Emoji.Open')}
-                testID={testIdWithKey(ChatIds.composerEmoji)}
-              >
-                <Icon name="emoticon-happy-outline" size={24} color="#888888" />
-              </Pressable>
+                onPress={() => setPicker({ for: 'composer' })}
+              />
             )
           }}
           onSend={onSend}
