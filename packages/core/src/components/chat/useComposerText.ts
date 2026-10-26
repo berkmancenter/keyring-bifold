@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RefObject } from 'react'
 import type { NativeSyntheticEvent, TextInput, TextInputSelectionChangeEventData } from 'react-native'
 
 /** `insert` placed into `text` over the selection, and where the caret ends up. */
@@ -28,7 +29,8 @@ export function insertAtSelection(
  * before the emoji (272).
  */
 export function useComposerText() {
-  const inputRef = useRef<TextInput>(null)
+  // gifted-chat's textInputRef is typed RefObject<TextInput>, without React 19's `| null`.
+  const inputRef = useRef<TextInput>(null) as RefObject<TextInput>
   const textRef = useRef('')
   const selectionRef = useRef({ start: 0, end: 0 })
   const [hasDraft, setHasDraft] = useState(false)
