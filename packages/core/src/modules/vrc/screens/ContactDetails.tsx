@@ -403,8 +403,11 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
           <ThemedText style={styles.sectionLabel} accessibilityRole="header">
             {t('ContactDetails.TrustTitle')}
           </ThemedText>
-          {/* WitnessSection is what the e2e looks for (flows.js assertWitnessCredential): a verified witness record shows.
-              The record's own detail is in its day's sheet, under How you know them. */}
+          {/* WitnessSection: the wallet's e2e (e2e/lib/flows.js assertContactShields and assertWitnessCredential) proves
+              a witnessed exchange landed by finding this raw testID. On iOS it is the only working path: the text
+              fallback misses the uppercased header. Keep it here, on exactly this condition (a verified witness record;
+              newestWitness exists exactly when witnessRecords is non-empty). The record's own detail is in its day's
+              sheet, under How you know them. */}
           {newestWitness ? (
             <View testID="WitnessSection">
               <View style={styles.row} testID={testIdWithKey('ContactTrustWitnessed')}>
