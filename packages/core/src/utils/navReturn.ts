@@ -22,7 +22,11 @@ import { Screens, Stacks, TabStacks } from '../types/navigators'
 
 type AnyState = NavigationState | PartialState<NavigationState>
 
-/** Screens that are safe to open again with the same params. Every stack and tab is a container and allowed. */
+/**
+ * Screens that are safe to open again with the same params. Every stack and tab is a container and allowed.
+ * Neither agent screen is here: the My Agent tab comes back with no screen of its own, so its stack lands
+ * on agentHomeScreen() for the link state at unlock, never on the old panel for a linked person (225 gate).
+ */
 const RESTORABLE: ReadonlySet<string> = new Set<string>([
   ...Object.values(Stacks),
   ...Object.values(TabStacks),
@@ -45,7 +49,6 @@ const RESTORABLE: ReadonlySet<string> = new Set<string>([
   Screens.HistorySettings,
   Screens.HistoryPage,
   Screens.HistoryDetails,
-  Screens.MyAgent,
   Screens.MyProfiles,
   Screens.ProofRequests,
   Screens.ProofDetails,

@@ -67,6 +67,19 @@ describe('restorableState', () => {
     expect(state.routes[1].state).toBeUndefined()
   })
 
+  it('brings the My Agent tab back with no screen, so it lands by link state (agentHomeScreen)', () => {
+    const state = restorableState({
+      type: 'tab',
+      index: 1,
+      routes: [
+        { name: TabStacks.HomeStack, state: { type: 'stack', index: 0, routes: [{ name: Screens.Home }] } },
+        { name: TabStacks.MyAgentStack, state: { type: 'stack', index: 0, routes: [{ name: Screens.MyAgent }] } },
+      ],
+    } as any) as any
+    expect(state.index).toBe(1)
+    expect(state.routes[1]).toMatchObject({ name: TabStacks.MyAgentStack, state: undefined })
+  })
+
   it('has nothing to give back when the first screen is not restorable', () => {
     expect(restorableState({ type: 'stack', index: 0, routes: [{ name: Screens.Scan }] } as any)).toBeUndefined()
     expect(restorableState(undefined)).toBeUndefined()
