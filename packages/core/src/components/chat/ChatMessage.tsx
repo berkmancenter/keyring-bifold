@@ -355,7 +355,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
 
   const isMe = message.user?._id === Role.me
 
-
   // A line about the chat itself (a timer change): centered words, no bubble.
   if (message.kind === 'system') {
     return (
