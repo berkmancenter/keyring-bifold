@@ -315,14 +315,12 @@ describe('ContactDetails Screen', () => {
       issuer: TEST_CONTACTS.alice.issuer,
     }
 
-    const { findByText } = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
+    const { getByText } = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
 
-    await waitFor(async () => {
-      const viewMessagesButton = await findByText('ContactDetails.QuickMessage')
-      fireEvent.press(viewMessagesButton)
-
-      expect(mockNavigate).toHaveBeenCalledWith('Chat', { connectionId })
-    })
+    // One press, once the read has given the connection: not pressed again and again until a time budget runs out.
+    await relationshipRead()
+    fireEvent.press(getByText('ContactDetails.QuickMessage'))
+    expect(mockNavigate).toHaveBeenCalledWith('Chat', { connectionId })
   })
 
   test('Throws error when route params are missing', () => {
@@ -701,16 +699,14 @@ describe('ContactDetails Screen', () => {
       })
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { findByText, findByTestId } = renderWithProfiles(contact, [workProfile])
+      const { getByText, getByTestId } = renderWithProfiles(contact, [workProfile])
 
-      await waitFor(async () => {
-        expect(await findByText('ContactDetails.LinkedProfile')).toBeTruthy()
-        // Live label wins over the share-time snapshot.
-        expect(await findByText('Work')).toBeTruthy()
-        const avatar = await findByTestId(testIdWithKey('LinkedProfileAvatarImage'))
-        expect(avatar.props.source).toEqual({ uri: photo })
-        expect(await findByTestId('LinkedProfileCard')).toBeTruthy()
-      })
+      await relationshipRead()
+      expect(getByText('ContactDetails.LinkedProfile')).toBeTruthy()
+      // Live label wins over the share-time snapshot.
+      expect(getByText('Work')).toBeTruthy()
+      expect(getByTestId(testIdWithKey('LinkedProfileAvatarImage')).props.source).toEqual({ uri: photo })
+      expect(getByTestId('LinkedProfileCard')).toBeTruthy()
     })
 
     // The default profile's name is stored as data ("My Profile"): shown in the app's language, never as stored.
@@ -720,9 +716,10 @@ describe('ContactDetails Screen', () => {
       mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue({ sharedProfileId: profile.id })
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { findByText, queryByText } = renderWithProfiles(contact, [profile])
+      const { getByText, queryByText } = renderWithProfiles(contact, [profile])
 
-      expect(await findByText('MyProfiles.DefaultLabel')).toBeTruthy()
+      await relationshipRead()
+      expect(getByText('MyProfiles.DefaultLabel')).toBeTruthy()
       expect(queryByText('My Profile')).toBeNull()
     })
 
@@ -733,13 +730,12 @@ describe('ContactDetails Screen', () => {
       })
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { findByText, queryByTestId } = renderWithProfiles(contact, [])
+      const { getByText, queryByTestId } = renderWithProfiles(contact, [])
 
-      await waitFor(async () => {
-        expect(await findByText('ContactDetails.LinkedProfile')).toBeTruthy()
-        expect(await findByText('ContactDetails.LinkedProfileDeleted')).toBeTruthy()
-        expect(queryByTestId(testIdWithKey('LinkedProfileAvatarImage'))).toBeNull()
-      })
+      await relationshipRead()
+      expect(getByText('ContactDetails.LinkedProfile')).toBeTruthy()
+      expect(getByText('ContactDetails.LinkedProfileDeleted')).toBeTruthy()
+      expect(queryByTestId(testIdWithKey('LinkedProfileAvatarImage'))).toBeNull()
     })
 
     test('does not show the Linked Profile card when no profile was ever recorded as shared', async () => {
