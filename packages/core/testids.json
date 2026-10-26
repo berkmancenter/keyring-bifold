@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "07ca46cc8d4b69c8c7c5d47576d0cbde809e74e0",
+  "generatedFrom": "92d091d586ce2cbd5da9ea6ea134658223c73702",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -860,6 +860,9 @@
     "RCardSubmit": ["src/modules/vrc/screens/RCardForm.tsx"],
     "RecordLoading": ["src/components/animated/RecordLoading.tsx"],
     "ReenterPIN": ["src/screens/PINChange.tsx", "src/screens/PINCreate.tsx"],
+    "RelationshipDayExchange": ["src/modules/vrc/components/RelationshipLayers.tsx"],
+    "RelationshipDaySheet": ["src/modules/vrc/components/RelationshipLayers.tsx"],
+    "RelationshipDaySheetClose": ["src/modules/vrc/components/RelationshipLayers.tsx"],
     "RelationshipLayer": ["src/modules/vrc/components/RelationshipLayers.tsx"],
     "RelationshipLayers": ["src/modules/vrc/components/RelationshipLayers.tsx"],
     "RelationshipUpgrade": ["src/modules/vrc/components/RelationshipUpgradeSection.tsx"],
@@ -1298,7 +1301,7 @@
     "SecureExchangeBadge": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "SecureExchangeChecking": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "VetterHeaderBackground": ["src/components/views/VetterHeaderBackground.tsx"],
-    "WitnessRecord": ["src/modules/vrc/screens/ContactDetails.tsx"],
+    "WitnessRecord": ["src/modules/vrc/components/RelationshipLayers.tsx"],
     "WitnessSection": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "WitnessVerifiedBadge": ["src/modules/vrc/components/ContactCard.tsx"],
     "WitnessedBadge": ["src/modules/vrc/screens/ContactDetails.tsx"]
