@@ -2,6 +2,8 @@ import React from 'react'
 import { Composer } from 'react-native-gifted-chat'
 
 import { StyleSheet } from 'react-native'
+// gifted-chat's own touchable, the element a press lands on. Coupled to gifted's internals on purpose: asserting on the
+// props we pass it stays green while gifted ignores them (wrapperStyle, min/maxComposerHeight, C2's simulator check).
 import { TouchableOpacity } from 'react-native-gifted-chat/lib/components/TouchableOpacity'
 import { render } from '@testing-library/react-native'
 

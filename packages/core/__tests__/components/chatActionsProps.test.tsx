@@ -1,7 +1,8 @@
 import { render } from '@testing-library/react-native'
 import React from 'react'
 import { StyleSheet } from 'react-native'
-// gifted-chat's own touchable: the element a press lands on, whatever props reach it.
+// gifted-chat's own touchable, the element a press lands on. Coupled to gifted's internals on purpose: asserting on the
+// props we pass it stays green while gifted ignores them (wrapperStyle was 44 while the target was 40, C2's check).
 import { TouchableOpacity } from 'react-native-gifted-chat/lib/components/TouchableOpacity'
 
 import { renderActions } from '../../src/components/chat/ChatActions'
