@@ -25,7 +25,7 @@ import VtiHiddenVetting from '../modules/trust-tasks/screens/VtiHiddenVetting'
 import VtiVetting from '../modules/trust-tasks/screens/VtiVetting'
 import SignIn from '../modules/trust-tasks/screens/SignIn'
 import VtaClaim from '../modules/trust-tasks/screens/VtaClaim'
-import RoomsList from '../modules/rooms/screens/RoomsList'
+import RoomsHome from '../modules/rooms/screens/RoomsHome'
 import Room from '../modules/rooms/screens/Room'
 import { MyAgentStackParams, Screens } from '../types/navigators'
 
@@ -172,9 +172,9 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
       />
       {/* Rooms: reached only from the entry points the rooms flag shows. */}
       <Stack.Screen
-        name={Screens.RoomsList}
-        component={RoomsList}
-        options={{ title: t('Rooms.YourRooms'), ...ScreenOptionsDictionary[Screens.RoomsList] }}
+        name={Screens.RoomsHome}
+        component={RoomsHome}
+        options={{ title: t('Rooms.Rooms'), ...ScreenOptionsDictionary[Screens.RoomsHome] }}
       />
       <Stack.Screen
         name={Screens.Room}

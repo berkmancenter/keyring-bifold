@@ -1,6 +1,6 @@
 /**
- * The ways into rooms (R2): a room's row, the list's states, "Your rooms" and a card's Rooms row, and the
- * read behind them. Words come from the service's reasons; a room known only from the agent's keys reads
+ * The way into rooms (R2): a room's row, the list's states, the Rooms card on the agent home, and the read
+ * behind them. Words come from the service's reasons; a room known only from the agent's keys reads
  * as an ID with "Details not loaded" and no tier; nothing shows without a service.
  */
 import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native'
@@ -12,7 +12,7 @@ import { sampleCapabilities } from '../capabilities'
 import { toInertText } from '../inertText'
 import RoomRow, { roomHandle } from '../components/RoomRow'
 import RoomsListBody, { groupRooms } from '../components/RoomsListBody'
-import { CommunityRoomsRow, YourRoomsRow } from '../components/RoomsEntryRows'
+import RoomsCard from '../components/RoomsCard'
 import { createSampleRoomsService } from '../sample/sampleRooms'
 import type { OperationStatus, RoomOffer, RoomsCapabilities, RoomsService, RoomSummary } from '../types'
 import { useMyRooms, type MyRooms } from '../useMyRooms'
@@ -147,69 +147,54 @@ describe('the rooms list', () => {
   })
 })
 
-describe('the entry rows', () => {
+describe('the Rooms card', () => {
   const service = { isSample: false } as RoomsService
+  const listed = () => myRooms({ capabilities: caps(), rooms: [room()], offers: [] })
 
-  test('no service (rooms flag off): neither row, while the same data with a service shows both', () => {
-    const data = myRooms({ capabilities: caps(), rooms: [room()], offers: [offer] })
-    const off = inApp(
-      <>
-        <YourRoomsRow myRooms={data} onOpen={jest.fn()} />
-        <CommunityRoomsRow myRooms={data} communityDid="did:webvh:c" handle="c" onOpen={jest.fn()} />
-      </>
-    )
-    expect(off.queryByTestId(id('YourRoomsRow'))).toBeNull()
-    expect(off.queryByTestId(id('CommunityRoomsRow_c'))).toBeNull()
-    const on = inApp(
-      <>
-        <YourRoomsRow service={service} myRooms={data} onOpen={jest.fn()} />
-        <CommunityRoomsRow service={service} myRooms={data} communityDid="did:webvh:c" handle="c" onOpen={jest.fn()} />
-      </>
-    )
-    expect(on.getByTestId(id('YourRoomsRow'))).toBeTruthy()
-    expect(on.getByTestId(id('CommunityRoomsRow_c'))).toBeTruthy()
+  test('no service (rooms flag off): no card, while the same data with a service shows it', () => {
+    const off = inApp(<RoomsCard myRooms={listed()} onOpen={jest.fn()} />)
+    expect(off.queryByTestId(id('RoomsCard'))).toBeNull()
+    const on = inApp(<RoomsCard service={service} myRooms={listed()} onOpen={jest.fn()} />)
+    expect(on.getByTestId(id('RoomsCard'))).toBeTruthy()
   })
 
-  test('"Your rooms" opens the list when rooms can be listed', () => {
+  test('opens Rooms when rooms can be listed', () => {
     const onOpen = jest.fn()
-    const tree = inApp(
-      <YourRoomsRow
-        service={service}
-        myRooms={myRooms({ capabilities: caps(), rooms: [room()], offers: [] })}
-        onOpen={onOpen}
-      />
-    )
-    fireEvent.press(tree.getByTestId(id('YourRoomsRow')))
+    const tree = inApp(<RoomsCard service={service} myRooms={listed()} onOpen={onOpen} />)
+    fireEvent.press(tree.getByTestId(id('RoomsCard')))
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
-  test('"Your rooms" when listing is not available: disabled, with the reason, and does nothing', () => {
+  test('when listing is not available: disabled, with the reason, and does nothing', () => {
     const onOpen = jest.fn()
     const tree = inApp(
-      <YourRoomsRow
+      <RoomsCard
         service={service}
         myRooms={myRooms({ capabilities: caps({ listMyRooms: no('noAgentLinked') }) })}
         onOpen={onOpen}
       />
     )
     expect(tree.getByText('Rooms.NoAgentLinked')).toBeTruthy()
-    expect(tree.getByTestId(id('YourRoomsRow')).props.accessibilityState).toEqual({ disabled: true })
-    fireEvent.press(tree.getByTestId(id('YourRoomsRow')))
+    expect(tree.getByTestId(id('RoomsCard')).props.accessibilityState).toEqual({ disabled: true })
+    fireEvent.press(tree.getByTestId(id('RoomsCard')))
     expect(onOpen).not.toHaveBeenCalled()
   })
 
-  test("a card's Rooms row counts only its community, and is absent for a community with none", () => {
-    const data = myRooms({ capabilities: caps(), rooms: [room(), custody], offers: [offer] })
-    const onOpen = jest.fn()
-    const tree = inApp(
-      <>
-        <CommunityRoomsRow service={service} myRooms={data} communityDid="did:webvh:c" handle="c" onOpen={onOpen} />
-        <CommunityRoomsRow service={service} myRooms={data} communityDid="did:webvh:other" handle="o" onOpen={onOpen} />
-      </>
+  test("the offers badge: the poll's count when it has one, else the home's own read, and none for no offers", () => {
+    const polled = inApp(<RoomsCard service={service} myRooms={listed()} offersCount={3} onOpen={jest.fn()} />)
+    expect(polled.getByTestId(id('RoomsCardBadge'))).toHaveTextContent('3')
+    const read = inApp(
+      <RoomsCard
+        service={service}
+        myRooms={myRooms({ capabilities: caps(), rooms: [room()], offers: [offer] })}
+        onOpen={jest.fn()}
+      />
     )
-    expect(tree.queryByTestId(id('CommunityRoomsRow_o'))).toBeNull()
-    fireEvent.press(tree.getByTestId(id('CommunityRoomsRow_c')))
-    expect(onOpen).toHaveBeenCalledWith('did:webvh:c')
+    expect(read.getByTestId(id('RoomsCardBadge'))).toHaveTextContent('1')
+    const none = inApp(<RoomsCard service={service} myRooms={listed()} offersCount={0} onOpen={jest.fn()} />)
+    expect(none.queryByTestId(id('RoomsCardBadge'))).toBeNull()
+    const many = inApp(<RoomsCard service={service} myRooms={listed()} offersCount={140} onOpen={jest.fn()} />)
+    expect(many.getByTestId(id('RoomsCardBadge'))).toHaveTextContent('99+')
   })
 })
 

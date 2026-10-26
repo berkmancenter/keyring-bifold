@@ -27,7 +27,7 @@ jest.mock('@react-navigation/native', () => ({
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Room = require('../screens/Room').default
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const RoomsList = require('../screens/RoomsList').default
+const RoomsHome = require('../screens/RoomsHome').default
 
 const id = (key: string) => testIdWithKey(key)
 const show = (Screen: React.FC = Room) =>
@@ -174,11 +174,11 @@ describe('reaching a room', () => {
     expect(tree.queryByTestId(id('RoomReading'))).toBeNull()
   })
 
-  test('"Your rooms" opens a room by its ID', async () => {
+  test('Rooms opens a room by its ID', async () => {
     mockService = createSampleRoomsService()
     const navigate = useNavigation().navigate as jest.Mock
     navigate.mockClear()
-    const tree = show(RoomsList)
+    const tree = show(RoomsHome)
     await waitFor(() => expect(tree.getByText('Planning')).toBeTruthy())
     fireEvent.press(tree.getByTestId(id(`RoomRow_${roomHandle(PLANNING)}`)))
     expect(navigate).toHaveBeenCalledWith(Screens.Room, { roomId: PLANNING })

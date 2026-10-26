@@ -1,11 +1,11 @@
 /**
- * "Your rooms": every room and room offer the member has, grouped by community; or one community's, when
- * opened from its card. Reached only while the rooms flag is on; with it off there is no service and the
- * screen says rooms are off rather than showing an empty list.
+ * Rooms: the offers waiting on the member, then their rooms grouped by community (rooms member sprint). Reached
+ * from the Rooms card on the My Agent home, only while the rooms flag is on; with it off there is no service and
+ * the screen says rooms are off rather than showing an empty list.
  *
- * @module rooms/screens/RoomsList
+ * @module rooms/screens/RoomsHome
  */
-import { useNavigation, useRoute } from '@react-navigation/native'
+import { useNavigation } from '@react-navigation/native'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollView, StyleSheet } from 'react-native'
@@ -20,13 +20,12 @@ import { SampleDataBanner } from '../components/SampleDataBanner'
 import { useMyRooms } from '../useMyRooms'
 import { useRoomsService } from '../useRoomsService'
 
-const RoomsList: React.FC = () => {
+const RoomsHome: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
-  const communityDid = (useRoute()?.params as { communityDid?: string } | undefined)?.communityDid
   const navigation = useNavigation()
   const service = useRoomsService()
-  const myRooms = useMyRooms(service, communityDid)
+  const myRooms = useMyRooms(service)
   const openRoom = (room: { roomId: string }) =>
     (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(Screens.Room, {
       roomId: room.roomId,
@@ -37,11 +36,11 @@ const RoomsList: React.FC = () => {
   })
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey('RoomsList')}>
+      <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey('RoomsHome')}>
         {service ? (
           <>
             <SampleDataBanner service={service} />
-            <RoomsListBody myRooms={myRooms} acrossCommunities={!communityDid} onOpenRoom={openRoom} />
+            <RoomsListBody myRooms={myRooms} acrossCommunities onOpenRoom={openRoom} />
           </>
         ) : (
           <ThemedText testID={testIdWithKey('RoomsOff')}>{t('Rooms.Off')}</ThemedText>
@@ -51,4 +50,4 @@ const RoomsList: React.FC = () => {
   )
 }
 
-export default RoomsList
+export default RoomsHome
