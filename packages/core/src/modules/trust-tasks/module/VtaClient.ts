@@ -42,6 +42,7 @@ import {
   type VerifyAttestationPayload,
   PCS_FAMILY,
   DISCOVERY_TASK,
+  DISCOVERY_TASK_03,
 } from './pcsVtaPayloads'
 
 import {
@@ -217,6 +218,8 @@ export const VTA_TASK_VERSIONS = {
   // serve it rather than asked of every agent and refused. The payload is the same in both; 1.1's answer adds
   // `serverless`.
   didsCreate: [VTA_TASK.didsCreate11, VTA_TASK.didsCreate],
+  // 0.3 first: every VTA in use serves it (pcsVtaPayloads.ts DISCOVERY_TASK_03).
+  discovery: [DISCOVERY_TASK_03, DISCOVERY_TASK],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -2409,23 +2412,25 @@ export class VtaClient {
     // and its handler takes no capability check, so the answer is conclusive
     // both ways and needs no grant.
     try {
-      const answer = await this.task<{ supportedTypes?: unknown }>(
-        DISCOVERY_TASK,
-        // **No patterns**, deliberately: a responder matches a pattern against
-        // a task's *slug*, not its Type URI
-        // (`vti-common/src/trust_task/discovery.rs` `matches_any` calls
-        // `slug_of(uri)` before `match_slug`), so a URI-shaped pattern matches
-        // nothing and the answer comes back empty — which would read as "does
-        // not serve it" for an agent that does. An empty pattern list means
-        // every supported task (`matches_any` returns true when
-        // `patterns.is_empty()`), and the filtering happens below where the
-        // Type URIs are unambiguous. The spec's own payload note says as much:
-        // a discoverer wanting more asks for everything and filters locally.
-        {},
-        30000,
-        {},
-        undefined,
-        { waitForConsent: false }
+      const { answer } = await this.versions.ask('discovery', VTA_TASK_VERSIONS.discovery, (type) =>
+        this.task<{ supportedTypes?: unknown }>(
+          type,
+          // **No patterns**, deliberately: a responder matches a pattern against
+          // a task's *slug*, not its Type URI
+          // (`vti-common/src/trust_task/discovery.rs` `matches_any` calls
+          // `slug_of(uri)` before `match_slug`), so a URI-shaped pattern matches
+          // nothing and the answer comes back empty — which would read as "does
+          // not serve it" for an agent that does. An empty pattern list means
+          // every supported task (`matches_any` returns true when
+          // `patterns.is_empty()`), and the filtering happens below where the
+          // Type URIs are unambiguous. The spec's own payload note says as much:
+          // a discoverer wanting more asks for everything and filters locally.
+          {},
+          30000,
+          {},
+          undefined,
+          { waitForConsent: false }
+        )
       )
       const types = Array.isArray(answer?.supportedTypes) ? answer.supportedTypes : []
       // Entries come as a bare URI or as `{type}` — both forms are legal in
