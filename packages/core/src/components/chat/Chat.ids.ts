@@ -35,4 +35,6 @@ export const ChatIds = {
   composerField: 'ChatComposerField',
   composerCamera: 'ChatComposerCamera',
   composerSend: 'ChatComposerSend',
+  // A day's marker ("Today", "Wed 15 Oct"): above its first message, and floating at the top while scrolling.
+  dayPill: 'ChatDayPill',
 } as const

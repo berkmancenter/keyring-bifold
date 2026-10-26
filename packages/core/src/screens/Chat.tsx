@@ -24,7 +24,7 @@ import { useChatAttended } from '../components/chat/useChatAttended'
 import { useComposerText } from '../components/chat/useComposerText'
 import { ToastType } from '../components/toast/BaseToast'
 import { pickAndSendPhoto } from '../modules/chat/media/compose'
-import type { PhotoSendOutcome } from '../modules/chat/media/compose'
+import { confirmGifAsIs, showPhotoOutcome } from '../modules/chat/media/outcome'
 import type { PhotoSource } from '../modules/chat/media/pick'
 import EmojiPickerSheet from '../modules/chat/emoji/EmojiPickerSheet'
 import { type ChatMessageIds, deleteChatMessages } from '../modules/chat/history'
@@ -33,6 +33,7 @@ import type { ChatSendOutcome } from '../modules/chat/send'
 import { chatEventsShown } from '../modules/chat/shown'
 import { renderActions } from '../components/chat/ChatActions'
 import { ChatMessage, ExtendedChatMessage } from '../components/chat/ChatMessage'
+import { renderDayPill } from '../components/chat/DayPill'
 import { useNetwork } from '../contexts/network'
 import { useStore } from '../contexts/store'
 import { useTheme } from '../contexts/theme'
@@ -47,6 +48,7 @@ import { getActiveChatConnectionId, setActiveChatConnectionId } from '../utils/a
 import { sendCapabilityNoticeIfNeeded } from '../modules/chat/notice'
 import { counterpartySpeaksChat } from '../modules/chat/capability'
 import { useChatEvents } from '../modules/chat/chatEventsStore'
+import { useChatDraft } from '../modules/chat/useChatDraft'
 import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
@@ -128,14 +130,6 @@ const progressStyles = StyleSheet.create({
 
 type ChatProps = StackScreenProps<ContactStackParams, Screens.Chat> | StackScreenProps<RootStackParams, Screens.Chat>
 
-/** What the person is told when a photo was not sent; 'sent' and 'cancelled' say nothing. */
-const PHOTO_PROBLEMS: ReadonlyMap<PhotoSendOutcome, string> = new Map<PhotoSendOutcome, string>([
-  ['no-permission', 'Chat.PhotoNoPermission'],
-  ['gif-too-large', 'Chat.GifTooLarge'],
-  ['photo-too-large', 'Chat.PhotoTooLarge'],
-  ['unreadable', 'Chat.PhotoUnreadable'],
-  ['not-sent', 'Chat.PhotoNotSent'],
-])
 const Chat: React.FC<ChatProps> = ({ route }) => {
   if (!route?.params) {
     throw new Error('Chat route params were not set properly')
@@ -198,13 +192,17 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     })
   }, [agent, connectionId])
 
-  // An unsent draft lives only in gifted-chat's own state, so applying an
-  // over-the-air update (a reload) would lose it. Watch the text, without
-  // controlling it (a controlled composer is what broke typing on 2026-08-26),
-  // and block applying while there is any. gifted-chat reports '' after a send.
-  // `composer.insert` puts text at the caret (the emoji button).
-  const composer = useComposerText()
-  const { hasDraft, focusAtCaret } = composer
+  // An unsent draft is kept per chat (chat/draft.ts), so it outlives this screen: unlocking after the app locked
+  // resets navigation (271, 272). It is saved a moment after it changes, so applying an over-the-air update (a
+  // reload) could still lose the last keystrokes: watch the text, without controlling it (a controlled composer is
+  // what broke typing on 2026-08-26), and block applying while there is any. gifted-chat reports '' after a send,
+  // which clears the kept draft too. `composer.insert` puts text at the caret (the emoji button).
+  const draft = useChatDraft(agent, connectionId)
+  const composer = useComposerText({ onTextChange: draft.onTextChange })
+  const { hasDraft, focusAtCaret, restore } = composer
+  useEffect(() => {
+    if (draft.saved) restore(draft.saved)
+  }, [draft.saved, restore])
   useEffect(() => {
     if (!hasDraft) return
     return registerOtaApplyBlocker('chat-draft')
@@ -472,21 +470,9 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
       if (!agent) return
       const outcome = await pickAndSendPhoto(agent, connectionId, source, {
         fallbackText: t('Chat.PhotoFallback'),
-        confirmGif: () =>
-          new Promise<boolean>((resolve) =>
-            Alert.alert(
-              t('Chat.GifAsIsTitle'),
-              t('Chat.GifAsIsBody'),
-              [
-                { text: t('Global.Cancel'), style: 'cancel', onPress: () => resolve(false) },
-                { text: t('Chat.SendGif'), onPress: () => resolve(true) },
-              ],
-              { cancelable: true, onDismiss: () => resolve(false) }
-            )
-          ),
+        confirmGif: confirmGifAsIs(t),
       })
-      const problem = PHOTO_PROBLEMS.get(outcome)
-      if (problem) Toast.show({ type: ToastType.Error, text1: t(problem) })
+      showPhotoOutcome(outcome, t)
     },
     [agent, connectionId, t]
   )
@@ -562,6 +548,10 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           renderAvatar={() => null}
           messageIdGenerator={(msg) => msg?._id.toString() || '0'}
           renderMessage={renderMessage}
+          // The day marker: gifted-chat draws it above each day's first message (every kind of message, its own
+          // DayWrapper) and as the copy floating while the list scrolls. ChatMessage draws none of its own: 272's
+          // second date line, and the doubled pill C1 first had, were a marker of ours beside gifted-chat's.
+          renderDay={renderDayPill}
           renderInputToolbar={(props) => renderInputToolbar(props, theme)}
           // Camera while the field is empty, where the chat takes photos; Send once it holds text.
           renderSend={(props) =>
