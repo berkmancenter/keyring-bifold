@@ -50,7 +50,11 @@ export class TaskVersions {
   /** Family → the URI this agent was found to serve. */
   private readonly served = new Map<string, string>()
 
-  constructor(private readonly onStepDown?: (family: string, from: string, to: string) => void) {}
+  constructor(
+    private readonly onStepDown?: (family: string, from: string, to: string) => void,
+    /** Told the version a family was answered in, once when it is learned and again whenever it changes. */
+    private readonly onServed?: (family: string, uri: string) => void
+  ) {}
 
   /** The URI to ask first: the one this agent served before, else the newest. */
   first(family: string, uris: readonly string[]): string {
@@ -74,6 +78,7 @@ export class TaskVersions {
       tried.add(uri)
       try {
         const answer = await send(uri)
+        if (this.served.get(family) !== uri) this.onServed?.(family, uri)
         this.served.set(family, uri)
         return { uri, answer }
       } catch (error) {
