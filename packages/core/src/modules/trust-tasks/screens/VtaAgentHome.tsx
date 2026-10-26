@@ -37,8 +37,9 @@ import { useCommunityJourneysOf } from '../module/communityJourney'
 import { COMMUNITY_CHANGED_EVENT, VTI_PERSONA_DELIVERIES_EVENT } from '../module/communityChanged'
 import { communityNameIsStale, refreshPublishedNameThrottled } from '../module/communityNameRefresh'
 import { communityTarget } from '../module/vtiCommunityLink'
-import { CommunityRoomsRow, YourRoomsRow } from '../../rooms/components/RoomsEntryRows'
+import { RoomsCard } from '../../rooms/components/RoomsCard'
 import { useMyRooms } from '../../rooms/useMyRooms'
+import { useRoomOffersCount } from '../../rooms/useRoomOffersCount'
 import { useRoomsService } from '../../rooms/useRoomsService'
 
 import { DevicesCard } from './DevicesCard'
@@ -312,9 +313,11 @@ const VtaAgentHome: React.FC = () => {
   // card shows it. Each card told it after painting, one render late.
   const held = holdings ? communitiesHeld(holdings) : []
   const journeys = useCommunityJourneysOf(held)
-  // Rooms, while the rooms flag is on: read once here for "Your rooms" and every card's Rooms row.
+  // Rooms, while the rooms flag is on: one card, its rooms read once here, its offers badge polled while an agent
+  // is linked and the app is in the foreground (nothing pushes an offer).
   const roomsService = useRoomsService()
   const myRooms = useMyRooms(roomsService)
+  const roomOffers = useRoomOffersCount(roomsService, link.kind === 'linked')
 
   // Only what still waits: a decided or expired request is not listed. The
   // same rule as the badge on the My Agent tab (waitingRequests.ts).
@@ -439,11 +442,6 @@ const VtaAgentHome: React.FC = () => {
 
   const go = (screen: Screens) => (navigation as unknown as { navigate: (name: string) => void }).navigate(screen)
 
-  /** One community's rooms and offers. */
-  const goToRooms = (communityDid: string) =>
-    (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(Screens.RoomsList, {
-      communityDid,
-    })
   /** A screen that needs to be told which community it is about. */
   const goToCommunity = (communityDid: string) =>
     (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(Screens.VtiCommunity, {
@@ -1032,13 +1030,6 @@ const VtaAgentHome: React.FC = () => {
                     go(action === 'acceptInvitation' ? Screens.VtiInvited : Screens.VtiVetting)
                   }}
                 />
-                <CommunityRoomsRow
-                  service={roomsService}
-                  myRooms={myRooms}
-                  communityDid={communityDid}
-                  handle={communityKeyOf(communityDid)}
-                  onOpen={goToRooms}
-                />
               </View>
             ))
           )}
@@ -1052,7 +1043,12 @@ const VtaAgentHome: React.FC = () => {
         {roomsService ? (
           <>
             <SectionRule />
-            <YourRoomsRow service={roomsService} myRooms={myRooms} onOpen={() => go(Screens.RoomsList)} />
+            <RoomsCard
+              service={roomsService}
+              myRooms={myRooms}
+              offersCount={roomOffers}
+              onOpen={() => go(Screens.RoomsHome)}
+            />
           </>
         ) : null}
 

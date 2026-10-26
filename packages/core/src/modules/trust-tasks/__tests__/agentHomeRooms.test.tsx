@@ -1,7 +1,6 @@
 /**
- * Rooms on the agent home, as the screen wires them: with the rooms flag on, "Your rooms" and a member's
- * community card's Rooms row, each opening the rooms list (the card's for its community); with it off,
- * neither (the flag-on case is the positive control).
+ * Rooms on the agent home, as the screen wires them: with the rooms flag on, one Rooms card that opens Rooms and
+ * carries the offers badge from the poll; with it off, no card (the flag-on case is the positive control).
  */
 import { useNavigation } from '@react-navigation/native'
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
@@ -66,7 +65,7 @@ const service = {
       standing: 'member',
     },
   ],
-  listOffers: async () => [],
+  listOffers: async () => [{ offerId: 'o1', roomName: toInertText('Kernel notes'), communityDid, tier: 'attributed' }],
 } as unknown as RoomsService
 
 const renderHome = async () => {
@@ -111,25 +110,23 @@ describe('rooms on the agent home', () => {
   })
   afterEach(() => jest.useRealTimers())
 
-  it('rooms flag on: "Your rooms" and the card\'s Rooms row, each opening the rooms list', async () => {
+  it('rooms flag on: the Rooms card opens Rooms, with the offers badge from the poll', async () => {
     mockRoomsService = service
     const navigate = useNavigation().navigate as jest.Mock
     navigate.mockClear()
     const tree = await renderHome()
-    const cardRow = testIdWithKey(`CommunityRoomsRow_${communityCardKey(communityDid)}`)
-    await waitFor(() => expect(tree.getByTestId(cardRow)).toBeTruthy())
-    fireEvent.press(tree.getByTestId(cardRow))
-    expect(navigate).toHaveBeenCalledWith(Screens.RoomsList, { communityDid })
-    fireEvent.press(tree.getByTestId(testIdWithKey('YourRoomsRow')))
-    expect(navigate).toHaveBeenCalledWith(Screens.RoomsList)
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomsCardBadge'))).toHaveTextContent('1'))
+    fireEvent.press(tree.getByTestId(testIdWithKey('RoomsCard')))
+    expect(navigate).toHaveBeenCalledWith(Screens.RoomsHome)
+    // One way in: no Rooms row on the community's card any more.
+    expect(tree.queryByTestId(testIdWithKey(`CommunityRoomsRow_${communityCardKey(communityDid)}`))).toBeNull()
   })
 
-  it('rooms flag off: neither row on the same holdings', async () => {
+  it('rooms flag off: no card on the same holdings', async () => {
     mockRoomsService = undefined
     const tree = await renderHome()
-    // The card itself is there, so an absent row is not an absent card.
+    // The community card is there, so an absent Rooms card is not an empty home.
     await waitFor(() => expect(tree.getByTestId(testIdWithKey('AgentMembershipRow'))).toBeTruthy())
-    expect(tree.queryByTestId(testIdWithKey('YourRoomsRow'))).toBeNull()
-    expect(tree.queryByTestId(testIdWithKey(`CommunityRoomsRow_${communityCardKey(communityDid)}`))).toBeNull()
+    expect(tree.queryByTestId(testIdWithKey('RoomsCard'))).toBeNull()
   })
 })
