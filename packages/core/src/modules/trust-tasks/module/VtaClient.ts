@@ -172,6 +172,8 @@ export const VTA_TASK = {
   vaultList02: 'https://trusttasks.org/spec/vault/list/0.2',
   vaultUpsert: 'https://trusttasks.org/spec/vault/upsert/0.1',
   vaultUpsert02: 'https://trusttasks.org/spec/vault/upsert/0.2',
+  vaultList03: 'https://trusttasks.org/spec/vault/list/0.3',
+  vaultUpsert03: 'https://trusttasks.org/spec/vault/upsert/0.3',
   vaultSignTrustTask: 'https://trusttasks.org/spec/vault/sign-trust-task/0.1',
   vaultSignTrustTask02: 'https://trusttasks.org/spec/vault/sign-trust-task/0.2',
 } as const
@@ -198,11 +200,16 @@ export const VTA_TASK_VERSIONS = {
   // 0.2 first: the reference rungs signed identify and grant with 0.2 against
   // VTI main 03a3562f (ref-23, ref-24). The payload is the same in both.
   vaultSignTrustTask: [VTA_TASK.vaultSignTrustTask02, VTA_TASK.vaultSignTrustTask],
-  // 0.1 first, as vta-sdk's own client and pnm send them (ref-23 created the
-  // sign-in entry with pnm's 0.1). Both casings of `secretKind` are read and
-  // accepted (vti-common vault/mod.rs:300-322).
-  vaultList: [VTA_TASK.vaultList, VTA_TASK.vaultList02],
-  vaultUpsert: [VTA_TASK.vaultUpsert, VTA_TASK.vaultUpsert02],
+  // 0.3 first: every VTA in use serves it, so it needs no refusal to reach.
+  // vta-service has served vault/{list,upsert}/0.3 since v0.22.0 (2026-08-28),
+  // and v0.60.0 and v0.64.0 serve 0.1 to 0.3, converting 0.2 and 0.3 down to
+  // the 0.1 handler (vta-sdk trust_tasks.rs TASK_VAULT_*; vta-service
+  // trust_tasks/wire_v0_2.rs). 0.1 and 0.2 are withdrawn in the 2027-01-01
+  // batch and 0.3 in 2027-04-01's; no VTA serves 0.4 yet. Each version gets its
+  // own enum spellings (vaultPayloadFor), and both are read back
+  // (vti-common vault/mod.rs:300-322).
+  vaultList: [VTA_TASK.vaultList03, VTA_TASK.vaultList02, VTA_TASK.vaultList],
+  vaultUpsert: [VTA_TASK.vaultUpsert03, VTA_TASK.vaultUpsert02, VTA_TASK.vaultUpsert],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -224,8 +231,34 @@ export interface VtaVaultEntry {
   [key: string]: unknown
 }
 
-/** `vault/_shared` SealedEnvelope, the one variant Keyring makes (vta-service trust_tasks/vault.rs:168-188). */
-export type VtaSealedSecret = { envelope: 'didcomm-authcrypt'; jwe: string }
+/**
+ * `vault/_shared` SealedEnvelope, the one variant Keyring makes (vta-service trust_tasks/vault.rs:168-188):
+ * `didcomm-authcrypt` at 0.1, `didcommAuthcrypt` from 0.2 (vaultPayloadFor spells it for the version sent).
+ */
+export type VtaSealedSecret = { envelope: 'didcomm-authcrypt' | 'didcommAuthcrypt'; jwe: string }
+
+/**
+ * A vault payload spelled for the version it is sent in. vault 0.1 spells its enums in kebab case and 0.2 on in
+ * camel case (trust-tasks vault/_shared 0.1 vs 0.2 and 0.3: `secretKind`, a target's `kind`, a sealed secret's
+ * `envelope`); the VTA validates each version against its own schema, so a payload built once in 0.1's spelling is
+ * invalid at 0.2 and 0.3. Callers build in 0.1's spelling; values with no camel form (`did`, `custom`) are unchanged.
+ */
+export function vaultPayloadFor<P extends Record<string, unknown>>(uri: string, payload: P): P {
+  const minor = Number(/\/vault\/[a-z-]+\/0\.(\d+)$/.exec(uri)?.[1] ?? 1)
+  if (minor < 2) return payload
+  const camel = (value: unknown) =>
+    typeof value === 'string' ? value.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) : value
+  const out: Record<string, unknown> = { ...payload }
+  if ('secretKind' in out) out.secretKind = camel(out.secretKind)
+  if (Array.isArray(out.targets)) {
+    out.targets = out.targets.map((target) =>
+      target && typeof target === 'object' ? { ...target, kind: camel((target as { kind?: unknown }).kind) } : target
+    )
+  }
+  const sealed = out.sealedSecret as { envelope?: unknown } | undefined
+  if (sealed && typeof sealed === 'object') out.sealedSecret = { ...sealed, envelope: camel(sealed.envelope) }
+  return out as P
+}
 
 /** Is this one of the 0.2 access-list URIs (where a revoke may answer `entry: null`)? */
 const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.2$/.test(uri)
@@ -1008,10 +1041,13 @@ export class VtaClient {
   /** Grants this client is waiting for, by the payload digest the VTA names. */
   private grantWaiters = new Map<string, () => void>()
   /** Which version of each family this agent was found to serve (taskVersions.ts). */
-  private readonly versions = new TaskVersions((family, from, to) =>
-    this.agent.config.logger.info(
-      `${LOG_PREFIX} ${agentNamedFor(from, this.vtaDid)} does not serve ${from}; asking ${to} (${family})`
-    )
+  private readonly versions = new TaskVersions(
+    (family, from, to) =>
+      this.agent.config.logger.info(
+        `${LOG_PREFIX} ${agentNamedFor(from, this.vtaDid)} does not serve ${from}; asking ${to} (${family})`
+      ),
+    // The version in use, once per family: what shows when an older one's fallback can go.
+    (family, uri) => this.agent.config.logger.info(`${LOG_PREFIX} ${family} answered in ${uri}`)
   )
 
   constructor(
@@ -1658,7 +1694,7 @@ export class VtaClient {
   /** `vault/list`: the entries' metadata, filtered as the VTA filters (`contextId`, `targetDid`, …). */
   async vaultList(filters: Record<string, unknown> = {}): Promise<VtaVaultEntry[]> {
     const { answer } = await this.versions.ask('vaultList', VTA_TASK_VERSIONS.vaultList, (type) =>
-      this.task<{ entries?: VtaVaultEntry[] } | VtaVaultEntry[]>(type, filters)
+      this.task<{ entries?: VtaVaultEntry[] } | VtaVaultEntry[]>(type, vaultPayloadFor(type, filters))
     )
     return Array.isArray(answer) ? answer : (answer?.entries ?? [])
   }
@@ -1666,7 +1702,7 @@ export class VtaClient {
   /** `vault/upsert`: create (no `id`) or update an entry. A create needs `sealedSecret` (vault.rs:826-870). */
   async vaultUpsert(payload: Record<string, unknown>): Promise<{ entry?: VtaVaultEntry; created?: boolean }> {
     const { answer } = await this.versions.ask('vaultUpsert', VTA_TASK_VERSIONS.vaultUpsert, (type) =>
-      this.task<{ entry?: VtaVaultEntry; created?: boolean }>(type, payload)
+      this.task<{ entry?: VtaVaultEntry; created?: boolean }>(type, vaultPayloadFor(type, payload))
     )
     return answer ?? {}
   }
