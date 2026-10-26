@@ -1,8 +1,8 @@
 /**
- * A new phone takes on its agent's community identities when the person asks
- * (242). A new install held none, so "Restore cards" was not even offered and
- * neither card came back (240 gate, cards-back-new-install). The agent's DIDs
- * and the cards its vault keeps about them say which identity is whose.
+ * A phone takes on its agent's community identities when the person asks
+ * (242): a new install, or an identity made with pnm/openvtc on the same agent
+ * (IN-363, IN-114). The agent's DIDs and the cards its vault keeps about them
+ * say which identity is whose; the identity's DID document says its key ids.
  */
 import {
   COMMUNITY,
@@ -14,7 +14,12 @@ import {
   roleVac,
 } from '../../../../__tests__/helpers/cardVault'
 import type { VtaMintedDid } from '../module/VtaClient'
-import { adoptAgentIdentities } from '../module/vtiAdoptIdentities'
+import {
+  adoptAgentIdentities,
+  keyIdsFromDocument,
+  visibleContextsOf,
+  type AdoptionKeyIds,
+} from '../module/vtiAdoptIdentities'
 import type { VtiIdentityStore, VtiPersona } from '../module/VtiIdentityStore'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -23,13 +28,12 @@ const VTA = persona.vtaDid
 const OTHER_COMMUNITY = 'did:webvh:QmOther:vtc.example:second-vtc'
 const NOW = Date.parse('2026-10-13T12:00:00Z')
 
-const mintedPersona: VtaMintedDid = {
-  did: PERSONA_DID,
-  contextId: 'keyring',
-  scid: 'QmPersona',
-  signingKeyId: 'key-sign-1',
-  kaKeyId: 'key-ka-1',
-}
+// What `dids/list` answers: the agent's DID record (vta-sdk `WebvhDidRecord`), which carries no key ids.
+const listed = (did: string, contextId: string) =>
+  ({ did, contextId, scid: 'Qm', serverId: 'serverless' }) as unknown as VtaMintedDid
+const ofPersona = listed(PERSONA_DID, 'keyring')
+// The key ids the agent keeps an identity's keys under: its published document's verification methods.
+const keysOf = (did: string): AdoptionKeyIds => ({ signing: `${did}#key-0`, keyAgreement: `${did}#key-1` })
 
 function identities(held: VtiPersona[] = []) {
   const map = new Map(held.map((p) => [`${p.vtaDid}|${p.communityDid}`, p]))
@@ -48,37 +52,107 @@ async function vaultWith(...cards: Record<string, unknown>[]) {
   return vault
 }
 
-const adopt = (store: VtiIdentityStore, task: ReturnType<typeof fakeVault>['task'], dids = [mintedPersona]) =>
-  adoptAgentIdentities({ identities: store, vtaDid: VTA, task, listDids: async () => dids, now: () => NOW })
+const adopt = (
+  store: VtiIdentityStore,
+  task: ReturnType<typeof fakeVault>['task'],
+  dids: VtaMintedDid[] = [ofPersona],
+  held: string[] = [],
+  keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined> = async (did) => keysOf(did)
+) =>
+  adoptAgentIdentities({
+    identities: store,
+    vtaDid: VTA,
+    task,
+    listDids: async () => dids,
+    keyIdsOf,
+    held,
+    now: () => NOW,
+  })
 
 describe("taking on the agent's identities", () => {
-  it("a membership card about one of the agent's DIDs: that identity, for that community, with its key ids", async () => {
+  it("a membership card about one of the agent's DIDs: that identity, for that community, with its document's key ids", async () => {
     const { store } = identities()
     const vault = await vaultWith(membershipCard)
-    const adopted = await adopt(store, vault.task)
+    const { adopted } = await adopt(store, vault.task)
     expect(adopted).toEqual([
       {
         communityDid: COMMUNITY,
         vtaDid: VTA,
         did: PERSONA_DID,
         contextId: 'keyring',
-        vtaKeyIds: { signing: 'key-sign-1', keyAgreement: 'key-ka-1' },
+        vtaKeyIds: { signing: `${PERSONA_DID}#key-0`, keyAgreement: `${PERSONA_DID}#key-1` },
         createdAt: new Date(NOW).toISOString(),
       },
     ])
     expect(store.setPersona).toHaveBeenCalledTimes(1)
   })
 
+  // IN-363 / IN-114 (Geoff): a persona made with pnm in a nested context on a second agent, a membership and a role
+  // in a community there, on a phone that already holds identities of its own. The agent's DID list carries no key
+  // ids, so they are the document's, and the context is the nested one the persona was made in.
+  it('an identity pnm made in a nested context, on a phone that holds others: taken on, the others untouched', async () => {
+    const PNM_DID = 'did:webvh:QmAlice:dids.example:openvtc-alice'
+    const pnmMembership = {
+      ...membershipCard,
+      id: 'urn:uuid:66666666-6666-4666-8666-666666666666',
+      issuer: OTHER_COMMUNITY,
+      credentialSubject: { id: PNM_DID },
+    }
+    const pnmRole = {
+      ...roleCard,
+      id: 'urn:uuid:77777777-7777-4777-8777-777777777777',
+      issuer: OTHER_COMMUNITY,
+      credentialSubject: {
+        id: PNM_DID,
+        endorsement: { type: 'CommunityRole', role: 'member', communityDid: OTHER_COMMUNITY },
+      },
+    }
+    const ownElsewhere: VtiPersona = { ...persona, communityDid: 'did:webvh:QmThird:vtc.example:third-vtc' }
+    const { store, map } = identities([persona, ownElsewhere])
+    const vault = await vaultWith(membershipCard, pnmMembership, pnmRole)
+    const report = await adopt(
+      store,
+      vault.task,
+      [ofPersona, listed(PNM_DID, 'openvtc-alice/alice')],
+      [PERSONA_DID],
+      async (did) => keyIdsFromDocument(did, { assertionMethod: ['#key-0'], keyAgreement: [{ id: `${did}#key-1` }] })
+    )
+
+    expect(report.adopted).toEqual([
+      {
+        communityDid: OTHER_COMMUNITY,
+        vtaDid: VTA,
+        did: PNM_DID,
+        contextId: 'openvtc-alice/alice',
+        vtaKeyIds: { signing: `${PNM_DID}#key-0`, keyAgreement: `${PNM_DID}#key-1` },
+        createdAt: new Date(NOW).toISOString(),
+      },
+    ])
+    expect(report).toMatchObject({ otherIdentities: 1, cardsForOthers: 2, unreadable: [] })
+    // The identities this phone made itself are as they were.
+    expect(map.get(`${VTA}|${COMMUNITY}`)).toBe(persona)
+    expect(map.get(`${VTA}|${ownElsewhere.communityDid}`)).toBe(ownElsewhere)
+  })
+
+  it('an identity whose DID document cannot be read is skipped and reported, never guessed at', async () => {
+    const { store } = identities()
+    const vault = await vaultWith(membershipCard)
+    const report = await adopt(store, vault.task, [ofPersona], [], async () => undefined)
+    expect(report.adopted).toEqual([])
+    expect(report.unreadable).toEqual([PERSONA_DID])
+    expect(store.setPersona).not.toHaveBeenCalled()
+  })
+
   it('a community known only by a DTG v1 role grant (an AuthorityCredential, here role:vetter) is taken on too', async () => {
     const { store } = identities()
     const vault = await vaultWith(roleVac)
-    expect((await adopt(store, vault.task)).map((p) => p.communityDid)).toEqual([COMMUNITY])
+    expect((await adopt(store, vault.task)).adopted.map((p) => p.communityDid)).toEqual([COMMUNITY])
   })
 
   it('a membership card and a role card for one community make one identity', async () => {
     const { store } = identities()
     const vault = await vaultWith(roleCard, membershipCard)
-    expect(await adopt(store, vault.task)).toHaveLength(1)
+    expect((await adopt(store, vault.task)).adopted).toHaveLength(1)
   })
 
   it("a card about a DID that is not the agent's is left alone", async () => {
@@ -90,14 +164,14 @@ describe("taking on the agent's identities", () => {
       credentialSubject: { id: 'did:webvh:QmSomeoneElse:dids.example:x' },
     }
     const vault = await vaultWith(stranger)
-    expect(await adopt(store, vault.task)).toEqual([])
+    expect((await adopt(store, vault.task)).adopted).toEqual([])
     expect(store.setPersona).not.toHaveBeenCalled()
   })
 
   it('an identity this phone already holds for the community is kept as it is', async () => {
     const { store, map } = identities([persona])
     const vault = await vaultWith(membershipCard)
-    expect(await adopt(store, vault.task)).toEqual([])
+    expect((await adopt(store, vault.task, [ofPersona], [PERSONA_DID])).adopted).toEqual([])
     expect(map.get(`${VTA}|${COMMUNITY}`)).toBe(persona)
   })
 
@@ -105,7 +179,7 @@ describe("taking on the agent's identities", () => {
     const { store } = identities()
     const vault = await vaultWith(membershipCard)
     const before = vault.calls.length
-    expect(await adopt(store, vault.task, [])).toEqual([])
+    expect(await adopt(store, vault.task, [])).toMatchObject({ adopted: [], otherIdentities: 0 })
     expect(vault.calls.length).toBe(before)
   })
 
@@ -119,8 +193,58 @@ describe("taking on the agent's identities", () => {
         listDids: async () => {
           throw new Error('the VTA did not answer')
         },
+        keyIdsOf: async (did) => keysOf(did),
       })
     ).rejects.toThrow('did not answer')
     expect(store.setPersona).not.toHaveBeenCalled()
+  })
+})
+
+// Why nothing came back, from the counts: what the screen turns into words.
+describe('what a run found', () => {
+  it('no identity but the ones this phone holds: no other identity', async () => {
+    const { store } = identities([persona])
+    const vault = await vaultWith(membershipCard)
+    expect(await adopt(store, vault.task, [ofPersona], [PERSONA_DID])).toMatchObject({ otherIdentities: 0 })
+  })
+
+  it('another identity, but no community card about it: no cards for others', async () => {
+    const { store } = identities([persona])
+    const vault = await vaultWith(membershipCard)
+    const report = await adopt(
+      store,
+      vault.task,
+      [ofPersona, listed('did:webvh:QmBare:dids.example:no-cards', 'openvtc-alice/alice')],
+      [PERSONA_DID]
+    )
+    expect(report).toMatchObject({ adopted: [], otherIdentities: 1, cardsForOthers: 0 })
+  })
+})
+
+describe("an identity's key ids, from its DID document", () => {
+  const DID = 'did:webvh:QmX:dids.example:x'
+  it('the first assertion method signs, the first keyAgreement entry agrees; a relative id is the DID’s', () => {
+    expect(keyIdsFromDocument(DID, { assertionMethod: ['#key-0'], keyAgreement: [{ id: `${DID}#key-1` }] })).toEqual({
+      signing: `${DID}#key-0`,
+      keyAgreement: `${DID}#key-1`,
+    })
+  })
+  it('authentication signs when no assertion method is named', () => {
+    expect(keyIdsFromDocument(DID, { authentication: [{ id: '#sig' }], keyAgreement: ['#ka'] })).toEqual({
+      signing: `${DID}#sig`,
+      keyAgreement: `${DID}#ka`,
+    })
+  })
+  it('a document without a key-agreement key, or none at all, gives nothing', () => {
+    expect(keyIdsFromDocument(DID, { assertionMethod: ['#key-0'] })).toBeUndefined()
+    expect(keyIdsFromDocument(DID, undefined)).toBeUndefined()
+  })
+})
+
+describe('the contexts a grant lets this phone see', () => {
+  it('a scoped grant names its contexts; an unrestricted one (no scopes) names none', () => {
+    expect(visibleContextsOf(['ctx:keyring', 'ctx:openvtc-alice'])).toEqual(['keyring', 'openvtc-alice'])
+    expect(visibleContextsOf([])).toBeUndefined()
+    expect(visibleContextsOf(undefined)).toBeUndefined()
   })
 })

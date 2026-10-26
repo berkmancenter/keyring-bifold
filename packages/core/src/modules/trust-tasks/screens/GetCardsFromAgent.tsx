@@ -22,7 +22,12 @@ import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { emitCommunityChanged } from '../module/communityChanged'
 import { vtaAgent } from '../module/vtaAgent'
-import { adoptAgentIdentities } from '../module/vtiAdoptIdentities'
+import {
+  adoptAgentIdentities,
+  keyIdsFromDocument,
+  visibleContextsOf,
+  type AdoptionReport,
+} from '../module/vtiAdoptIdentities'
 import { recoverCardsFromAgent, type RecoveredRefusal, type VaultTask } from '../module/vtiCardVault'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
@@ -39,15 +44,27 @@ export interface CardsBack {
   asked?: number
   /** The identities taken on, for the next run to ask again without taking them on twice. */
   taken?: VtiPersona[]
+  /**
+   * Why no community came back, when none did and the agent answered: it showed this phone no identity it does
+   * not hold already (`noOtherIdentities`), or it holds no community card for those it showed (`noCards`).
+   */
+  noneBecause?: 'noOtherIdentities' | 'noCards'
+  /** The agent contexts this phone's grant lets it see, when it is not unrestricted. */
+  visibleContexts?: string[]
+  /** Identities with a community card whose DID document could not be read: not taken on. */
+  unreadableIdentities?: number
 }
+
+/** What taking on the agent's identities found, with what the phone can see of it. */
+export type AdoptionFound = AdoptionReport & { visibleContexts?: string[] }
 
 export interface GetCardsDeps {
   recover: typeof recoverCardsFromAgent
   store: (agent: Agent) => VtiCommunityStore
   /** The persona's agent, connected, as a task sender. */
   taskFor: (agent: Agent, persona: VtiPersona) => Promise<VaultTask>
-  /** Take on the agent's identities this phone does not hold yet; those taken on. */
-  adopt: (agent: Agent, vtaDid: string) => Promise<VtiPersona[]>
+  /** Take on the agent's identities this phone does not hold yet (`held`: the DIDs it does). */
+  adopt: (agent: Agent, vtaDid: string, held: string[]) => Promise<AdoptionFound>
 }
 
 const defaultDeps: GetCardsDeps = {
@@ -58,15 +75,23 @@ const defaultDeps: GetCardsDeps = {
     const client = vtaAgent.client(agent, persona.vtaDid)
     return <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload)
   },
-  adopt: async (agent, vtaDid) => {
+  adopt: async (agent, vtaDid, held) => {
     await vtaAgent.connect(agent, vtaDid)
     const client = vtaAgent.client(agent, vtaDid)
-    return adoptAgentIdentities({
+    const report = await adoptAgentIdentities({
       identities: new GenericRecordsIdentityStore(agent),
       vtaDid,
       task: <T,>(type: string, payload: Record<string, unknown>) => client.task<T>(type, payload),
       listDids: () => client.listDids(),
+      keyIdsOf: async (did) => {
+        const { didDocument } = await agent.dids.resolve(did)
+        return keyIdsFromDocument(did, didDocument as unknown as Record<string, unknown> | undefined)
+      },
+      held,
     })
+    // What this phone's grant lets it see, for saying why nothing came back; a phone that cannot tell says less.
+    const me = await client.whoAmI().catch(() => undefined)
+    return { ...report, visibleContexts: visibleContextsOf(me?.scopes) }
   },
 }
 
@@ -83,12 +108,19 @@ export async function bringBackFromAgent(
   deps: GetCardsDeps = defaultDeps
 ): Promise<CardsBack> {
   let silent = false
-  const adopted = vtaDid
-    ? await deps.adopt(agent, vtaDid).catch(() => {
-        silent = true
-        return [] as VtiPersona[]
-      })
-    : []
+  const found = vtaDid
+    ? await deps
+        .adopt(
+          agent,
+          vtaDid,
+          personas.filter((p) => p.vtaDid === vtaDid).map((p) => p.did)
+        )
+        .catch(() => {
+          silent = true
+          return undefined
+        })
+    : undefined
+  const adopted = found?.adopted ?? []
   const held = new Set(personas.map((p) => `${p.vtaDid}|${p.communityDid}`))
   const fresh = adopted.filter((p) => !held.has(`${p.vtaDid}|${p.communityDid}`))
   const all = [...personas, ...fresh]
@@ -97,7 +129,23 @@ export async function bringBackFromAgent(
     return { found: 0, restored: 0, refused: [], unreachable: 1, adopted: 0, asked: 1, taken: [] }
   for (const p of fresh) emitCommunityChanged(p.communityDid, 'membership')
   const got = await getCardsFromAgent(agent, all, onProgress, deps)
-  return { ...got, adopted: fresh.length, asked: all.length, taken: fresh }
+  const noneBecause =
+    !found || fresh.length > 0 || found.unreadable.length > 0
+      ? undefined
+      : found.otherIdentities === 0
+        ? 'noOtherIdentities'
+        : found.cardsForOthers === 0
+          ? 'noCards'
+          : undefined
+  return {
+    ...got,
+    adopted: fresh.length,
+    asked: all.length,
+    taken: fresh,
+    ...(noneBecause ? { noneBecause } : {}),
+    ...(found?.visibleContexts ? { visibleContexts: found.visibleContexts } : {}),
+    ...(found?.unreadable.length ? { unreadableIdentities: found.unreadable.length } : {}),
+  }
 }
 
 /**
@@ -187,6 +235,24 @@ export const GetCardsFromAgent: React.FC<{
           {result.adopted ? (
             <ThemedText testID={testIdWithKey('AgentGetCardsCommunities')}>
               {t('VtaLink.CommunitiesBack', { count: result.adopted })}
+            </ThemedText>
+          ) : null}
+          {/* Why no community came back, in words: what a person whose communities are missing can act on. */}
+          {result.noneBecause ? (
+            <ThemedText style={styles.muted} testID={testIdWithKey('AgentGetCardsNoCommunities')}>
+              {result.noneBecause === 'noCards'
+                ? t('VtaLink.CommunitiesNoCards')
+                : result.visibleContexts
+                  ? t('VtaLink.CommunitiesNoneSeenScoped', {
+                      contexts: result.visibleContexts.join(', '),
+                      interpolation: { escapeValue: false },
+                    })
+                  : t('VtaLink.CommunitiesNoneSeen')}
+            </ThemedText>
+          ) : null}
+          {result.unreadableIdentities ? (
+            <ThemedText style={styles.muted} testID={testIdWithKey('AgentGetCardsUnreadableIdentities')}>
+              {t('VtaLink.CommunitiesUnreadable', { count: result.unreadableIdentities })}
             </ThemedText>
           ) : null}
           <ThemedText>

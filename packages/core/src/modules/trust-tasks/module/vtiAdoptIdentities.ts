@@ -1,15 +1,23 @@
 /**
- * A new phone takes on its agent's community identities, when the person asks
+ * A phone takes on its agent's community identities, when the person asks
  * ("Bring back your communities and cards from your agent"; Alberto, 10-13,
  * for 242). Never on its own at link: the phone shows communities it did not
  * join itself only once the person has asked for them.
  *
- * A phone keeps an identity per community (`VtiPersona`). A new install holds
- * none, so it had nothing to restore cards for: the cards the agent keeps
- * stayed there. The agent knows its DIDs (`dids/list`), and its vault keeps the
- * cards each community issued to one of them. A card about one of the agent's
- * own DIDs names the community it is for (its issuer), so the identity is
- * recorded from the two, and nothing else is guessed.
+ * A phone keeps an identity per community (`VtiPersona`). Identities it did
+ * not make itself (a new install, or one made with pnm/openvtc on the same
+ * agent: IN-363, IN-114) it had nothing to restore cards for, so the cards the
+ * agent keeps stayed there. The agent knows its DIDs (`dids/list`, every
+ * context this phone's grant covers, nested ones included), and its vault
+ * keeps the cards each community issued to one of them. A card about one of
+ * the agent's own DIDs names the community it is for (its issuer), so the
+ * identity is recorded from the two, and nothing else is guessed.
+ *
+ * The key ids come from the identity's DID document: `dids/list` answers the
+ * DID record, which carries none, and the agent keeps an identity's keys under
+ * the verification-method ids its published document names (vta-keys
+ * `save_entity_key_records_with_ids`). A DID whose document cannot be read is
+ * skipped and reported, never guessed at.
  *
  * @module trust-tasks/module/vtiAdoptIdentities
  */
@@ -27,24 +35,76 @@ const COMMUNITY_CARD_QUERIES: Record<string, string>[] = [
   { type: 'AuthorityCredential' },
 ]
 
+export interface AdoptionKeyIds {
+  signing: string
+  keyAgreement: string
+}
+
+/** What a run found, for the screen to say why nothing came back when nothing did. */
+export interface AdoptionReport {
+  /** The identities taken on. */
+  adopted: VtiPersona[]
+  /** The agent's identities this phone does not hold, among those it showed. */
+  otherIdentities: number
+  /** Community cards about those identities. */
+  cardsForOthers: number
+  /** Identities with a community card whose DID document could not be read: not taken on. */
+  unreadable: string[]
+}
+
+type DocumentLike = Record<string, unknown> | undefined
+
+const idOf = (did: string, entry: unknown): string | undefined => {
+  const id =
+    typeof entry === 'string'
+      ? entry
+      : entry && typeof (entry as { id?: unknown }).id === 'string'
+        ? (entry as { id: string }).id
+        : undefined
+  if (!id) return undefined
+  return id.startsWith('#') ? `${did}${id}` : id
+}
+
+const firstOf = (did: string, list: unknown): string | undefined =>
+  Array.isArray(list) ? list.map((entry) => idOf(did, entry)).find(Boolean) : undefined
+
+/**
+ * The agent's key ids for `did`, read off its DID document: the signing key is
+ * the first assertion method (else authentication), the key-agreement key the
+ * first keyAgreement entry. Undefined when either is missing.
+ */
+export function keyIdsFromDocument(did: string, document: DocumentLike): AdoptionKeyIds | undefined {
+  if (!document) return undefined
+  const signing = firstOf(did, document.assertionMethod) ?? firstOf(did, document.authentication)
+  const keyAgreement = firstOf(did, document.keyAgreement)
+  return signing && keyAgreement ? { signing, keyAgreement } : undefined
+}
+
 /**
  * Record, on this phone, each of `vtaDid`'s identities that a community card in
  * its vault is about and that this phone does not hold yet for that community.
  * A membership card wins over a role or vetter grant for the same community, and the
  * newer card over the older. What the vault cannot answer for is skipped; an
- * agent that does not answer at all throws. The identities recorded.
+ * agent that does not answer at all throws.
  */
 export async function adoptAgentIdentities(options: {
   identities: VtiIdentityStore
   vtaDid: string
   task: VaultTask
   listDids: () => Promise<VtaMintedDid[]>
+  /** The identity's key ids, from its DID document; undefined when it cannot be read. */
+  keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined>
+  /** The DIDs of the identities this phone already holds. */
+  held?: string[]
   now?: () => number
-}): Promise<VtiPersona[]> {
+}): Promise<AdoptionReport> {
   const { identities, vtaDid, task } = options
   const now = options.now ?? Date.now
+  const held = new Set(options.held ?? [])
   const minted = new Map((await options.listDids()).map((d) => [d.did, d]))
-  if (minted.size === 0) return []
+  const otherIdentities = [...minted.keys()].filter((did) => !held.has(did)).length
+  const report: AdoptionReport = { adopted: [], otherIdentities, cardsForOthers: 0, unreadable: [] }
+  if (minted.size === 0) return report
 
   const ids = new Set<string>()
   for (const query of COMMUNITY_CARD_QUERIES) {
@@ -62,29 +122,44 @@ export async function adoptAgentIdentities(options: {
     // The cards a community gives an identity in it: membership, a role, a vetter grant.
     if (item.kind !== 'membership' && item.kind !== 'role' && item.kind !== 'vetter-grant') continue
     if (!item.communityDid || !minted.has(item.subjectDid)) continue
+    if (!held.has(item.subjectDid)) report.cardsForOthers += 1
     const membership = item.kind === 'membership'
     const from = typeof credential.validFrom === 'string' ? credential.validFrom : ''
-    const held = best.get(item.communityDid)
+    const kept = best.get(item.communityDid)
     const better =
-      !held || (membership && !held.membership) || (membership === held.membership && from.localeCompare(held.from) > 0)
+      !kept || (membership && !kept.membership) || (membership === kept.membership && from.localeCompare(kept.from) > 0)
     if (better) best.set(item.communityDid, { did: item.subjectDid, membership, from })
   }
 
-  const adopted: VtiPersona[] = []
   for (const [communityDid, { did }] of best) {
     // An identity this phone already holds for the community is kept as it is.
     if (await identities.getPersona(communityDid, vtaDid)) continue
+    const keyIds = await options.keyIdsOf(did).catch(() => undefined)
+    if (!keyIds) {
+      if (!report.unreadable.includes(did)) report.unreadable.push(did)
+      continue
+    }
     const at = minted.get(did) as VtaMintedDid
     const persona: VtiPersona = {
       communityDid,
       vtaDid,
       did,
       contextId: at.contextId,
-      vtaKeyIds: { signing: at.signingKeyId, keyAgreement: at.kaKeyId },
+      vtaKeyIds: { signing: keyIds.signing, keyAgreement: keyIds.keyAgreement },
       createdAt: new Date(now()).toISOString(),
     }
     await identities.setPersona(persona)
-    adopted.push(persona)
+    report.adopted.push(persona)
   }
-  return adopted
+  return report
+}
+
+/** The contexts a whoami answer's `scopes` (`ctx:<id>`) name; undefined for an unrestricted grant or none stated. */
+export function visibleContextsOf(scopes: unknown): string[] | undefined {
+  if (!Array.isArray(scopes) || scopes.length === 0) return undefined
+  const contexts = scopes
+    .filter((s): s is string => typeof s === 'string')
+    .map((s) => (s.startsWith('ctx:') ? s.slice(4) : s))
+    .filter(Boolean)
+  return contexts.length ? contexts : undefined
 }

@@ -17,6 +17,7 @@ import {
   bringBackFromAgent,
   GetCardsFromAgent,
   getCardsFromAgent,
+  type AdoptionFound,
   type GetCardsDeps,
 } from '../screens/GetCardsFromAgent'
 
@@ -42,12 +43,21 @@ const second: VtiPersona = {
   did: 'did:webvh:QmP2:x',
 }
 
+// What a run of adoption found: `adopted`, with the counts the screen explains an empty run from.
+const found = (adopted: VtiPersona[], counts: Partial<AdoptionFound> = {}): AdoptionFound => ({
+  adopted,
+  otherIdentities: adopted.length,
+  cardsForOthers: adopted.length,
+  unreadable: [],
+  ...counts,
+})
+
 const deps = (
   answers: Record<
     string,
     'down' | { found: number; restored: string[]; refused: { reason: 'failedCheck' | 'notOurs' | 'unreadable' }[] }
   >,
-  adopt: GetCardsDeps['adopt'] = async () => []
+  adopt: GetCardsDeps['adopt'] = async () => found([])
 ): GetCardsDeps => ({
   adopt,
   store: () => ({}) as never,
@@ -116,7 +126,7 @@ describe('the Manage row', () => {
   // 240 gate (cards-back-new-install): a new install held no identity, so it
   // was not offered this at all, and neither card came back.
   it('a new phone with its agent linked: offered, and it brings the communities back, then their cards', async () => {
-    const adopt = jest.fn(async () => [persona])
+    const adopt = jest.fn(async () => found([persona]))
     const d = deps({ [persona.did]: { found: 2, restored: ['m', 'r'], refused: [] } }, adopt)
     const recover = jest.spyOn(d, 'recover')
     const tree = renderRow([], d, persona.vtaDid)
@@ -124,7 +134,7 @@ describe('the Manage row', () => {
     await act(async () => {
       fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
     })
-    expect(adopt).toHaveBeenCalledWith(agent, persona.vtaDid)
+    expect(adopt).toHaveBeenCalledWith(agent, persona.vtaDid, [])
     expect(recover.mock.calls.map((c) => (c[2] as VtiPersona).did)).toEqual([persona.did])
     expect(tree.getByTestId(testIdWithKey('AgentGetCardsCommunities'))).toHaveTextContent(
       'VtaLink.CommunitiesBack(count=1)'
@@ -134,7 +144,7 @@ describe('the Manage row', () => {
 
   it('a second tap asks again for the cards of the identities the first one took on', async () => {
     let first = true
-    const adopt = jest.fn(async () => (first ? ((first = false), [persona]) : []))
+    const adopt = jest.fn(async () => (first ? ((first = false), found([persona])) : found([])))
     const d = deps({ [persona.did]: { found: 1, restored: ['m'], refused: [] } }, adopt)
     const recover = jest.spyOn(d, 'recover')
     const tree = renderRow([], d, persona.vtaDid)
@@ -163,11 +173,25 @@ describe('the Manage row', () => {
   })
 
   it('an identity already here is asked once, even when the agent names it again', async () => {
-    const d = deps({ [persona.did]: { found: 1, restored: ['m'], refused: [] } }, async () => [persona])
+    const d = deps({ [persona.did]: { found: 1, restored: ['m'], refused: [] } }, async () => found([persona]))
     const recover = jest.spyOn(d, 'recover')
     const got = await bringBackFromAgent(agent, persona.vtaDid, [persona], () => undefined, d)
     expect(recover).toHaveBeenCalledTimes(1)
     expect(got).toMatchObject({ restored: 1, adopted: 0, asked: 1 })
+  })
+
+  it("tells adoption the identities this phone holds on that agent, and only that agent's", async () => {
+    const elsewhere: VtiPersona = { ...second, vtaDid: 'did:webvh:QmVta2:dids.example:other-vta' }
+    const adopt = jest.fn(async () => found([]))
+    const d = deps(
+      {
+        [persona.did]: { found: 0, restored: [], refused: [] },
+        [elsewhere.did]: { found: 0, restored: [], refused: [] },
+      },
+      adopt
+    )
+    await bringBackFromAgent(agent, persona.vtaDid, [persona, elsewhere], () => undefined, d)
+    expect(adopt).toHaveBeenCalledWith(agent, persona.vtaDid, [persona.did])
   })
 
   // K7 (Alberto, 10-04): "Get your cards" did not say what it was for. It
@@ -213,5 +237,60 @@ describe('the Manage row', () => {
       fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
     })
     expect(tree.getByTestId(testIdWithKey('AgentGetCardsResult'))).toHaveTextContent('VtaLink.CardsBackNone')
+  })
+
+  // IN-363 / IN-114: a tap that brings no community back says why, in words, not just "no cards".
+  describe('when no community comes back, it says why', () => {
+    const tap = async (adoption: AdoptionFound) => {
+      const tree = renderRow(
+        [persona],
+        deps(
+          {
+            [persona.did]: { found: 0, restored: [], refused: [] },
+            [second.did]: { found: 0, restored: [], refused: [] },
+          },
+          async () => adoption
+        ),
+        persona.vtaDid
+      )
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey('AgentGetCardsButton')))
+      })
+      return tree
+    }
+    const why = (tree: Awaited<ReturnType<typeof tap>>) => tree.getByTestId(testIdWithKey('AgentGetCardsNoCommunities'))
+
+    it('the agent showed no identity but the ones here, under a grant that covers everything', async () => {
+      expect(why(await tap(found([], { otherIdentities: 0 })))).toHaveTextContent('VtaLink.CommunitiesNoneSeen')
+    })
+
+    it('the same, under a grant limited to some contexts: it names them, a nested one as it is', async () => {
+      const tree = await tap(found([], { otherIdentities: 0, visibleContexts: ['keyring', 'openvtc-alice/alice'] }))
+      expect(why(tree)).toHaveTextContent(
+        /^VtaLink\.CommunitiesNoneSeenScoped\(contexts=keyring, openvtc-alice\/alice,/
+      )
+    })
+
+    it('other identities, but no community card about any of them', async () => {
+      expect(why(await tap(found([], { otherIdentities: 2, cardsForOthers: 0 })))).toHaveTextContent(
+        'VtaLink.CommunitiesNoCards'
+      )
+    })
+
+    it('an identity whose document could not be read is counted, not passed over in silence', async () => {
+      const tree = await tap(found([], { otherIdentities: 1, cardsForOthers: 1, unreadable: ['did:webvh:QmU:x'] }))
+      expect(tree.getByTestId(testIdWithKey('AgentGetCardsUnreadableIdentities'))).toHaveTextContent(
+        'VtaLink.CommunitiesUnreadable(count=1)'
+      )
+      expect(tree.queryByTestId(testIdWithKey('AgentGetCardsNoCommunities'))).toBeNull()
+    })
+
+    it('a community that came back needs no reason', async () => {
+      const tree = await tap(found([second]))
+      expect(tree.getByTestId(testIdWithKey('AgentGetCardsCommunities'))).toHaveTextContent(
+        'VtaLink.CommunitiesBack(count=1)'
+      )
+      expect(tree.queryByTestId(testIdWithKey('AgentGetCardsNoCommunities'))).toBeNull()
+    })
   })
 })
