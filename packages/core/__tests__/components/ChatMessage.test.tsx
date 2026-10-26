@@ -301,7 +301,9 @@ describe('chat lines and replies', () => {
   })
 })
 
-describe('the day marker', () => {
+// The day's marker is gifted-chat's to draw (Chat.tsx renderDay, above each day's first message); a message draws
+// none of its own, or the day shows twice (272's second date line, and the doubled pill a simulator run caught).
+describe('a message names no day of its own', () => {
   const at = (iso: string, overrides: Partial<ExtendedChatMessage> = {}): ExtendedChatMessage => ({
     _id: iso,
     user: { _id: Role.them },
@@ -312,54 +314,13 @@ describe('the day marker', () => {
   })
   const show = (message: ExtendedChatMessage, previousMessage?: ExtendedChatMessage) =>
     render(<ChatMessage messageProps={{ user, position: 'left', currentMessage: message, previousMessage }} />)
-  const pill = testIdWithKey(ChatIds.dayPill)
 
-  test('a new day: one pill, and never the old full date-and-time line', () => {
-    const tree = show(at('2026-10-15T16:01:00.000Z'))
-    expect(tree.getAllByTestId(pill)).toHaveLength(1)
-    expect(tree.queryByText(/October 15, 2026|\d{4} \d{1,2}:\d{2} [AP]M/)).toBeNull()
-  })
-
-  test('the same day as the message before: no pill (the control above shows one)', () => {
-    const tree = show(at('2026-10-15T16:05:00.000Z'), at('2026-10-15T16:01:00.000Z'))
-    expect(tree.queryByTestId(pill)).toBeNull()
-  })
-
-  test('a line about the chat itself on a new day keeps its pill', () => {
-    const tree = show(
-      at('2026-10-16T09:00:00.000Z', { kind: 'system', text: 'Timer set' }),
-      at('2026-10-15T16:01:00.000Z')
-    )
-    expect(tree.getAllByTestId(pill)).toHaveLength(1)
-    expect(tree.getByText('Timer set')).toBeTruthy()
-  })
-})
-
-describe("a message's time", () => {
-  const item = (overrides: Partial<ExtendedChatMessage>): MessageProps<ExtendedChatMessage> => ({
-    user,
-    position: 'left',
-    currentMessage: {
-      _id: 't',
-      user: { _id: Role.them },
-      renderEvent: () => <></>,
-      text: 'hello',
-      createdAt: new Date(2026, 9, 15, 16, 1),
-      ...overrides,
-    },
-  })
-
-  test('a text message shows its time, and only the time', () => {
-    const tree = render(<ChatMessage messageProps={item({})} />)
-    expect(tree.getByText('4:01 PM')).toBeTruthy()
-  })
-
-  test('a photo with no caption still shows its time', () => {
-    const tree = render(
-      <ChatMessage
-        messageProps={item({ text: 'Chat.Photo', image: 'file:///photo.jpg', imageSize: { width: 800, height: 600 } })}
-      />
-    )
-    expect(tree.getByText('4:01 PM')).toBeTruthy()
+  test.each([
+    ['a bubble', {}],
+    ['a line about the chat itself', { kind: 'system' as const, text: 'Timer set' }],
+  ])('%s on a new day: no pill and no date line', (_what, overrides) => {
+    const tree = show(at('2026-10-16T09:00:00.000Z', overrides), at('2026-10-15T16:01:00.000Z'))
+    expect(tree.queryByTestId(testIdWithKey(ChatIds.dayPill))).toBeNull()
+    expect(tree.queryByText(/October 1[56], 2026|\d{4} \d{1,2}:\d{2} [AP]M/)).toBeNull()
   })
 })

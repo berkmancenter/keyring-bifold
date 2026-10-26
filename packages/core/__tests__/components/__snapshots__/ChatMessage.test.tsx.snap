@@ -3,45 +3,6 @@
 exports[`ChatMessage Credential offer renders correctly 1`] = `
 <View>
   <View
-    pointerEvents="none"
-    style={
-      Object {
-        "alignItems": "center",
-        "marginVertical": 10,
-      }
-    }
-  >
-    <View
-      style={
-        Array [
-          Object {
-            "backgroundColor": "#E6E0E6",
-            "borderRadius": 12,
-            "paddingHorizontal": 10,
-            "paddingVertical": 3,
-          },
-          null,
-        ]
-      }
-    >
-      <Text
-        accessibilityRole="header"
-        maxFontSizeMultiplier={2}
-        style={
-          Object {
-            "color": "#4A4A4A",
-            "fontSize": 13,
-            "fontWeight": "600",
-            "lineHeight": 18,
-          }
-        }
-        testID="com.ariesbifold:id/ChatDayPill"
-      >
-        Jan 1, 2024
-      </Text>
-    </View>
-  </View>
-  <View
     style={
       Object {
         "flexDirection": "row",
@@ -178,45 +139,6 @@ exports[`ChatMessage Credential offer renders correctly 1`] = `
 
 exports[`ChatMessage Proof request renders correctly 1`] = `
 <View>
-  <View
-    pointerEvents="none"
-    style={
-      Object {
-        "alignItems": "center",
-        "marginVertical": 10,
-      }
-    }
-  >
-    <View
-      style={
-        Array [
-          Object {
-            "backgroundColor": "#E6E0E6",
-            "borderRadius": 12,
-            "paddingHorizontal": 10,
-            "paddingVertical": 3,
-          },
-          null,
-        ]
-      }
-    >
-      <Text
-        accessibilityRole="header"
-        maxFontSizeMultiplier={2}
-        style={
-          Object {
-            "color": "#4A4A4A",
-            "fontSize": 13,
-            "fontWeight": "600",
-            "lineHeight": 18,
-          }
-        }
-        testID="com.ariesbifold:id/ChatDayPill"
-      >
-        Jan 1, 2024
-      </Text>
-    </View>
-  </View>
   <View
     style={
       Object {
@@ -355,45 +277,6 @@ exports[`ChatMessage Proof request renders correctly 1`] = `
 exports[`ChatMessage Reporting DID renders correctly 1`] = `
 <View>
   <View
-    pointerEvents="none"
-    style={
-      Object {
-        "alignItems": "center",
-        "marginVertical": 10,
-      }
-    }
-  >
-    <View
-      style={
-        Array [
-          Object {
-            "backgroundColor": "#E6E0E6",
-            "borderRadius": 12,
-            "paddingHorizontal": 10,
-            "paddingVertical": 3,
-          },
-          null,
-        ]
-      }
-    >
-      <Text
-        accessibilityRole="header"
-        maxFontSizeMultiplier={2}
-        style={
-          Object {
-            "color": "#4A4A4A",
-            "fontSize": 13,
-            "fontWeight": "600",
-            "lineHeight": 18,
-          }
-        }
-        testID="com.ariesbifold:id/ChatDayPill"
-      >
-        Jan 1, 2024
-      </Text>
-    </View>
-  </View>
-  <View
     style={
       Object {
         "backgroundColor": "#FFFFFF",
@@ -459,45 +342,6 @@ exports[`ChatMessage Reporting DID renders correctly 1`] = `
 
 exports[`ChatMessage Sent presentation renders correctly 1`] = `
 <View>
-  <View
-    pointerEvents="none"
-    style={
-      Object {
-        "alignItems": "center",
-        "marginVertical": 10,
-      }
-    }
-  >
-    <View
-      style={
-        Array [
-          Object {
-            "backgroundColor": "#E6E0E6",
-            "borderRadius": 12,
-            "paddingHorizontal": 10,
-            "paddingVertical": 3,
-          },
-          null,
-        ]
-      }
-    >
-      <Text
-        accessibilityRole="header"
-        maxFontSizeMultiplier={2}
-        style={
-          Object {
-            "color": "#4A4A4A",
-            "fontSize": 13,
-            "fontWeight": "600",
-            "lineHeight": 18,
-          }
-        }
-        testID="com.ariesbifold:id/ChatDayPill"
-      >
-        Jan 1, 2024
-      </Text>
-    </View>
-  </View>
   <View
     style={
       Object {

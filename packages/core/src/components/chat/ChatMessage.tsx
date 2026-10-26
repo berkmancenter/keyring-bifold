@@ -6,7 +6,6 @@ import { View, Text } from 'react-native'
 // inverted list + GestureHandlerRootView on Android with the new architecture
 import { TouchableOpacity } from 'react-native-gesture-handler'
 import { Bubble, IMessage, MessageImage, MessageImageProps, MessageProps } from 'react-native-gifted-chat'
-import moment from 'moment'
 
 import { useTheme } from '../../contexts/theme'
 import { Role } from '../../types/chat'
@@ -17,8 +16,7 @@ import type { ChatReaction } from '../../modules/chat/fold'
 import type { ChatEventRecord } from '../../modules/chat/records/ChatEventRecord'
 import { testIdWithKey } from '../../utils/testable'
 import { ChatIds } from './Chat.ids'
-import { DayPill } from './DayPill'
-import { timeLabel } from '../../modules/chat/dayLabel'
+import { timeLabel, useDateWords, useUses24HourClock } from '../../utils/localDay'
 
 // Date separator color as per design
 const DATE_SEPARATOR_COLOR = '#888888'
@@ -125,10 +123,11 @@ export const MessageReactions: React.FC<{ reactions: ChatReaction[]; isMe: boole
 
 const MessageTime: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
   const { ChatTheme: theme } = useTheme()
-  const { i18n } = useTranslation()
+  const words = useDateWords()
+  const use24h = useUses24HourClock()
 
-  // Only the time, in the app's language and its clock ("4:01 PM", "16:01"); the day pill says the day.
-  const timeOnly = timeLabel(new Date(message.createdAt), i18n.language)
+  // Only the time, in the app's words and the phone's clock ("4:01 PM", "16:01"); the day pill says the day.
+  const timeOnly = timeLabel(new Date(message.createdAt), words, use24h)
 
   return (
     <ThemedText style={message.user._id === Role.me ? theme.timeStyleRight : theme.timeStyleLeft}>
@@ -177,19 +176,6 @@ const MessageIcon: React.FC<{ iconType: MessageIconType; isMe: boolean }> = ({ i
       {getIcon()}
     </View>
   )
-}
-
-// Check if we should show day separator (different day from previous message)
-const shouldShowDaySeparator = (currentMessage: ExtendedChatMessage, previousMessage?: IMessage): boolean => {
-  if (!previousMessage) {
-    // Always show day separator for the first message (oldest message at bottom with inverted list)
-    return true
-  }
-
-  const currentDate = moment(currentMessage.createdAt).startOf('day')
-  const previousDate = moment(previousMessage.createdAt).startOf('day')
-
-  return !currentDate.isSame(previousDate)
 }
 
 const EventCard: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
@@ -364,12 +350,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
   const { ChatTheme: theme } = useTheme()
   const { t } = useTranslation()
   const message = useMemo(() => messageProps.currentMessage as ExtendedChatMessage, [messageProps])
-  const previousMessage = messageProps.previousMessage as ExtendedChatMessage | undefined
-
-  const showDaySeparator = useMemo(
-    () => (message ? shouldShowDaySeparator(message, previousMessage) : false),
-    [message, previousMessage]
-  )
 
   if (!message) {
     return null
@@ -377,15 +357,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
 
   const isMe = message.user?._id === Role.me
 
-  // One marker per day, the same pill that floats while scrolling (Chat.tsx's renderDay): never a second,
-  // differently worded date under it.
-  const daySeparator = showDaySeparator ? <DayPill date={new Date(message.createdAt)} /> : null
-
   // A line about the chat itself (a timer change): centered words, no bubble.
   if (message.kind === 'system') {
     return (
       <View>
-        {daySeparator}
         <View style={{ alignItems: 'center', marginVertical: 8, paddingHorizontal: 32 }}>
           <Text style={{ color: DATE_SEPARATOR_COLOR, fontSize: 14, textAlign: 'center' }}>{message.text}</Text>
         </View>
@@ -397,7 +372,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
   if (message.iconType) {
     return (
       <View>
-        {daySeparator}
         <EventCard message={message} />
         {(message.iconType === MessageIconType.Credential || message.iconType === MessageIconType.Proof) && (
           <CredentialOfferActions message={message} />
@@ -409,7 +383,6 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
   // Regular chat messages render as left/right bubbles
   return (
     <View>
-      {daySeparator}
       <View style={{ flexDirection: 'row', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
         <View style={{ ...theme.containerStyle }}>
           <Bubble

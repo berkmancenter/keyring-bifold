@@ -32,7 +32,7 @@ import type { ChatSendOutcome } from '../modules/chat/send'
 import { chatEventsShown } from '../modules/chat/shown'
 import { renderActions } from '../components/chat/ChatActions'
 import { ChatMessage, ExtendedChatMessage } from '../components/chat/ChatMessage'
-import { renderFloatingDay } from '../components/chat/DayPill'
+import { renderDayPill } from '../components/chat/DayPill'
 import { useNetwork } from '../contexts/network'
 import { useStore } from '../contexts/store'
 import { useTheme } from '../contexts/theme'
@@ -51,7 +51,18 @@ import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
 import { testIdWithKey } from '../utils/testable'
-import { Alert, Animated, Easing, Pressable, View, StyleSheet, Text, TouchableOpacity, ViewToken } from 'react-native'
+import {
+  Alert,
+  Animated,
+  Easing,
+  Platform,
+  Pressable,
+  View,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  ViewToken,
+} from 'react-native'
 
 const PROGRESS_BAR_WIDTH = 200
 
@@ -205,7 +216,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   // and block applying while there is any. gifted-chat reports '' after a send.
   // `composer.insert` puts text at the caret (the emoji button).
   const composer = useComposerText()
-  const { hasDraft } = composer
+  const { hasDraft, focusAtCaret } = composer
   useEffect(() => {
     if (!hasDraft) return
     return registerOtaApplyBlocker('chat-draft')
@@ -227,7 +238,25 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   const [picker, setPicker] = useState<{ for: 'composer' } | { for: 'reaction'; target: ExtendedChatMessage } | null>(
     null
   )
-  const closePicker = useCallback(() => setPicker(null), [])
+  // Closing the composer's picker puts the person back in the field, caret after what they chose. iOS can focus it
+  // only once the sheet's modal is gone, which its onDismiss says; Android's modal never says so, and needs no wait.
+  const refocusComposer = useRef(false)
+  const closePicker = useCallback(() => {
+    if (picker?.for === 'composer') {
+      if (Platform.OS === 'ios') refocusComposer.current = true
+      else focusAtCaret()
+    }
+    setPicker(null)
+  }, [focusAtCaret, picker])
+  const onPickerClosed = useCallback(() => {
+    if (!refocusComposer.current) return
+    refocusComposer.current = false
+    focusAtCaret()
+  }, [focusAtCaret])
+  // A picker opened before the last one's onDismiss came is not the composer's to refocus after.
+  useEffect(() => {
+    if (picker) refocusComposer.current = false
+  }, [picker])
 
   // Received chat messages as they scroll into view, each reported once while someone is looking at this chat
   // (plan §4.6, D4). What is in view while nobody is (another screen over it, the app in the background) is
@@ -545,8 +574,10 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           renderAvatar={() => null}
           messageIdGenerator={(msg) => msg?._id.toString() || '0'}
           renderMessage={renderMessage}
-          // gifted-chat's own day marker floats at the top while the list scrolls; it says the day as the list does.
-          renderDay={renderFloatingDay}
+          // The day marker: gifted-chat draws it above each day's first message (every kind of message, its own
+          // DayWrapper) and as the copy floating while the list scrolls. ChatMessage draws none of its own: 272's
+          // second date line, and the doubled pill C1 first had, were a marker of ours beside gifted-chat's.
+          renderDay={renderDayPill}
           renderInputToolbar={(props) => renderInputToolbar(props, theme)}
           renderSend={(props) => renderSend(props, theme)}
           renderComposer={(props) => {
@@ -572,6 +603,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           onSend={onSend}
           text={composer.text}
           textInputProps={composer.textInputProps}
+          textInputRef={composer.inputRef}
           onLongPressMessage={onLongPressMessage}
           reply={{ message: replyTarget, onClear: () => setReplyTarget(null) }}
           user={{
@@ -598,7 +630,12 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           onCopy={actionTarget && !actionTarget.textIsLabel ? onCopy : undefined}
           onDeleteForMe={actionTarget ? onDeleteForMe : undefined}
         />
-        <EmojiPickerSheet visible={picker !== null} onSelect={onPickEmoji} onClose={closePicker} />
+        <EmojiPickerSheet
+          visible={picker !== null}
+          onSelect={onPickEmoji}
+          onClose={closePicker}
+          onClosed={onPickerClosed}
+        />
 
         {/* VRC exchange flow loading overlay */}
         {vrcFlowInProgress && (
