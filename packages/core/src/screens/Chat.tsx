@@ -16,7 +16,7 @@ import InfoIcon from '../modules/vrc/components/InfoIcon'
 // Temporarily removed for cleaner witness chat UI
 // import { WitnessChatBanner } from '../modules/vrc/components/WitnessChatBanner'
 import { renderComposer, renderInputToolbar, renderSend } from '../components/chat'
-import { COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT, ComposerEmojiButton } from '../components/chat/MessageInput'
+import { ComposerEmojiButton } from '../components/chat/MessageInput'
 import ActionSlider from '../components/chat/ActionSlider'
 import { ChatIds } from '../components/chat/Chat.ids'
 import MessageActions from '../components/chat/MessageActions'
@@ -568,8 +568,6 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
                   }
             )
           }
-          minComposerHeight={COMPOSER_MIN_HEIGHT}
-          maxComposerHeight={COMPOSER_MAX_HEIGHT}
           renderComposer={(props) => {
             const disabled = !silentAssertConnectedNetwork() || vrcFlowInProgress
             return renderComposer(

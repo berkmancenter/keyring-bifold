@@ -1,7 +1,18 @@
 import React from 'react'
 import { Composer } from 'react-native-gifted-chat'
 
-import { renderComposer, renderSend } from '../../src/components/chat/MessageInput'
+import { StyleSheet } from 'react-native'
+import { TouchableOpacity } from 'react-native-gifted-chat/lib/components/TouchableOpacity'
+import { render } from '@testing-library/react-native'
+
+import {
+  COMPOSER_BUTTON,
+  COMPOSER_LINE,
+  COMPOSER_MAX_HEIGHT,
+  COMPOSER_MIN_HEIGHT,
+  renderComposer,
+  renderSend,
+} from '../../src/components/chat/MessageInput'
 
 /**
  * gifted-chat's composer TextInput is fully controlled (value={text}), and the
@@ -34,8 +45,8 @@ describe('renderComposer textInputProps', () => {
     const onChangeText = jest.fn()
     const composer = composerFrom({ textInputProps: { onChangeText } })
 
-    // The field is named by its placeholder ("Message"), so a screen reader says what it is (C2).
-    expect(composer.props.textInputProps.accessibilityLabel).toBe('Type here')
+    // gifted-chat names the input by its placeholder; a label of the same words made VoiceOver say it twice (C2).
+    expect(composer.props.textInputProps.accessibilityLabel).toBe('')
     // The theme's cap for text in the composer (C2 raised it from 1.2).
     expect(composer.props.textInputProps.maxFontSizeMultiplier).toBe(1.5)
     expect(composer.props.textInputProps.editable).toBe(true)
@@ -81,6 +92,16 @@ describe('renderComposer textInputProps', () => {
     expect(composer.props.textInputProps.placeholderTextColor).toBe('#666666')
   })
 
+  // gifted-chat 3.3.3 sizes nothing on native: the TextInput grows with its text. A flex on it took the field's
+  // height instead, so it scrolled at one line's height (C2's simulator check); it is bounded here instead.
+  test('the input grows with its text, from one line to five, and is never stretched to the field', () => {
+    const style = StyleSheet.flatten(composerFrom({ textInputProps: {} }).props.textInputProps.style)
+
+    expect(style.flex).toBeUndefined()
+    expect(style).toMatchObject({ minHeight: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT })
+    expect(COMPOSER_MAX_HEIGHT - COMPOSER_MIN_HEIGHT).toBe(4 * COMPOSER_LINE)
+  })
+
   test('a caller-supplied style still wins over ours', () => {
     const callerStyle = { color: 'rebeccapurple' }
     const composer = composerFrom({ textInputProps: { style: callerStyle } })
@@ -113,6 +134,15 @@ describe('renderSend uses v3 prop names', () => {
     // v3's Send already refuses to fire on empty text; `disabled` was v2-era
     // and silently dropped, so passing it only misleads the reader.
     expect(send.props).not.toHaveProperty('disabled')
+  })
+
+  // gifted-chat sizes Send's touchable by its child, the 36-point circle, and its container takes no touches: Send
+  // measured 36 dp on Android (C2's simulator check). The touchable itself fills the square.
+  test('the touchable itself is the full tap target', () => {
+    const tree = render(<>{renderSend({ text: 'hi', onSend: () => undefined }, theme)}</>)
+    const style = StyleSheet.flatten(tree.UNSAFE_getByType(TouchableOpacity).props.style)
+
+    expect(style).toMatchObject({ width: COMPOSER_BUTTON, height: COMPOSER_BUTTON })
   })
 
   test('still styles the button from the theme', () => {

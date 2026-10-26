@@ -19,9 +19,24 @@ export const COMPOSER_BUTTON = Platform.select({ android: 48, default: 44 }) as 
 export const COMPOSER_FIELD = 40
 export const COMPOSER_LINE = 21
 export const COMPOSER_MAX_LINES = 5
-/** For GiftedChat's minComposerHeight / maxComposerHeight: the TextInput inside the field's 1-point edge. */
+/** The text's padding inside the field: one line plus this is the field less its 1-point edge (40 - 2). */
+const COMPOSER_PAD_TOP = 8
+const COMPOSER_PAD_BOTTOM = 9
+/**
+ * The TextInput's own height bounds. gifted-chat 3.3.3 sizes nothing on native (its minComposerHeight /
+ * maxComposerHeight are v2 props it no longer reads): the multiline TextInput grows with its text, so the bounds are
+ * set on it here, and past five lines it scrolls.
+ */
 export const COMPOSER_MIN_HEIGHT = COMPOSER_FIELD - 2
-export const COMPOSER_MAX_HEIGHT = COMPOSER_LINE * COMPOSER_MAX_LINES + 18
+export const COMPOSER_MAX_HEIGHT = COMPOSER_LINE * COMPOSER_MAX_LINES + COMPOSER_PAD_TOP + COMPOSER_PAD_BOTTOM
+
+/** A touchable that fills a button's square, its content centred. */
+export const TAP_TARGET = {
+  width: COMPOSER_BUTTON,
+  height: COMPOSER_BUTTON,
+  alignItems: 'center',
+  justifyContent: 'center',
+} as const
 
 const FIELD_EDGE = '#CFCACF'
 const ICON = '#4A4A4A'
@@ -92,7 +107,9 @@ export const renderComposer = (
       {...props}
       textInputProps={{
         ...props.textInputProps,
-        accessibilityLabel: placeholder,
+        // gifted-chat already names the input by its placeholder; naming it again made VoiceOver say "Message
+        // Message" (simulator check on C2), so the label stays empty and the placeholder is read once.
+        accessibilityLabel: '',
         maxFontSizeMultiplier: 1.5,
         editable: !disabled,
         placeholder,
@@ -100,11 +117,14 @@ export const renderComposer = (
         style: [
           {
             ...theme.inputText,
-            flex: 1,
+            // No flex: a flex child takes the field's height and scrolls inside it instead of growing (C2's
+            // simulator check: 44 points at every line). Its own text sizes it, within these bounds.
+            minHeight: COMPOSER_MIN_HEIGHT,
+            maxHeight: COMPOSER_MAX_HEIGHT,
             fontSize: 16,
             lineHeight: COMPOSER_LINE,
-            paddingTop: 9,
-            paddingBottom: 9,
+            paddingTop: COMPOSER_PAD_TOP,
+            paddingBottom: COMPOSER_PAD_BOTTOM,
             paddingHorizontal: 0,
             marginTop: 0,
             marginBottom: 0,
@@ -183,6 +203,9 @@ export const renderSend = (
         height: COMPOSER_BUTTON,
         width: COMPOSER_BUTTON,
       }}
+      // The touchable itself fills the square. gifted-chat sizes it by its child (the 36-point circle), and the
+      // container above takes no touches: Send measured 36 dp on Android (C2's simulator check).
+      sendButtonProps={{ style: TAP_TARGET }}
     >
       <View
         style={{

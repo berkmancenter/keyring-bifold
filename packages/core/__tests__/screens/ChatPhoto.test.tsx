@@ -160,8 +160,9 @@ describe('the composer (Option A)', () => {
   it('a plain "+" in a full tap target, not the boxed 40-point icon', () => {
     const tree = renderChat()
     const plus = tree.UNSAFE_getByType(Actions)
-    expect(plus.props.wrapperStyle).toMatchObject({ width: expect.any(Number), height: expect.any(Number) })
-    expect(plus.props.wrapperStyle.width).toBeGreaterThanOrEqual(44)
+    // buttonStyle, not wrapperStyle: with an icon of our own, v3 sizes only the touchable (chatActionsProps).
+    expect(plus.props.buttonStyle.width).toBeGreaterThanOrEqual(44)
+    expect(plus.props.buttonStyle.height).toBeGreaterThanOrEqual(44)
     const icon = render(<>{(plus.props.icon as () => React.ReactElement)()}</>)
     expect(icon.UNSAFE_getByProps({ name: 'plus' }).props.size).toBe(26)
     expect(icon.UNSAFE_queryAllByProps({ name: 'plus-box-outline' })).toHaveLength(0)
