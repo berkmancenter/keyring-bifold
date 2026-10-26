@@ -5,8 +5,13 @@
  *
  * A missing permission gets a message that stays until it is answered, with a
  * way to Settings. A brief toast there read as the tap doing nothing (iOS 26
- * simulators, 10-25), and once access has been refused the app cannot ask
- * again: Settings is the only way back to it.
+ * simulators, 10-25), and once access has been denied the app cannot ask
+ * again: Settings is the only way back to it. Limited photo access is not
+ * denied: it counts as granted, and iOS's own picker lets the person choose
+ * more photos.
+ *
+ * A GIF goes as it is, with whatever the file carries, so the person is asked
+ * first: `confirmGifAsIs` is that question, for any caller's `confirmGif`.
  *
  * @module chat/media/outcome
  */
@@ -49,4 +54,20 @@ export function showPhotoOutcome(outcome: PhotoSendOutcome, t: TFunction): void 
     { text: t('Global.Cancel'), style: 'cancel' },
     { text: t('Chat.OpenSettings'), onPress: () => void Linking.openSettings() },
   ])
+}
+
+/** A `confirmGif` for pickAndSendPhoto: asks whether to send a GIF as it is; resolves true only for Send GIF. */
+export function confirmGifAsIs(t: TFunction): () => Promise<boolean> {
+  return () =>
+    new Promise<boolean>((resolve) =>
+      Alert.alert(
+        t('Chat.GifAsIsTitle'),
+        t('Chat.GifAsIsBody'),
+        [
+          { text: t('Global.Cancel'), style: 'cancel', onPress: () => resolve(false) },
+          { text: t('Chat.SendGif'), onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      )
+    )
 }

@@ -23,7 +23,7 @@ import { useChatAttended } from '../components/chat/useChatAttended'
 import { useComposerText } from '../components/chat/useComposerText'
 import { ToastType } from '../components/toast/BaseToast'
 import { pickAndSendPhoto } from '../modules/chat/media/compose'
-import { showPhotoOutcome } from '../modules/chat/media/outcome'
+import { confirmGifAsIs, showPhotoOutcome } from '../modules/chat/media/outcome'
 import type { PhotoSource } from '../modules/chat/media/pick'
 import EmojiPickerSheet from '../modules/chat/emoji/EmojiPickerSheet'
 import { type ChatMessageIds, deleteChatMessages } from '../modules/chat/history'
@@ -475,18 +475,7 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
       if (!agent) return
       const outcome = await pickAndSendPhoto(agent, connectionId, source, {
         fallbackText: t('Chat.PhotoFallback'),
-        confirmGif: () =>
-          new Promise<boolean>((resolve) =>
-            Alert.alert(
-              t('Chat.GifAsIsTitle'),
-              t('Chat.GifAsIsBody'),
-              [
-                { text: t('Global.Cancel'), style: 'cancel', onPress: () => resolve(false) },
-                { text: t('Chat.SendGif'), onPress: () => resolve(true) },
-              ],
-              { cancelable: true, onDismiss: () => resolve(false) }
-            )
-          ),
+        confirmGif: confirmGifAsIs(t),
       })
       showPhotoOutcome(outcome, t)
     },
