@@ -697,6 +697,19 @@ describe('ContactDetails Screen', () => {
       })
     })
 
+    // The default profile's name is stored as data ("My Profile"): shown in the app's language, never as stored.
+    test('a profile still under its default name shows the default name in the app language', async () => {
+      const profile = buildRCardTemplate({ firstName: 'Jane', lastName: 'Doe', email: '', organization: '' })
+      expect(profile.label).toBe('My Profile')
+      mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue({ sharedProfileId: profile.id })
+
+      const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
+      const { findByText, queryByText } = renderWithProfiles(contact, [profile])
+
+      expect(await findByText('MyProfiles.DefaultLabel')).toBeTruthy()
+      expect(queryByText('My Profile')).toBeNull()
+    })
+
     test('falls back to the share-time label snapshot, with no photo, when the linked profile no longer exists', async () => {
       mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue({
         sharedProfileId: 'urn:uuid:deleted-profile',

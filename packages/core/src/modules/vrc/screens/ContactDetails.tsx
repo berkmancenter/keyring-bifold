@@ -30,7 +30,7 @@ import ContactMergeSection from '../components/ContactMergeSection'
 import { relationshipLayers } from '../utils/relationshipLayers'
 import { resolveContactDisplayInfo } from '../utils/rcardDisplayUtils'
 import { useRCardCredential } from '../hooks/useRCardCredential'
-import { formInputFromTemplate } from '../types/rcard'
+import { formInputFromTemplate, profileLabel } from '../types/rcard'
 import { testIdWithKey } from '../../../utils/testable'
 import { DidDetails } from '../../trust-tasks/screens/DidDetails'
 import { ContactLinks, loadContactLinks, relationshipsOfContact } from '../contacts/contactLinks'
@@ -493,8 +493,11 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
               <View style={styles.rowText}>
                 <ThemedText style={styles.rowTitle} selectable={true}>
                   {liveSharedProfile
-                    ? liveSharedProfile.label
-                    : t('ContactDetails.LinkedProfileDeleted', { label: sharedProfileLabelSnapshot ?? '' })}
+                    ? profileLabel(liveSharedProfile.label, t)
+                    : t('ContactDetails.LinkedProfileDeleted', {
+                        label: sharedProfileLabelSnapshot ? profileLabel(sharedProfileLabelSnapshot, t) : '',
+                        interpolation: { escapeValue: false },
+                      })}
                 </ThemedText>
                 <ThemedText style={styles.rowCaption}>{t('ContactDetails.LinkedProfile')}</ThemedText>
               </View>
