@@ -64,6 +64,21 @@ export interface ChatMessageIds {
  * `deleteById` would announce only the id and type.
  */
 export async function deleteChatMessages(agent: Agent, connectionId: string, ids?: ChatMessageIds): Promise<void> {
+  // Unsent text is the chat's too: Clear chat and removing the contact leave none of it behind. First, so a draft that
+  // cannot be removed fails the clear before anything else is gone, as any record that cannot be deleted does.
+  if (!ids) {
+    await clearChatDraft(agent, connectionId).catch((error: unknown) => {
+      // Named, since the person sees only that the clear (or the contact's removal) failed.
+      agent.config?.logger?.warn(
+        `[Chat:draft] the draft for ${connectionId} could not be removed, so nothing was cleared`,
+        {
+          error,
+        }
+      )
+      throw error
+    })
+  }
+
   const basicMessages = agent.dependencyManager.resolve(DidCommBasicMessageRepository)
   const chatEvents = getChatEventRepository(agent)
 
@@ -85,8 +100,6 @@ export async function deleteChatMessages(agent: Agent, connectionId: string, ids
     // Housekeeping only: a stale tombstone can change nothing but the wording for an id that no longer exists, so it
     // never fails a clear.
     await forgetExpired(connectionId).catch(() => undefined)
-    // Unsent text is the chat's too: Clear chat and removing the contact leave none of it behind.
-    await clearChatDraft(agent, connectionId)
     return
   }
   // A media file is named by its message's eventId alone, so a file whose name a kept message shares is kept with it.

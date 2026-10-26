@@ -206,6 +206,28 @@ describe('chat history on this phone', () => {
 
   // A draft has not been sent, so no timer runs on it: the expiry sweep deletes through this same path (expiry.ts),
   // and a draft in a disappearing-messages chat stays until it is sent, emptied or the whole chat is cleared.
+  test('a draft that cannot be removed fails Clear chat before any message is gone', async () => {
+    const { agent, store } = makeAgent([ev('c1', 'E1', 'message')], [{ id: 'b1', connectionId: 'c1' }], {
+      drafts: ['c1'],
+    })
+    const warn = jest.fn()
+    const faked = agent as unknown as { genericRecords: { delete: () => Promise<void> }; config: unknown }
+    faked.genericRecords.delete = async () => {
+      throw new Error('the store could not be written')
+    }
+    faked.config = { logger: { warn } }
+
+    await expect(deleteChatMessages(agent, 'c1')).rejects.toThrow('the store could not be written')
+    // The person sees only that the clear failed; the log says why.
+    expect(warn).toHaveBeenCalledWith(
+      '[Chat:draft] the draft for c1 could not be removed, so nothing was cleared',
+      expect.anything()
+    )
+
+    expect(store.events).toHaveLength(1)
+    expect(store.basic).toHaveLength(1)
+  })
+
   test('Delete for me, and so the timer’s expiry sweep, leaves the draft alone', async () => {
     const { agent, draftRecords } = makeAgent([ev('c1', 'E1', 'message')], [], { drafts: ['c1'] })
 

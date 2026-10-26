@@ -29,10 +29,11 @@ function inTurn<T>(connectionId: string, task: () => Promise<T>): Promise<T> {
   const next = (queues.get(connectionId) ?? Promise.resolve()).catch(() => undefined).then(task)
   queues.set(connectionId, next)
   inFlight.add(next)
-  next.then(
-    () => inFlight.delete(next),
-    () => inFlight.delete(next)
-  )
+  const done = () => {
+    inFlight.delete(next)
+    if (queues.get(connectionId) === next) queues.delete(connectionId)
+  }
+  next.then(done, done)
   return next
 }
 
