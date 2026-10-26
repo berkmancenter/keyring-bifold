@@ -17,6 +17,7 @@ import type { ChatReaction } from '../../modules/chat/fold'
 import type { ChatEventRecord } from '../../modules/chat/records/ChatEventRecord'
 import { testIdWithKey } from '../../utils/testable'
 import { ChatIds } from './Chat.ids'
+import { DayPill } from './DayPill'
 
 // Date separator color as per design
 const DATE_SEPARATOR_COLOR = '#888888'
@@ -187,11 +188,6 @@ const shouldShowDaySeparator = (currentMessage: ExtendedChatMessage, previousMes
   const previousDate = moment(previousMessage.createdAt).startOf('day')
 
   return !currentDate.isSame(previousDate)
-}
-
-// Format date for day separator
-const formatDaySeparator = (date: Date): string => {
-  return moment(date).format('MMMM D, YYYY h:mm A')
 }
 
 const EventCard: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
@@ -379,13 +375,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
 
   const isMe = message.user?._id === Role.me
 
-  const daySeparator = showDaySeparator ? (
-    <View style={{ alignItems: 'center', marginVertical: 16 }}>
-      <Text style={{ color: DATE_SEPARATOR_COLOR, fontSize: 14, fontWeight: '500' }}>
-        {formatDaySeparator(message.createdAt)}
-      </Text>
-    </View>
-  ) : null
+  // One marker per day, the same pill that floats while scrolling (Chat.tsx's renderDay): never a second,
+  // differently worded date under it.
+  const daySeparator = showDaySeparator ? <DayPill date={new Date(message.createdAt)} /> : null
 
   // A line about the chat itself (a timer change): centered words, no bubble.
   if (message.kind === 'system') {

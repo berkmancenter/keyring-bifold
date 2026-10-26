@@ -3,24 +3,43 @@
 exports[`ChatMessage Credential offer renders correctly 1`] = `
 <View>
   <View
+    pointerEvents="none"
     style={
       Object {
         "alignItems": "center",
-        "marginVertical": 16,
+        "marginVertical": 10,
       }
     }
   >
-    <Text
+    <View
       style={
-        Object {
-          "color": "#888888",
-          "fontSize": 14,
-          "fontWeight": "500",
-        }
+        Array [
+          Object {
+            "backgroundColor": "#E6E0E6",
+            "borderRadius": 12,
+            "paddingHorizontal": 10,
+            "paddingVertical": 3,
+          },
+          null,
+        ]
       }
     >
-      January 1, 2024 12:00 AM
-    </Text>
+      <Text
+        accessibilityRole="header"
+        maxFontSizeMultiplier={1.5}
+        style={
+          Object {
+            "color": "#4A4A4A",
+            "fontSize": 13,
+            "fontWeight": "600",
+            "lineHeight": 18,
+          }
+        }
+        testID="com.ariesbifold:id/ChatDayPill"
+      >
+        Jan 1, 2024
+      </Text>
+    </View>
   </View>
   <View
     style={
@@ -160,24 +179,43 @@ exports[`ChatMessage Credential offer renders correctly 1`] = `
 exports[`ChatMessage Proof request renders correctly 1`] = `
 <View>
   <View
+    pointerEvents="none"
     style={
       Object {
         "alignItems": "center",
-        "marginVertical": 16,
+        "marginVertical": 10,
       }
     }
   >
-    <Text
+    <View
       style={
-        Object {
-          "color": "#888888",
-          "fontSize": 14,
-          "fontWeight": "500",
-        }
+        Array [
+          Object {
+            "backgroundColor": "#E6E0E6",
+            "borderRadius": 12,
+            "paddingHorizontal": 10,
+            "paddingVertical": 3,
+          },
+          null,
+        ]
       }
     >
-      January 1, 2024 12:00 AM
-    </Text>
+      <Text
+        accessibilityRole="header"
+        maxFontSizeMultiplier={1.5}
+        style={
+          Object {
+            "color": "#4A4A4A",
+            "fontSize": 13,
+            "fontWeight": "600",
+            "lineHeight": 18,
+          }
+        }
+        testID="com.ariesbifold:id/ChatDayPill"
+      >
+        Jan 1, 2024
+      </Text>
+    </View>
   </View>
   <View
     style={
@@ -317,24 +355,43 @@ exports[`ChatMessage Proof request renders correctly 1`] = `
 exports[`ChatMessage Reporting DID renders correctly 1`] = `
 <View>
   <View
+    pointerEvents="none"
     style={
       Object {
         "alignItems": "center",
-        "marginVertical": 16,
+        "marginVertical": 10,
       }
     }
   >
-    <Text
+    <View
       style={
-        Object {
-          "color": "#888888",
-          "fontSize": 14,
-          "fontWeight": "500",
-        }
+        Array [
+          Object {
+            "backgroundColor": "#E6E0E6",
+            "borderRadius": 12,
+            "paddingHorizontal": 10,
+            "paddingVertical": 3,
+          },
+          null,
+        ]
       }
     >
-      January 1, 2024 12:00 AM
-    </Text>
+      <Text
+        accessibilityRole="header"
+        maxFontSizeMultiplier={1.5}
+        style={
+          Object {
+            "color": "#4A4A4A",
+            "fontSize": 13,
+            "fontWeight": "600",
+            "lineHeight": 18,
+          }
+        }
+        testID="com.ariesbifold:id/ChatDayPill"
+      >
+        Jan 1, 2024
+      </Text>
+    </View>
   </View>
   <View
     style={
@@ -403,24 +460,43 @@ exports[`ChatMessage Reporting DID renders correctly 1`] = `
 exports[`ChatMessage Sent presentation renders correctly 1`] = `
 <View>
   <View
+    pointerEvents="none"
     style={
       Object {
         "alignItems": "center",
-        "marginVertical": 16,
+        "marginVertical": 10,
       }
     }
   >
-    <Text
+    <View
       style={
-        Object {
-          "color": "#888888",
-          "fontSize": 14,
-          "fontWeight": "500",
-        }
+        Array [
+          Object {
+            "backgroundColor": "#E6E0E6",
+            "borderRadius": 12,
+            "paddingHorizontal": 10,
+            "paddingVertical": 3,
+          },
+          null,
+        ]
       }
     >
-      January 1, 2024 12:00 AM
-    </Text>
+      <Text
+        accessibilityRole="header"
+        maxFontSizeMultiplier={1.5}
+        style={
+          Object {
+            "color": "#4A4A4A",
+            "fontSize": 13,
+            "fontWeight": "600",
+            "lineHeight": 18,
+          }
+        }
+        testID="com.ariesbifold:id/ChatDayPill"
+      >
+        Jan 1, 2024
+      </Text>
+    </View>
   </View>
   <View
     style={

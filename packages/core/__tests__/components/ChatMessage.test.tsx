@@ -11,6 +11,8 @@ import {
   bubbleImageSize,
 } from '../../src/components/chat/ChatMessage'
 import { Role } from '../../src/types/chat'
+import { ChatIds } from '../../src/components/chat/Chat.ids'
+import { testIdWithKey } from '../../src/utils/testable'
 
 const onDetailsMock = jest.fn()
 const user = {
@@ -296,5 +298,39 @@ describe('chat lines and replies', () => {
     const reading = quote({ unread: true })
     expect(reading.queryByText('Chat.ReplyExpired')).toBeNull()
     expect(reading.queryByText('Chat.ReplyUnavailable')).toBeNull()
+  })
+})
+
+describe('the day marker', () => {
+  const at = (iso: string, overrides: Partial<ExtendedChatMessage> = {}): ExtendedChatMessage => ({
+    _id: iso,
+    user: { _id: Role.them },
+    renderEvent: () => <></>,
+    text: 'hello',
+    createdAt: new Date(iso),
+    ...overrides,
+  })
+  const show = (message: ExtendedChatMessage, previousMessage?: ExtendedChatMessage) =>
+    render(<ChatMessage messageProps={{ user, position: 'left', currentMessage: message, previousMessage }} />)
+  const pill = testIdWithKey(ChatIds.dayPill)
+
+  test('a new day: one pill, and never the old full date-and-time line', () => {
+    const tree = show(at('2026-10-15T16:01:00.000Z'))
+    expect(tree.getAllByTestId(pill)).toHaveLength(1)
+    expect(tree.queryByText(/October 15, 2026|\d{4} \d{1,2}:\d{2} [AP]M/)).toBeNull()
+  })
+
+  test('the same day as the message before: no pill (the control above shows one)', () => {
+    const tree = show(at('2026-10-15T16:05:00.000Z'), at('2026-10-15T16:01:00.000Z'))
+    expect(tree.queryByTestId(pill)).toBeNull()
+  })
+
+  test('a line about the chat itself on a new day keeps its pill', () => {
+    const tree = show(
+      at('2026-10-16T09:00:00.000Z', { kind: 'system', text: 'Timer set' }),
+      at('2026-10-15T16:01:00.000Z')
+    )
+    expect(tree.getAllByTestId(pill)).toHaveLength(1)
+    expect(tree.getByText('Timer set')).toBeTruthy()
   })
 })

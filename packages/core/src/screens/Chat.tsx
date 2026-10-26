@@ -32,6 +32,7 @@ import type { ChatSendOutcome } from '../modules/chat/send'
 import { chatEventsShown } from '../modules/chat/shown'
 import { renderActions } from '../components/chat/ChatActions'
 import { ChatMessage, ExtendedChatMessage } from '../components/chat/ChatMessage'
+import { renderFloatingDay } from '../components/chat/DayPill'
 import { useNetwork } from '../contexts/network'
 import { useStore } from '../contexts/store'
 import { useTheme } from '../contexts/theme'
@@ -544,6 +545,8 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           renderAvatar={() => null}
           messageIdGenerator={(msg) => msg?._id.toString() || '0'}
           renderMessage={renderMessage}
+          // gifted-chat's own day marker floats at the top while the list scrolls; it says the day as the list does.
+          renderDay={renderFloatingDay}
           renderInputToolbar={(props) => renderInputToolbar(props, theme)}
           renderSend={(props) => renderSend(props, theme)}
           renderComposer={(props) => {

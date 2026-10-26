@@ -1107,6 +1107,8 @@
   },
   "Chat": {
     "Photo": "📷 Foto",
+    "Today": "Hoje",
+    "Yesterday": "Ontem",
     "AttachCamera": "Câmera",
     "AttachLibrary": "Biblioteca de fotos",
     "PhotoFallback": "📷 Foto — atualize o Keyring para vê-la",
