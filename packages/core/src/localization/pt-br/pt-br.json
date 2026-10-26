@@ -2745,6 +2745,13 @@
     "NoteRetracted": "Retirada",
     "NoteOutdated": "Desatualizada",
     "NoteByAgentFor": "Publicada por um agente para {{who}}",
-    "NotePinned": "Fixada"
+    "NotePinned": "Fixada",
+    "You": "Você",
+    "AgentBadge": "Agente de IA",
+    "PostRemoved": "Removida",
+    "PostUnread": "Não foi possível ler esta publicação.",
+    "PostsFailed": "Não foi possível ler as publicações desta sala. Puxe para baixo para tentar de novo.",
+    "PostsNone": "Nenhuma publicação ainda.",
+    "LoadOlder": "Carregar publicações anteriores"
   }
 }

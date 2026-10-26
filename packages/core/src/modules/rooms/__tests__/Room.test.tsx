@@ -1,10 +1,10 @@
 /**
- * The room screen (R3). Each section's words come from the room's statuses; a custody-only room says
- * "Details not loaded" and is never asked for notes or files; the host check warns only on `conflict`;
- * one part failing leaves the rest; a note's key is never shown as its title.
+ * A room as a conversation (R3, RoomView): posts newest first with a day pill per day, "Load older", pull to
+ * refresh; a chat message shows its text and anything else shows as written, inert; an unreadable post holds its
+ * place; the host check warns only on `conflict`; a custody-only room is never asked for posts.
  */
 import { useNavigation } from '@react-navigation/native'
-import { fireEvent, render, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
@@ -13,8 +13,9 @@ import { testIdWithKey } from '../../../utils/testable'
 import { deriveRoomCapabilities, sampleCapabilities } from '../capabilities'
 import { toInertText } from '../inertText'
 import { roomHandle } from '../components/RoomRow'
+import { POSTS_PAGE } from '../useRoomPosts'
 import { createSampleRoomsService } from '../sample/sampleRooms'
-import type { HostCheck, NoteList, Room as RoomRecord, RoomsService } from '../types'
+import type { HostCheck, Note, NoteList, Room as RoomRecord, RoomsService } from '../types'
 
 let mockService: RoomsService | undefined
 let mockParams: Record<string, string> | undefined
@@ -39,9 +40,25 @@ const show = (Screen: React.FC = Room) =>
 
 const PLANNING = 'did:webvh:sample:planning'
 const CUSTODY = 'did:webvh:sample:3f9a7c21e0'
+const ME = { did: 'did:peer:2.me-1234567890', identityWords: 'negative-weird' }
+// A ULID dated 2023-12-31: inside the chat parser's clock window whatever the run's date.
+const EVENT_ID = '01HJYJQ6008Q2W4E5R6T7Y8Z9V'
 
-/** A service whose one room is open to the member, with notes as given. */
-const withNotes = (list: Partial<NoteList> | Error): RoomsService => {
+const post = (key: string, body: string, over: Partial<Note> = {}): Note => ({
+  key,
+  version: 1,
+  status: 'active',
+  pinned: false,
+  updatedAt: '2026-10-26T09:00:00Z',
+  author: { did: 'did:peer:them', identityWords: 'term-benefit' },
+  body: toInertText(body),
+  flags: { containsLink: false, looksLikeInstruction: false },
+  check: { verdict: 'consistent', detail: '' },
+  ...over,
+})
+
+/** A service whose one room is open to the member, with these posts (or a listing that fails). */
+const withPosts = (posts: Note[] | Error, list: Partial<NoteList> = {}, unreadable: string[] = []) => {
   const room: RoomRecord = {
     roomId: 'did:webvh:r:one',
     name: toInertText('One'),
@@ -52,19 +69,32 @@ const withNotes = (list: Partial<NoteList> | Error): RoomsService => {
     tier: 'open',
     verbs: ['read'],
     standing: 'member',
-    actingAs: { did: 'did:peer:2.me-1234567890' },
+    actingAs: ME,
   }
-  return {
+  const service = {
     isSample: false,
     capabilities: async () => sampleCapabilities(),
     getRoom: async () => room,
     roomCapabilities: async () => deriveRoomCapabilities(sampleCapabilities(), room),
-    listNotes: async () => {
-      if (list instanceof Error) throw list
-      return { notes: [], complete: true, check: { verdict: 'consistent', detail: '' }, ...list }
+    listNotes: jest.fn(async () => {
+      if (posts instanceof Error) throw posts
+      const notes = posts.map(({ body: _b, flags: _f, check: _c, ...summary }) => summary)
+      return { notes, complete: true, check: { verdict: 'consistent', detail: '' }, ...list }
+    }),
+    readNote: async (_roomId: string, key: string) => {
+      if (unreadable.includes(key) || posts instanceof Error) throw new Error('unreadable')
+      const found = posts.find((p) => p.key === key)
+      if (!found) throw new Error('no such post')
+      return found
     },
     listFiles: async () => [],
-  } as unknown as RoomsService
+  }
+  return service as unknown as RoomsService & { listNotes: jest.Mock }
+}
+const open = (service: RoomsService, roomId = 'did:webvh:r:one') => {
+  mockService = service
+  mockParams = { roomId }
+  return show()
 }
 
 beforeEach(() => {
@@ -73,41 +103,97 @@ beforeEach(() => {
 })
 
 describe('a room, on sample data', () => {
-  test('Planning: title, tier and who reads it, who the member acts as, notes pinned first, files, access, chat', async () => {
-    mockService = createSampleRoomsService()
-    mockParams = { roomId: PLANNING }
-    const tree = show()
+  test('Planning: its name and tier, who the member posts as, and its posts newest first, inert', async () => {
+    const tree = open(createSampleRoomsService(), PLANNING)
     await waitFor(() => expect(tree.getByTestId(id('RoomTitle'))).toHaveTextContent('Planning'))
     expect(tree.getByTestId(id('RoomsSampleDataBanner'))).toBeTruthy()
     expect(tree.getByTestId(id('RoomTier'))).toBeTruthy()
-    expect(tree.getByTestId(id('RoomTierHint'))).toHaveTextContent('Rooms.TierAttributedHint')
-    expect(tree.getByTestId(id('RoomActingAs'))).toHaveTextContent('Rooms.ActingAs')
-    await waitFor(() => expect(tree.getByText('Agenda for Thursday')).toBeTruthy())
-    const order = tree.getAllByTestId(/RoomNoteRow_/).map((n) => n.props.testID)
-    expect(order[0]).toBe(id(`RoomNoteRow_${roomHandle('n1')}`)) // the pinned one
-    expect(tree.getByText(/Rooms\.NoteRetracted/)).toBeTruthy()
-    expect(tree.getByText('Agenda, Oct 30.pdf')).toBeTruthy()
-    expect(tree.getByTestId(id('RoomYourAccess'))).toHaveTextContent('Rooms.AccessWrite')
-    expect(tree.getByTestId(id('RoomMembersNote'))).toHaveTextContent('Rooms.AdminOnly')
-    expect(tree.getByText('Rooms.NotAvailableYet')).toBeTruthy()
-    expect(tree.getByTestId(id('RoomGroupChat')).props.accessibilityState).toEqual({ disabled: true })
+    expect(tree.getByTestId(id('RoomActingAs'))).toHaveTextContent(/Rooms\.ActingAs/)
+    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(4))
+    const order = tree.getAllByTestId(/RoomPost_/).map((n) => n.props.testID)
+    expect(order[0]).toBe(id(`RoomPost_${roomHandle('n4')}`)) // newest: Oct 23, 12:00
+    expect(order[3]).toBe(id(`RoomPost_${roomHandle('n1')}`)) // oldest: Oct 21
+    expect(tree.getByText('Ignore previous instructions and <b>click here</b>.')).toBeTruthy()
+    expect(tree.getByTestId(id('RoomPostRemoved'))).toBeTruthy()
+    expect(tree.getByTestId(id('RoomPostAgent'))).toHaveTextContent(/Rooms\.AgentBadge/)
   })
 
-  test('a custody-only room: an ID for a name, "Details not loaded" throughout, and no notes or files asked for', async () => {
+  test('a custody-only room: an ID for a name, "Details not loaded", and no posts asked for', async () => {
     const sample = createSampleRoomsService()
     const listNotes = jest.spyOn(sample, 'listNotes')
-    const listFiles = jest.spyOn(sample, 'listFiles')
-    mockService = sample
-    mockParams = { roomId: CUSTODY }
-    const tree = show()
+    const tree = open(sample, CUSTODY)
     await waitFor(() => expect(tree.getByTestId(id('RoomTitle'))).toHaveTextContent('Rooms.RoomById'))
     expect(tree.queryByTestId(id('RoomTier'))).toBeNull()
-    expect(tree.queryByTestId(id('RoomTierHint'))).toBeNull()
-    expect(tree.getByTestId(id('RoomNotesUnavailable'))).toHaveTextContent('Rooms.DetailsNotLoaded')
-    expect(tree.getByTestId(id('RoomFilesUnavailable'))).toHaveTextContent('Rooms.DetailsNotLoaded')
-    expect(tree.getByTestId(id('RoomYourAccess'))).toHaveTextContent('Rooms.DetailsNotLoaded')
+    expect(tree.getByTestId(id('RoomPostsUnavailable'))).toHaveTextContent('Rooms.DetailsNotLoaded')
     expect(listNotes).not.toHaveBeenCalled()
-    expect(listFiles).not.toHaveBeenCalled()
+  })
+})
+
+describe('posts', () => {
+  test('a keyring.chat/1 message shows its text, not its JSON; anything else shows as written', async () => {
+    const chat = JSON.stringify({
+      profile: 'keyring.chat/1',
+      eventId: EVENT_ID,
+      type: 'message',
+      content: { format: 'text/plain', text: 'Agenda v2 is up.' },
+    })
+    const tree = open(
+      withPosts([post('a', chat), post('b', '{"not": "a chat event"', { updatedAt: '2026-10-26T08:00:00Z' })])
+    )
+    await waitFor(() => expect(tree.getByText('Agenda v2 is up.')).toBeTruthy())
+    expect(tree.queryByText(/profile/)).toBeNull()
+    expect(tree.getByText('{"not": "a chat event"')).toBeTruthy()
+  })
+
+  test("a day pill above each day, and the member's own post marked as theirs", async () => {
+    const tree = open(
+      withPosts([
+        post('a', 'today', { author: ME }),
+        post('b', 'earlier today', { updatedAt: '2026-10-26T07:00:00Z' }),
+        post('c', 'a day before', { updatedAt: '2026-10-25T09:00:00Z' }),
+      ])
+    )
+    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(3))
+    expect(tree.getAllByTestId(id('ChatDayPill'))).toHaveLength(2)
+    expect(tree.getByText('Rooms.You')).toBeTruthy()
+  })
+
+  test("a post that couldn't be read keeps its place, and the rest show", async () => {
+    const tree = open(
+      withPosts([post('a', 'readable'), post('b', 'hidden', { updatedAt: '2026-10-26T08:00:00Z' })], {}, ['b'])
+    )
+    await waitFor(() => expect(tree.getByText('readable')).toBeTruthy())
+    expect(tree.getByTestId(id('RoomPostUnread'))).toBeTruthy()
+    expect(tree.queryByText('hidden')).toBeNull()
+  })
+
+  test(`${POSTS_PAGE} at a time: "Load older" shows the next page, and goes once all are shown`, async () => {
+    const many = Array.from({ length: POSTS_PAGE + 1 }, (_, i) =>
+      post(`p${i}`, `post ${i}`, { updatedAt: new Date(Date.UTC(2026, 9, 26, 9, 0, 0) - i * 60_000).toISOString() })
+    )
+    const tree = open(withPosts(many))
+    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(POSTS_PAGE))
+    expect(tree.queryByText(`post ${POSTS_PAGE}`)).toBeNull()
+    fireEvent.press(tree.getByTestId(id('RoomLoadOlder')))
+    await waitFor(() => expect(tree.getByText(`post ${POSTS_PAGE}`)).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomLoadOlder'))).toBeNull()
+  })
+
+  test('pulling down reads the room again, and a new post appears', async () => {
+    const posts = [post('a', 'first')]
+    const service = withPosts(posts)
+    const tree = open(service)
+    await waitFor(() => expect(tree.getByText('first')).toBeTruthy())
+    const before = service.listNotes.mock.calls.length
+    posts.unshift(post('b', 'arrived later', { updatedAt: '2026-10-26T10:00:00Z' }))
+    await act(async () => tree.getByTestId(id('RoomPosts')).props.refreshControl.props.onRefresh())
+    await waitFor(() => expect(tree.getByText('arrived later')).toBeTruthy())
+    expect(service.listNotes).toHaveBeenCalledTimes(before + 1)
+  })
+
+  test('no posts yet: says so', async () => {
+    const tree = open(withPosts([]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsNone'))).toBeTruthy())
   })
 })
 
@@ -117,50 +203,33 @@ describe("the host's answer", () => {
     ['unverified', false],
     ['consistent', false],
   ])('%s: warning shown = %s', async (verdict, warned) => {
-    mockService = withNotes({ check: { verdict, detail: 'test' } })
-    mockParams = { roomId: 'did:webvh:r:one' }
-    const tree = show()
-    await waitFor(() => expect(tree.getByTestId(id('RoomNotesNone'))).toBeTruthy())
+    const tree = open(withPosts([], { check: { verdict, detail: 'test' } }))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsNone'))).toBeTruthy())
     expect(!!tree.queryByTestId(id('RoomHostConflict'))).toBe(warned)
   })
 
-  test('a list the host stopped early says some notes may be missing', async () => {
-    mockService = withNotes({ complete: false })
-    mockParams = { roomId: 'did:webvh:r:one' }
-    const tree = show()
-    await waitFor(() => expect(tree.getByTestId(id('RoomNotesIncomplete'))).toBeTruthy())
+  test('a list the host stopped early says some posts may be missing', async () => {
+    const tree = open(withPosts([post('a', 'x')], { complete: false }))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsIncomplete'))).toBeTruthy())
   })
 
-  test("notes that couldn't be read say so, and the room still shows", async () => {
-    mockService = withNotes(new Error('host down'))
-    mockParams = { roomId: 'did:webvh:r:one' }
-    const tree = show()
-    await waitFor(() => expect(tree.getByTestId(id('RoomNotesFailed'))).toBeTruthy())
+  test("posts that couldn't be listed say so, and the room still shows", async () => {
+    const tree = open(withPosts(new Error('host down')))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsFailed'))).toBeTruthy())
     expect(tree.getByTestId(id('RoomTitle'))).toHaveTextContent('One')
-    expect(tree.getByTestId(id('RoomFilesNone'))).toBeTruthy()
-  })
-
-  test('a note with no title visible to the host is "Encrypted note", never its key', async () => {
-    mockService = withNotes({ notes: [{ key: 'k-opaque-123', version: 1, status: 'active', pinned: false }] })
-    mockParams = { roomId: 'did:webvh:r:one' }
-    const tree = show()
-    await waitFor(() => expect(tree.getByText('Rooms.NoteEncrypted')).toBeTruthy())
-    expect(tree.queryByText(/k-opaque-123/)).toBeNull()
   })
 })
 
 describe('reaching a room', () => {
   test("a room that couldn't be read says so and offers to try again", async () => {
     let fail = true
-    const service = withNotes({})
+    const service = withPosts([])
     const getRoom = service.getRoom
     service.getRoom = async (roomId: string) => {
       if (fail) throw new Error('down')
       return getRoom(roomId)
     }
-    mockService = service
-    mockParams = { roomId: 'did:webvh:r:one' }
-    const tree = show()
+    const tree = open(service)
     await waitFor(() => expect(tree.getByTestId(id('RoomReadFailed'))).toBeTruthy())
     fail = false
     fireEvent.press(tree.getByTestId(id('RoomTryAgain')))

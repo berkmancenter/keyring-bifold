@@ -2895,6 +2895,13 @@
     "NoteRetracted": "Retracted",
     "NoteOutdated": "Outdated",
     "NoteByAgentFor": "Posted by an agent for {{who}}",
-    "NotePinned": "Pinned"
+    "NotePinned": "Pinned",
+    "You": "You",
+    "AgentBadge": "AI agent",
+    "PostRemoved": "Removed",
+    "PostUnread": "This post couldn't be read.",
+    "PostsFailed": "Couldn't read this room's posts. Pull down to try again.",
+    "PostsNone": "No posts yet.",
+    "LoadOlder": "Load older posts"
   }
 }

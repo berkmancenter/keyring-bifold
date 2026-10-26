@@ -2843,6 +2843,13 @@
     "NoteRetracted": "Retirée",
     "NoteOutdated": "Obsolète",
     "NoteByAgentFor": "Publiée par un agent pour {{who}}",
-    "NotePinned": "Épinglée"
+    "NotePinned": "Épinglée",
+    "You": "Vous",
+    "AgentBadge": "Agent IA",
+    "PostRemoved": "Retiré",
+    "PostUnread": "Ce message n'a pas pu être lu.",
+    "PostsFailed": "Impossible de lire les messages de ce salon. Tirez vers le bas pour réessayer.",
+    "PostsNone": "Aucun message pour l'instant.",
+    "LoadOlder": "Charger les messages plus anciens"
   }
 }
