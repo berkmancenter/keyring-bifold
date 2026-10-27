@@ -136,7 +136,9 @@ export class MainContainer implements Container {
     // A wallet backup shared from Export Wallet is left under the caches for its share target; a day is enough.
     sweepStaleWalletBackupsAtStart()
     // Before any agent opens its store: askar-shared 0.6.0's Scan leaks each query's native result list.
-    this.log?.info(`Askar scan list free: ${installAskarScanListFree()}`)
+    // Installed first, outside the optional log call, so a container built without a logger still installs it.
+    const askarScanFix = installAskarScanListFree()
+    this.log?.info(`Askar scan list free: ${askarScanFix}`)
 
     this._container.registerInstance(TOKENS.SCREEN_PREFACE, Preface)
     this._container.registerInstance(TOKENS.SCREEN_DEVELOPER, Developer)
