@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "4f32e50deab23dfab12e4ca803896b9b72253d69",
+  "generatedFrom": "bf46c37a26e565c1631595acff0502f11feacfc1",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -927,6 +927,15 @@
     "RoomHeader": ["src/modules/rooms/screens/Room.tsx"],
     "RoomHostConflict": ["src/modules/rooms/screens/Room.tsx"],
     "RoomLoadOlder": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomMembers": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersCaption": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersFailed": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersLeave": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersList": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersNone": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersReading": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersUnavailable": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMembersYourAccess": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomNotePinned": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNoteRemoved": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNoteUnread": ["src/modules/rooms/components/RoomNoteCard.tsx"],
@@ -972,6 +981,7 @@
     "RoomScreen": ["src/modules/rooms/screens/Room.tsx"],
     "RoomTabChat": ["src/modules/rooms/components/RoomTabs.tsx"],
     "RoomTabFiles": ["src/modules/rooms/components/RoomTabs.tsx"],
+    "RoomTabMembers": ["src/modules/rooms/components/RoomTabs.tsx"],
     "RoomTabNotes": ["src/modules/rooms/components/RoomTabs.tsx"],
     "RoomTabs": ["src/modules/rooms/components/RoomTabs.tsx"],
     "RoomTier": ["src/modules/rooms/components/TierBadge.tsx"],
@@ -1372,6 +1382,7 @@
     "RequestsSwitch_": ["src/modules/trust-tasks/screens/OtherAgentsRequests.tsx"],
     "RoomFileChip_": ["src/modules/rooms/components/RoomFileChip.tsx"],
     "RoomFileRow_": ["src/modules/rooms/components/RoomListRows.tsx"],
+    "RoomMember_": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomName_": ["src/modules/rooms/components/RoomRow.tsx"],
     "RoomNoteRow_": ["src/modules/rooms/components/RoomListRows.tsx"],
     "RoomNote_": ["src/modules/rooms/components/RoomNoteCard.tsx"],
@@ -1512,6 +1523,9 @@
     },
     {
       "src/modules/chat/emoji/EmojiPickerSheet.tsx": "EmojiPickerIds.sheetClose"
+    },
+    {
+      "src/modules/rooms/components/RoomMembersTab.tsx": "testID"
     },
     {
       "src/modules/rooms/components/RoomTabs.tsx": "TEST_ID[tab]"

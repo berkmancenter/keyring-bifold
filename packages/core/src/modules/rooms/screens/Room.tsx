@@ -9,13 +9,14 @@
  * may not post, the composer gives the reason instead. A post's files show as chips; a tap opens the attachment sheet
  * (download, then share), and "+" posts one.
  *
- * Under the header, the room's parts as tabs (data rooms mock): Chat; Files, the room's library; and Notes, its
- * titled records and the markers of removed ones, which the chat leaves out. Reached only while the rooms flag is on.
+ * Under the header, the room's parts as tabs (data rooms mock): Chat; Files, the room's library; Notes, its titled
+ * records and the markers of removed ones, which the chat leaves out; and Members, the member's own access and the
+ * community's list. Reached only while the rooms flag is on.
  *
  * @module rooms/screens/Room
  */
 import { useHeaderHeight } from '@react-navigation/elements'
-import { useRoute } from '@react-navigation/native'
+import { useNavigation, useRoute } from '@react-navigation/native'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -34,11 +35,13 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { DayPill } from '../../../components/chat/DayPill'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { Screens } from '../../../types/navigators'
 import { localDayKey } from '../../../utils/localDay'
 import { testIdWithKey } from '../../../utils/testable'
 import { RoomComposer } from '../components/RoomComposer'
 import { RoomFileSheet } from '../components/RoomFileSheet'
 import { RoomFilesTab } from '../components/RoomFilesTab'
+import { RoomMembersTab } from '../components/RoomMembersTab'
 import { RoomNotesTab } from '../components/RoomNotesTab'
 import { RoomPostBubble } from '../components/RoomPostBubble'
 import { roomTitle } from '../components/RoomRow'
@@ -104,6 +107,7 @@ const Room: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const roomId = (useRoute()?.params as { roomId?: string } | undefined)?.roomId ?? ''
+  const navigation = useNavigation() as unknown as { navigate: (name: string, params: object) => void }
   const service = useRoomsService()
   // The keyboard rises from the screen's bottom, under a navigation header: offset by the header, as the chat does.
   const headerHeight = useHeaderHeight()
@@ -240,7 +244,19 @@ const Room: React.FC = () => {
           <ThemedText style={styles.warnText}>{t('Rooms.HostConflict')}</ThemedText>
         </View>
       ) : null}
-      <RoomTabs tabs={['chat', 'files', 'notes']} selected={tab} onSelect={showTab} />
+      <RoomTabs tabs={['chat', 'files', 'notes', 'members']} selected={tab} onSelect={showTab} />
+      {tab === 'members' ? (
+        <RoomMembersTab
+          service={service}
+          room={room}
+          status={roomCapabilities.listCommunityMembers}
+          onLeave={
+            room.communityDid
+              ? () => navigation.navigate(Screens.VtiCommunity, { communityDid: room.communityDid })
+              : undefined
+          }
+        />
+      ) : null}
       {tab === 'notes' ? (
         <RoomNotesTab
           notes={notes}
