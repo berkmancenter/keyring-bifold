@@ -33,7 +33,12 @@ import { DeviceEventEmitter } from 'react-native'
 import { VTI_PERSONA_DELIVERIES_EVENT } from './communityChanged'
 import { listKeyed, putKeyed } from './keyedRecords'
 import { vtaAgent } from './vtaAgent'
-import { GenericRecordsCommunityStore, isCurrentMembership, type VtiCommunityStore } from './VtiCommunityStore'
+import {
+  GenericRecordsCommunityStore,
+  heldCredentialKey,
+  isCurrentMembership,
+  type VtiCommunityStore,
+} from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import { checkDeliveredCard, VtiCardStatusUnreadable } from './vtiDeliveredCheck'
 import { classifyCredential, roleNameOf } from './vtiInbox'
@@ -203,16 +208,72 @@ export type RecoveredRefusal = {
   reason: 'failedCheck' | 'notOurs' | 'unreadable'
 }
 
+/** A card the agent keeps, as fetched: no `credential` when the vault did not give it back. */
+export interface AgentCard {
+  id: string
+  credential?: Record<string, unknown>
+}
+
 /**
- * Fetch what the agent keeps for this persona and keep, on this phone, each
- * card that is about the persona and still holds up (vtiDeliveredCheck). The
- * vault answers only a filtered query, never a list of everything. It is asked
- * by purpose, which the vault's receive infers from the card's type names
+ * The queries that find every community card the agent keeps. The vault
+ * answers only a filtered query, never a list of everything. It is asked by
+ * purpose, which the vault's receive infers from the card's type names
  * (vta-vault receive.rs `infer_purpose`: invitation, membership, role,
  * endorsement, personhood), and by type for what that leaves out: a DTG
  * Credentials v1 role card is an `AuthorityCredential`, which no purpose
  * matches, so it was never asked for and never came back on a new phone.
- * Every card is fetched once, whichever query found it.
+ */
+export const AGENT_CARD_QUERIES: Record<string, string>[] = [
+  { purpose: 'membership' },
+  { purpose: 'role' },
+  { purpose: 'endorsement' },
+  { type: 'AuthorityCredential' },
+]
+
+/**
+ * Every community card the agent keeps, each fetched once, whichever query
+ * found it. The vault cannot be asked for one identity's cards (its query has
+ * no subject filter, and what it answers names no subject), so a run that
+ * reads it for several identities reads it once and sorts the cards by
+ * subject: read per identity, every card was fetched once per identity (#401
+ * Farm run, 4 identities on an agent keeping 88 cards: 352 fetches, 164 s).
+ * A query the agent does not answer throws; a card it does not give back is
+ * returned without its credential. `onRead` hears how many cards there are as
+ * soon as the queries answer, then each one read: the reads are most of a
+ * run's time (#401 re-time: 88 cards, ~40 s), and a count that sat at 0 for
+ * all of it read as stuck.
+ */
+export async function fetchAgentCards(
+  task: VaultTask,
+  onRead?: (read: number, of: number) => void
+): Promise<AgentCard[]> {
+  const ids = new Set<string>()
+  for (const query of AGENT_CARD_QUERIES) {
+    const answer = await task<{ credentials?: { id?: string }[] }>(VAULT_QUERY, query)
+    for (const d of answer?.credentials ?? []) if (typeof d.id === 'string' && d.id) ids.add(d.id)
+  }
+  const cards: AgentCard[] = []
+  onRead?.(0, ids.size)
+  for (const id of ids) {
+    const got = await task<{ credential?: Record<string, unknown> }>(VAULT_GET, { id }).catch(() => undefined)
+    cards.push({ id, credential: got?.credential })
+    onRead?.(cards.length, ids.size)
+  }
+  return cards
+}
+
+/** The same card: its id, or its content when it has none (as held credentials are keyed). */
+const sameCard = (held: Record<string, unknown> | undefined, card: Record<string, unknown>) =>
+  !!held &&
+  heldCredentialKey({ kind: 'other', communityDid: '', credential: held }) ===
+    heldCredentialKey({ kind: 'other', communityDid: '', credential: card })
+
+/**
+ * Keep, on this phone, each card the agent keeps that is about this persona
+ * and still holds up (vtiDeliveredCheck). `cards` are the agent's cards
+ * already fetched (`fetchAgentCards`); without them the vault is read here.
+ * A card this phone already holds is not saved again: it is `already`, not
+ * `restored`, so a tap that brings nothing new says so.
  */
 export async function recoverCardsFromAgent(
   agent: Agent,
@@ -222,26 +283,16 @@ export async function recoverCardsFromAgent(
   options: {
     onProgress?: (p: { found: number; restored: number }) => void
     check?: (credential: Record<string, unknown>, issuer: string) => Promise<string | undefined>
+    cards?: AgentCard[]
   } = {}
-): Promise<{ found: number; restored: string[]; refused: RecoveredRefusal[] }> {
+): Promise<{ found: number; restored: string[]; already: string[]; refused: RecoveredRefusal[] }> {
   const check = options.check ?? ((c, issuer) => checkDeliveredCard(agent, c, issuer))
-  const ids = new Set<string>()
-  const queries: Record<string, string>[] = [
-    { purpose: 'membership' },
-    { purpose: 'role' },
-    { purpose: 'endorsement' },
-    { type: 'AuthorityCredential' },
-  ]
-  for (const query of queries) {
-    const answer = await task<{ credentials?: { id?: string }[] }>(VAULT_QUERY, query)
-    for (const d of answer?.credentials ?? []) if (typeof d.id === 'string' && d.id) ids.add(d.id)
-  }
+  const cards = options.cards ?? (await fetchAgentCards(task))
   const restored: string[] = []
+  const already: string[] = []
   const refused: RecoveredRefusal[] = []
-  options.onProgress?.({ found: ids.size, restored: 0 })
-  for (const id of ids) {
-    const got = await task<{ credential?: Record<string, unknown> }>(VAULT_GET, { id }).catch(() => undefined)
-    const credential = got?.credential
+  options.onProgress?.({ found: cards.length, restored: 0 })
+  for (const { id, credential } of cards) {
     if (!credential) {
       refused.push({ credentialId: id, reason: 'unreadable' })
       continue
@@ -261,29 +312,40 @@ export async function recoverCardsFromAgent(
       refused.push({ credentialId: id, communityDid: item.communityDid, reason: 'failedCheck' })
       continue
     }
+    let held = false
     if (item.kind === 'membership') {
       const found = await store.getMembership(item.communityDid, persona.did)
       // The very card the community ended does not bring the membership back.
       if (found && !isCurrentMembership(found) && found.vmc?.id === credential.id) continue
       // A membership the community ended lends nothing to a new one.
       const existing = found && isCurrentMembership(found) ? found : undefined
-      await store.saveMembership({
-        communityDid: item.communityDid,
-        personaDid: persona.did,
-        role: existing?.role ?? 'member',
-        vmc: credential,
-        roleVec: existing?.roleVec,
-        grantedAt: typeof credential.validFrom === 'string' ? credential.validFrom : new Date().toISOString(),
-        validUntil: typeof credential.validUntil === 'string' ? credential.validUntil : undefined,
-        via: existing?.via ?? 'unknown',
-      })
+      held = sameCard(existing?.vmc, credential)
+      if (!held)
+        await store.saveMembership({
+          communityDid: item.communityDid,
+          personaDid: persona.did,
+          role: existing?.role ?? 'member',
+          vmc: credential,
+          roleVec: existing?.roleVec,
+          grantedAt: typeof credential.validFrom === 'string' ? credential.validFrom : new Date().toISOString(),
+          validUntil: typeof credential.validUntil === 'string' ? credential.validUntil : undefined,
+          via: existing?.via ?? 'unknown',
+        })
     } else if (item.kind === 'role') {
       const existing = await store.getMembership(item.communityDid, persona.did)
       const role = String(roleNameOf(credential) ?? 'member')
-      if (existing) await store.saveMembership({ ...existing, role, roleVec: credential })
-      else await store.saveHeldCredential({ ...item, kind: 'role' })
+      held = existing
+        ? sameCard(existing.roleVec, credential)
+        : (await store.listHeldCredentials('role', item.communityDid)).some((c) => sameCard(c.credential, credential))
+      if (!held) {
+        if (existing) await store.saveMembership({ ...existing, role, roleVec: credential })
+        else await store.saveHeldCredential({ ...item, kind: 'role' })
+      }
     } else if (item.kind === 'vetter-grant') {
-      await store.saveHeldCredential({ ...item, kind: 'vetter-grant' })
+      held = (await store.listHeldCredentials('vetter-grant', item.communityDid)).some((c) =>
+        sameCard(c.credential, credential)
+      )
+      if (!held) await store.saveHeldCredential({ ...item, kind: 'vetter-grant' })
     } else {
       refused.push({ credentialId: id, communityDid: item.communityDid, reason: 'notOurs' })
       continue
@@ -295,10 +357,14 @@ export async function recoverCardsFromAgent(
       kind,
       vault: { state: 'kept', at: new Date().toISOString() },
     })
+    if (held) {
+      already.push(id)
+      continue
+    }
     restored.push(id)
-    options.onProgress?.({ found: ids.size, restored: restored.length })
+    options.onProgress?.({ found: cards.length, restored: restored.length })
   }
-  return { found: ids.size, restored, refused }
+  return { found: cards.length, restored, already, refused }
 }
 
 // ---------------------------------------------------------------------------
