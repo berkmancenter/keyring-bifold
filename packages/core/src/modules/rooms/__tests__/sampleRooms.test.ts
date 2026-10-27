@@ -1,5 +1,5 @@
 import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsUnavailable } from '../types'
-import { createSampleRoomsService, ROOMS_SAMPLE_DATA } from '../sample/sampleRooms'
+import { createSampleRoomsService, ROOMS_SAMPLE_DATA, SAMPLE_CONTEXT } from '../sample/sampleRooms'
 
 const PLANNING = 'did:webvh:sample:planning'
 
@@ -106,16 +106,20 @@ describe('the sample rooms service', () => {
     expect(custody.name.length).toBeGreaterThan(0)
   })
 
-  it('grants and withdraws an agent’s access', async () => {
+  it('grants and withdraws an agent’s access per persona context, never per room', async () => {
     const rooms = createSampleRoomsService()
     const grant = await rooms.grantAgentAccess({
-      roomId: PLANNING,
       agentDid: 'did:key:sample-agent',
-      verbs: ['read'],
+      contextId: SAMPLE_CONTEXT,
+      capabilities: ['roomPresent'],
       expiresAt: '2026-10-25T16:00:00Z',
     })
-    expect(await rooms.listAgentAccess(PLANNING)).toHaveLength(1)
+    expect(grant).toMatchObject({ contextId: SAMPLE_CONTEXT, capabilities: ['roomPresent'] })
+    expect(String(grant.contextLabel)).toBe('Test VTC')
+    expect(grant).not.toHaveProperty('roomId')
+    expect(await rooms.listAgentAccess(SAMPLE_CONTEXT)).toHaveLength(1)
+    expect(await rooms.listAgentAccess('another-context')).toEqual([])
     await rooms.withdrawAgentAccess(grant.grantId)
-    expect(await rooms.listAgentAccess(PLANNING)).toEqual([])
+    expect(await rooms.listAgentAccess()).toEqual([])
   })
 })

@@ -198,7 +198,7 @@ describe('ContactDetails Screen', () => {
     const { findByText } = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
 
     await waitFor(async () => {
-      expect(await findByText('ContactDetails.ViewMessages')).toBeTruthy()
+      expect(await findByText('ContactDetails.QuickMessage')).toBeTruthy()
     })
   })
 
@@ -231,17 +231,20 @@ describe('ContactDetails Screen', () => {
     })
     expect(await findByTestId(testIdWithKey('RelationshipUpgrade'))).toBeTruthy()
     expect(getByTestId(testIdWithKey('RelationshipUpgradeResign'))).toBeTruthy()
-    expect(getByTestId(testIdWithKey('RelationshipLayers'))).toHaveTextContent(/Relationship\.LayerCards/)
+    expect(getByTestId(testIdWithKey('RelationshipLayers'))).toHaveTextContent(/Relationship\.DayCards/)
   })
 
-  test('offers nothing to add to without a connection', async () => {
+  // Without a connection nothing can be added to: the actions are shown disabled, with why, never hidden.
+  test('without a connection, the actions are shown disabled and say why', async () => {
     mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue(null)
     const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-    const { findByText, queryByTestId } = render(<ContactDetails {...createRouteParams(contact)} />, {
+    const { findByText, getByTestId } = render(<ContactDetails {...createRouteParams(contact)} />, {
       wrapper: TestContainerWrapper,
     })
     expect(await findByText('Alice Smith')).toBeTruthy()
-    expect(queryByTestId(testIdWithKey('RelationshipUpgrade'))).toBeNull()
+    expect(getByTestId(testIdWithKey('RelationshipUpgradeResign')).props.accessibilityState?.disabled).toBe(true)
+    expect(getByTestId(testIdWithKey('RelationshipUpgradeWitness')).props.accessibilityState?.disabled).toBe(true)
+    expect(await findByText('Relationship.NoRelationship')).toBeTruthy()
   })
 
   test('Disables View Messages button when no connection exists', async () => {
@@ -256,7 +259,7 @@ describe('ContactDetails Screen', () => {
     })
 
     await waitFor(() => {
-      const button = getByLabelText('ContactDetails.ViewMessages')
+      const button = getByLabelText('ContactDetails.QuickMessage')
       expect(button).toBeTruthy()
       expect(button.props.accessibilityState?.disabled).toBe(true)
     })
@@ -278,7 +281,7 @@ describe('ContactDetails Screen', () => {
     })
 
     await waitFor(() => {
-      const button = getByLabelText('ContactDetails.ViewMessages')
+      const button = getByLabelText('ContactDetails.QuickMessage')
       expect(button).toBeTruthy()
       expect(button.props.accessibilityState?.disabled).toBe(true)
     })
@@ -299,7 +302,7 @@ describe('ContactDetails Screen', () => {
     const { findByText } = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
 
     await waitFor(async () => {
-      const viewMessagesButton = await findByText('ContactDetails.ViewMessages')
+      const viewMessagesButton = await findByText('ContactDetails.QuickMessage')
       fireEvent.press(viewMessagesButton)
 
       expect(mockNavigate).toHaveBeenCalledWith('Chat', { connectionId })
@@ -331,7 +334,7 @@ describe('ContactDetails Screen', () => {
 
     await waitFor(() => {
       // Button should be visible but disabled after error
-      const button = getByLabelText('ContactDetails.ViewMessages')
+      const button = getByLabelText('ContactDetails.QuickMessage')
       expect(button).toBeTruthy()
       expect(button.props.accessibilityState?.disabled).toBe(true)
     })
@@ -366,7 +369,7 @@ describe('ContactDetails Screen', () => {
 
     await waitFor(async () => {
       // Should display email label
-      expect(await findByText('Email')).toBeTruthy()
+      expect(await findByText('ContactDetails.Email')).toBeTruthy()
       // Should display email value
       expect(await findByText('alice@example.com')).toBeTruthy()
     })
@@ -382,9 +385,7 @@ describe('ContactDetails Screen', () => {
     const { findByText } = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
 
     await waitFor(async () => {
-      // Should display organisation label
-      expect(await findByText('Organisation')).toBeTruthy()
-      // Should display organisation value
+      // The organisation shows under the name, without a label
       expect(await findByText('Tech Corp')).toBeTruthy()
     })
   })
@@ -406,7 +407,7 @@ describe('ContactDetails Screen', () => {
       // Should display organization
       expect(await findByText('Wilson Industries')).toBeTruthy()
       // Should NOT display email (charlie doesn't have email)
-      expect(queryByText('Email')).toBeNull()
+      expect(queryByText('ContactDetails.Email')).toBeNull()
     })
   })
 
@@ -426,8 +427,8 @@ describe('ContactDetails Screen', () => {
       expect(await findByText('Bob Jones')).toBeTruthy()
       // Should display email
       expect(await findByText('bob@example.org')).toBeTruthy()
-      // Should NOT display organisation (bob doesn't have organisation)
-      expect(queryByText('Organisation')).toBeNull()
+      // Should NOT display an organisation (bob doesn't have one): only the name, the email and the actions' words
+      expect(queryByText(/Tech Corp|Wilson Industries/)).toBeNull()
     })
   })
 
@@ -448,8 +449,8 @@ describe('ContactDetails Screen', () => {
       // The DID is behind Details (#12)
       expect(queryByText(TEST_CONTACTS.diana.issuer.id)).toBeNull()
       // Should NOT display email or organization sections
-      expect(queryByText('Email')).toBeNull()
-      expect(queryByText('Organisation')).toBeNull()
+      expect(queryByText('ContactDetails.Email')).toBeNull()
+      expect(queryByText(/Tech Corp|Wilson Industries/)).toBeNull()
     })
   })
 
@@ -506,7 +507,7 @@ describe('ContactDetails Screen', () => {
     await waitFor(() => {
       expect(mockRepository.findByCounterpartyRelationshipDid).not.toHaveBeenCalled()
       // Button should be visible but disabled when agent is undefined
-      const button = getByLabelText('ContactDetails.ViewMessages')
+      const button = getByLabelText('ContactDetails.QuickMessage')
       expect(button).toBeTruthy()
       expect(button.props.accessibilityState?.disabled).toBe(true)
     })
@@ -529,12 +530,16 @@ describe('ContactDetails Screen', () => {
     })
 
     await waitFor(() => {
-      const button = getByLabelText('ContactDetails.ViewMessages')
+      const button = getByLabelText('ContactDetails.QuickMessage')
       expect(button.props.accessibilityRole).toBe('button')
     })
   })
 
   describe('locality confirmation', () => {
+    // The witness record's lines are in its day's sheet (How you know them), opened with a tap.
+    const openDay = (tree: { getAllByTestId: (id: string) => unknown[] }) =>
+      fireEvent.press(tree.getAllByTestId(testIdWithKey('RelationshipLayer'))[0] as never)
+
     test('shows the In-Person badge and a Confirmed record line for a confirmed-locality VWC', async () => {
       mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue(null)
       const vwc = createLocalityVwc(TEST_CONTACTS.alice.issuer.id, {
@@ -547,15 +552,16 @@ describe('ContactDetails Screen', () => {
       } as any)
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { findByTestId, findByText } = render(<ContactDetails {...createRouteParams(contact)} />, {
+      const tree = render(<ContactDetails {...createRouteParams(contact)} />, {
         wrapper: TestContainerWrapper,
       })
 
       await waitFor(async () => {
-        expect(await findByTestId('LocalityConfirmedBadge')).toBeTruthy()
-        expect(await findByText('In-Person')).toBeTruthy()
-        expect(await findByText('Confirmed — ATL, Room 2')).toBeTruthy()
+        expect(await tree.findByTestId('LocalityConfirmedBadge')).toBeTruthy()
+        expect(await tree.findByText('ContactDetails.BadgeInPerson')).toBeTruthy()
       })
+      openDay(tree)
+      expect(tree.getByText('Relationship.DayLocationConfirmed · ATL, Room 2')).toBeTruthy()
     })
 
     test('does not show the badge, and shows a Declined record line, when the holder declined locality', async () => {
@@ -570,14 +576,14 @@ describe('ContactDetails Screen', () => {
       } as any)
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { queryByTestId, findByText } = render(<ContactDetails {...createRouteParams(contact)} />, {
+      const tree = render(<ContactDetails {...createRouteParams(contact)} />, {
         wrapper: TestContainerWrapper,
       })
 
-      await waitFor(async () => {
-        expect(queryByTestId('LocalityConfirmedBadge')).toBeNull()
-        expect(await findByText('Declined')).toBeTruthy()
-      })
+      await tree.findByTestId(testIdWithKey('RelationshipLayer'))
+      expect(tree.queryByTestId('LocalityConfirmedBadge')).toBeNull()
+      openDay(tree)
+      expect(tree.getByText('Relationship.DayLocationDeclined')).toBeTruthy()
     })
 
     test('shows an Interrupted record line when the ceremony window was lost, not Declined', async () => {
@@ -592,14 +598,14 @@ describe('ContactDetails Screen', () => {
       } as any)
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { findByText, queryByText } = render(<ContactDetails {...createRouteParams(contact)} />, {
+      const tree = render(<ContactDetails {...createRouteParams(contact)} />, {
         wrapper: TestContainerWrapper,
       })
 
-      await waitFor(async () => {
-        expect(await findByText('Interrupted')).toBeTruthy()
-        expect(queryByText('Declined')).toBeNull()
-      })
+      await tree.findByTestId(testIdWithKey('RelationshipLayer'))
+      openDay(tree)
+      expect(tree.getByText('Relationship.DayLocationInterrupted')).toBeTruthy()
+      expect(tree.queryByText('Relationship.DayLocationDeclined')).toBeNull()
     })
 
     test('shows neither the badge nor a record line for a witness that never offered locality', async () => {
@@ -610,17 +616,18 @@ describe('ContactDetails Screen', () => {
       } as any)
 
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
-      const { queryByTestId, queryByText, findByText } = render(<ContactDetails {...createRouteParams(contact)} />, {
+      const tree = render(<ContactDetails {...createRouteParams(contact)} />, {
         wrapper: TestContainerWrapper,
       })
 
-      await waitFor(async () => {
-        // Still shows the Witnessed badge/section (a VWC exists) —
-        // just no locality-specific indicator anywhere.
-        expect(await findByText('Verified')).toBeTruthy()
-        expect(queryByTestId('LocalityConfirmedBadge')).toBeNull()
-        expect(queryByText('Locality Verification')).toBeNull()
-      })
+      // Still shows the Witnessed badge and section (a VWC exists), just no locality-specific indicator anywhere.
+      expect(await tree.findByText('ContactDetails.BadgeVerified')).toBeTruthy()
+      expect(tree.getByTestId('WitnessSection')).toBeTruthy()
+      expect(tree.queryByTestId('LocalityConfirmedBadge')).toBeNull()
+      // Its day's sheet has the witness's record (a positive control), and no location check line.
+      openDay(tree)
+      expect(tree.getByTestId('WitnessRecord')).toBeTruthy()
+      expect(tree.queryByText('Relationship.DayLocationCheck')).toBeNull()
     })
   })
 
@@ -649,7 +656,7 @@ describe('ContactDetails Screen', () => {
         expect(await findByText('Alice Smith')).toBeTruthy()
         expect(queryByTestId('WitnessedBadge')).toBeNull()
         expect(queryByTestId('LocalityConfirmedBadge')).toBeNull()
-        expect(queryByText('In-Person')).toBeNull()
+        expect(queryByText('ContactDetails.BadgeInPerson')).toBeNull()
         expect(queryByText('Confirmed — ATL, Room 2')).toBeNull()
       })
     })
@@ -688,6 +695,19 @@ describe('ContactDetails Screen', () => {
         expect(avatar.props.source).toEqual({ uri: photo })
         expect(await findByTestId('LinkedProfileCard')).toBeTruthy()
       })
+    })
+
+    // The default profile's name is stored as data ("My Profile"): shown in the app's language, never as stored.
+    test('a profile still under its default name shows the default name in the app language', async () => {
+      const profile = buildRCardTemplate({ firstName: 'Jane', lastName: 'Doe', email: '', organization: '' })
+      expect(profile.label).toBe('My Profile')
+      mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue({ sharedProfileId: profile.id })
+
+      const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
+      const { findByText, queryByText } = renderWithProfiles(contact, [profile])
+
+      expect(await findByText('MyProfiles.DefaultLabel')).toBeTruthy()
+      expect(queryByText('My Profile')).toBeNull()
     })
 
     test('falls back to the share-time label snapshot, with no photo, when the linked profile no longer exists', async () => {

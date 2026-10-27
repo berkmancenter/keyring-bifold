@@ -33,6 +33,8 @@ import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsUnavaila
 export const ROOMS_SAMPLE_DATA = 'ROOMS_SAMPLE_DATA: sample rooms, never in a store build'
 
 const COMMUNITY = { did: 'did:webvh:sample:test-vtc', name: toInertText('Test VTC') }
+/** The persona context the sample's agent grants cover (upstream scopes an agent by context). */
+export const SAMPLE_CONTEXT = 'sample-test-vtc'
 const ME: Identity = { identityWords: '…negative-weird', did: 'did:peer:2.sample-me' }
 const RIVER: Identity = { identityWords: '…river-stone', did: 'did:peer:2.sample-river' }
 const TERM: Identity = { identityWords: '…term-benefit', did: 'did:peer:2.sample-term' }
@@ -325,16 +327,17 @@ export function createSampleRoomsService(options: { now?: () => number } = {}): 
         'only the community’s administrators see the list'
       )
     },
-    async listAgentAccess(roomId) {
-      return state.grants.filter((g) => !roomId || g.roomId === roomId)
+    async listAgentAccess(contextId) {
+      return state.grants.filter((g) => !contextId || g.contextId === contextId)
     },
     async grantAgentAccess(request: AgentGrantRequest) {
       const grant: AgentGrant = {
         grantId: `g${nextToken++}`,
-        roomId: request.roomId,
-        agentLabel: toInertText('Sample assistant'),
         agentDid: request.agentDid,
-        verbs: request.verbs,
+        agentLabel: toInertText('Sample assistant'),
+        contextId: request.contextId,
+        contextLabel: request.contextId === SAMPLE_CONTEXT ? COMMUNITY.name : undefined,
+        capabilities: request.capabilities,
         expiresAt: request.expiresAt,
       }
       state.grants.push(grant)

@@ -1,13 +1,19 @@
 import { DidCommConnectionType, DidCommDidExchangeState } from '@credo-ts/didcomm'
 import { useConnections } from '@bifold/react-hooks'
+import { useIsFocused } from '@react-navigation/native'
 import { StackNavigationProp } from '@react-navigation/stack'
-import React, { useCallback, useEffect, useSyncExternalStore } from 'react'
+import React, { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native'
 
 import IconButton, { ButtonLocation } from '../components/buttons/IconButton'
 import EmptyListConnections from '../modules/vrc/components/EmptyListConnections'
 import { useStore } from '../contexts/store'
+import { useConnectionActivity } from '../hooks/useConnectionActivity'
+import { useUnreadMessages } from '../hooks/useUnreadMessages'
+import { messageRows } from '../modules/vrc/contacts/messageRows'
+import { useConnectionRelationships } from '../modules/vrc/contacts/useContactFacts'
+import { useContactLinks } from '../modules/vrc/contacts/useContactLinks'
 import { useTheme } from '../contexts/theme'
 import { MessageStackParams, Screens, Stacks } from '../types/navigators'
 import { messageWakeFetching, useReportMessagesListFocus } from '../utils/messageWake'
@@ -35,17 +41,37 @@ const Messages: React.FC<MessagesProps> = ({ navigation }) => {
     TOKENS.OBJECT_SCREEN_CONFIG,
   ])
 
-  // Filter connections to show peer-to-peer and witness connections (not infrastructure)
-  const connections = connectionRecords.filter((r) => {
-    const isMediatorConnection = r.connectionTypes.includes(DidCommConnectionType.Mediator)
-    const isHidden = contactHideList?.includes((r.theirLabel || r.alias) ?? '')
-    const isCompleted = r.state === DidCommDidExchangeState.Completed
+  // People and witnesses only: never the mediator or another hidden connection, never one not yet completed. The
+  // same in developer mode: a conversation list is not where infrastructure is inspected.
+  const connections = useMemo(
+    () =>
+      connectionRecords.filter((r) => {
+        const isMediatorConnection = r.connectionTypes.includes(DidCommConnectionType.Mediator)
+        const isHidden = contactHideList?.includes((r.theirLabel || r.alias) ?? '')
+        const isCompleted = r.state === DidCommDidExchangeState.Completed
+        return !isMediatorConnection && !isHidden && isCompleted
+      }),
+    [connectionRecords, contactHideList]
+  )
 
-    if (!store.preferences.developerModeEnabled) {
-      return !isMediatorConnection && !isHidden && isCompleted
-    }
-    return true
-  })
+  // One row per contact, as the Contacts list groups them (a merged contact has a connection per exchange). Re-read
+  // the links on focus, so a merge or separation made on a contact's page shows on return.
+  const isFocused = useIsFocused()
+  const contactLinks = useContactLinks(isFocused)
+  const relationshipOf = useConnectionRelationships()
+  const activity = useConnectionActivity()
+  const { unreadByConnection } = useUnreadMessages()
+  const rows = useMemo(
+    () =>
+      messageRows(
+        connections,
+        relationshipOf,
+        contactLinks,
+        (connection) => activity(connection.id, connection.createdAt),
+        (connection) => unreadByConnection[connection.id] ?? 0
+      ),
+    [connections, relationshipOf, contactLinks, activity, unreadByConnection]
+  )
 
   // Only show empty state if we have data but no connections (not during initial load)
   const shouldShowEmptyState = connectionRecords.length > 0 && connections.length === 0
@@ -97,10 +123,12 @@ const Messages: React.FC<MessagesProps> = ({ navigation }) => {
       <FlatList
         style={style.list}
         contentContainerStyle={{ flexGrow: 1 }}
-        data={connections}
+        data={rows}
         ItemSeparatorComponent={() => <View style={style.itemSeparator} />}
-        keyExtractor={(connection) => connection.id}
-        renderItem={({ item: connection }) => <ContactListItem contact={connection} navigation={navigation as any} />}
+        keyExtractor={(row) => row.key}
+        renderItem={({ item: row }) => (
+          <ContactListItem contact={row.connection} connectionIds={row.connectionIds} navigation={navigation as any} />
+        )}
         ListEmptyComponent={() =>
           shouldShowEmptyState ? <EmptyListConnections navigation={navigation as any} /> : null
         }
