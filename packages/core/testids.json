@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "dc9d0481f19fae8a5dbe7eeffe2a443395034e6f",
+  "generatedFrom": "b48f63bd2b75d06998f265f19801c9771e8b94d9",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -89,9 +89,12 @@
     "AgentGetAgentToggle": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "AgentGetCards": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsButton": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
+    "AgentGetCardsCommunities": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsHint": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
+    "AgentGetCardsNoCommunities": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsProgress": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGetCardsResult": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
+    "AgentGetCardsUnreadableIdentities": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
     "AgentGone": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentGoneLinkNew": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentGoneTryAgain": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
