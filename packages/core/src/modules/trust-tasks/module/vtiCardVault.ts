@@ -249,6 +249,10 @@ const cardReads = new Map<string, Record<string, unknown>>()
 export function forgetCardReads(): void {
   cardReads.clear()
 }
+// Registered when this module loads and never removed, unlike this file's other listeners, and on purpose. A
+// release build inlines requires, so it runs only once something first uses this module, but cardReads lives
+// here too: before then there is nothing to forget. Keep it here rather than in RootStack. A test that resets
+// modules around this file would add a listener per load.
 DeviceEventEmitter.addListener(WALLET_LOCKED_EVENT, forgetCardReads)
 
 /**
