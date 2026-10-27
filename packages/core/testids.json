@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "7a2d9e8f4c9f8c9814eaa3deec7b55df836072aa",
+  "generatedFrom": "1302e962f1807920242254f29976003a54b6ed50",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -751,6 +751,9 @@
     "MessagesListTimer": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListUnread": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesNewMessage": ["src/screens/Messages.tsx"],
+    "MessagesNoMatch": ["src/screens/Messages.tsx"],
+    "MessagesSearch": ["src/screens/Messages.tsx"],
+    "MessagesSearchClear": ["src/screens/Messages.tsx"],
     "MyAgent": ["src/navigators/TabStack.tsx"],
     "MyAgentActivity": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentApprovalCard": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
