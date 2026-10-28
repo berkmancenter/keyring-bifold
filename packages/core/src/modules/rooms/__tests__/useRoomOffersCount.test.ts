@@ -1,13 +1,14 @@
 /**
- * The Rooms card's offers badge is pulled, never pushed: once on mount and every minute after, only while an agent
- * is linked, the app is in the foreground and the rooms flag is on. Any of those false, and nothing is asked.
+ * The Rooms card's offers badge is pulled, never pushed: once on mount, then every minute while offers wait and every
+ * five while none do or the last poll failed; only while an agent is linked, the app is in the foreground and the
+ * rooms flag is on. Any of those false, and nothing is asked.
  */
 import { act, renderHook } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 
 import { sampleCapabilities } from '../capabilities'
 import type { RoomsService } from '../types'
-import { OFFERS_POLL_MS, useRoomOffersCount } from '../useRoomOffersCount'
+import { OFFERS_IDLE_POLL_MS, OFFERS_POLL_MS, useRoomOffersCount } from '../useRoomOffersCount'
 
 let onAppState: ((state: string) => void) | undefined
 const serviceWith = (offers: number) =>
@@ -40,6 +41,42 @@ describe('the offers badge poll', () => {
     expect(result.current).toBe(2)
     await act(async () => jest.advanceTimersByTime(OFFERS_POLL_MS))
     expect(service.listOffers).toHaveBeenCalledTimes(2)
+  })
+
+  test('no offers waiting: asks again after five minutes, not every minute', async () => {
+    const service = serviceWith(0)
+    const { result } = renderHook(() => useRoomOffersCount(service, true))
+    await flush()
+    expect(result.current).toBe(0)
+    await act(async () => jest.advanceTimersByTime(OFFERS_POLL_MS * 4))
+    expect(service.listOffers).toHaveBeenCalledTimes(1)
+    await act(async () => jest.advanceTimersByTime(OFFERS_IDLE_POLL_MS - OFFERS_POLL_MS * 4))
+    expect(service.listOffers).toHaveBeenCalledTimes(2)
+  })
+
+  test('a failed poll waits five minutes too, and keeps the count it had', async () => {
+    const service = serviceWith(2)
+    const { result } = renderHook(() => useRoomOffersCount(service, true))
+    await flush()
+    service.listOffers.mockRejectedValueOnce(new Error('the community did not answer'))
+    await act(async () => jest.advanceTimersByTime(OFFERS_POLL_MS))
+    expect(service.listOffers).toHaveBeenCalledTimes(2)
+    expect(result.current).toBe(2)
+    await act(async () => jest.advanceTimersByTime(OFFERS_POLL_MS * 4))
+    expect(service.listOffers).toHaveBeenCalledTimes(2)
+    await act(async () => jest.advanceTimersByTime(OFFERS_IDLE_POLL_MS - OFFERS_POLL_MS * 4))
+    expect(service.listOffers).toHaveBeenCalledTimes(3)
+  })
+
+  test('once an offer arrives, asks every minute again', async () => {
+    const service = serviceWith(0)
+    const { result } = renderHook(() => useRoomOffersCount(service, true))
+    await flush()
+    service.listOffers.mockResolvedValue([{ offerId: 'o0' }])
+    await act(async () => jest.advanceTimersByTime(OFFERS_IDLE_POLL_MS))
+    expect(result.current).toBe(1)
+    await act(async () => jest.advanceTimersByTime(OFFERS_POLL_MS))
+    expect(service.listOffers).toHaveBeenCalledTimes(3)
   })
 
   test('no agent linked: never asks, even a minute later (the linked case above is the control)', async () => {
