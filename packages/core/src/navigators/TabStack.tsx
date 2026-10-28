@@ -19,6 +19,7 @@ import { useTheme } from '../contexts/theme'
 import { BifoldError } from '../types/error'
 import { Screens, Stacks, TabStackParams, TabStacks } from '../types/navigators'
 import { connectFromScanOrDeepLink } from '../utils/helpers'
+import { findUsedInvitation, openUsedInvitation, usedInvitationToast } from '../utils/usedInvitation'
 import { deepLinkCarriesInvitation, invitationLinkError } from '../utils/invitationLink'
 import { appMessageWakeDeps, openMessageWake, type WakeNavigation } from '../utils/messageWake'
 import { isOpenIdCredentialOffer } from '../utils/parsers'
@@ -135,6 +136,10 @@ const TabStack: React.FC = () => {
   const navigation = useNavigation<StackNavigationProp<TabStackParams>>()
   const { fontScale } = useWindowDimensions()
   const showLabels = fontScale * TabTheme.tabBarTextStyle.fontSize < 18
+  // Two points each side of a tab's icon and label, so two labels shrunk to fill their slots stay apart. On the
+  // container, not the label: padding inside an Android Text is left out when it sizes the text to fit, and the
+  // label's last letter was clipped with no ellipsis ("Contact" for "Contacts" at font scale 1.15).
+  const labelGap = { paddingHorizontal: 2 }
   const [showQRCodeBottomSheet, setShowQRCodeBottomSheet] = React.useState(false)
   const { totalUnread } = useUnreadMessages()
   // Requests waiting for this phone's decision: said on the tab, wherever the person is.
@@ -258,6 +263,14 @@ const TabStack: React.FC = () => {
           store.preferences.walletName
         )
       } catch (err: unknown) {
+        // An invitation taken before: open the contact it made, not "Unable to handle deeplink".
+        const used = await findUsedInvitation(agent, err)
+        if (used) {
+          logger.info(`deep link: invitation ${used.invitationId} was already used`)
+          openUsedInvitation(used, navigation as unknown as { navigate: (name: string, params?: object) => void })
+          Toast.show(usedInvitationToast(used, t, toastBottomOffset))
+          return
+        }
         const error = new BifoldError(
           t('Error.Title1039'),
           t('Error.Message1039'),
@@ -338,7 +351,13 @@ const TabStack: React.FC = () => {
           options={{
             tabBarIconStyle: styles.tabBarIcon,
             tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+              <View
+                style={{
+                  ...TabTheme.tabBarContainerStyle,
+                  ...labelGap,
+                  justifyContent: showLabels ? 'flex-end' : 'center',
+                }}
+              >
                 {focused ? (
                   <Assets.svg.contactsIconFocused height={20} width={20} fill={color} />
                 ) : (
@@ -348,13 +367,13 @@ const TabStack: React.FC = () => {
                   <Text
                     // One line in every language (all six labels): a long word ("Portefeuille") shrinks rather
                     // than breaking. 0.7 keeps it whole up to the largest text size that still shows labels
-                    // (fontScale about 1.28); 2 points each side keep two shrunk neighbours apart.
+                    // (fontScale about 1.28). The gap between neighbours is the container's (labelGap), never
+                    // the label's own padding: Android sizes the text without it and clipped a last letter.
                     numberOfLines={1}
                     adjustsFontSizeToFit
                     minimumFontScale={0.7}
                     style={{
                       ...TabTheme.tabBarTextStyle,
-                      paddingHorizontal: 2,
                       color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                       fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                     }}
@@ -378,7 +397,13 @@ const TabStack: React.FC = () => {
             tabBarBadgeStyle: styles.tabBarBadge,
             tabBarIcon: ({ color, focused }) => (
               <AttachTourStep tourID={BaseTourID.HomeTour} index={0}>
-                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                <View
+                  style={{
+                    ...TabTheme.tabBarContainerStyle,
+                    ...labelGap,
+                    justifyContent: showLabels ? 'flex-end' : 'center',
+                  }}
+                >
                   {focused ? (
                     <Assets.svg.tabFourFocusedIcon height={20} width={20} fill={color} />
                   ) : (
@@ -391,7 +416,6 @@ const TabStack: React.FC = () => {
                       minimumFontScale={0.7}
                       style={{
                         ...TabTheme.tabBarTextStyle,
-                        paddingHorizontal: 2,
                         color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                         fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                       }}
@@ -414,7 +438,13 @@ const TabStack: React.FC = () => {
             tabBarIconStyle: styles.tabBarIcon,
             tabBarIcon: ({ color, focused }) => (
               <AttachTourStep tourID={BaseTourID.HomeTour} index={2}>
-                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                <View
+                  style={{
+                    ...TabTheme.tabBarContainerStyle,
+                    ...labelGap,
+                    justifyContent: showLabels ? 'flex-end' : 'center',
+                  }}
+                >
                   <Assets.svg.tabTwoIcon height={20} width={20} fill={color} />
                   {showLabels && (
                     <Text
@@ -423,7 +453,6 @@ const TabStack: React.FC = () => {
                       minimumFontScale={0.7}
                       style={{
                         ...TabTheme.tabBarTextStyle,
-                        paddingHorizontal: 2,
                         color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                         fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                       }}
@@ -457,7 +486,13 @@ const TabStack: React.FC = () => {
             tabBarIconStyle: styles.tabBarIcon,
             tabBarIcon: ({ color, focused }) => (
               <AttachTourStep tourID={BaseTourID.HomeTour} index={1}>
-                <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+                <View
+                  style={{
+                    ...TabTheme.tabBarContainerStyle,
+                    ...labelGap,
+                    justifyContent: showLabels ? 'flex-end' : 'center',
+                  }}
+                >
                   {focused ? (
                     <Assets.svg.tabThreeFocusedIcon height={20} width={20} fill={color} />
                   ) : (
@@ -470,7 +505,6 @@ const TabStack: React.FC = () => {
                       minimumFontScale={0.7}
                       style={{
                         ...TabTheme.tabBarTextStyle,
-                        paddingHorizontal: 2,
                         color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                         fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                       }}
@@ -494,7 +528,13 @@ const TabStack: React.FC = () => {
             tabBarBadge: myAgentBadge.badge,
             tabBarBadgeStyle: styles.tabBarBadge,
             tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+              <View
+                style={{
+                  ...TabTheme.tabBarContainerStyle,
+                  ...labelGap,
+                  justifyContent: showLabels ? 'flex-end' : 'center',
+                }}
+              >
                 <Icon name={focused ? 'shield-account' : 'shield-account-outline'} size={24} color={color} />
                 {showLabels && (
                   <Text
@@ -503,7 +543,6 @@ const TabStack: React.FC = () => {
                     minimumFontScale={0.7}
                     style={{
                       ...TabTheme.tabBarTextStyle,
-                      paddingHorizontal: 2,
                       color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                       fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                     }}
@@ -527,7 +566,13 @@ const TabStack: React.FC = () => {
           options={{
             tabBarIconStyle: styles.tabBarIcon,
             tabBarIcon: ({ color, focused }) => (
-              <View style={{ ...TabTheme.tabBarContainerStyle, justifyContent: showLabels ? 'flex-end' : 'center' }}>
+              <View
+                style={{
+                  ...TabTheme.tabBarContainerStyle,
+                  ...labelGap,
+                  justifyContent: showLabels ? 'flex-end' : 'center',
+                }}
+              >
                 <Icon name={focused ? 'account-circle' : 'account-circle-outline'} size={26} color={color} />
                 {showLabels && (
                   <Text
@@ -536,7 +581,6 @@ const TabStack: React.FC = () => {
                     minimumFontScale={0.7}
                     style={{
                       ...TabTheme.tabBarTextStyle,
-                      paddingHorizontal: 2,
                       color: focused ? TabTheme.tabBarActiveTintColor : TabTheme.tabBarInactiveTintColor,
                       fontWeight: focused ? TextTheme.bold.fontWeight : TextTheme.normal.fontWeight,
                     }}

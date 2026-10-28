@@ -19,15 +19,8 @@ import { useHeaderHeight } from '@react-navigation/elements'
 import { useNavigation, useRoute } from '@react-navigation/native'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  ActivityIndicator,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  RefreshControl,
-  StyleSheet,
-  View,
-} from 'react-native'
+import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
@@ -36,6 +29,7 @@ import { DayPill } from '../../../components/chat/DayPill'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { Screens } from '../../../types/navigators'
+import { useMeasuredKeyboardOffset } from '../../trust-tasks/screens/keyboardOffset'
 import { localDayKey } from '../../../utils/localDay'
 import { testIdWithKey } from '../../../utils/testable'
 import { RoomComposer } from '../components/RoomComposer'
@@ -109,8 +103,10 @@ const Room: React.FC = () => {
   const roomId = (useRoute()?.params as { roomId?: string } | undefined)?.roomId ?? ''
   const navigation = useNavigation() as unknown as { navigate: (name: string, params: object) => void }
   const service = useRoomsService()
-  // The keyboard rises from the screen's bottom, under a navigation header: offset by the header, as the chat does.
+  // The composer rides above the keyboard. The view's offset is where its parent starts on screen, measured: on iOS 26
+  // the header height a screen is told is the status bar alone, and the composer stayed under the keyboard.
   const headerHeight = useHeaderHeight()
+  const keyboard = useMeasuredKeyboardOffset(headerHeight)
   const state = useRoom(service, roomId)
   const { room, roomCapabilities } = state
   const canList = roomCapabilities?.listNotes.status === 'available'
@@ -283,11 +279,14 @@ const Room: React.FC = () => {
           }
         />
       ) : null}
-      {/* The chat stays mounted on the other tabs, hidden, so its draft and a post on its way are kept. */}
+      {/* The chat stays mounted on the other tabs, hidden, so its draft and a post on its way are kept.
+          keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */}
       <KeyboardAvoidingView
+        ref={keyboard.ref}
+        onLayout={keyboard.onLayout}
         style={tab === 'chat' ? { flex: 1 } : { display: 'none' }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={headerHeight}
+        behavior="padding"
+        keyboardVerticalOffset={keyboard.offset}
       >
         <FlatList
           testID={testIdWithKey('RoomPosts')}
