@@ -204,6 +204,28 @@ describe('AgentRoomsService offers', () => {
     expect(communityTask).toHaveBeenLastCalledWith(COMMUNITY.did, ROOMS_TASK.offersList02, {})
   })
 
+  it('remembers a community answered at 0.2, and asks it 0.2 alone from then on', async () => {
+    const { service, communityTask } = setup()
+    communityTask.mockImplementation(async (_did: string, type: string) => {
+      if (type === ROOMS_TASK.offersList03) throw new FakeRefusal('unsupportedVersion')
+      return { items: [offer(OPEN_ROOM, 'open', 'open')] }
+    })
+    await service.listOffers()
+    await service.listOffers()
+    await service.listOffers()
+    // One refused 0.3 on the first listing, then 0.2 only: four requests for three listings, not six.
+    expect(sent(communityTask, ROOMS_TASK.offersList03)).toHaveLength(1)
+    expect(sent(communityTask, ROOMS_TASK.offersList02)).toHaveLength(3)
+  })
+
+  it('keeps asking 0.3 of a community that serves it', async () => {
+    const { service, communityTask } = setup({ offers: [offer(OPEN_ROOM, 'open', 'open')] })
+    await service.listOffers()
+    await service.listOffers()
+    expect(sent(communityTask, ROOMS_TASK.offersList03)).toHaveLength(2)
+    expect(sent(communityTask, ROOMS_TASK.offersList02)).toHaveLength(0)
+  })
+
   it('stores a renewal in place of what it renews, once, and never accepts it', async () => {
     const renewal = {
       roomId: JOINED_ROOM,

@@ -204,6 +204,8 @@ export class AgentRoomsService implements RoomsService {
   private writes = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
+  /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
+  private offersType = new Map<string, string>()
   private nextToken = 1
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
@@ -433,17 +435,18 @@ export class AgentRoomsService implements RoomsService {
 
   /** Every page of a community's offers to this member, and the renewals the first page carries. */
   private async offersOf(community: RoomsCommunity): Promise<{ items: OfferRecord[]; renewals: RenewalRecord[] }> {
-    let type: string = ROOMS_TASK.offersList03
+    let type: string = this.offersType.get(community.did) ?? ROOMS_TASK.offersList03
     let first: unknown
     try {
       first = await this.backend.communityTask(community.did, type, {})
     } catch (e) {
       const code = refusalCode(e)
       // A community older than renewals is read at 0.2, which carries none.
-      if (code !== 'unsupportedVersion' && code !== 'unsupportedType') throw e
+      if (type !== ROOMS_TASK.offersList03 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
       type = ROOMS_TASK.offersList02
       first = await this.backend.communityTask(community.did, type, {})
     }
+    this.offersType.set(community.did, type)
     const page = parseOffers(first)
     const items = [...page.items]
     let cursor = page.nextCursor
