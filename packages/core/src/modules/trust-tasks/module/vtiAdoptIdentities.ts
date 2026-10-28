@@ -108,8 +108,8 @@ export async function adoptAgentIdentities(options: {
    * with its agent next opens.
    */
   holdKeys?: (persona: VtiPersona) => Promise<unknown>
-  /** Told of a borrow that failed. */
-  onKeysFailed?: (persona: VtiPersona, error: unknown) => void
+  /** Told of a borrow that failed, and why, for the log. */
+  onKeysFailed?: (persona: VtiPersona, reason: string) => void
   now?: () => number
 }): Promise<AdoptionReport> {
   const { identities, vtaDid, cards } = options
@@ -182,7 +182,11 @@ export async function adoptAgentIdentities(options: {
   if (holdKeys)
     void report.adopted.reduce(
       (previous, persona) =>
-        previous.then(() => holdKeys(persona).then(undefined, (error: unknown) => onKeysFailed?.(persona, error))),
+        previous.then(() =>
+          holdKeys(persona).then(undefined, (e: unknown) =>
+            onKeysFailed?.(persona, e instanceof Error ? e.message : String(e))
+          )
+        ),
       Promise.resolve()
     )
   return report

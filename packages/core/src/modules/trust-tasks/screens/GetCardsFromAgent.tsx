@@ -119,11 +119,9 @@ const defaultDeps: GetCardsDeps = {
         await client.holdPersonaKeys(persona)
         DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: persona.did })
       },
-      onKeysFailed: (persona, error) =>
+      onKeysFailed: (persona, reason) =>
         agent.config.logger.warn(
-          `Bring back: ${persona.did}'s keys were not borrowed; asked again at the next session: ${
-            error instanceof Error ? error.message : String(error)
-          }`
+          `Bring back: ${persona.did}'s keys were not borrowed; asked again when a session with its agent next opens: ${reason}`
         ),
     })
     // What this phone's grant lets it see, for saying why nothing came back; a phone that cannot tell says less.

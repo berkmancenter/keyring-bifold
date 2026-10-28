@@ -230,7 +230,7 @@ describe('Bring back borrows the keys of what it takes on', () => {
     const onKeysFailed = jest.fn()
     const report = await adopt(store, { holdKeys: async () => Promise.reject(failed), onKeysFailed })
     await new Promise((resolve) => setImmediate(resolve))
-    expect(onKeysFailed).toHaveBeenCalledWith(report.adopted[0], failed)
+    expect(onKeysFailed).toHaveBeenCalledWith(report.adopted[0], 'the agent did not answer')
     expect((await store.getPersona(COMMUNITY, VTA))?.did).toBe(PERSONA_DID)
   })
 })
