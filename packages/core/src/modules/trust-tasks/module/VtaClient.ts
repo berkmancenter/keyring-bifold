@@ -2288,6 +2288,31 @@ export class VtaClient {
     }
   }
 
+  /**
+   * Borrow both keys of an identity that holds no copies, and record them on it, as a join records a new
+   * persona's. Only the identity's own agent is asked, and nothing is minted: a persona of another agent is left as
+   * it is. A borrow running for the same community (a join's, or another caller's) is waited for, not repeated.
+   */
+  private async borrowAdoptedKeys(persona: VtiPersona): Promise<boolean> {
+    if (persona.vtaDid !== this.vtaDid) return false
+    const inFlightKey = `${this.vtaDid}|${persona.communityDid}`
+    const running = personasInFlight.get(inFlightKey)
+    if (running) return running.then((held) => held.did === persona.did && Boolean(held.kmsKeyIds?.keyAgreement))
+    const work = (async () => {
+      await this.connect()
+      const keyAgreement = await this.borrowKey(persona.vtaKeyIds.keyAgreement)
+      const signing = await this.borrowKey(persona.vtaKeyIds.signing)
+      const held: VtiPersona = { ...persona, kmsKeyIds: { keyAgreement: keyAgreement.keyId, signing: signing.keyId } }
+      await this.store.setPersona(held)
+      return held
+    })().finally(() => {
+      if (personasInFlight.get(inFlightKey) === work) personasInFlight.delete(inFlightKey)
+    })
+    personasInFlight.set(inFlightKey, work)
+    await work
+    return true
+  }
+
   /** Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. */
   async borrowKey(
     vtaKeyId: string
@@ -2304,8 +2329,14 @@ export class VtaClient {
    * after a restart or a lock the in-memory backend is empty. A persona whose
    * copies are still in the wallet's store (minted before memory-only custody)
    * is left alone. Answers whether anything was fetched.
+   *
+   * An identity taken on from the agent (Bring back, vtiAdoptIdentities) is recorded with the agent's key ids
+   * and no copies at all, so nothing on the phone could sign in as it (vtiAgent: "the persona has no borrowed
+   * key-agreement key"): its rooms, its community's messages and its vetting all stopped there. Its copies are
+   * borrowed and recorded here, the first time it is asked for.
    */
   async holdPersonaKeys(persona: VtiPersona): Promise<boolean> {
+    if (!persona.kmsKeyIds?.keyAgreement || !persona.kmsKeyIds.signing) return this.borrowAdoptedKeys(persona)
     const pairs = [
       [persona.kmsKeyIds?.signing, persona.vtaKeyIds.signing],
       [persona.kmsKeyIds?.keyAgreement, persona.vtaKeyIds.keyAgreement],

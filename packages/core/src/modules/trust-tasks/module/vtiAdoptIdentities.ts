@@ -101,6 +101,15 @@ export async function adoptAgentIdentities(options: {
   keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined>
   /** The DIDs of the identities this phone already holds. */
   held?: string[]
+  /**
+   * Borrow an identity's key copies from its agent once it is recorded (VtaClient.holdPersonaKeys). Run one at a
+   * time, after the report is made and never waited for: Bring back does not take longer for it, and a borrow
+   * that fails takes nothing back. The identity stays recorded and its keys are asked for again when a session
+   * with its agent next opens.
+   */
+  holdKeys?: (persona: VtiPersona) => Promise<unknown>
+  /** Told of a borrow that failed. */
+  onKeysFailed?: (persona: VtiPersona, error: unknown) => void
   now?: () => number
 }): Promise<AdoptionReport> {
   const { identities, vtaDid, cards } = options
@@ -166,6 +175,13 @@ export async function adoptAgentIdentities(options: {
     await identities.setPersona(persona)
     report.adopted.push(persona)
   }
+  const { holdKeys, onKeysFailed } = options
+  if (holdKeys)
+    void report.adopted.reduce(
+      (previous, persona) =>
+        previous.then(() => holdKeys(persona).then(undefined, (error: unknown) => onKeysFailed?.(persona, error))),
+      Promise.resolve()
+    )
   return report
 }
 
