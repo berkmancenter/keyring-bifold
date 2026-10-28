@@ -8,7 +8,8 @@ import { container } from 'tsyringe'
 
 import { TOKENS } from '../../../container-api'
 import * as core from '../../../index'
-import type { RoomsBackend } from '../real/agentRoomsService'
+// The types come through the root too, so a dropped type export fails the type check.
+import type { RoomsBackend, RoomsService } from '../../../index'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
@@ -34,7 +35,7 @@ describe("the rooms service through the package root, which is what '@bifold/cor
     const service = new core.AgentRoomsService(unlinked)
     core.registerRoomsService(child, service)
 
-    const resolved = child.resolve(TOKENS.UTIL_ROOMS_SERVICE)
+    const resolved = child.resolve<RoomsService>(TOKENS.UTIL_ROOMS_SERVICE)
     expect(resolved).toBe(service)
     expect(resolved.isSample).toBe(false)
   })
