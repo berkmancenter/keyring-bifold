@@ -29,12 +29,14 @@ import {
   type AdoptionReport,
 } from '../module/vtiAdoptIdentities'
 import {
+  cardsOnPhone,
   fetchAgentCards,
   recoverCardsFromAgent,
   type AgentCard,
   type RecoveredRefusal,
   type VaultTask,
 } from '../module/vtiCardVault'
+import { sameIdentity } from '../module/didScid'
 import { checkDeliveredCard } from '../module/vtiDeliveredCheck'
 import { classifyCredential } from '../module/vtiInbox'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from '../module/VtiCommunityStore'
@@ -76,8 +78,15 @@ export interface GetCardsDeps {
   store: (agent: Agent) => VtiCommunityStore
   /** The agent, connected, as a task sender. */
   taskFor: (agent: Agent, vtaDid: string) => Promise<VaultTask>
-  /** Every card the agent keeps, each fetched once; `onRead` hears how many are read of how many. */
-  fetchCards: (task: VaultTask, onRead?: (read: number, of: number) => void) => Promise<AgentCard[]>
+  /**
+   * Every card the agent keeps, each fetched once; `onRead` hears how many are read of how many, and a card in
+   * `onPhone` is not fetched.
+   */
+  fetchCards: (
+    task: VaultTask,
+    onRead?: (read: number, of: number) => void,
+    onPhone?: ReadonlyMap<string, Record<string, unknown>>
+  ) => Promise<AgentCard[]>
   /** Take on the agent's identities this phone does not hold yet (`held`: the DIDs it does), from its `cards`. */
   adopt: (agent: Agent, vtaDid: string, held: string[], cards: AgentCard[]) => Promise<AdoptionFound>
 }
@@ -176,12 +185,15 @@ function vaultReader(
   onRead?: (read: number, of: number) => void
 ): (vtaDid: string) => Promise<VaultRead | undefined> {
   const reads = new Map<string, Promise<VaultRead | undefined>>()
+  // The cards already on this phone, read once a run: the vault is not asked for them again.
+  let onPhone: Promise<Map<string, Record<string, unknown>>> | undefined
   return (vtaDid) => {
     let read = reads.get(vtaDid)
     if (!read) {
       read = (async () => {
         const task = await deps.taskFor(agent, vtaDid)
-        return { task, cards: await deps.fetchCards(task, onRead) }
+        onPhone ??= cardsOnPhone(deps.store(agent)).catch(() => new Map())
+        return { task, cards: await deps.fetchCards(task, onRead, await onPhone) }
       })().catch(() => undefined)
       reads.set(vtaDid, read)
     }
@@ -220,11 +232,12 @@ export async function getCardsFromAgent(
     }
     total.found += vault.cards.length
     onProgress({ found: total.found, restored: total.restored })
-    const dids = new Set(theirs.map((p) => p.did))
     const mine = new Map<string, AgentCard[]>()
     for (const card of vault.cards) {
       const subject = card.credential ? classifyCredential(card.credential).subjectDid : undefined
-      if (subject && dids.has(subject)) mine.set(subject, [...(mine.get(subject) ?? []), card])
+      // Whose card it is: the identity's DID, or its did:scid:vh:1 form (didScid).
+      const whose = subject ? theirs.find((p) => sameIdentity(p.did, subject))?.did : undefined
+      if (whose) mine.set(whose, [...(mine.get(whose) ?? []), card])
       else if (!card.credential) total.refused.push({ credentialId: card.id, reason: 'unreadable' })
       else if (failed.has(card.id)) {
         const f = failedCheck.find((x) => x.credentialId === card.id)

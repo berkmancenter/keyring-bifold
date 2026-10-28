@@ -19,7 +19,7 @@ import {
   persona,
 } from '../../../../__tests__/helpers/cardVault'
 import { testIdWithKey } from '../../../utils/testable'
-import { fetchAgentCards, recoverCardsFromAgent, type AgentCard } from '../module/vtiCardVault'
+import { fetchAgentCards, forgetCardReads, recoverCardsFromAgent, type AgentCard } from '../module/vtiCardVault'
 import type { VtiPersona } from '../module/VtiIdentityStore'
 import {
   bringBackFromAgent,
@@ -45,6 +45,9 @@ jest.mock('react-i18next', () => {
 })
 
 const agent = {} as Agent
+
+// Each test reads its agent as a fresh session would.
+beforeEach(() => forgetCardReads())
 const VTA = persona.vtaDid
 const OTHER_VTA = 'did:webvh:QmVta2:dids.example:other-vta'
 const second: VtiPersona = {
@@ -155,6 +158,25 @@ describe('getting the cards back, identity by identity', () => {
   })
 
   // #401 Farm run: four identities on an agent keeping 88 cards fetched 352 of them, one by one (164 s).
+  it("a card issued to an identity's did:scid form is that identity's, not another's", async () => {
+    const scidOf = (did: string) => `did:scid:vh:1:${did.split(':')[2]}?src=x.example`
+    const card = cardAbout(persona.did, 7)
+    const asScid: AgentCard = {
+      ...card,
+      credential: { ...card.credential, credentialSubject: { id: scidOf(persona.did) } },
+    }
+    const recover = jest.fn(async (_a: Agent, _s: never, _p: VtiPersona, _t: never, o: { cards: AgentCard[] }) => ({
+      found: o.cards.length,
+      restored: o.cards.map((c) => c.id),
+      already: [],
+      refused: [],
+    }))
+    const d = { ...deps({ [VTA]: [asScid] }), recover: recover as never }
+    const got = await getCardsFromAgent(agent, [persona], () => undefined, d)
+    expect(recover.mock.calls.map((c) => c[4].cards.map((x) => x.id))).toEqual([[asScid.id]])
+    expect(got.refused).toEqual([])
+  })
+
   it('reads the vault once a run: one fetch per card, however many identities', async () => {
     const vault = fakeVault()
     for (const c of [cardAbout(persona.did), cardAbout(second.did), cardAbout('did:webvh:QmX:zzzz')])
