@@ -52,6 +52,8 @@ export function loadTrustTaskRuntime(): Promise<LoadedTrustTaskRuntime> {
  * validity interval. The skew is the wallet's five-minute clock allowance, the same as the
  * wallet's own consumer (@bifold/core TrustTasksService), so the two sides judge alike.
  */
-export function witnessConsumeChecks(runtime: TrustTaskRuntime): ReturnType<TrustTaskRuntime['notConsequentialChecks']> {
+export function witnessConsumeChecks(
+  runtime: TrustTaskRuntime
+): ReturnType<TrustTaskRuntime['notConsequentialChecks']> {
   return { ...runtime.notConsequentialChecks(), freshness: { ...runtime.DEFAULT_FRESHNESS, skewMs: 5 * 60_000 } }
 }
