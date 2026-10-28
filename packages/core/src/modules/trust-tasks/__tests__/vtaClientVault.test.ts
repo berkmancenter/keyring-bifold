@@ -7,6 +7,7 @@
  */
 import Ajv from 'ajv/dist/2020'
 import { PAYLOAD_SCHEMA as UPSERT_0_3 } from '@openvtc/trust-tasks/vault/upsert/0.3/payload'
+import { PAYLOAD_SCHEMA as UPSERT_0_4 } from '@openvtc/trust-tasks/vault/upsert/0.4/payload'
 
 import { VAULT_SECRET_MESSAGE_TYPE, VTA_TASK, VtaClient, vaultPayloadFor } from '../module/VtaClient'
 import { AGENT_DEVICE_TASK } from '../module/vtaDevices'
@@ -56,19 +57,19 @@ describe("the sign-in's VTA calls", () => {
     await expect(vta.signTrustTask({ entryId: 'vault_1', unsignedEnvelope: {} })).rejects.toThrow(/signedEnvelope/)
   })
 
-  it('lists and upserts vault entries at 0.3, and logs the version each was answered in', async () => {
+  it('lists and upserts vault entries at 0.4, and logs the version each was answered in', async () => {
     logger.info.mockClear()
     const vta = client()
     const task = jest
       .spyOn(vta, 'task')
-      .mockResolvedValueOnce({ entries: [{ id: 'vault_1' }], truncated: false })
-      .mockResolvedValueOnce({ entry: { id: 'vault_2' }, created: true })
+      .mockResolvedValueOnce({ entries: [{ id: 'vault_1' }] })
+      .mockResolvedValueOnce({ entry: { id: 'vault_2' }, wasCreated: true })
     await expect(vta.vaultList({ targetDid: 'did:web:vtc' })).resolves.toEqual([{ id: 'vault_1' }])
     await expect(vta.vaultUpsert({ label: 'x' })).resolves.toEqual({ entry: { id: 'vault_2' }, created: true })
-    expect(task.mock.calls.map((c) => c[0])).toEqual([VTA_TASK.vaultList03, VTA_TASK.vaultUpsert03])
-    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining(`vaultList answered in ${VTA_TASK.vaultList03}`))
+    expect(task.mock.calls.map((c) => c[0])).toEqual([VTA_TASK.vaultList04, VTA_TASK.vaultUpsert04])
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining(`vaultList answered in ${VTA_TASK.vaultList04}`))
     expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining(`vaultUpsert answered in ${VTA_TASK.vaultUpsert03}`)
+      expect.stringContaining(`vaultUpsert answered in ${VTA_TASK.vaultUpsert04}`)
     )
   })
 
@@ -81,33 +82,38 @@ describe("the sign-in's VTA calls", () => {
     sealedSecret: { envelope: 'didcomm-authcrypt' as const, jwe: '{"ciphertext":"c"}' },
   }
 
-  it("sends the sign-in's entry at 0.3 in 0.3's spelling, which 0.3's own schema accepts", async () => {
+  it("sends the sign-in's entry at 0.4 in its spelling, which 0.4's and 0.3's own schemas accept", async () => {
     const vta = client()
-    const task = jest.spyOn(vta, 'task').mockResolvedValueOnce({ entry: { id: 'vault_3' }, created: true })
+    const task = jest.spyOn(vta, 'task').mockResolvedValueOnce({ entry: { id: 'vault_3' }, wasCreated: true })
     await vta.vaultUpsert(signInEntry)
     const [type, sent] = task.mock.calls[0]
-    expect(type).toBe(VTA_TASK.vaultUpsert03)
-    const valid = new Ajv({ strict: false, allErrors: true, logger: false }).compile(UPSERT_0_3 as object)
+    expect(type).toBe(VTA_TASK.vaultUpsert04)
+    const ajv = new Ajv({ strict: false, allErrors: true, logger: false })
+    expect(ajv.compile(UPSERT_0_4 as object)(sent)).toBe(true)
+    const valid = ajv.compile(UPSERT_0_3 as object)
     expect(valid(sent)).toBe(true)
     // The control: the same entry as built, in 0.1's spelling, is what 0.3 refuses.
     expect(valid(signInEntry)).toBe(false)
     expect(sent).toMatchObject({ secretKind: 'didSelfIssued', sealedSecret: { envelope: 'didcommAuthcrypt' } })
   })
 
-  it('steps down 0.3 → 0.2 → 0.1 on version refusals, each in its own spelling', async () => {
+  it('steps down 0.4 → 0.3 → 0.2 → 0.1 on version refusals, each in its own spelling', async () => {
     const vta = client()
     const task = jest
       .spyOn(vta, 'task')
       .mockRejectedValueOnce(new VtiRefusal('unsupportedVersion', 'no'))
       .mockRejectedValueOnce(new VtiRefusal('unsupportedVersion', 'no'))
+      .mockRejectedValueOnce(new VtiRefusal('unsupportedVersion', 'no'))
       .mockResolvedValueOnce({ entry: { id: 'vault_4' } })
     await vta.vaultUpsert(signInEntry)
     expect(task.mock.calls.map((c) => c[0])).toEqual([
+      VTA_TASK.vaultUpsert04,
       VTA_TASK.vaultUpsert03,
       VTA_TASK.vaultUpsert02,
       VTA_TASK.vaultUpsert,
     ])
     expect(task.mock.calls.map((c) => (c[1] as { secretKind: string }).secretKind)).toEqual([
+      'didSelfIssued',
       'didSelfIssued',
       'didSelfIssued',
       'did-self-issued',

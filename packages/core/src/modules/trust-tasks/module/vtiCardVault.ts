@@ -26,12 +26,13 @@
  *
  * @module trust-tasks/module/vtiCardVault
  */
-import type { Agent } from '@credo-ts/core'
+import { TypedArrayEncoder, type Agent } from '@credo-ts/core'
 import { useEffect } from 'react'
 import { DeviceEventEmitter } from 'react-native'
 
 import { VTI_PERSONA_DELIVERIES_EVENT } from './communityChanged'
 import { listKeyed, putKeyed } from './keyedRecords'
+import { versionsFor } from './taskVersions'
 import { vtaAgent } from './vtaAgent'
 import { GenericRecordsCommunityStore, isCurrentMembership, type VtiCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
@@ -41,6 +42,30 @@ import { classifyCredential, roleNameOf } from './vtiInbox'
 export const VAULT_RECEIVE = 'https://trusttasks.org/spec/vault/credentials/receive/0.1'
 export const VAULT_QUERY = 'https://trusttasks.org/spec/vault/credentials/query/0.1'
 export const VAULT_GET = 'https://trusttasks.org/spec/vault/credentials/get/0.1'
+/**
+ * 0.2, asked first: from 0d3f268e (vta-service #2309) the agent serves only vault/credentials/get/0.2, while
+ * v0.60.0 to v0.66.0 serve only 0.1. The request is the same; 0.2's answer names a `format` and carries the card
+ * as `credential` or, for a format that is not JSON, `credentialBase64`.
+ */
+export const VAULT_GET_02 = 'https://trusttasks.org/spec/vault/credentials/get/0.2'
+
+type VaultGetAnswer = { credential?: unknown; credentialBase64?: unknown; format?: unknown }
+
+/** The card in a vault/credentials/get answer (0.1 or 0.2), when it is a JSON object. */
+export function credentialOfGet(answer: VaultGetAnswer | undefined): Record<string, unknown> | undefined {
+  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+  if (isObject(answer?.credential)) return answer.credential
+  if (typeof answer?.credentialBase64 !== 'string') return undefined
+  try {
+    const parsed: unknown = JSON.parse(
+      TypedArrayEncoder.toUtf8String(TypedArrayEncoder.fromBase64(answer.credentialBase64))
+    )
+    return isObject(parsed) ? parsed : undefined
+  } catch {
+    // A format that is not JSON (a JWT, say): not a card this phone keeps.
+    return undefined
+  }
+}
 
 /** A card's vault state changed: `{ credentialId }`. */
 export const VTI_CARD_VAULT_EVENT = 'vti:card-vault'
@@ -250,8 +275,11 @@ export async function fetchAgentCards(
   const cards: AgentCard[] = []
   onRead?.(0, ids.size)
   for (const id of ids) {
-    const got = await task<{ credential?: Record<string, unknown> }>(VAULT_GET, { id }).catch(() => undefined)
-    cards.push({ id, credential: got?.credential })
+    const got = await versionsFor(task)
+      .ask('vaultCredentialsGet', [VAULT_GET_02, VAULT_GET], (uri) => task<VaultGetAnswer>(uri, { id }))
+      .then(({ answer }) => answer)
+      .catch(() => undefined)
+    cards.push({ id, credential: credentialOfGet(got) })
     onRead?.(cards.length, ids.size)
   }
   return cards
