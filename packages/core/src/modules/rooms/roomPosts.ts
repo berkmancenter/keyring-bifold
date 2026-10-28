@@ -9,10 +9,10 @@
  *
  * @module rooms/roomPosts
  */
-import { parseChatEvent } from '../chat/chatEvent'
+import { CHAT_PROFILE, type ChatMessageEvent, parseChatEvent } from '../chat/chatEvent'
 
 import { toInertText, type InertText } from './inertText'
-import type { Identity, Note, NoteSummary } from './types'
+import type { Identity, Note, NoteSummary, RoomFile } from './types'
 
 export interface RoomPost {
   key: string
@@ -32,6 +32,12 @@ export interface RoomPost {
   retracted: boolean
   /** The record could not be read; only what the listing said about it is known. */
   unread: boolean
+  /** A post this phone is still sending, or could not send (not yet a record in the room). */
+  delivery?: 'sending' | 'failed'
+  /** The files the post carries, each shown as a chip under its words. None on a retracted post. */
+  files: RoomFile[]
+  /** How far a sending post's file has come, 0 to 1. */
+  progress?: number
 }
 
 const sameIdentity = (a?: Identity, b?: Identity): boolean => !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
@@ -55,6 +61,18 @@ export function chatMessageText(body: string, now: number = Date.now()): string 
   return result.event.content?.text
 }
 
+/** A post's body as it is written to the room: a keyring.chat/1 message, which `chatMessageText` reads back. */
+export function chatMessageBody(text: string, eventId: string, at: Date): string {
+  const event: ChatMessageEvent = {
+    profile: CHAT_PROFILE,
+    eventId,
+    type: 'message',
+    content: { format: 'text/plain', text },
+    clientTs: at.toISOString(),
+  }
+  return JSON.stringify(event)
+}
+
 /** One record as a post. `note` is the record when it was read, or only its listing entry when it could not be. */
 export function postOf(note: Note | NoteSummary, actingAs?: Identity, now: number = Date.now()): RoomPost {
   const read = 'body' in note
@@ -72,6 +90,7 @@ export function postOf(note: Note | NoteSummary, actingAs?: Identity, now: numbe
     isChatMessage: chatText !== undefined,
     retracted,
     unread: !read && !retracted,
+    files: retracted ? [] : (note.files ?? []),
   }
 }
 
