@@ -172,6 +172,9 @@ export async function adoptAgentIdentities(options: {
       vtaKeyIds: { signing: keyIds.signing, keyAgreement: keyIds.keyAgreement },
       createdAt: new Date(now()).toISOString(),
     }
+    // The card check and the DID document are network reads: a join may have recorded this community's identity
+    // meanwhile. That one, which the community just admitted and whose keys are on the phone, is kept.
+    if (await identities.getPersona(communityDid, vtaDid)) continue
     await identities.setPersona(persona)
     report.adopted.push(persona)
   }

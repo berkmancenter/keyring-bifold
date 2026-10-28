@@ -140,6 +140,43 @@ describe('an identity Bring back takes on from the agent', () => {
     expect(borrow).toHaveBeenCalledTimes(2)
   })
 
+  it('is not written back over an identity a join recorded for the community meanwhile', async () => {
+    const store = identities()
+    const { adopted } = await adopt(store)
+    const joined: VtiPersona = {
+      ...adopted[0],
+      did: 'did:webvh:QmJoined:dids.example:joined',
+      kmsKeyIds: { keyAgreement: 'kms-ka-joined', signing: 'kms-sig-joined' },
+    }
+    await store.setPersona(joined)
+    const { client, borrow } = agentClient(store)
+
+    await expect(client.holdPersonaKeys(adopted[0])).resolves.toBe(false)
+    expect(borrow).not.toHaveBeenCalled()
+    expect(await store.getPersona(COMMUNITY, VTA)).toEqual(joined)
+  })
+
+  it("waits for a join running for the same community, keeps the join's identity, and borrows nothing for itself", async () => {
+    const store = identities()
+    const { client, borrow } = agentClient(store)
+    jest.spyOn(client, 'listContexts').mockResolvedValue([{ id: 'vta' }] as never)
+    jest.spyOn(client, 'listServers').mockResolvedValue([{ id: 'dids.example' }] as never)
+    let minted: (did: VtaMintedDid) => void = () => undefined
+    const JOINED = 'did:webvh:QmJoined:dids.example:joined'
+    jest.spyOn(client, 'mintPersona').mockImplementation(() => new Promise((resolve) => (minted = resolve)))
+
+    // The join starts before Bring back has recorded anything, so it mints; Bring back then records its identity.
+    const join = client.ensurePersona({ communityDid: COMMUNITY, label: 'joined' })
+    const { adopted } = await adopt(store)
+    const held = client.holdPersonaKeys(adopted[0])
+    minted({ did: JOINED, signingKeyId: `${JOINED}#key-0`, kaKeyId: `${JOINED}#key-1` } as VtaMintedDid)
+
+    await expect(join).resolves.toMatchObject({ did: JOINED })
+    await expect(held).resolves.toBe(false)
+    expect(borrow.mock.calls.map(([id]) => id)).toEqual([`${JOINED}#key-1`, `${JOINED}#key-0`])
+    expect((await store.getPersona(COMMUNITY, VTA))?.did).toBe(JOINED)
+  })
+
   it("is not borrowed through another agent's client, and nothing is minted there", async () => {
     const store = identities()
     const { adopted } = await adopt(store)
@@ -147,6 +184,30 @@ describe('an identity Bring back takes on from the agent', () => {
     await expect(client.holdPersonaKeys(adopted[0])).resolves.toBe(false)
     expect(borrow).not.toHaveBeenCalled()
     expect(mint).not.toHaveBeenCalled()
+  })
+})
+
+describe('Bring back and a join for the same community at once', () => {
+  it('keeps the identity the join recorded while Bring back was reading, and takes nothing on over it', async () => {
+    const store = identities()
+    const joined: VtiPersona = {
+      communityDid: COMMUNITY,
+      vtaDid: VTA,
+      did: 'did:webvh:QmJoined:dids.example:joined',
+      contextId: 'vta',
+      vtaKeyIds: { signing: 'joined#key-0', keyAgreement: 'joined#key-1' },
+      kmsKeyIds: { keyAgreement: 'kms-ka-joined', signing: 'kms-sig-joined' },
+      createdAt: '2026-10-28T21:00:00Z',
+    }
+    const report = await adopt(store, {
+      // The join lands while Bring back reads the identity's DID document.
+      keyIdsOf: async (did) => {
+        await store.setPersona(joined)
+        return { signing: `${did}#key-0`, keyAgreement: `${did}#key-1` }
+      },
+    })
+    expect(report.adopted).toEqual([])
+    expect(await store.getPersona(COMMUNITY, VTA)).toEqual(joined)
   })
 })
 

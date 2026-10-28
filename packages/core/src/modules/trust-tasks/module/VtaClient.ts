@@ -2291,26 +2291,45 @@ export class VtaClient {
   /**
    * Borrow both keys of an identity that holds no copies, and record them on it, as a join records a new
    * persona's. Only the identity's own agent is asked, and nothing is minted: a persona of another agent is left as
-   * it is. A borrow running for the same community (a join's, or another caller's) is waited for, not repeated.
+   * it is. Answers whether the identity recorded for its community is this one, with copies, afterwards.
+   *
+   * The in-flight map is per community, not per identity, and shared with `ensurePersona`: a join or another borrow
+   * for the same community is waited for, and what it left is read again before anything is borrowed. So a borrow
+   * never repeats one that has just finished, and never writes this identity back over one a join recorded
+   * meanwhile (both keep one record per agent and community). It cannot wait on itself: `ensurePersonaOnce` hands
+   * a persona to `holdPersonaKeys` only when both its copies are recorded, which never comes here.
    */
   private async borrowAdoptedKeys(persona: VtiPersona): Promise<boolean> {
     if (persona.vtaDid !== this.vtaDid) return false
     const inFlightKey = `${this.vtaDid}|${persona.communityDid}`
-    const running = personasInFlight.get(inFlightKey)
-    if (running) return running.then((held) => held.did === persona.did && Boolean(held.kmsKeyIds?.keyAgreement))
-    const work = (async () => {
-      await this.connect()
-      const keyAgreement = await this.borrowKey(persona.vtaKeyIds.keyAgreement)
-      const signing = await this.borrowKey(persona.vtaKeyIds.signing)
-      const held: VtiPersona = { ...persona, kmsKeyIds: { keyAgreement: keyAgreement.keyId, signing: signing.keyId } }
-      await this.store.setPersona(held)
-      return held
-    })().finally(() => {
-      if (personasInFlight.get(inFlightKey) === work) personasInFlight.delete(inFlightKey)
-    })
-    personasInFlight.set(inFlightKey, work)
-    await work
-    return true
+    for (;;) {
+      const running = personasInFlight.get(inFlightKey)
+      if (running) {
+        await running.catch(() => undefined)
+        continue
+      }
+      const recorded = await this.store.getPersona(persona.communityDid, this.vtaDid)
+      // Something started for this community while the record was read: wait for it, and read again.
+      if (personasInFlight.has(inFlightKey)) continue
+      if (recorded?.did !== persona.did) return false
+      if (recorded.kmsKeyIds?.keyAgreement && recorded.kmsKeyIds.signing) return true
+      const work = (async () => {
+        await this.connect()
+        const keyAgreement = await this.borrowKey(recorded.vtaKeyIds.keyAgreement)
+        const signing = await this.borrowKey(recorded.vtaKeyIds.signing)
+        const held: VtiPersona = {
+          ...recorded,
+          kmsKeyIds: { keyAgreement: keyAgreement.keyId, signing: signing.keyId },
+        }
+        await this.store.setPersona(held)
+        return held
+      })().finally(() => {
+        if (personasInFlight.get(inFlightKey) === work) personasInFlight.delete(inFlightKey)
+      })
+      personasInFlight.set(inFlightKey, work)
+      await work
+      return true
+    }
   }
 
   /** Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. */
