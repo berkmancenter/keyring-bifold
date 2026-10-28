@@ -15,6 +15,10 @@
  * issuer is a room when it gave the agent an authority card scoped to itself whose actions are all room actions;
  * every card that issuer gave is a room's card.
  *
+ * Room actions are an allowlist: a room that gains an action outside the four stops matching, and its cards are
+ * read as a community's again. A community group's membership card (issued by the group's DID, with the
+ * community's `issue-membership` authority to the group) is the same kind of card and is not caught here either.
+ *
  * @module trust-tasks/module/roomCards
  */
 
