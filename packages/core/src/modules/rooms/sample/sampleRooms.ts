@@ -9,6 +9,7 @@
  */
 import { deriveRoomCapabilities, sampleCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
+import { chatMessageBody } from '../roomPosts'
 import type {
   AgentGrant,
   AgentGrantRequest,
@@ -20,6 +21,8 @@ import type {
   OpenedFile,
   Room,
   RoomFile,
+  RoomsAttachment,
+  RoomsTransferOptions,
   RoomOffer,
   RoomsCapabilities,
   RoomsService,
@@ -39,6 +42,58 @@ const ME: Identity = { identityWords: '…negative-weird', did: 'did:peer:2.samp
 const RIVER: Identity = { identityWords: '…river-stone', did: 'did:peer:2.sample-river' }
 const TERM: Identity = { identityWords: '…term-benefit', did: 'did:peer:2.sample-term' }
 const GLASS: Identity = { identityWords: '…glass-willow', did: 'did:peer:2.sample-glass' }
+
+const AGENDA: RoomFile = {
+  fileId: 'f1',
+  name: toInertText('Agenda, Oct 30.pdf'),
+  mediaType: 'application/pdf',
+  size: 84_000,
+  sharedBy: RIVER,
+  sharedAt: '2026-10-21T15:05:00Z',
+}
+
+/** The sample's transfers: this many steps of progress, one per tick, so a screen can show them and cancel. */
+export const SAMPLE_TRANSFER_STEPS = 4
+
+/** A pretend upload or download of `total` bytes, in steps; an aborted signal rejects with `AbortError`. */
+async function sampleTransfer(total: number, options: RoomsTransferOptions): Promise<void> {
+  const aborted = () => Object.assign(new Error('the transfer was cancelled'), { name: 'AbortError' })
+  for (let step = 1; step <= SAMPLE_TRANSFER_STEPS; step++) {
+    if (options.signal?.aborted) throw aborted()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    if (options.signal?.aborted) throw aborted()
+    options.onProgress?.({ sent: Math.round((total * step) / SAMPLE_TRANSFER_STEPS), total })
+  }
+}
+
+const fileOf = (attachment: RoomsAttachment, fileId: string): RoomFile => ({
+  fileId,
+  name: toInertText(attachment.name),
+  mediaType: attachment.mimeType,
+  size: attachment.size,
+  sharedBy: ME,
+  sharedAt: '2026-10-25T12:00:00Z',
+})
+
+/**
+ * A chat message in a sample room: a keyring.chat/1 message body, as the composer writes one. The event ids are
+ * fixed and dated 2023, so the chat parser's clock window accepts them whatever the run's date.
+ */
+const chatPost = (
+  key: string,
+  version: number,
+  author: Identity,
+  at: string,
+  text: string
+): NoteSummary & { body: string } => ({
+  key,
+  version,
+  author,
+  updatedAt: at,
+  status: 'active',
+  pinned: false,
+  body: chatMessageBody(text, `01HJYJQ6008Q2W4E5R6T7Y8Z${key.toUpperCase().replace('M', '9')}`, new Date(at)),
+})
 
 interface SampleRoom extends Room {
   notes: (NoteSummary & { body: string })[]
@@ -102,17 +157,13 @@ function sampleState() {
           pinned: false,
           body: '',
         },
+        // The chat (data rooms mock): keyring.chat/1 messages, as Keyring posts them. Untitled, so they stay in Chat.
+        chatPost('m1', 5, TERM, '2026-10-21T14:50:00Z', 'Draft agenda is in Files. Can everyone look before Thursday?'),
+        { ...chatPost('m2', 6, RIVER, '2026-10-21T15:05:00Z', 'Agenda, Oct 30'), files: [AGENDA] },
+        chatPost('m3', 7, ME, '2026-10-22T08:10:00Z', 'Looks good. Item 3 needs a vote.'),
+        { ...chatPost('m4', 8, GLASS, '2026-10-22T09:31:00Z', 'Summary of item 3 posted to Notes.'), byAgent: true },
       ],
-      files: [
-        {
-          fileId: 'f1',
-          name: toInertText('Agenda, Oct 30.pdf'),
-          mediaType: 'application/pdf',
-          size: 84_000,
-          sharedBy: RIVER,
-          sharedAt: '2026-10-21T15:05:00Z',
-        },
-      ],
+      files: [AGENDA],
     },
     {
       roomId: 'did:webvh:sample:welcome-desk',
@@ -178,6 +229,8 @@ export function createSampleRoomsService(options: { now?: () => number } = {}): 
   const now = options.now ?? (() => Date.now())
   const state = sampleState()
   const pendingWrites = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
+  // Posts already written, by their idempotency key: a retry answers with the post it wrote, as the service does.
+  const written = new Map<string, { key: string; version: number }>()
   const pendingOffers = new Map<string, { offerId: string; at: number }>()
   let nextToken = 1
   const fresh = (at: number) => now() - at <= PREVIEW_TOKEN_TTL_MS
@@ -238,11 +291,15 @@ export function createSampleRoomsService(options: { now?: () => number } = {}): 
         validUntil: r.validUntil,
       }
     },
-    async confirmWrite(token) {
+    async confirmWrite(token, options = {}) {
       const pending = pendingWrites.get(token)
       pendingWrites.delete(token)
       if (!pending || !fresh(pending.at)) throw new RoomsPreviewExpired(token)
       const r = room(pending.roomId)
+      const again = pending.draft.idempotencyKey ? written.get(pending.draft.idempotencyKey) : undefined
+      if (again) return again
+      const attachment = pending.draft.attachment
+      if (attachment) await sampleTransfer(attachment.size, options)
       if (pending.draft.replaceKey) {
         const current = r.notes.find((n) => n.key === pending.draft.replaceKey)
         if (current && current.version !== pending.replacedVersion)
@@ -260,7 +317,10 @@ export function createSampleRoomsService(options: { now?: () => number } = {}): 
         status: 'active',
         pinned: false,
         body: pending.draft.body,
+        ...(attachment ? { files: [fileOf(attachment, `f-${key}`)] } : {}),
       })
+      if (attachment) r.files.push(fileOf(attachment, `f-${key}`))
+      if (pending.draft.idempotencyKey) written.set(pending.draft.idempotencyKey, { key, version })
       return { key, version }
     },
     async curate(roomId, key, action) {
@@ -312,10 +372,12 @@ export function createSampleRoomsService(options: { now?: () => number } = {}): 
     async listFiles(roomId) {
       return room(roomId).files
     },
-    async openFile(roomId, fileId): Promise<OpenedFile> {
+    async openFile(roomId, fileId, options = {}): Promise<OpenedFile> {
       const file = room(roomId).files.find((f) => f.fileId === fileId)
       if (!file) throw new Error(`no sample file ${fileId}`)
-      return { localUri: `sample://${fileId}`, mediaType: file.mediaType, size: file.size ?? 0 }
+      const total = file.size ?? 0
+      await sampleTransfer(total, options)
+      return { localUri: `sample://${fileId}`, mediaType: file.mediaType, size: total }
     },
     async releaseFile() {
       // Nothing to delete: the sample makes no local copies.

@@ -4,15 +4,23 @@
  * the room's name and tier and who the member posts as; and a warning when the member's agent found the host's
  * answer inconsistent (records dropped or replayed).
  *
- * A post's words are its chat message, or the record as it was written: inert either way, never followed. Writing
- * and attachments come in later steps; nothing here pretends to do them. Reached only while the rooms flag is on.
+ * A post's words are its chat message, or the record as it was written: inert either way, never followed. Below the
+ * posts, the composer: a post shows at once as sending, and stays, marked, if it could not be sent. Where the member
+ * may not post, the composer gives the reason instead. A post's files show as chips; a tap opens the attachment sheet
+ * (download, then share), and "+" posts one.
+ *
+ * Under the header, the room's parts as tabs (data rooms mock): Chat; Files, the room's library; Notes, its titled
+ * records and the markers of removed ones, which the chat leaves out; and Members, the member's own access and the
+ * community's list. Reached only while the rooms flag is on.
  *
  * @module rooms/screens/Room
  */
-import { useRoute } from '@react-navigation/native'
-import React from 'react'
+import { useHeaderHeight } from '@react-navigation/elements'
+import { useNavigation, useRoute } from '@react-navigation/native'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native'
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
@@ -20,17 +28,28 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { DayPill } from '../../../components/chat/DayPill'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { Screens } from '../../../types/navigators'
+import { useMeasuredKeyboardOffset } from '../../trust-tasks/screens/keyboardOffset'
 import { localDayKey } from '../../../utils/localDay'
 import { testIdWithKey } from '../../../utils/testable'
+import { RoomComposer } from '../components/RoomComposer'
+import { RoomFileSheet } from '../components/RoomFileSheet'
+import { RoomFilesTab } from '../components/RoomFilesTab'
+import { RoomMembersTab } from '../components/RoomMembersTab'
+import { RoomNotesTab } from '../components/RoomNotesTab'
 import { RoomPostBubble } from '../components/RoomPostBubble'
 import { roomTitle } from '../components/RoomRow'
 import { roomsStatusText } from '../components/roomsStatusText'
 import { identityText } from '../components/roomWords'
+import { type RoomTab, RoomTabs } from '../components/RoomTabs'
 import { SampleDataBanner } from '../components/SampleDataBanner'
 import TierBadge from '../components/TierBadge'
-import type { RoomPost } from '../roomPosts'
+import { toInertText } from '../inertText'
+import { isNote, type RoomPost } from '../roomPosts'
+import type { RoomFile } from '../types'
 import { useRoom } from '../useRoom'
 import { POSTS_PAGE, useRoomPosts } from '../useRoomPosts'
+import { type PendingPost, useRoomSend } from '../useRoomSend'
 import { useRoomsService } from '../useRoomsService'
 
 type Item = { kind: 'day'; key: string; date: Date } | { kind: 'post'; key: string; post: RoomPost }
@@ -48,15 +67,70 @@ export const withDayPills = (posts: RoomPost[]): Item[] => {
   return items
 }
 
+/** A post on its way, drawn as the member's own until the room's list carries it. */
+export const pendingAsPost = (pending: PendingPost, actingAs: RoomPost['author']): RoomPost => ({
+  key: pending.localId,
+  version: 0,
+  author: actingAs,
+  byAgent: false,
+  mine: true,
+  at: pending.at,
+  text: toInertText(pending.text),
+  isChatMessage: true,
+  retracted: false,
+  pinned: false,
+  unread: false,
+  delivery: pending.state === 'sent' ? undefined : pending.state,
+  files: pending.file
+    ? [
+        {
+          fileId: pending.localId,
+          name: toInertText(pending.file.name),
+          mediaType: pending.file.mimeType,
+          size: pending.file.size,
+        },
+      ]
+    : [],
+  progress:
+    pending.state === 'sending' && pending.progress && pending.progress.total > 0
+      ? Math.min(1, pending.progress.sent / pending.progress.total)
+      : undefined,
+})
+
 const Room: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const roomId = (useRoute()?.params as { roomId?: string } | undefined)?.roomId ?? ''
+  const navigation = useNavigation() as unknown as { navigate: (name: string, params: object) => void }
   const service = useRoomsService()
+  // The composer rides above the keyboard. The view's offset is where its parent starts on screen, measured: on iOS 26
+  // the header height a screen is told is the status bar alone, and the composer stayed under the keyboard.
+  const headerHeight = useHeaderHeight()
+  const keyboard = useMeasuredKeyboardOffset(headerHeight)
   const state = useRoom(service, roomId)
   const { room, roomCapabilities } = state
   const canList = roomCapabilities?.listNotes.status === 'available'
   const feed = useRoomPosts(service, roomId, room?.actingAs, !!room && canList)
+  const outbox = useRoomSend(service, roomId, feed.refresh)
+  const [openedFile, setOpenedFile] = useState<RoomFile>()
+  const [tab, setTab] = useState<RoomTab>('chat')
+  const [attachRequest, setAttachRequest] = useState(0)
+  const { reload } = state
+  // The library is read again each time it is shown, so a file just posted from the chat is in it.
+  const showTab = (next: RoomTab) => {
+    if (next === 'files' && tab !== 'files') reload()
+    setTab(next)
+  }
+  const canOpenFiles = roomCapabilities?.openFile.status === 'available'
+  const { settle } = outbox
+  // A sent post leaves the outbox once the room's own list shows it.
+  useEffect(() => {
+    if (feed.posts) settle(new Set(feed.posts.map((p) => p.key)))
+  }, [feed.posts, settle])
+  const pendingPosts = useMemo(
+    () => outbox.pending.map((p) => pendingAsPost(p, room?.actingAs)),
+    [outbox.pending, room?.actingAs]
+  )
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
     header: { paddingHorizontal: 16, paddingVertical: 10, gap: 4 },
@@ -111,7 +185,11 @@ const Room: React.FC = () => {
     )
 
   const unavailable = roomsStatusText(t, roomCapabilities.listNotes, 'listNotes')
-  const items = feed.posts ? withDayPills(feed.posts) : []
+  const cannotPost = roomsStatusText(t, roomCapabilities.write, 'write')
+  // Titled records and removed ones are the room's notes, on their own tab; the chat shows the rest.
+  const chatPosts = feed.posts?.filter((p) => !isNote(p))
+  const notes = feed.posts?.filter(isNote)
+  const items = chatPosts || pendingPosts.length ? withDayPills([...pendingPosts, ...(chatPosts ?? [])]) : []
 
   const empty = unavailable ? (
     <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsUnavailable')}>
@@ -162,42 +240,110 @@ const Room: React.FC = () => {
           <ThemedText style={styles.warnText}>{t('Rooms.HostConflict')}</ThemedText>
         </View>
       ) : null}
-      <FlatList
-        testID={testIdWithKey('RoomPosts')}
-        data={unavailable ? [] : items}
-        keyExtractor={(item) => item.key}
-        // A page is small (POSTS_PAGE posts and their day pills): draw it whole, so "Load older" sits under it.
-        initialNumToRender={POSTS_PAGE * 2}
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) =>
-          item.kind === 'day' ? <DayPill date={item.date} /> : <RoomPostBubble post={item.post} />
-        }
-        ListEmptyComponent={empty}
-        refreshControl={
-          unavailable ? undefined : (
-            <RefreshControl
-              refreshing={feed.refreshing}
-              onRefresh={feed.refresh}
-              tintColor={ColorPalette.brand.primary}
-            />
-          )
-        }
-        ListFooterComponent={
-          feed.hasOlder ? (
-            <Button
-              title={t('Rooms.LoadOlder')}
-              buttonType={ButtonType.Secondary}
-              onPress={feed.loadOlder}
-              disabled={feed.loadingOlder}
-              testID={testIdWithKey('RoomLoadOlder')}
-            />
-          ) : feed.incomplete ? (
-            <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
-              {t('Rooms.NotesIncomplete')}
-            </ThemedText>
-          ) : null
-        }
-      />
+      <RoomTabs tabs={['chat', 'files', 'notes', 'members']} selected={tab} onSelect={showTab} />
+      {tab === 'members' ? (
+        <RoomMembersTab
+          service={service}
+          room={room}
+          status={roomCapabilities.listCommunityMembers}
+          onLeave={
+            room.communityDid
+              ? () => navigation.navigate(Screens.VtiCommunity, { communityDid: room.communityDid })
+              : undefined
+          }
+        />
+      ) : null}
+      {tab === 'notes' ? (
+        <RoomNotesTab
+          notes={notes}
+          feed={feed}
+          unavailable={unavailable}
+          onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+        />
+      ) : null}
+      {tab === 'files' ? (
+        <RoomFilesTab
+          files={state.files}
+          failed={state.filesFailed}
+          status={roomCapabilities.listFiles}
+          refreshing={state.refreshing}
+          onRefresh={reload}
+          onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+          onAddFile={
+            unavailable || cannotPost
+              ? undefined
+              : () => {
+                  setTab('chat')
+                  setAttachRequest((n) => n + 1)
+                }
+          }
+        />
+      ) : null}
+      {/* The chat stays mounted on the other tabs, hidden, so its draft and a post on its way are kept.
+          keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */}
+      <KeyboardAvoidingView
+        ref={keyboard.ref}
+        onLayout={keyboard.onLayout}
+        style={tab === 'chat' ? { flex: 1 } : { display: 'none' }}
+        behavior="padding"
+        keyboardVerticalOffset={keyboard.offset}
+      >
+        <FlatList
+          testID={testIdWithKey('RoomPosts')}
+          data={unavailable ? [] : items}
+          keyExtractor={(item) => item.key}
+          // A page is small (POSTS_PAGE posts and their day pills): draw it whole, so "Load older" sits under it.
+          initialNumToRender={POSTS_PAGE * 2}
+          contentContainerStyle={styles.list}
+          renderItem={({ item }) =>
+            item.kind === 'day' ? (
+              <DayPill date={item.date} />
+            ) : (
+              <RoomPostBubble
+                post={item.post}
+                onRetry={item.post.delivery === 'failed' ? () => outbox.retry(item.post.key) : undefined}
+                onCancel={item.post.files.length > 0 ? () => outbox.cancel(item.post.key) : undefined}
+                onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+              />
+            )
+          }
+          ListEmptyComponent={empty}
+          refreshControl={
+            unavailable ? undefined : (
+              <RefreshControl
+                refreshing={feed.refreshing}
+                onRefresh={feed.refresh}
+                tintColor={ColorPalette.brand.primary}
+              />
+            )
+          }
+          ListFooterComponent={
+            feed.hasOlder ? (
+              <Button
+                title={t('Rooms.LoadOlder')}
+                buttonType={ButtonType.Secondary}
+                onPress={feed.loadOlder}
+                disabled={feed.loadingOlder}
+                testID={testIdWithKey('RoomLoadOlder')}
+              />
+            ) : feed.incomplete ? (
+              <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
+                {t('Rooms.NotesIncomplete')}
+              </ThemedText>
+            ) : null
+          }
+        />
+        {unavailable ? null : (
+          <RoomComposer
+            onSend={outbox.send}
+            unavailable={cannotPost}
+            postingAs={identityText(room.actingAs)}
+            canAttach
+            attachRequest={attachRequest}
+          />
+        )}
+      </KeyboardAvoidingView>
+      <RoomFileSheet service={service} roomId={roomId} file={openedFile} onClose={() => setOpenedFile(undefined)} />
     </SafeAreaView>
   )
 }

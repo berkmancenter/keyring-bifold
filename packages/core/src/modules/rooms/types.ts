@@ -149,6 +149,11 @@ export interface NoteSummary {
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
+  /**
+   * The files the record carries (`rooms/records/put` 0.2 `blobs`), with the details its body gives each: listed
+   * from the host's metadata, with no file key and no download. Usually one; more when another client attached them.
+   */
+  files?: RoomFile[]
 }
 
 /**
@@ -184,11 +189,26 @@ export interface Note extends NoteSummary {
   check: HostCheck
 }
 
+/** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */
+export interface RoomsAttachment {
+  uri: string
+  name: string
+  mimeType?: string
+  size: number
+}
+
 export interface WriteDraft {
   title: string
   body: string
   /** Replace this note instead of adding one. */
   replaceKey?: string
+  /** One file to post with it (`rooms/records/put` 0.2 `blobs`). The service refuses one over its limit. */
+  attachment?: RoomsAttachment /**
+   * The post's own id, the same on every retry. The service derives the record's key from it and writes create-only,
+   * so a retry of a post that already landed answers with that post instead of writing it twice; within one app run
+   * a retried upload resumes rather than starting again. Without it, a retry may post twice.
+   */
+  idempotencyKey?: string
 }
 
 /**
@@ -237,7 +257,20 @@ export interface OfferPreview {
   actingAs: Identity
 }
 
+/** Bytes moved so far, and in all. Upload or download alike. */
+export interface RoomsTransferProgress {
+  sent: number
+  total: number
+}
+
+export interface RoomsTransferOptions {
+  onProgress?: (progress: RoomsTransferProgress) => void
+  /** Aborting it stops the transfer and rejects with an error named `AbortError`; no partial copy is kept. */
+  signal?: AbortSignal
+}
+
 export interface RoomFile {
+  /** The blob's id: what `openFile` takes. */
   fileId: string
   name: InertText
   mediaType?: string
@@ -362,7 +395,8 @@ export interface RoomsService {
   listNotes(roomId: string): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
-  confirmWrite(token: string): Promise<{ key: string; version: number }>
+  /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
+  confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }>
   curate(roomId: string, key: string, action: 'pin' | 'unpin' | 'retract'): Promise<void>
 
   listOffers(communityDid?: string): Promise<RoomOffer[]>
@@ -372,9 +406,9 @@ export interface RoomsService {
   hideOffer(offerId: string): Promise<void>
 
   listFiles(roomId: string): Promise<RoomFile[]>
-  openFile(roomId: string, fileId: string): Promise<OpenedFile>
+  openFile(roomId: string, fileId: string, options?: RoomsTransferOptions): Promise<OpenedFile>
   /**
-   * Deletes the protected local copy `openFile` made. Call it when the viewer closes. The service also
+   * Deletes the protected local copy a completed `openFile` made (a cancelled one keeps none). Call it when the viewer closes. The service also
    * deletes any copies left from earlier sessions on its first `openFile` after the app starts.
    */
   releaseFile(localUri: string): Promise<void>

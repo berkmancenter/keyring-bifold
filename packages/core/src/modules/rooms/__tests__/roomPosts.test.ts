@@ -3,7 +3,7 @@
  * was written (inert, never followed), and nothing a room holds makes it throw.
  */
 import { toInertText } from '../inertText'
-import { chatMessageText, newestFirst, postOf } from '../roomPosts'
+import { chatMessageBody, chatMessageText, newestFirst, postOf } from '../roomPosts'
 import type { Note, NoteSummary } from '../types'
 
 // A ULID dated 2023-12-31: inside the parser's clock window whatever the run's date.
@@ -53,10 +53,16 @@ describe('a record as a post', () => {
     expect(post.isChatMessage).toBe(false)
   })
 
-  test('retracted: no words, and not "unread"', () => {
-    const summary: NoteSummary = { key: 'k2', version: 2, status: 'retracted', pinned: false }
+  test('retracted: no words, no files, and not "unread"', () => {
+    const files = [{ fileId: 'f9', name: toInertText('old.pdf') }]
+    const summary: NoteSummary = { key: 'k2', version: 2, status: 'retracted', pinned: false, files }
     const post = postOf(summary, me)
-    expect(post).toMatchObject({ retracted: true, unread: false, text: '' })
+    expect(post).toMatchObject({ retracted: true, unread: false, text: '', files: [] })
+  })
+
+  test("a post's files come from its record", () => {
+    const files = [{ fileId: 'f1', name: toInertText('Agenda.pdf'), mediaType: 'application/pdf', size: 84_000 }]
+    expect(postOf({ ...note('Agenda attached'), files }, me).files).toEqual(files)
   })
 
   test("a record that couldn't be read: unread, with no words", () => {
@@ -90,5 +96,23 @@ describe('newest first', () => {
       { key: 'd', version: 9 },
     ])
     expect(order.map((n) => n.key)).toEqual(['b', 'a', 'd', 'c'])
+  })
+})
+
+describe('a post as written', () => {
+  const EVENT_ID = '01JB0000000000000000000000'
+  const at = new Date('2026-10-26T12:00:00Z')
+
+  test('is a keyring.chat/1 message that reads back as its text, markup and all', () => {
+    const text = 'Agenda: <b>item 3</b> https://example.org'
+    const body = chatMessageBody(text, EVENT_ID, at)
+    expect(JSON.parse(body)).toEqual({
+      profile: 'keyring.chat/1',
+      eventId: EVENT_ID,
+      type: 'message',
+      content: { format: 'text/plain', text },
+      clientTs: '2026-10-26T12:00:00.000Z',
+    })
+    expect(chatMessageText(body, at.getTime())).toBe(text)
   })
 })

@@ -9,10 +9,10 @@
  *
  * @module rooms/roomPosts
  */
-import { parseChatEvent } from '../chat/chatEvent'
+import { CHAT_PROFILE, type ChatMessageEvent, parseChatEvent } from '../chat/chatEvent'
 
 import { toInertText, type InertText } from './inertText'
-import type { Identity, Note, NoteSummary } from './types'
+import type { Identity, Note, NoteSummary, RoomFile } from './types'
 
 export interface RoomPost {
   key: string
@@ -30,8 +30,16 @@ export interface RoomPost {
   /** The body is a keyring.chat/1 message. False: shown as the record's text, as written. */
   isChatMessage: boolean
   retracted: boolean
+  /** Pinned by a curator: listed first among the room's notes. */
+  pinned: boolean
   /** The record could not be read; only what the listing said about it is known. */
   unread: boolean
+  /** A post this phone is still sending, or could not send (not yet a record in the room). */
+  delivery?: 'sending' | 'failed'
+  /** The files the post carries, each shown as a chip under its words. None on a retracted post. */
+  files: RoomFile[]
+  /** How far a sending post's file has come, 0 to 1. */
+  progress?: number
 }
 
 const sameIdentity = (a?: Identity, b?: Identity): boolean => !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
@@ -55,6 +63,18 @@ export function chatMessageText(body: string, now: number = Date.now()): string 
   return result.event.content?.text
 }
 
+/** A post's body as it is written to the room: a keyring.chat/1 message, which `chatMessageText` reads back. */
+export function chatMessageBody(text: string, eventId: string, at: Date): string {
+  const event: ChatMessageEvent = {
+    profile: CHAT_PROFILE,
+    eventId,
+    type: 'message',
+    content: { format: 'text/plain', text },
+    clientTs: at.toISOString(),
+  }
+  return JSON.stringify(event)
+}
+
 /** One record as a post. `note` is the record when it was read, or only its listing entry when it could not be. */
 export function postOf(note: Note | NoteSummary, actingAs?: Identity, now: number = Date.now()): RoomPost {
   const read = 'body' in note
@@ -71,9 +91,18 @@ export function postOf(note: Note | NoteSummary, actingAs?: Identity, now: numbe
     text: retracted || !read ? toInertText('') : chatText !== undefined ? toInertText(chatText) : note.body,
     isChatMessage: chatText !== undefined,
     retracted,
+    pinned: note.pinned,
     unread: !read && !retracted,
+    files: retracted ? [] : (note.files ?? []),
   }
 }
+
+/**
+ * A record that belongs in the room's Notes rather than its chat (data rooms mock): one with a title, which a chat
+ * message never has, or one a curator removed, whose marker stays among the notes so the history stays honest. A
+ * record with neither stays in the chat, shown as written.
+ */
+export const isNote = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => !!post.title || post.retracted
 
 /** Newest first: by time, then by version, so records with no time keep a stable order. */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'>>(notes: T[]): T[] =>
