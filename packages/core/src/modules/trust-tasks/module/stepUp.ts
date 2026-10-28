@@ -75,6 +75,16 @@ export const approveResponseTypeFor = (requestType: string): string => {
   return STEP_UP_TASK.approveResponse
 }
 
+/**
+ * The approve-response types to try for a request, in order: 0.6, then the request's own
+ * ({@link approveResponseTypeFor}) as the step-down. Agents from 0d3f268e (vta-service #2313) serve only
+ * approve-response/0.6 while still minting approve-request/0.2; v0.60.0 to v0.66.0 serve only 0.1-0.3.
+ */
+export const approveResponseTypesFor = (requestType: string): string[] => {
+  const own = approveResponseTypeFor(requestType)
+  return own === STEP_UP_TASK.approveResponse06 ? [own] : [STEP_UP_TASK.approveResponse06, own]
+}
+
 const STEP_UP_REQUIRED = 'auth:step_up_required'
 
 /** The schema's `challenge` minimum (approve-request 0.1 and 0.2: `minLength: 16`). */
