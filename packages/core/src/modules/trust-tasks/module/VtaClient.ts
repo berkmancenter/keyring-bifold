@@ -78,7 +78,13 @@ import {
   type VetterStanding,
 } from './pcsVetterTasks'
 import { VtiRefusal, isHiddenVettingType } from './vtiAgent'
-import { STEP_UP_TASK, StepUpDeclined, approveResponsePayload, stepUpRequestOf, type StepUpRequest } from './stepUp'
+import {
+  STEP_UP_REQUEST_TYPES,
+  StepUpDeclined,
+  approveResponsePayload,
+  stepUpRequestOf,
+  type StepUpRequest,
+} from './stepUp'
 import { isDigestMultibase } from './vettingShape'
 import { TaskVersions } from './taskVersions'
 import { chooseCarriage, type Carriage } from './tspCapability'
@@ -729,13 +735,7 @@ export function activeSwapTestHook(): VtaSwapTestHook {
 type Probe = { kind: 'live' } | { kind: 'refused'; detail: string } | { kind: 'unknown'; detail: string }
 
 /** Documents the agent sends of its own accord: never the answer to a task this client asked. */
-const UNSOLICITED = new Set<string>([
-  VTA_TASK.consentRequest,
-  VTA_TASK.consentGranted,
-  STEP_UP_TASK.approveRequest01,
-  STEP_UP_TASK.approveRequest02,
-  STEP_UP_TASK.approveRequest04,
-])
+const UNSOLICITED = new Set<string>([VTA_TASK.consentRequest, VTA_TASK.consentGranted, ...STEP_UP_REQUEST_TYPES])
 
 /** Persona mints running now, by VTA and community (see `ensurePersona`). */
 const personasInFlight = new Map<string, Promise<VtiPersona>>()
@@ -1407,6 +1407,9 @@ export class VtaClient {
     }
     const answer = await ask(stepUp.request, { taskType })
     const decision = answer === 'approve' ? 'approved' : 'denied'
+    this.agent.config.logger.info(
+      `${LOG_PREFIX} answering the agent's step-up ${stepUp.request.requestType} with ${stepUp.request.responseType} (${decision})`
+    )
     await this.sendTask(stepUp.request.responseType, approveResponsePayload(stepUp.request, decision), 30000)
     if (decision === 'denied') throw new StepUpDeclined()
     return resubmit()
