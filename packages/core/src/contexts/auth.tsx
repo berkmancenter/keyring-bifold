@@ -20,6 +20,8 @@ import {
 } from '../services/keychain'
 import { WalletSecret } from '../types/security'
 import { migrateToAskar } from '../utils/migration'
+import { dropReturnState, keepReturnState } from '../utils/navReturn'
+import { WALLET_LOCKED_EVENT } from '../utils/walletLocked'
 import { BifoldError } from '../types/error'
 import { EventTypes } from '../constants'
 import { useServices, TOKENS } from '../container-api'
@@ -191,7 +193,11 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
 
   const lockOutUser = useCallback(
     (reason: LockoutReason) => {
+      // An inactivity lock comes back to where the person was; a log out does not (utils/navReturn.ts).
+      if (reason === LockoutReason.Timeout) keepReturnState()
+      else dropReturnState()
       removeSavedWalletSecret()
+      DeviceEventEmitter.emit(WALLET_LOCKED_EVENT, reason)
       dispatch({
         type: DispatchAction.DID_AUTHENTICATE,
         payload: [false],

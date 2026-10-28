@@ -91,6 +91,8 @@ export const fileSize = (bytes: number): string =>
   bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`
 
 export const FileRow: React.FC<{ file: RoomFile }> = ({ file }) => {
+  // Drawn again on a language change, so the shared date follows it.
+  useTranslation()
   const { ColorPalette } = useTheme()
   const styles = useRowStyles()
   const line = [
