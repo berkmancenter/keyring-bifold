@@ -69,7 +69,8 @@ export function mergeNewer(listing: Listing, newer: NoteList): { listing: Listin
     changed = true
   }
   // A conflict the agent found shows at once. A partial listing can't be compared, so it never clears one; and the
-  // same conflict found again is no change, so a standing one redraws nothing.
+  // same conflict found again is no change, so a standing one redraws nothing. `HostCheck` is exactly
+  // { verdict, detail }: a field added to it must be compared here too.
   const sameCheck = newer.check.verdict === listing.check.verdict && newer.check.detail === listing.check.detail
   const check = newer.check.verdict === 'conflict' && !sameCheck ? newer.check : listing.check
   if (!changed && check === listing.check) return undefined
@@ -176,7 +177,8 @@ export function useRoomPosts(
         }
       )
     }
-    // No catch-up while a failure's ticks are still owed: they pass first.
+    // No catch-up while a failure's ticks are still owed: they pass first, up to (skips + 1) ticks. Pull to refresh
+    // is the member's way out at once, and a listing that succeeds clears them.
     if (resumed.current && skips.current === 0) tick()
     resumed.current = false
     const timer = setInterval(tick, ROOM_POLL_MS)
