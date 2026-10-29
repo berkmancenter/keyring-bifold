@@ -1,10 +1,4 @@
 name: Code Quality
-# "subset" tells a merge waiter that Testing ran a selected subset; the job "Testing scope · ..." names it exactly.
-# The full suite is the "Full test suite" workflow (full-tests.yaml).
-run-name: >-
-  ${{ github.event_name == 'pull_request'
-  && format('{0} · Testing: subset', github.event.pull_request.title)
-  || format('Code Quality · {0} · {1}', github.ref_name, github.sha) }}
 
 on:
   pull_request:
@@ -210,7 +204,8 @@ jobs:
           node scripts/ci/select-tests.mjs run --plan "$RUNNER_TEMP/test-plan.json"
 
   # Not required. Its name carries what Testing ran ("@bifold/core subset 63 of 704", "full suite"), where a merge
-  # waiter can read it through the API (a job's name; a check run's summary is not readable there).
+  # waiter can read it through the API (a job's name; a check run's summary is not readable there). Not run-name:
+  # that is fixed before the selection runs, and it replaces the run's `name`, which waiters match on.
   scope:
     name: Testing scope · ${{ needs.test.outputs.scope || 'unknown' }}
     needs: test

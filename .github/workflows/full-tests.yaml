@@ -2,10 +2,6 @@ name: Full test suite
 # Every package's whole jest suite, with coverage: core in four shards, the other packages in a fifth job. A PR's
 # Testing job (quality.yaml) runs only the suites its change can reach; this is what catches anything that selection
 # misses, within one merge. Gate on the job "Full suite": it is green only when every shard is.
-run-name: >-
-  ${{ github.event_name == 'pull_request'
-  && format('Full test suite · {0}', github.event.pull_request.title)
-  || format('Full test suite · {0} · {1}', github.event_name, github.sha) }}
 
 on:
   push:
