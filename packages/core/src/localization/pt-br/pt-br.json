@@ -2711,6 +2711,7 @@
     "NoAgentLinked": "Vincule seu agente primeiro",
     "AgentUnknown": "Não foi possível falar com seu agente. Tente mais tarde.",
     "CommunityUnreachable": "Não foi possível falar com sua comunidade. Tente mais tarde.",
+    "TierNotYet": "Ainda não é possível escrever neste tipo de sala.",
     "YourRooms": "Suas salas",
     "Rooms": "Salas",
     "RoomCount": "{{count}} salas",

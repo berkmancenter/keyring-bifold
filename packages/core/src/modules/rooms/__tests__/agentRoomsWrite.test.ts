@@ -1,4 +1,10 @@
-import { AgentRoomsService, NOTE_BODY_MAX, type RoomsBackend, type RoomsCommunity } from '../real/agentRoomsService'
+import {
+  AgentRoomsService,
+  NOTE_BODY_MAX,
+  postKey,
+  type RoomsBackend,
+  type RoomsCommunity,
+} from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
 import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
 
@@ -271,7 +277,7 @@ describe('AgentRoomsService writes', () => {
     const s = setup()
     const sealed = await s.service.prepareWrite(SEALED_ROOM, { title: '', body: 'x' }).catch((e) => e)
     expect(sealed).toBeInstanceOf(RoomsUnavailable)
-    expect(sealed).toMatchObject({ reason: 'clientNotBuilt' })
+    expect(sealed).toMatchObject({ reason: 'tierNotYet' })
     await expect(s.service.prepareWrite(READ_ONLY_ROOM, { title: '', body: 'x' })).rejects.toMatchObject({
       reason: 'noRight',
     })
@@ -328,5 +334,91 @@ describe('AgentRoomsService curation', () => {
     const s = setup()
     await expect(s.service.curate(READ_ONLY_ROOM, 'note/abc', 'pin')).rejects.toMatchObject({ reason: 'noRight' })
     expect(s.sendCompleted).not.toHaveBeenCalled()
+  })
+})
+
+describe('writing, by room tier', () => {
+  it('says writing is not available yet in a sealed room, and stays available in an open one', async () => {
+    const { service } = setup()
+    expect((await service.roomCapabilities(SEALED_ROOM)).write).toMatchObject({
+      status: 'comingSoon',
+      reason: 'tierNotYet',
+    })
+    expect((await service.roomCapabilities(OPEN_ROOM)).write).toMatchObject({ status: 'available', reason: 'ok' })
+    // Reading a sealed room is unchanged.
+    expect((await service.roomCapabilities(SEALED_ROOM)).listNotes.status).toBe('available')
+  })
+
+  it('names a missing right before the tier: a read-only member is told they may not post', async () => {
+    const { service } = setup()
+    expect((await service.roomCapabilities(READ_ONLY_ROOM)).write).toMatchObject({ reason: 'noRight' })
+  })
+})
+
+describe('a post sent again', () => {
+  it('takes its key from its idempotency key: the same on every retry, its own per post, opaque', async () => {
+    expect(postKey('post-1')).toBe(postKey('post-1'))
+    expect(postKey('post-1')).not.toBe(postKey('post-2'))
+    expect(postKey('post-1')).toMatch(/^note\/[0-9a-f]{32}$/)
+    expect(postKey('post-1')).not.toContain('post-1')
+
+    const { service, agentTask } = setup()
+    const preview = await service.prepareWrite(OPEN_ROOM, { title: '', body: 'hi', idempotencyKey: 'post-1' })
+    expect(await service.confirmWrite(preview.token)).toEqual({ key: postKey('post-1'), version: 1 })
+    expect(acted(agentTask)[0].payload).toMatchObject({ key: postKey('post-1'), expectedVersion: 0 })
+  })
+
+  // The host stores what it is sent; the first answer never reaches the phone.
+  const lossyHost = () => {
+    const versions: Record<string, number> = {}
+    let answers = 0
+    const host = (document: Record<string, unknown>) => {
+      const { key, expectedVersion } = document.payload as { key: string; expectedVersion: number }
+      if ((versions[key] ?? 0) !== expectedVersion) throw new FakeRefusal('taskFailed', { reason: 'conflict' })
+      versions[key] = (versions[key] ?? 0) + 1
+      if (answers++ === 0) throw new Error('the community did not answer within 30 s')
+      return { key, version: versions[key], epoch: 1 }
+    }
+    return { versions, host }
+  }
+
+  it('after a lost answer, meets the post already there and resolves to it: one record, not two', async () => {
+    const { versions, host } = lossyHost()
+    const { service } = setup({ versions, host })
+    const draft = { title: '', body: 'hello', idempotencyKey: 'post-1' }
+
+    await expect(service.confirmWrite((await service.prepareWrite(OPEN_ROOM, draft)).token)).rejects.toThrow(
+      'did not answer'
+    )
+    expect(await service.confirmWrite((await service.prepareWrite(OPEN_ROOM, draft)).token)).toEqual({
+      key: postKey('post-1'),
+      version: 1,
+    })
+    expect(Object.keys(versions)).toEqual([postKey('post-1')])
+  })
+
+  it('without an idempotency key, the same retry posts twice (the control for the one above)', async () => {
+    const { versions, host } = lossyHost()
+    const { service } = setup({ versions, host })
+    const draft = { title: '', body: 'hello' }
+
+    await expect(service.confirmWrite((await service.prepareWrite(OPEN_ROOM, draft)).token)).rejects.toThrow()
+    await service.confirmWrite((await service.prepareWrite(OPEN_ROOM, draft)).token)
+    expect(Object.keys(versions)).toHaveLength(2)
+  })
+
+  it('refuses a post carrying a file, sending nothing: files are not built', async () => {
+    const { service, agentTask, sendCompleted } = setup()
+    const err = await service
+      .prepareWrite(OPEN_ROOM, {
+        title: '',
+        body: 'see attached',
+        attachment: { name: 'a.pdf', mimeType: 'application/pdf', size: 3, uri: 'file:///a.pdf' },
+      })
+      .catch((e) => e)
+    expect(err).toBeInstanceOf(RoomsUnavailable)
+    expect(err).toMatchObject({ reason: 'clientNotBuilt' })
+    expect(acted(agentTask)).toEqual([])
+    expect(sendCompleted).not.toHaveBeenCalled()
   })
 })

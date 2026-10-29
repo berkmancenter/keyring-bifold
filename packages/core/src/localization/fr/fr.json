@@ -2809,6 +2809,7 @@
     "NoAgentLinked": "Reliez d'abord votre agent",
     "AgentUnknown": "Impossible de joindre votre agent. Réessayez plus tard.",
     "CommunityUnreachable": "Impossible de joindre votre communauté. Réessayez plus tard.",
+    "TierNotYet": "L'écriture n'est pas encore disponible dans ce type de salle.",
     "YourRooms": "Vos salons",
     "Rooms": "Salons",
     "RoomCount": "{{count}} salons",

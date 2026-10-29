@@ -22,6 +22,9 @@
  *
  * Files and agent access are later phases and report `clientNotBuilt`.
  */
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
 import type {
@@ -132,6 +135,14 @@ export const BUILT: ReadonlySet<RoomsOperation> = new Set<RoomsOperation>([
  */
 export const NOTE_BODY_MAX = 16384
 export const NOTE_TITLE_MAX = 512
+
+/**
+ * A post's record key, from its idempotency key: the same on every retry, so a post sent again after its answer
+ * was lost meets itself (create-only) instead of landing twice. Opaque, as a sealed room's keys must be.
+ */
+export function postKey(idempotencyKey: string): string {
+  return `note/${bytesToHex(sha256(utf8ToBytes(`keyring.rooms.post|${idempotencyKey}`))).slice(0, 32)}`
+}
 
 /** How many pages of a community's membership record, or of its offers, to read before stopping. */
 const MAX_MEMBERSHIP_PAGES = 10
@@ -342,12 +353,28 @@ export class AgentRoomsService implements RoomsService {
   }
 
   public async roomCapabilities(roomId: string): Promise<RoomCapabilities> {
-    return deriveRoomCapabilities(await this.capabilities(), await this.known(roomId))
+    return this.capabilitiesIn(await this.known(roomId))
+  }
+
+  /**
+   * A room's statuses, and what this build does not yet do in a room of its tier: writing is built for `open` rooms
+   * only (cleartext `rooms/records/put`). A sealed room's record is sealed and signed by the agent first
+   * (`rooms/keys/seal/0.2`), which is not built, so the composer says so instead of every post failing.
+   */
+  private async capabilitiesIn(room: KnownRoom): Promise<RoomCapabilities> {
+    const statuses = deriveRoomCapabilities(await this.capabilities(), room)
+    if (statuses.write.status === 'available' && room.tier !== 'open')
+      statuses.write = {
+        status: 'comingSoon',
+        reason: 'tierNotYet',
+        detail: `writing to ${room.tier} rooms is not built yet`,
+      }
+    return statuses
   }
 
   private async requireInRoom(roomId: string, operation: keyof RoomCapabilities): Promise<KnownRoom> {
     const room = await this.known(roomId)
-    const status = deriveRoomCapabilities(await this.capabilities(), room)[operation]
+    const status = (await this.capabilitiesIn(room))[operation]
     if (status.status !== 'available') throw new RoomsUnavailable(operation, status.reason, status.detail)
     if (!room.host) throw new RoomsUnavailable(operation, 'detailsNotLoaded', 'no host is known for this room')
     return room
@@ -756,8 +783,8 @@ export class AgentRoomsService implements RoomsService {
    */
   public async prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview> {
     const room = await this.requireInRoom(roomId, 'write')
-    if (room.tier !== 'open')
-      throw new RoomsUnavailable('write', 'clientNotBuilt', `writing to ${room.tier} rooms is not built yet`)
+    // Files are not built: a post that carries one is refused, never sent without it.
+    if (draft.attachment) throw new RoomsUnavailable('write', 'clientNotBuilt', 'posting a file is not built yet')
     if (draft.body.trim().length === 0) throw new RoomsRefused('write', 'empty', false, 'the note has no text')
     if (draft.body.length > NOTE_BODY_MAX || draft.title.length > NOTE_TITLE_MAX)
       throw new RoomsRefused('write', 'tooLong', false, `a note holds ${NOTE_BODY_MAX} characters`)
@@ -794,8 +821,8 @@ export class AgentRoomsService implements RoomsService {
     if (!pending || this.now() - pending.at > PREVIEW_TOKEN_TTL_MS) throw new RoomsPreviewExpired(token)
     const room = await this.requireInRoom(pending.roomId, 'write')
     const { community, host } = this.hostOf(room, 'write')
-    const { title, body, replaceKey } = pending.draft
-    const key = replaceKey ?? `note/${this.backend.newId()}`
+    const { title, body, replaceKey, idempotencyKey } = pending.draft
+    const key = replaceKey ?? (idempotencyKey ? postKey(idempotencyKey) : `note/${this.backend.newId()}`)
     const expectedVersion = pending.replacedVersion ?? 0
     let answer: unknown
     try {
@@ -806,7 +833,11 @@ export class AgentRoomsService implements RoomsService {
         cleartext: { ...(title.trim() ? { title } : {}), body },
       })
     } catch (e) {
-      throw await this.hostRefusal('write', room, key, expectedVersion, e)
+      const refused = await this.hostRefusal('write', room, key, expectedVersion, e)
+      // Sent again after its answer was lost: the key is this post's own, so the record already there is this post.
+      if (!replaceKey && idempotencyKey && refused instanceof RoomsConflict)
+        return { key, version: refused.currentVersion }
+      throw refused
     }
     const put = parsePut(answer)
     if (!put || put.key !== key) throw new Error(`the host answered the write of ${key} with something else`)
