@@ -177,10 +177,11 @@ describe('posting to a room', () => {
     } as RoomsService
   }
 
-  test('a room whose tier this build does not write to: the reason, and no field', async () => {
+  test('a room whose tier this build does not write to: posting is on its way, so the strip, and no field', async () => {
     withStatus('write', 'tierNotYet')
     const tree = show(PLANNING)
-    await waitFor(() => expect(tree.getByTestId(id('RoomComposerUnavailable'))).toHaveTextContent('Rooms.TierNotYet'))
+    await waitFor(() => expect(tree.getByTestId(id('RoomFeatureCard_write'))).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomComposerUnavailable'))).toBeNull()
     expect(tree.queryByTestId(id('RoomComposerInput'))).toBeNull()
   })
 

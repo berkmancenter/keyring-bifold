@@ -2884,6 +2884,8 @@
     "SoonFilesLine": "Share documents with everyone in this room, and open theirs.",
     "SoonNotesTitle": "Room notes",
     "SoonNotesLine": "Read the room's titled notes and see what changed.",
+    "SoonNoteWriteTitle": "Writing notes",
+    "SoonNoteWriteLine": "Soon you can add and edit titled notes for everyone in this room.",
     "SoonCurateTitle": "Tidying notes",
     "SoonCurateLine": "Pin, mark outdated or take back notes in this room.",
     "SoonAgentTitle": "Agent access",

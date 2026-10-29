@@ -26,6 +26,7 @@ const FEATURES = {
   write: { icon: 'message-text-clock-outline', title: 'Rooms.SoonWriteTitle', line: 'Rooms.SoonWriteLine' },
   files: { icon: 'folder-clock-outline', title: 'Rooms.SoonFilesTitle', line: 'Rooms.SoonFilesLine' },
   notes: { icon: 'note-text-outline', title: 'Rooms.SoonNotesTitle', line: 'Rooms.SoonNotesLine' },
+  noteWrite: { icon: 'note-edit-outline', title: 'Rooms.SoonNoteWriteTitle', line: 'Rooms.SoonNoteWriteLine' },
   curate: { icon: 'pin-outline', title: 'Rooms.SoonCurateTitle', line: 'Rooms.SoonCurateLine' },
   agent: { icon: 'robot-outline', title: 'Rooms.SoonAgentTitle', line: 'Rooms.SoonAgentLine' },
   chat: { icon: 'forum-outline', title: 'Rooms.SoonChatTitle', line: 'Rooms.SoonChatLine' },
