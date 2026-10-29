@@ -145,7 +145,6 @@ export function useRoomPosts(
         skips--
         return
       }
-      if (listingsInFlight.current > 0) return
       listingsInFlight.current++
       service
         .listNotes(roomId, { sinceVersion: newestVersion(listingNow.current?.notes ?? []) })
