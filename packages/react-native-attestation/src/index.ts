@@ -186,6 +186,34 @@ export const deleteHardwareSigningKey = async (): Promise<boolean> => {
   return Attestation.deleteHardwareSigningKey();
 };
 
+// =============================================================================
+// Sign-in approval key (Android)
+// =============================================================================
+
+/** Why an approval-key call failed, as the native side rejects it (`error.code`). */
+export type ApprovalKeyFailure = 'lost' | 'cancelled' | 'unavailable';
+
+/**
+ * Android: make the sign-in approval key and keep `secretHex` under it. The key is released for one operation at a
+ * time, through a strong biometric only, and a new enrolment ends it; one that cannot be made so is refused
+ * (`unavailable`). Shows one prompt.
+ */
+export const approvalKeyWrap = async (
+  secretHex: string,
+  prompt: string,
+  cancel: string
+): Promise<boolean> => Attestation.approvalKeyWrap(secretHex, prompt, cancel);
+
+/** Android: the kept secret, after a strong biometric for this one use. `lost` when there is none or it was ended. */
+export const approvalKeyUnwrap = async (
+  prompt: string,
+  cancel: string
+): Promise<string> => Attestation.approvalKeyUnwrap(prompt, cancel);
+
+/** Android: forget the approval key and what it kept. */
+export const approvalKeyForget = async (): Promise<boolean> =>
+  Attestation.approvalKeyForget();
+
 /** Get information about the hardware signing key */
 export const getHardwareKeyInfo = async (): Promise<HardwareKeyInfo> => {
   return Attestation.getHardwareKeyInfo();
