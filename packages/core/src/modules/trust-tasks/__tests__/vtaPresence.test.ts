@@ -29,9 +29,26 @@ function world(opts: { otherSeenAt?: () => string | undefined; registered?: bool
         registered = true
         return {} as T
       }
-      // An agent at v0.52.0: acl/* at 0.1 only.
+      // An agent at v0.52.0: acl/* at 0.1 only, and the device tasks at 0.2 (0.3 refused, as before 0d3f268e).
+      if (
+        type === AGENT_DEVICE_TASK.heartbeat03 ||
+        type === AGENT_DEVICE_TASK.list03 ||
+        type === AGENT_DEVICE_TASK.aclList03
+      )
+        throw new VtiRefusal('unsupportedVersion', 'unsupported version', {
+          servedVersions: [
+            (
+              {
+                [AGENT_DEVICE_TASK.heartbeat03]: AGENT_DEVICE_TASK.heartbeat,
+                [AGENT_DEVICE_TASK.list03]: AGENT_DEVICE_TASK.list,
+              } as Record<string, string>
+            )[type] ?? AGENT_DEVICE_TASK.aclList,
+          ],
+        })
       if (type === AGENT_DEVICE_TASK.aclList02)
-        throw new VtiRefusal('unsupportedVersion', 'unsupported version', { servedVersions: [AGENT_DEVICE_TASK.aclList] })
+        throw new VtiRefusal('unsupportedVersion', 'unsupported version', {
+          servedVersions: [AGENT_DEVICE_TASK.aclList],
+        })
       if (type === AGENT_DEVICE_TASK.aclList)
         return {
           entries: [
@@ -85,7 +102,13 @@ describe('telling the agent this phone is here', () => {
         task: async <T>(type: string) => {
           sent.push(type)
           if (type === AGENT_DEVICE_TASK.register) throw new VtiRefusal('invalid', 'displayName too long')
-          if (type === AGENT_DEVICE_TASK.aclList02) throw new VtiRefusal('unsupportedVersion', 'unsupported version')
+          if (
+            type === AGENT_DEVICE_TASK.aclList02 ||
+            type === AGENT_DEVICE_TASK.aclList03 ||
+            type === AGENT_DEVICE_TASK.list03 ||
+            type === AGENT_DEVICE_TASK.heartbeat03
+          )
+            throw new VtiRefusal('unsupportedVersion', 'unsupported version')
           if (type === AGENT_DEVICE_TASK.aclList) return { entries: [] } as T
           if (type === AGENT_DEVICE_TASK.list) return { devices: [] } as T
           return {} as T
@@ -189,5 +212,67 @@ describe('when presence runs', () => {
       true
     )
     expect(isLinkOnline({ kind: 'revoked', ...agent, reason: 'x', cause: 'notInAcl' } as never)).toBe(false)
+  })
+})
+
+describe('the access list and the presence tick', () => {
+  const ACL_TYPES: readonly string[] = [
+    AGENT_DEVICE_TASK.aclList03,
+    AGENT_DEVICE_TASK.aclList02,
+    AGENT_DEVICE_TASK.aclList,
+  ]
+
+  it('never asks acl/list, at any version, tick after tick', async () => {
+    const w = world({ otherSeenAt: () => new Date(T0 - 60_000).toISOString() })
+    await w.presence.tick()
+    w.advance(5 * 60_000)
+    await w.presence.tick()
+
+    expect(w.sent.filter((s) => ACL_TYPES.includes(s.type))).toEqual([])
+    expect(w.count(AGENT_DEVICE_TASK.heartbeat)).toBe(2)
+    expect(w.seen).toEqual([OTHER]) // siblings still come from device/list
+  })
+
+  // A tester's run (10-29): the agent never answered acl/list, and the agent client sends one task at a time, so
+  // the tick's ask held every other ask (the rooms read among them) for its whole timeout.
+  it('finishes, and names a live sibling, while acl/list would never be answered', async () => {
+    const sent: string[] = []
+    const port: AgentDevicePort = {
+      managerDid: ME,
+      task: async <T>(type: string) => {
+        sent.push(type)
+        if (ACL_TYPES.includes(type)) return new Promise<T>(() => undefined)
+        if (type === AGENT_DEVICE_TASK.list03 || type === AGENT_DEVICE_TASK.list)
+          return {
+            devices: [
+              { deviceId: 'me', consumerDid: ME, lastSeenAt: new Date(T0).toISOString() },
+              { deviceId: 'other', consumerDid: OTHER, platform: 'ios', lastSeenAt: new Date(T0).toISOString() },
+              {
+                deviceId: 'gone',
+                consumerDid: 'did:peer:2.wiped',
+                wipedAt: '2026-09-01T00:00:00Z',
+                lastSeenAt: new Date(T0).toISOString(),
+              },
+            ],
+          } as T
+        return {} as T
+      },
+    }
+    const seen: string[] = []
+    const presence = new AgentPresence({
+      port: async () => port,
+      platform: 'ios',
+      now: () => new Date(T0),
+      onSiblingSeen: (d) => seen.push(d.did),
+    })
+
+    const outcome = await Promise.race([
+      presence.tick().then(() => 'finished'),
+      new Promise((resolve) => setTimeout(() => resolve('held'), 500)),
+    ])
+
+    expect(outcome).toBe('finished')
+    expect(seen).toEqual([OTHER]) // not this phone, not the wiped one
+    expect(sent.filter((t) => ACL_TYPES.includes(t))).toEqual([])
   })
 })

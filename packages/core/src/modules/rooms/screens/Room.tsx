@@ -1,18 +1,26 @@
 /**
  * A room as a conversation (rooms member sprint, RoomView): its posts newest first, a day pill above each day's
- * posts, "Load older" at the end, and pull to refresh, since nothing pushes a post to a phone yet. Above the posts,
+ * posts, "Load older" at the end, and pull to refresh. Nothing pushes a post to a phone, so while the room is in view
+ * and the app in the foreground, new posts are asked for every few seconds (`useRoomPosts`). Above the posts,
  * the room's name and tier and who the member posts as; and a warning when the member's agent found the host's
  * answer inconsistent (records dropped or replayed).
  *
  * A post's words are its chat message, or the record as it was written: inert either way, never followed. Below the
  * posts, the composer: a post shows at once as sending, and stays, marked, if it could not be sent. Where the member
  * may not post, the composer gives the reason instead. A post's files show as chips; a tap opens the attachment sheet
- * (download, then share). Sending a file comes in a later step. Reached only while the rooms flag is on.
+ * (download, then share), and "+" posts one.
+ *
+ * Under the header, the room's parts as tabs (data rooms mock): Chat; Files, the room's library; Notes, its titled
+ * records and the markers of removed ones, which the chat leaves out; and Members, the member's own access and the
+ * community's list. Reached only while the rooms flag is on.
+ *
+ * In an open room a member who may write can add a titled note from the Notes tab and edit their own, each through
+ * the note editor's check before posting. Other tiers say writing isn't available there yet.
  *
  * @module rooms/screens/Room
  */
 import { useHeaderHeight } from '@react-navigation/elements'
-import { useRoute } from '@react-navigation/native'
+import { useNavigation, useRoute } from '@react-navigation/native'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native'
@@ -24,20 +32,27 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { DayPill } from '../../../components/chat/DayPill'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { Screens } from '../../../types/navigators'
 import { useMeasuredKeyboardOffset } from '../../trust-tasks/screens/keyboardOffset'
 import { localDayKey } from '../../../utils/localDay'
 import { testIdWithKey } from '../../../utils/testable'
 import { RoomComposer } from '../components/RoomComposer'
 import { RoomFileSheet } from '../components/RoomFileSheet'
+import { type NoteEditorTarget, RoomNoteEditor } from '../components/RoomNoteEditor'
+import { RoomFilesTab } from '../components/RoomFilesTab'
+import { RoomMembersTab } from '../components/RoomMembersTab'
+import { RoomNotesTab } from '../components/RoomNotesTab'
 import { RoomPostBubble } from '../components/RoomPostBubble'
 import { roomTitle } from '../components/RoomRow'
 import { roomsStatusText } from '../components/roomsStatusText'
 import { identityText } from '../components/roomWords'
+import { type RoomTab, RoomTabs } from '../components/RoomTabs'
 import { SampleDataBanner } from '../components/SampleDataBanner'
 import TierBadge from '../components/TierBadge'
 import { toInertText } from '../inertText'
-import type { RoomPost } from '../roomPosts'
+import { isNote, type RoomPost } from '../roomPosts'
 import type { RoomFile } from '../types'
+import { useInViewAndActive } from '../useInViewAndActive'
 import { useRoom } from '../useRoom'
 import { POSTS_PAGE, useRoomPosts } from '../useRoomPosts'
 import { type PendingPost, useRoomSend } from '../useRoomSend'
@@ -69,6 +84,7 @@ export const pendingAsPost = (pending: PendingPost, actingAs: RoomPost['author']
   text: toInertText(pending.text),
   isChatMessage: true,
   retracted: false,
+  pinned: false,
   unread: false,
   delivery: pending.state === 'sent' ? undefined : pending.state,
   files: pending.file
@@ -91,6 +107,7 @@ const Room: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const roomId = (useRoute()?.params as { roomId?: string } | undefined)?.roomId ?? ''
+  const navigation = useNavigation() as unknown as { navigate: (name: string, params: object) => void }
   const service = useRoomsService()
   // The composer rides above the keyboard. The view's offset is where its parent starts on screen, measured: on iOS 26
   // the header height a screen is told is the status bar alone, and the composer stayed under the keyboard.
@@ -99,9 +116,19 @@ const Room: React.FC = () => {
   const state = useRoom(service, roomId)
   const { room, roomCapabilities } = state
   const canList = roomCapabilities?.listNotes.status === 'available'
-  const feed = useRoomPosts(service, roomId, room?.actingAs, !!room && canList)
+  const inView = useInViewAndActive()
+  const feed = useRoomPosts(service, roomId, room?.actingAs, !!room && canList, inView)
   const outbox = useRoomSend(service, roomId, feed.refresh)
   const [openedFile, setOpenedFile] = useState<RoomFile>()
+  const [tab, setTab] = useState<RoomTab>('chat')
+  const [attachRequest, setAttachRequest] = useState(0)
+  const [noteEditor, setNoteEditor] = useState<NoteEditorTarget>()
+  const { reload } = state
+  // The library is read again each time it is shown, so a file just posted from the chat is in it.
+  const showTab = (next: RoomTab) => {
+    if (next === 'files' && tab !== 'files') reload()
+    setTab(next)
+  }
   const canOpenFiles = roomCapabilities?.openFile.status === 'available'
   const { settle } = outbox
   // A sent post leaves the outbox once the room's own list shows it.
@@ -167,7 +194,13 @@ const Room: React.FC = () => {
 
   const unavailable = roomsStatusText(t, roomCapabilities.listNotes, 'listNotes')
   const cannotPost = roomsStatusText(t, roomCapabilities.write, 'write')
-  const items = feed.posts || pendingPosts.length ? withDayPills([...pendingPosts, ...(feed.posts ?? [])]) : []
+  // Notes are written to open rooms only, for now: elsewhere the tab says so rather than offer a write that fails.
+  const notesNotYet = !cannotPost && room.tier !== 'open' ? (t('Rooms.TierNotYet') as string) : undefined
+  const canWriteNotes = !unavailable && !cannotPost && !notesNotYet
+  // Titled records and removed ones are the room's notes, on their own tab; the chat shows the rest.
+  const chatPosts = feed.posts?.filter((p) => !isNote(p))
+  const notes = feed.posts?.filter(isNote)
+  const items = chatPosts || pendingPosts.length ? withDayPills([...pendingPosts, ...(chatPosts ?? [])]) : []
 
   const empty = unavailable ? (
     <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsUnavailable')}>
@@ -218,11 +251,55 @@ const Room: React.FC = () => {
           <ThemedText style={styles.warnText}>{t('Rooms.HostConflict')}</ThemedText>
         </View>
       ) : null}
-      {/* keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */}
+      <RoomTabs tabs={['chat', 'files', 'notes', 'members']} selected={tab} onSelect={showTab} />
+      {tab === 'members' ? (
+        <RoomMembersTab
+          service={service}
+          room={room}
+          status={roomCapabilities.listCommunityMembers}
+          onLeave={
+            room.communityDid
+              ? () => navigation.navigate(Screens.VtiCommunity, { communityDid: room.communityDid })
+              : undefined
+          }
+        />
+      ) : null}
+      {tab === 'notes' ? (
+        <RoomNotesTab
+          notes={notes}
+          feed={feed}
+          unavailable={unavailable}
+          onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+          onNewNote={canWriteNotes ? () => setNoteEditor({ kind: 'new' }) : undefined}
+          onEditNote={canWriteNotes ? (note) => setNoteEditor({ kind: 'edit', note }) : undefined}
+          cannotWrite={notesNotYet ?? cannotPost}
+          writeStatus={roomCapabilities.write}
+        />
+      ) : null}
+      {tab === 'files' ? (
+        <RoomFilesTab
+          files={state.files}
+          failed={state.filesFailed}
+          status={roomCapabilities.listFiles}
+          refreshing={state.refreshing}
+          onRefresh={reload}
+          onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+          onAddFile={
+            unavailable || cannotPost
+              ? undefined
+              : () => {
+                  setTab('chat')
+                  setAttachRequest((n) => n + 1)
+                }
+          }
+        />
+      ) : null}
+      {/* The chat stays mounted on the other tabs, hidden, so its draft and a post on its way are kept.
+          keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */}
       <KeyboardAvoidingView
         ref={keyboard.ref}
         onLayout={keyboard.onLayout}
-        style={{ flex: 1 }}
+        style={tab === 'chat' ? { flex: 1 } : { display: 'none' }}
         behavior="padding"
         keyboardVerticalOffset={keyboard.offset}
       >
@@ -277,10 +354,18 @@ const Room: React.FC = () => {
             unavailable={cannotPost}
             postingAs={identityText(room.actingAs)}
             canAttach
+            attachRequest={attachRequest}
           />
         )}
       </KeyboardAvoidingView>
       <RoomFileSheet service={service} roomId={roomId} file={openedFile} onClose={() => setOpenedFile(undefined)} />
+      <RoomNoteEditor
+        service={service}
+        roomId={roomId}
+        target={noteEditor}
+        onClose={() => setNoteEditor(undefined)}
+        onSaved={feed.refresh}
+      />
     </SafeAreaView>
   )
 }

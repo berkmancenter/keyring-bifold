@@ -48,6 +48,7 @@ export type RoomsOperation =
  * - `detailsNotLoaded`: a room known only from the agent's key custody, without the community's
  *   record of it (rights, host). The operation needs those ("Details not loaded").
  * - `noRight`: this member's rights in the room do not include it ("You can't post here").
+ * - `communityUnreachable`: none of the member's communities answered for their rooms; try again later.
  */
 export type RoomsReason =
   | 'ok'
@@ -61,6 +62,7 @@ export type RoomsReason =
   | 'communityDoesNotServe'
   | 'detailsNotLoaded'
   | 'noRight'
+  | 'communityUnreachable'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -197,6 +199,11 @@ export interface RoomsAttachment {
   size: number
 }
 
+/** The longest note title, in characters: the room schema's cleartext title (`RecordMetadata.title`). */
+export const NOTE_TITLE_MAX = 512
+/** The longest note body, in characters: the member sprint's 16 KiB cap on a record. */
+export const NOTE_BODY_MAX = 16384
+
 export interface WriteDraft {
   title: string
   body: string
@@ -237,9 +244,12 @@ export interface WritePreview {
 }
 
 export interface RoomOffer {
+  /** Names the offer to `previewOffer` and `hideOffer`: a route parameter, opaque to screens. */
   offerId: string
   roomId: string
   roomName: InertText
+  /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
+  description?: InertText
   communityDid: string
   communityName: InertText
   tier: RoomTier
@@ -347,6 +357,25 @@ export class RoomsPreviewExpired extends Error {
   }
 }
 
+/**
+ * A community or the person's agent refused the operation, in its own terms. `code` is the refusal's code
+ * without its task prefix (`vtc/rooms/offers/accept:alreadyAccepted` → `alreadyAccepted`), plus a few of
+ * Keyring's own for a step that went wrong between them (`welcomeMissing`, `joinFailed`). Screens word the
+ * codes they know and show a generic line for any other. `retryable`: the same request again may succeed.
+ * A transport failure (no answer) is not a refusal and arrives as a plain `Error`.
+ */
+export class RoomsRefused extends Error {
+  public constructor(
+    public readonly operation: RoomsOperation,
+    public readonly code: string,
+    public readonly retryable: boolean,
+    detail?: string
+  ) {
+    super(`${operation} was refused (${code})${detail ? `: ${detail}` : ''}`)
+    this.name = 'RoomsRefused'
+  }
+}
+
 /** The note being replaced changed since the preview. Nothing was sent; re-read it first. */
 export class RoomsConflict extends Error {
   public constructor(
@@ -370,7 +399,12 @@ export interface RoomsService {
   getRoom(roomId: string): Promise<Room>
   /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
   roomCapabilities(roomId: string): Promise<RoomCapabilities>
-  listNotes(roomId: string): Promise<NoteList>
+  /**
+   * The room's records, metadata only. With `sinceVersion`, only those written or curated after it (a version is
+   * the host's, monotonic per room), so a refresh asks only for what is new; such a listing is never complete
+   * against the room's record count.
+   */
+  listNotes(roomId: string, options?: { sinceVersion?: number }): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
   /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
