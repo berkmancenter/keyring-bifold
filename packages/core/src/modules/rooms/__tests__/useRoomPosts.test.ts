@@ -10,7 +10,14 @@ import { AppState } from 'react-native'
 import { toInertText } from '../inertText'
 import type { Note, NoteList, NoteSummary, RoomsService } from '../types'
 import { useInViewAndActive } from '../useInViewAndActive'
-import { mergeNewer, newestVersion, POLL_SKIPS_AFTER_FAILURE, ROOM_POLL_MS, useRoomPosts } from '../useRoomPosts'
+import {
+  mergeNewer,
+  newestVersion,
+  POLL_SKIPS_AFTER_FAILURE,
+  ROOM_POLL_MS,
+  type RoomPosts,
+  useRoomPosts,
+} from '../useRoomPosts'
 
 let mockFocused = true
 jest.mock('@react-navigation/native', () => ({
@@ -87,9 +94,12 @@ const tick = async () => {
 }
 
 const open = async (service: RoomsService, live = true) => {
-  const hook = renderHook(({ inView }) => useRoomPosts(service, ROOM, ME, true, inView), {
-    initialProps: { inView: live },
-  })
+  const hook = renderHook<RoomPosts, { inView: boolean }>(
+    ({ inView }) => useRoomPosts(service, ROOM, ME, true, inView),
+    {
+      initialProps: { inView: live },
+    }
+  )
   await flush()
   await flush()
   return hook
