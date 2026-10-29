@@ -123,6 +123,16 @@ jobs:
         run: |
           node --test scripts/ci/select-tests.test.mjs
 
+      - name: every other node test
+        run: |
+          # A *.test.mjs that no step names still runs here: an explicit list silently leaves a new one out
+          # (eslint-rules/require-testid.test.mjs never ran before this step).
+          named=$(grep -ohE 'node --test [^ ]+\.test\.mjs' .github/workflows/*.yaml | awk '{print $3}' | sort -u)
+          files=$(git ls-files '*.test.mjs' | grep -vxF "$named" || true)
+          echo "Not named by any step:"
+          echo "${files:-  (none)}"
+          if [ -n "$files" ]; then node --test $files; fi
+
   # On a PR, Testing runs only the suites the change can reach, plus every guard (scripts/ci/select-tests.mjs says
   # which and why). The full suite with coverage runs on every push to main, nightly, and on a PR labelled
   # `full-tests`: the "Full test suite" workflow. The selection runs in four parts at once, each on its own runner
