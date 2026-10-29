@@ -13,8 +13,8 @@
 // mode: "all" (its whole suite) or, for @bifold/core only, "related" (jest's
 // --findRelatedTests on the changed files, plus every guard, see below). It prints
 // each rule it applied. Under GitHub Actions it writes the step outputs `work`
-// (false when no suite is selected), `build` (the workspaces whose build output
-// the selected tests load), `build-key` and `build-paths` (the build cache).
+// (false when no suite is selected) and `build` (the workspaces whose build output
+// the selected tests load).
 //
 // run: lists the selected test files with jest, says "related subset: N of M test
 // files" or "full suite" in the log, the step summary, a notice and the step output
@@ -52,7 +52,6 @@
 // that does, runs on every PR. They are found on each run, not listed, so a new
 // guard joins without anyone remembering. NAMED_GUARDS run too.
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -356,16 +355,6 @@ function planCommand(args) {
     ? workspaces.filter((w) => w.hasTest).map((w) => w.name)
     : Object.keys(result.modes).filter((n) => workspaces.find((w) => w.name === n)?.hasTest)
   const build = result.everything ? workspaces.map((w) => w.name).sort() : buildSet(testing, workspaces)
-  const dirs = build.map((n) => workspaces.find((w) => w.name === n).dir)
-  // The build cache key: the git trees of what is built, plus what every build reads.
-  const rootConfig = git('ls-tree', '--name-only', 'HEAD')
-    .split('\n')
-    .filter((f) => /^(tsconfig[^/]*\.json|babel\.config\..+)$/.test(f))
-  const inputs = [...dirs, 'yarn.lock', 'package.json', '.yarnrc.yml', ...rootConfig]
-    .map((p) => `${p} ${git('rev-parse', `HEAD:${p}`).trim()}`)
-    .join('\n')
-  const key = createHash('sha256').update(`${process.version}\n${inputs}`).digest('hex').slice(0, 32)
-
   const out = { ...result, workspaces, testing, build }
   console.log(`Changed against ${base}: ${changes.length} file(s)`)
   for (const r of result.reasons) console.log(`  ${r}`)
@@ -382,8 +371,6 @@ function planCommand(args) {
     work: testing.length > 0,
     ...(testing.length === 0 ? { scope: 'no jest suite' } : {}),
     build: result.everything ? 'all' : build.join(' '),
-    'build-key': key,
-    'build-paths': dirs.flatMap((d) => ['build', 'lib', 'dist'].map((o) => `${d}/${o}`)).join('\n'),
   })
 }
 

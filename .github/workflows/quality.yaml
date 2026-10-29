@@ -173,18 +173,10 @@ jobs:
         run: |
           yarn install --immutable
 
-      # The build output the selected tests load, keyed on the git trees of exactly those packages, so a PR that
-      # changes none of them skips the build.
-      - name: Restore build output
-        id: build-cache
-        if: steps.plan.outputs.work == 'true' && steps.plan.outputs.build != 'all' && steps.plan.outputs.build != ''
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ${{ steps.plan.outputs.build-paths }}
-          key: build-v1-${{ runner.os }}-${{ steps.plan.outputs.build-key }}
-
+      # Only the packages the selected tests load (a rooms-only PR: core's dependencies, about 20 s), not the whole
+      # workspace. Not cached: that would save about 20 s, and only for a PR's own re-runs.
       - name: Build what the tests load
-        if: steps.plan.outputs.work == 'true' && steps.plan.outputs.build != '' && steps.build-cache.outputs.cache-hit != 'true'
+        if: steps.plan.outputs.work == 'true' && steps.plan.outputs.build != ''
         env:
           BUILD: ${{ steps.plan.outputs.build }}
         run: |
@@ -196,6 +188,17 @@ jobs:
             for name in "$@"; do args+=(--include "$name"); done
             yarn workspaces foreach --all --topological-dev -p "${args[@]}" run build
           fi
+
+      # Jest's transform cache (babel output per file, keyed by jest on content and config), so a run re-transforms
+      # only what changed. Restored from the newest run with the same dependencies and config.
+      - name: Restore jest's cache
+        if: steps.plan.outputs.work == 'true'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: packages/core/.jest/cache
+          key: jest-v1-${{ runner.os }}-${{ hashFiles('yarn.lock', 'packages/core/babel.config.js', 'packages/core/jest.config.js') }}-${{ github.sha }}
+          restore-keys: |
+            jest-v1-${{ runner.os }}-${{ hashFiles('yarn.lock', 'packages/core/babel.config.js', 'packages/core/jest.config.js') }}-
 
       - name: Automated testing
         id: run
