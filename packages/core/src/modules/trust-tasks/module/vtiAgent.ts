@@ -1284,6 +1284,8 @@ class VtiAgentController {
     // when the task's specification declares the proof REQUIRED.
     const document = prepared ?? (await this.taskDocument(communityDid, type, payload, threadId))
     entry.correlation.add(String(document.id))
+    // A reply threads on the request document's `threadId` (SPEC §4.9); a prepared document may carry its own.
+    if (prepared && typeof prepared.threadId === 'string') entry.correlation.add(prepared.threadId)
     entry.sentAt = entry.lastSentAt = Date.now()
 
     // §4.2 on the ecosystem leg. Unlike `send()` there is no toggle here on

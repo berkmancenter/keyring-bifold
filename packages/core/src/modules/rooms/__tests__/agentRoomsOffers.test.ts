@@ -531,3 +531,60 @@ describe('AgentRoomsService offers', () => {
     expect(s.calls).not.toContain(ROOMS_TASK.offersAccept)
   })
 })
+
+// The agent's key list is one read shared by every caller while it is in flight (#725). An accept must never be
+// answered from, or leave behind, a read that left before the room was held.
+describe('the shared key-list read across an accept', () => {
+  /** Holds every key-list answer until released; returns the release. */
+  const gateKeyList = (s: ReturnType<typeof setup>) => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    const answer = s.agentTask.getMockImplementation()!
+    s.agentTask.mockImplementation(async (type: string, payload: Record<string, unknown>) => {
+      if (type === ROOMS_TASK.keysList02) await gate
+      return answer(type, payload)
+    })
+    return release
+  }
+  const keyListAsks = (s: ReturnType<typeof setup>) => sent(s.agentTask, ROOMS_TASK.keysList02).length
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('a read asked before an accept is not joined after it: the next listing asks again', async () => {
+    const s = setup({ offers: [offer(OPEN_ROOM, 'open', 'open'), offer(SEALED_ROOM, 'attributed', 'accepted')] })
+    const preview = await s.service.previewOffer(offerIdOf(COMMUNITY.did, OPEN_ROOM))
+    const release = gateKeyList(s)
+    const before = keyListAsks(s)
+
+    const first = s.service.listOffers() // asks the key list for the accepted sealed offer, and waits
+    await settle()
+    expect(await s.service.acceptOffer(preview.token)).toEqual({ roomId: OPEN_ROOM })
+    const second = s.service.listOffers()
+    await settle()
+
+    expect(keyListAsks(s) - before).toBe(2)
+    release()
+    await Promise.all([first, second])
+  })
+
+  it('the accept asks whether the room is held afresh, never from a read already in flight', async () => {
+    const s = setup({ offers: [offer(SEALED_ROOM, 'attributed', 'accepted')] })
+    const preview = await s.service.previewOffer(offerIdOf(COMMUNITY.did, SEALED_ROOM))
+    const release = gateKeyList(s)
+    const before = keyListAsks(s)
+    // The read in flight is the rooms list's (an offers listing would hold back the offer being accepted).
+    const answer = s.communityTask.getMockImplementation()!
+    s.communityTask.mockImplementation(async (did: string, type: string, payload: Record<string, unknown>) =>
+      type === ROOMS_TASK.membershipsList ? { items: [] } : answer(did, type, payload)
+    )
+
+    const listing = s.service.listMyRooms()
+    await settle()
+    const accepting = s.service.acceptOffer(preview.token)
+    await settle()
+
+    expect(keyListAsks(s) - before).toBe(2)
+    release()
+    expect(await accepting).toEqual({ roomId: SEALED_ROOM })
+    await listing
+  })
+})

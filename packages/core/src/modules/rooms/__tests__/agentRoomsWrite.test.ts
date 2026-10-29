@@ -6,6 +6,7 @@ import {
   type RoomsCommunity,
 } from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
+import { chatMessageBody } from '../roomPosts'
 import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
 
 const COMMUNITY: RoomsCommunity = { did: 'did:webvh:community:a', name: 'Garden club', personaDid: 'did:key:persona-a' }
@@ -420,5 +421,25 @@ describe('a post sent again', () => {
     expect(err).toMatchObject({ reason: 'clientNotBuilt' })
     expect(acted(agentTask)).toEqual([])
     expect(sendCompleted).not.toHaveBeenCalled()
+  })
+})
+
+describe('a long post', () => {
+  const NOW = new Date(1_000_000)
+  // As the composer sends it: the words inside a keyring.chat/1 message, whose JSON escapes each quote and line break.
+  const post = (text: string) => ({ title: '', body: chatMessageBody(text, '01HZZZZZZZZZZZZZZZZZZZZZZZ', NOW) })
+
+  it('is held to the composer’s limit on its words, not on the message around them', async () => {
+    const { service } = setup()
+    const text = '"\n'.repeat(Math.floor(NOTE_BODY_MAX / 2)) // NOTE_BODY_MAX characters, nearly twice that escaped
+    expect(post(text).body.length).toBeGreaterThan(NOTE_BODY_MAX)
+    await expect(service.prepareWrite(OPEN_ROOM, post(text))).resolves.toMatchObject({ roomId: OPEN_ROOM })
+  })
+
+  it('and still refused past it', async () => {
+    const { service } = setup()
+    await expect(service.prepareWrite(OPEN_ROOM, post('x'.repeat(NOTE_BODY_MAX + 1)))).rejects.toMatchObject({
+      code: 'tooLong',
+    })
   })
 })

@@ -27,6 +27,7 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
+import { chatMessageText } from '../roomPosts'
 import type {
   AgentGrant,
   CommunityRoomMember,
@@ -804,7 +805,10 @@ export class AgentRoomsService implements RoomsService {
     // Files are not built: a post that carries one is refused, never sent without it.
     if (draft.attachment) throw new RoomsUnavailable('write', 'clientNotBuilt', 'posting a file is not built yet')
     if (draft.body.trim().length === 0) throw new RoomsRefused('write', 'empty', false, 'the note has no text')
-    if (draft.body.length > NOTE_BODY_MAX || draft.title.length > NOTE_TITLE_MAX)
+    // A post's limit is its words, not the keyring.chat/1 message around them, whose escaping (quotes, line breaks)
+    // would refuse a post the composer allowed, on every retry.
+    const words = chatMessageText(draft.body, this.now()) ?? draft.body
+    if (words.length > NOTE_BODY_MAX || draft.title.length > NOTE_TITLE_MAX)
       throw new RoomsRefused('write', 'tooLong', false, `a note holds ${NOTE_BODY_MAX} characters`)
     let replacedVersion: number | undefined
     if (draft.replaceKey) {
