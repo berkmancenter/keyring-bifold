@@ -159,7 +159,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
         run: |
-          node scripts/ci/select-tests.mjs plan --base "origin/${BASE_REF}" --out "$RUNNER_TEMP/test-plan.json"
+          node scripts/ci/select-tests.mjs plan --base "origin/test/fo-base3" --out "$RUNNER_TEMP/test-plan.json"
 
       # node_modules and yarn's cache, keyed on everything the install reads. The install still runs: on a hit it only
       # checks and relinks.
@@ -214,7 +214,7 @@ jobs:
         env:
           PART: ${{ matrix.part }}/4
         run: |
-          node scripts/ci/select-tests.mjs run --plan "$RUNNER_TEMP/test-plan.json" --part "$PART" --max-workers 4
+          node scripts/ci/select-tests.mjs run --plan "$RUNNER_TEMP/test-plan.json" --part "$PART"
 
   test:
     runs-on: ubuntu-22.04
