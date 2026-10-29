@@ -216,7 +216,11 @@ describe('when presence runs', () => {
 })
 
 describe('the access list and the presence tick', () => {
-  const ACL_TYPES = [AGENT_DEVICE_TASK.aclList03, AGENT_DEVICE_TASK.aclList02, AGENT_DEVICE_TASK.aclList]
+  const ACL_TYPES: readonly string[] = [
+    AGENT_DEVICE_TASK.aclList03,
+    AGENT_DEVICE_TASK.aclList02,
+    AGENT_DEVICE_TASK.aclList,
+  ]
 
   it('never asks acl/list, at any version, tick after tick', async () => {
     const w = world({ otherSeenAt: () => new Date(T0 - 60_000).toISOString() })

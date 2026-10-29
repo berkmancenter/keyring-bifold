@@ -341,7 +341,11 @@ export function defaultDeviceName(platform: string, addedAt: Date, _locale?: str
   return `${what} · added ${addedAt.getDate()} ${MONTHS[addedAt.getMonth()]}`
 }
 
-/** Other devices acting as this agent right now: seen within the liveness window, still allowed in. */
+/**
+ * Other devices acting as this agent right now: seen within the liveness window, still allowed in. The
+ * limited-access filter holds only for rows that carry the access list's role (`listAgentDevices`); on
+ * `listRegisteredDevices` rows the role is unknown, so a narrower key that beats passes it.
+ */
 export function liveSiblings(
   devices: AgentDevice[],
   now: Date = new Date(),
