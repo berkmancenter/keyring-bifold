@@ -202,6 +202,11 @@ export interface RoomsAttachment {
   size: number
 }
 
+/** The longest note title, in characters: the room schema's cleartext title (`RecordMetadata.title`). */
+export const NOTE_TITLE_MAX = 512
+/** The longest note body, in characters: the member sprint's 16 KiB cap on a record. */
+export const NOTE_BODY_MAX = 16384
+
 export interface WriteDraft {
   title: string
   body: string
@@ -397,7 +402,12 @@ export interface RoomsService {
   getRoom(roomId: string): Promise<Room>
   /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
   roomCapabilities(roomId: string): Promise<RoomCapabilities>
-  listNotes(roomId: string): Promise<NoteList>
+  /**
+   * The room's records, metadata only. With `sinceVersion`, only those written or curated after it (a version is
+   * the host's, monotonic per room), so a refresh asks only for what is new; such a listing is never complete
+   * against the room's record count.
+   */
+  listNotes(roomId: string, options?: { sinceVersion?: number }): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
   /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
