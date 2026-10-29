@@ -107,3 +107,5 @@ export const isNote = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => 
 /** Newest first: by time, then by version, so records with no time keep a stable order. */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'>>(notes: T[]): T[] =>
   [...notes].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || b.version - a.version)
+
+export const GUARD_CONTROL = 'Screens.MyAgent'
