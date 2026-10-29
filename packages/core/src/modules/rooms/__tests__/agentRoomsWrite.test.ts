@@ -1,13 +1,14 @@
-import {
-  AgentRoomsService,
-  NOTE_BODY_MAX,
-  postKey,
-  type RoomsBackend,
-  type RoomsCommunity,
-} from '../real/agentRoomsService'
+import { AgentRoomsService, postKey, type RoomsBackend, type RoomsCommunity } from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
 import { chatMessageBody } from '../roomPosts'
-import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
+import {
+  NOTE_BODY_MAX,
+  PREVIEW_TOKEN_TTL_MS,
+  RoomsConflict,
+  RoomsPreviewExpired,
+  RoomsRefused,
+  RoomsUnavailable,
+} from '../types'
 
 const COMMUNITY: RoomsCommunity = { did: 'did:webvh:community:a', name: 'Garden club', personaDid: 'did:key:persona-a' }
 const HOST = COMMUNITY.did

@@ -47,7 +47,15 @@ import type {
   WriteDraft,
   WritePreview,
 } from '../types'
-import { PREVIEW_TOKEN_TTL_MS, RoomsConflict, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
+import {
+  NOTE_BODY_MAX,
+  NOTE_TITLE_MAX,
+  PREVIEW_TOKEN_TTL_MS,
+  RoomsConflict,
+  RoomsPreviewExpired,
+  RoomsRefused,
+  RoomsUnavailable,
+} from '../types'
 
 import {
   parseAccept,
@@ -129,13 +137,6 @@ export const BUILT: ReadonlySet<RoomsOperation> = new Set<RoomsOperation>([
   'write',
   'curate',
 ])
-
-/**
- * The wallet's own caps on a note, below the host's: the body in UTF-16 code units, as chat's `keyring.chat/1`
- * counts it, and the title as `rooms/records/put/0.1` bounds it.
- */
-export const NOTE_BODY_MAX = 16384
-export const NOTE_TITLE_MAX = 512
 
 /**
  * A post's record key, from its idempotency key: the same on every retry, so a post sent again after its answer
