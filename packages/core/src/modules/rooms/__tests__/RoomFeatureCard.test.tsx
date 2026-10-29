@@ -3,14 +3,13 @@
  * says something else is missing; one element to a screen reader, with the feature, what it will do and "Coming soon";
  * in the composer's slot, at least the composer's height.
  */
-import { render } from '@testing-library/react-native'
+import { render, within } from '@testing-library/react-native'
 import React from 'react'
 import { StyleSheet } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
-import { COMPOSER_FIELD } from '../../../components/chat/MessageInput'
 import { testIdWithKey } from '../../../utils/testable'
-import { isComingSoon, RoomFeatureCard } from '../components/RoomFeatureCard'
+import { COMPOSER_BLOCK_HEIGHT, isComingSoon, RoomFeatureCard } from '../components/RoomFeatureCard'
 import type { OperationStatus, RoomsReason } from '../types'
 
 const at = (status: OperationStatus['status'], reason: RoomsReason): OperationStatus => ({ status, reason, detail: '' })
@@ -52,8 +51,15 @@ describe('RoomFeatureCard', () => {
     expect(card(undefined).queryByTestId(testIdWithKey('RoomFeatureCard_files'))).toBeNull()
   })
 
-  test("in the composer's slot: at least the composer's height, so the chat does not jump when posting arrives", () => {
-    const el = card(at('comingSoon', 'clientNotBuilt'), true).getByTestId(testIdWithKey('RoomFeatureCard_files'))
-    expect(StyleSheet.flatten(el.props.style).minHeight).toBeGreaterThanOrEqual(COMPOSER_FIELD + 14)
+  test("in the composer's slot: the composer's height, with the badge beside the name, so the chat does not jump", () => {
+    const tree = card(at('comingSoon', 'clientNotBuilt'), true)
+    const el = tree.getByTestId(testIdWithKey('RoomFeatureCard_files'))
+    expect(StyleSheet.flatten(el.props.style).minHeight).toBe(COMPOSER_BLOCK_HEIGHT)
+    // The badge shares the name's row rather than taking a row of its own: its nearest row is not the card's.
+    let row = tree.getByText('Rooms.ComingSoon').parent
+    while (row && StyleSheet.flatten(row.props.style)?.flexDirection !== 'row') row = row.parent
+    if (!row) throw new Error('the badge sits in no row')
+    expect(row.props.testID).toBeUndefined()
+    expect(within(row).getByText('Rooms.SoonFilesTitle')).toBeTruthy()
   })
 })

@@ -6,8 +6,8 @@
  * its status turns available and the card stops showing: nothing to remove.
  *
  * One element to a screen reader ("Room files. Share documents…. Coming soon"), never a button. `strip` is the
- * composer's slot: at least the composer's own height, so the chat does not jump when posting arrives, and no bottom
- * padding of its own, since the room's keyboard view handles the inset.
+ * composer's slot: the composer's own height, with the badge beside the name, so the chat does not jump when posting
+ * arrives; the room's keyboard view handles the bottom inset.
  *
  * @module rooms/components/RoomFeatureCard
  */
@@ -16,7 +16,6 @@ import { useTranslation } from 'react-i18next'
 import { StyleSheet, View } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
-import { COMPOSER_FIELD } from '../../../components/chat/MessageInput'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
@@ -34,6 +33,13 @@ const FEATURES = {
 } as const
 
 export type RoomFeature = keyof typeof FEATURES
+
+/**
+ * The height of what the strip stands in for: the composer's "Posting as" line and its bar, 23 + 59 pt as measured
+ * on an iOS simulator (10-29). The strip is at least this tall and, at the default text size, no taller, so the chat
+ * keeps its height when posting arrives.
+ */
+export const COMPOSER_BLOCK_HEIGHT = 81
 
 /** Whether a status says the feature is on its way: the one case a card stands in for. */
 export const isComingSoon = (status: OperationStatus | undefined): boolean => status?.status === 'comingSoon'
@@ -57,12 +63,12 @@ export const RoomFeatureCard: React.FC<RoomFeatureCardProps> = ({ status, featur
     card: {
       flexDirection: 'row',
       gap: 12,
-      padding: 12,
+      paddingHorizontal: 12,
+      paddingVertical: strip ? 8 : 12,
       backgroundColor: ColorPalette.brand.secondaryBackground,
       borderColor: ColorPalette.grayscale.lightGrey,
       ...(strip
-        ? // The composer bar's height: its field plus 6 above and 8 below.
-          { borderTopWidth: 1, minHeight: COMPOSER_FIELD + 14, alignItems: 'center' as const }
+        ? { borderTopWidth: 1, minHeight: COMPOSER_BLOCK_HEIGHT, alignItems: 'center' as const }
         : // The lists it sits in already have their side padding.
           { alignItems: 'flex-start' as const, marginVertical: 12, borderWidth: 1, borderRadius: 10 }),
     },
@@ -74,7 +80,9 @@ export const RoomFeatureCard: React.FC<RoomFeatureCardProps> = ({ status, featur
       justifyContent: 'center',
       backgroundColor: ColorPalette.brand.primaryBackground,
     },
-    words: { flex: 1, gap: 6 },
+    words: { flex: 1, gap: strip ? 2 : 6 },
+    // In the strip the badge sits beside the name, so the strip stays the composer's height.
+    titleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
     line: { color: ColorPalette.grayscale.mediumGrey },
     // The tier badge's shape, so the room's header and the card speak the same badge.
     badge: {
@@ -85,6 +93,13 @@ export const RoomFeatureCard: React.FC<RoomFeatureCardProps> = ({ status, featur
       backgroundColor: ColorPalette.brand.primaryBackground,
     },
   })
+  const badge = (
+    <View style={styles.badge}>
+      <ThemedText variant="caption" maxFontSizeMultiplier={1.5}>
+        {soon}
+      </ThemedText>
+    </View>
+  )
   return (
     <View
       style={styles.card}
@@ -96,17 +111,16 @@ export const RoomFeatureCard: React.FC<RoomFeatureCardProps> = ({ status, featur
         <Icon name={words.icon} size={strip ? 18 : 20} color={ColorPalette.brand.primary} />
       </View>
       <View style={styles.words}>
-        <ThemedText variant="bold" maxFontSizeMultiplier={1.5}>
-          {title}
-        </ThemedText>
+        <View style={strip ? styles.titleRow : undefined}>
+          <ThemedText variant="bold" maxFontSizeMultiplier={1.5}>
+            {title}
+          </ThemedText>
+          {strip ? badge : null}
+        </View>
         <ThemedText variant="caption" style={styles.line} maxFontSizeMultiplier={1.5}>
           {line}
         </ThemedText>
-        <View style={styles.badge}>
-          <ThemedText variant="caption" maxFontSizeMultiplier={1.5}>
-            {soon}
-          </ThemedText>
-        </View>
+        {strip ? null : badge}
       </View>
     </View>
   )
