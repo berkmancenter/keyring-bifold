@@ -57,8 +57,11 @@ export const RoomTabs: React.FC<{ tabs: RoomTab[]; selected: RoomTab; onSelect: 
   }, [selected, rowWidth])
 
   const styles = StyleSheet.create({
+    // A ScrollView may shrink, a View may not: without flexShrink 0 a tall tab below (Members at large text) squeezed
+    // the row's height and cut its words through.
     row: {
       flexGrow: 0,
+      flexShrink: 0,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: ColorPalette.grayscale.lightGrey,
     },

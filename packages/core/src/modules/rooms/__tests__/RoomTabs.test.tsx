@@ -23,10 +23,12 @@ const show = (selected: RoomTab) => (
 const layout = (x: number, width: number) => ({ nativeEvent: { layout: { x, y: 0, width, height: 44 } } })
 
 describe('RoomTabs', () => {
-  test('the row scrolls; while the words fit, each tab takes an equal share, as its least width, not its width', () => {
+  test('the row scrolls and keeps its height; while the words fit, each tab takes an equal share, as its least width, not its width', () => {
     const tree = render(show('chat'))
     const row = tree.getByTestId(id('RoomTabs'))
     expect(row.props.horizontal).toBe(true)
+    // Its height is never given up to a tall tab below it.
+    expect(StyleSheet.flatten(row.props.style).flexShrink).toBe(0)
     act(() => fireEvent(row, 'layout', layout(0, 360)))
     const tab = StyleSheet.flatten(tree.getByTestId(id('RoomTabMembers')).props.style)
     // (360 - 2 × 8 padding) / 4 tabs
