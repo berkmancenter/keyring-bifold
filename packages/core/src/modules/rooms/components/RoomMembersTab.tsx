@@ -88,7 +88,8 @@ export const RoomMembersTab: React.FC<RoomMembersTabProps> = ({ service, room, s
     // A least width, not a width: a label longer than its column ("Vous pouvez" at large text) widens it and the value
     // wraps below, rather than the label breaking mid-word.
     label: { minWidth: 84, flexShrink: 0, color: ColorPalette.grayscale.mediumGrey },
-    value: { flex: 1, minWidth: 140 },
+    // Narrower than this, a value of a few words stacks one to a line beside its label: it wraps below instead.
+    value: { flex: 1, minWidth: 160 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
     idWords: { flex: 1 },

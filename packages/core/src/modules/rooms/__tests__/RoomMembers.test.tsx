@@ -93,7 +93,7 @@ describe("a room's Members tab", () => {
     expect(tree.getByTestId(id('RoomMembersCaption'))).toBeTruthy()
   })
 
-  test('a label longer than its column widens it instead of breaking mid-word ("Vous pouv / ez" at large text)', async () => {
+  test('a label longer than its column widens it instead of breaking mid-word ("Vous pouv / ez" at large text), and its value wraps below', async () => {
     const tree = show()
     await openMembers(tree)
     for (const key of ['Rooms.MembersYouCan', 'Rooms.MembersUntil', 'Rooms.MembersAs']) {
@@ -102,6 +102,8 @@ describe("a room's Members tab", () => {
       expect(label.minWidth).toBe(84)
       expect(label.flexShrink).toBe(0)
     }
+    // A value goes below its label sooner than it would stack its words one to a line beside it.
+    expect(StyleSheet.flatten(tree.getByTestId(id('RoomMembersYouCan')).props.style).minWidth).toBe(160)
   })
 
   test("the community's list, read only once the tab is shown, with roles and you marked", async () => {
