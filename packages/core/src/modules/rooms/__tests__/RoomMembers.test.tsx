@@ -104,6 +104,8 @@ describe("a room's Members tab", () => {
     }
     // A value goes below its label sooner than it would stack its words one to a line beside it.
     expect(StyleSheet.flatten(tree.getByTestId(id('RoomMembersYouCan')).props.style).minWidth).toBe(160)
+    // An identity's short form has no space to break at: it goes below sooner, rather than split at its ellipsis.
+    expect(StyleSheet.flatten(tree.getByTestId(id('RoomMembersAs')).props.style).minWidth).toBe(220)
   })
 
   test("the community's list, read only once the tab is shown, with roles and you marked", async () => {
