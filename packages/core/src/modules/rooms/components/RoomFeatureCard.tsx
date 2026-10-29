@@ -42,6 +42,10 @@ export type RoomFeature = keyof typeof FEATURES
  */
 export const COMPOSER_BLOCK_HEIGHT = 81
 
+/** What a screen reader says for a card: each part a sentence, never "..": a line that ends its own sentence keeps it. */
+export const cardWords = (title: string, line: string, soon: string): string =>
+  [title, line, soon].map((part) => part.trim().replace(/[.。!?…]+$/u, '')).join('. ')
+
 /** Whether a status says the feature is on its way: the one case a card stands in for. */
 export const isComingSoon = (status: OperationStatus | undefined): boolean => status?.status === 'comingSoon'
 
@@ -105,7 +109,7 @@ export const RoomFeatureCard: React.FC<RoomFeatureCardProps> = ({ status, featur
     <View
       style={styles.card}
       accessible
-      accessibilityLabel={`${title}. ${line}. ${soon}`}
+      accessibilityLabel={cardWords(title, line, soon)}
       testID={testIdWithKey(`RoomFeatureCard_${feature}`)}
     >
       <View style={styles.disc}>

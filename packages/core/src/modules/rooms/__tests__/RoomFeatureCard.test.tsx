@@ -9,7 +9,7 @@ import { StyleSheet } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
-import { COMPOSER_BLOCK_HEIGHT, isComingSoon, RoomFeatureCard } from '../components/RoomFeatureCard'
+import { cardWords, COMPOSER_BLOCK_HEIGHT, isComingSoon, RoomFeatureCard } from '../components/RoomFeatureCard'
 import type { OperationStatus, RoomsReason } from '../types'
 
 const at = (status: OperationStatus['status'], reason: RoomsReason): OperationStatus => ({ status, reason, detail: '' })
@@ -31,6 +31,18 @@ describe('isComingSoon', () => {
       expect(isComingSoon(at('unavailable', reason))).toBe(false)
     expect(isComingSoon(at('available', 'ok'))).toBe(false)
     expect(isComingSoon(undefined)).toBe(false)
+  })
+})
+
+describe('cardWords', () => {
+  test('one period between parts, never two, in each language (a line ends its own sentence)', () => {
+    expect(cardWords('Posting in this room', 'Soon you can write to everyone in this room.', 'Coming soon')).toBe(
+      'Posting in this room. Soon you can write to everyone in this room. Coming soon'
+    )
+    expect(cardWords('Publier dans ce salon', 'Vous pourrez bientôt écrire.', 'Bientôt disponible')).toBe(
+      'Publier dans ce salon. Vous pourrez bientôt écrire. Bientôt disponible'
+    )
+    expect(cardWords('Room files', 'Share documents', 'Coming soon')).toBe('Room files. Share documents. Coming soon')
   })
 })
 
