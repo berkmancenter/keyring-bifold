@@ -387,6 +387,14 @@ describe('signing in to a Farm', () => {
     expect(SIGN_IN_FAILURE_MESSAGES.farmNotLinked).toMatch(/pick the agent you got from this service/)
   })
 
+  it.each(['farmNotLinked', 'farmKeyMissing'] as const)(
+    '%s offers both ways out: a new agent from this service, or another way to sign in',
+    (reason) => {
+      expect(SIGN_IN_FAILURE_MESSAGES[reason]).toMatch(/get a new agent from this service/i)
+      expect(SIGN_IN_FAILURE_MESSAGES[reason]).toMatch(/sign in another way/)
+    }
+  )
+
   it('a wrong number ends the request, once', async () => {
     const farm = fakeFarm()
     const failure = await failureOf(
