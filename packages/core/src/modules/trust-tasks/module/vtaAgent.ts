@@ -1801,7 +1801,7 @@ export class VtaAgentController {
     // Read before the swap below moves the manager record onto the long-term key.
     // A claim key keeps its Farm on its own record, so a Try again with it
     // after a swap that never happened, even after a restart, still knows it.
-    const manager = await Promise.resolve(identities.getManager(vtaDid)).catch(() => undefined)
+    const manager = await Promise.resolve(identities.getManager?.(vtaDid)).catch(() => undefined)
     const farmLogin = manager?.claimedFrom ? { farmLogin: { farmDid: manager.claimedFrom, did: manager.did } } : {}
     await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
     // The agent just linked is the one this phone acts with: the store keeps
