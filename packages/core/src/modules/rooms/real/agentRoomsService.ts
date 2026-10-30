@@ -60,6 +60,8 @@ import {
 } from '../types'
 
 import {
+  KEYS_ACT_TYPES,
+  OFFERS_LIST_TYPES,
   parseAccept,
   parseActed,
   parseBrowse,
@@ -94,6 +96,11 @@ export interface RoomsCommunity {
 
 /** What the service needs from the rest of the app. The adapter wires it to VtaClient and vtiAgent. */
 export interface RoomsBackend {
+  /**
+   * The app's agent this backend talks through. An unlock restarts that same agent, and a service registered
+   * again for it is the one already registered (register.ts).
+   */
+  readonly runsOn?: object
   agentLinked(): boolean
   /** The agent's `trust-task-discovery` answer; undefined when it could not be asked. */
   agentServedTypes(): Promise<readonly string[] | undefined>
@@ -256,6 +263,9 @@ interface KnownRoom extends Room {
 export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
+  public get runsOn(): object | undefined {
+    return this.backend.runsOn
+  }
 
   private served?: { types: readonly string[] | undefined; at: number }
   private servedInFlight?: Promise<void>
@@ -281,6 +291,8 @@ export class AgentRoomsService implements RoomsService {
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
   private offersType = new Map<string, string>()
+  /** The `rooms/records/put` each host took, so a host that refused 0.3 is not asked it on every post. */
+  private putTypeOf = new Map<string, string>()
   private nextToken = 1
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
@@ -515,7 +527,7 @@ export class AgentRoomsService implements RoomsService {
   private async readListing(roomId: string, sinceVersion: number | undefined): Promise<NoteList> {
     const room = await this.requireInRoom(roomId, 'listNotes')
     const listing = parseBrowse(
-      await this.backend.agentTask(ROOMS_TASK.keysBrowse, {
+      await this.backend.agentTask(this.browseType(), {
         roomId,
         host: room.host,
         ...(sinceVersion !== undefined ? { sinceVersion } : {}),
@@ -682,16 +694,21 @@ export class AgentRoomsService implements RoomsService {
 
   /** Every page of a community's offers to this member, and the renewals the first page carries. */
   private async offersOf(community: RoomsCommunity): Promise<{ items: OfferRecord[]; renewals: RenewalRecord[] }> {
-    let type: string = this.offersType.get(community.did) ?? ROOMS_TASK.offersList03
+    // The version the community last answered first, then the others newest first: a community older than renewals
+    // is read at 0.2, which carries none, and one that moved on to 0.4 alone (VTC 0.16) is still read.
+    const known = this.offersType.get(community.did)
+    const types: string[] = known ? [known, ...OFFERS_LIST_TYPES.filter((t) => t !== known)] : [...OFFERS_LIST_TYPES]
+    let type = types[0]
     let first: unknown
-    try {
-      first = await this.backend.communityTask(community.did, type, {})
-    } catch (e) {
-      const code = refusalCode(e)
-      // A community older than renewals is read at 0.2, which carries none.
-      if (type !== ROOMS_TASK.offersList03 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
-      type = ROOMS_TASK.offersList02
-      first = await this.backend.communityTask(community.did, type, {})
+    for (let i = 0; ; i++) {
+      type = types[i]
+      try {
+        first = await this.backend.communityTask(community.did, type, {})
+        break
+      } catch (e) {
+        const code = refusalCode(e)
+        if (i === types.length - 1 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
+      }
     }
     this.offersType.set(community.did, type)
     const page = parseOffers(first)
@@ -707,7 +724,7 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * Stores each renewal's credentials in the agent's vault in place of the ones they renew, never beside them: a
-   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list/0.3`).
+   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list` 0.3/0.4).
    * Storing one already stored is success, so whichever surface collects it first wins.
    */
   private async takeRenewals(community: RoomsCommunity, renewals: RenewalRecord[]): Promise<void> {
@@ -771,7 +788,7 @@ export class AgentRoomsService implements RoomsService {
     const served = this.served?.types ?? []
     const missing: string[] = [ROOMS_TASK.keysKeyPackage, ROOMS_TASK.keysWelcome].filter((t) => !served.includes(t))
     // The acceptance carries the agent's KeyPackage, so the agent completes it (`rooms/keys/act`, recipient item 10).
-    if (!this.actType()) missing.push(ROOMS_TASK.keysAct06)
+    if (!this.actType()) missing.push(KEYS_ACT_TYPES[0])
     if (missing.length > 0)
       throw new RoomsUnavailable('acceptOffer', 'agentDoesNotServe', `a ${offer.tier} room needs ${missing.join(', ')}`)
   }
@@ -901,10 +918,46 @@ export class AgentRoomsService implements RoomsService {
     }
   }
 
+  /**
+   * The newest `rooms/keys/browse` the agent serves. 0.3 asks the same and answers the same, plus the room's
+   * `lastPrune` (not read here); an agent that lists neither is asked 0.1, as before 0.3.
+   */
+  private browseType(): string {
+    const served = this.served?.types ?? []
+    return [ROOMS_TASK.keysBrowse03, ROOMS_TASK.keysBrowse].find((t) => served.includes(t)) ?? ROOMS_TASK.keysBrowse
+  }
+
   /** The newest `rooms/keys/act` the agent serves, if any. */
   private actType(): string | undefined {
     const served = this.served?.types ?? []
-    return [ROOMS_TASK.keysAct06, ROOMS_TASK.keysAct05].find((t) => served.includes(t))
+    return KEYS_ACT_TYPES.find((t) => served.includes(t))
+  }
+
+  /**
+   * A record put to `host`, completed as the member by the agent. From act 0.8 the agent completes put 0.3 as well as
+   * 0.1, and which one the host takes is the host's own: VTC 0.16 serves only 0.3, VTC 0.15 both, VTC 0.12 (the lab)
+   * only 0.1 and 0.2. So the version the host last took is sent first (else 0.3), and the other when the host does not
+   * serve it; 0.3 is 0.1 with optional members this client does not send. Before act 0.8 the agent completes only
+   * 0.1. A refused document did nothing, and the one sent again is new (`actAndSend`).
+   */
+  private async put(community: RoomsCommunity, host: string, payload: Record<string, unknown>): Promise<unknown> {
+    const act = this.actType()
+    const types: string[] =
+      act === ROOMS_TASK.keysAct09 || act === ROOMS_TASK.keysAct08
+        ? [ROOMS_TASK.recordsPut03, ROOMS_TASK.recordsPut]
+        : [ROOMS_TASK.recordsPut]
+    const took = this.putTypeOf.get(host)
+    if (took && types.includes(took)) types.sort((a, b) => Number(b === took) - Number(a === took))
+    for (let i = 0; ; i++) {
+      try {
+        const answer = await this.actAndSend('write', community, host, types[i], payload)
+        this.putTypeOf.set(host, types[i])
+        return answer
+      } catch (e) {
+        const code = refusalCode(e)
+        if (i === types.length - 1 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
+      }
+    }
   }
 
   /**
@@ -924,7 +977,7 @@ export class AgentRoomsService implements RoomsService {
       throw new RoomsUnavailable(
         operation,
         'agentDoesNotServe',
-        `the agent serves neither ${ROOMS_TASK.keysAct06} nor ${ROOMS_TASK.keysAct05}`
+        `the agent serves none of ${KEYS_ACT_TYPES.join(', ')}`
       )
     const document = {
       id: `urn:uuid:${this.backend.newId()}`,
@@ -1050,7 +1103,7 @@ export class AgentRoomsService implements RoomsService {
       )
     let answer: unknown
     try {
-      answer = await this.actAndSend('write', community, host, ROOMS_TASK.recordsPut, {
+      answer = await this.put(community, host, {
         roomId: room.roomId,
         key,
         expectedVersion,
@@ -1112,7 +1165,7 @@ export class AgentRoomsService implements RoomsService {
       if (!sealed) throw new Error(`the agent answered the seal of ${key} with something else`)
       let answer: unknown
       try {
-        answer = await this.actAndSend('write', community, host, ROOMS_TASK.recordsPut, {
+        answer = await this.put(community, host, {
           roomId: room.roomId,
           key,
           expectedVersion: expected,
@@ -1141,7 +1194,7 @@ export class AgentRoomsService implements RoomsService {
   /** The newest version among the room's records, as the agent lists them; 0 for an empty room. */
   private async headVersion(room: KnownRoom): Promise<number> {
     const listing = parseBrowse(
-      await this.agentStep('write', 'list the room', ROOMS_TASK.keysBrowse, { roomId: room.roomId, host: room.host })
+      await this.agentStep('write', 'list the room', this.browseType(), { roomId: room.roomId, host: room.host })
     )
     return listing.records.reduce((head, r) => Math.max(head, r.version), 0)
   }
@@ -1217,7 +1270,7 @@ export class AgentRoomsService implements RoomsService {
    */
   public async listFiles(roomId: string): Promise<RoomFile[]> {
     const room = await this.requireInRoom(roomId, 'listFiles')
-    const listing = parseBrowse(await this.backend.agentTask(ROOMS_TASK.keysBrowse, { roomId, host: room.host }))
+    const listing = parseBrowse(await this.backend.agentTask(this.browseType(), { roomId, host: room.host }))
     const files: RoomFile[] = []
     let opened = 0
     let failure: unknown

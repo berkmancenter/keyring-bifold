@@ -16,10 +16,14 @@
  * A poll that fails says so (`pollFailed`) until a listing succeeds, and `pollNow` asks again at once. Only the change
  * redraws: a failure repeated while one is already said, or a success while none is, redraws nothing.
  *
+ * While the agent is being reached again (an unlock reopens its session) neither failure is said, and a listing or a
+ * poll that failed is asked again once the moment a session opens after it was sent (#772, 276.9), not at a tick.
+ *
  * @module rooms/useRoomPosts
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useAgentSession } from './agentSession'
 import { newestFirst, postOf, type RoomPost } from './roomPosts'
 import type { HostCheck, Identity, Note, NoteList, NoteSummary, RoomsService } from './types'
 
@@ -116,10 +120,19 @@ export function useRoomPosts(
   roomId: string,
   actingAs: Identity | undefined,
   enabled: boolean,
-  live = false
+  live = false,
+  /**
+   * The posts a page is counted in, when the screen draws only some of them: a room's chat leaves its notes out, so
+   * its page is POSTS_PAGE chat posts, and the notes among them are read too. Every post counts when absent.
+   */
+  counts?: (post: RoomPost) => boolean
 ): RoomPosts {
   const [listing, setListing] = useState<Listing>()
+  // Records read and drawn: `wanted` counted posts, and as many more records as it takes to reach them.
   const [shown, setShown] = useState(POSTS_PAGE)
+  const wanted = useRef(POSTS_PAGE)
+  const countsNow = useRef(counts)
+  countsNow.current = counts
   const [posts, setPosts] = useState<RoomPost[]>()
   const [failed, setFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -150,10 +163,17 @@ export function useRoomPosts(
   })
   if (reads.current.service !== service || reads.current.roomId !== roomId)
     reads.current = { service, roomId, notes: new Map() }
+  const session = useAgentSession()
+  // The agent session each failed ask was sent on: a session opened since asks again.
+  const openedAt = useRef(session.openedAt)
+  openedAt.current = session.openedAt
+  const listFailedOn = useRef<number | undefined>(undefined)
+  const pollFailedOn = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     if (!service || !enabled) return
     let current = true
+    const sentOn = openedAt.current
     counted(listingsInFlight, () => service.listNotes(roomId)).then(
       (list) => {
         skips.current = 0
@@ -164,6 +184,7 @@ export function useRoomPosts(
       },
       () => {
         if (!current) return
+        listFailedOn.current = sentOn
         setFailed(true)
         setRefreshing(false)
       }
@@ -183,6 +204,7 @@ export function useRoomPosts(
         return
       }
       if (listingsInFlight.current > 0) return
+      const sentOn = openedAt.current
       counted(listingsInFlight, () =>
         service.listNotes(roomId, { sinceVersion: newestVersion(listingNow.current?.notes ?? []) })
       ).then(
@@ -198,6 +220,7 @@ export function useRoomPosts(
         () => {
           // What is shown stays, and the next ticks give the agent room. The first failure is said; more say nothing.
           skips.current = POLL_SKIPS_AFTER_FAILURE
+          pollFailedOn.current = sentOn
           if (current) notePoll(true)
         }
       )
@@ -224,10 +247,19 @@ export function useRoomPosts(
     let current = true
     const read = reads.current.notes
     const page = listing.notes.slice(0, shown)
-    const draw = (notes: NoteSummary[]) =>
-      setPosts(notes.map((summary) => postOf(read.get(readKey(summary)) ?? summary, actingAs)))
+    const postsOf = (notes: NoteSummary[]) =>
+      notes.map((summary) => postOf(read.get(readKey(summary)) ?? summary, actingAs))
+    const draw = (notes: NoteSummary[]) => setPosts(postsOf(notes))
     const show = () => {
-      draw(page)
+      const drawn = postsOf(page)
+      setPosts(drawn)
+      // A page short of the posts it is counted in, with records left, reads on by the shortfall. Only once a page
+      // is read: on a private room a note's title is sealed with its body, so the listing cannot tell one.
+      const counted = countsNow.current ? drawn.filter(countsNow.current).length : drawn.length
+      if (counted < wanted.current && listing.notes.length > page.length) {
+        setShown(page.length + wanted.current - counted)
+        return
+      }
       setRefreshing(false)
       setLoadingOlder(false)
     }
@@ -268,26 +300,41 @@ export function useRoomPosts(
 
   const loadOlder = useCallback(() => {
     setLoadingOlder(true)
+    wanted.current += POSTS_PAGE
     setShown((n) => n + POSTS_PAGE)
   }, [])
   const refresh = useCallback(() => {
     setRefreshing(true)
+    wanted.current = POSTS_PAGE
     setShown(POSTS_PAGE)
     setGeneration((g) => g + 1)
   }, [])
   const pollNow = useCallback(() => tickNow.current?.(), [])
+
+  // The agent is back: a first listing that failed is asked again, else a poll that did. Once per session opened.
+  const back = session.openedAt
+  useEffect(() => {
+    if (back === undefined) return
+    if (failed && !listing && back !== listFailedOn.current) {
+      listFailedOn.current = back
+      setGeneration((g) => g + 1)
+    } else if (pollFailed && back !== pollFailedOn.current && tickNow.current) {
+      pollFailedOn.current = back
+      tickNow.current?.()
+    }
+  }, [back, failed, listing, pollFailed])
 
   return {
     posts,
     hasOlder: !!listing && listing.notes.length > shown,
     check: listing?.check,
     incomplete: !!listing && !listing.complete,
-    failed,
+    failed: failed && !session.reconnecting,
     refreshing,
     loadingOlder,
     loadOlder,
     refresh,
-    pollFailed,
+    pollFailed: pollFailed && !session.reconnecting,
     pollNow,
   }
 }

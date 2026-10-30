@@ -55,7 +55,7 @@ import {
   type VtiManagerIdentity,
   type VtiPersona,
 } from './VtiIdentityStore'
-import { GenericRecordsVtaLinkStore, type VtaLinkStore } from './VtaLinkStore'
+import { GenericRecordsVtaLinkStore, type VtaLink, type VtaLinkStore } from './VtaLinkStore'
 import { createVtiTemporaryDidKey } from './VtiMediatorTransport'
 import {
   AGENT_DEVICE_TASK,
@@ -181,6 +181,14 @@ export interface VtaAgentState {
    * breaker, VTI #1978). "Your agent is catching up", not "didn't answer".
    */
   repliesStalled?: boolean
+  /**
+   * A session to the linked agent is being opened, the quiet reopen after an unlock included (the link stays
+   * shown online then): a screen whose read failed meanwhile waits for it rather than saying the agent is
+   * unreachable (#772, 276.9: "Couldn't reach your agent" for 10–20 s after the PIN).
+   */
+  sessionOpening?: boolean
+  /** When a session to the linked agent last opened: a screen whose read failed reads again then. */
+  sessionOpenedAt?: number
   /**
    * The devices an agent's list named when last read, by DID: what a request
    * card calls the device that asked (Alberto's iPhone, 10-06: a request from
@@ -644,6 +652,11 @@ export class VtaAgentController {
   private resumeRetry?: { timer?: ReturnType<typeof setTimeout>; subscription?: { remove(): void } }
   private reconnecting = false
   private opening?: { client: VtaClient; done: Promise<void> }
+  /** The sign-in shared by every caller, and `sessionOpening` with it. */
+  private setOpening(opening: { client: VtaClient; done: Promise<void> } | undefined) {
+    this.opening = opening
+    if (Boolean(this.state.sessionOpening) !== Boolean(opening)) this.set({ sessionOpening: Boolean(opening) })
+  }
   /** The VTA whose client an unlock just retired; its replacement opens quietly. */
   private handedOver?: string
   /** Identities whose keys moved into memory in this run; their stored copies go at the next (plan part E). */
@@ -652,11 +665,6 @@ export class VtaAgentController {
   private namesAsked = new Set<string>()
   /** The agent the current link attempt is creating from this phone ("Create my agent"), if it is one. */
   private ownerFor?: string
-  /**
-   * Agents claimed from a Farm in this run, with the Farm and the claim key, until their link is kept: the link
-   * records them (`farmLogin`) only if it finished as that key, so an attempt given up leaves nothing behind.
-   */
-  private readonly claimedFrom = new Map<string, { farmDid: string; did: string }>()
   /** The agent that was current when "Add another agent" began: the way back. */
   private addingFrom?: string
   /** A pick-up of a link left part-way is under way (resumeLink). */
@@ -840,7 +848,7 @@ export class VtaAgentController {
         await client.whoAmI().catch((error: unknown) => {
           if (refusedAsNotOnAcl(error)) throw error
         })
-        this.set({ status: 'connected', managerDid: client.managerDid })
+        this.set({ status: 'connected', managerDid: client.managerDid, sessionOpenedAt: this.now() })
         this.learnAgentName(client, vtaDid)
       } catch (error) {
         this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
@@ -850,11 +858,11 @@ export class VtaAgentController {
         throw error
       }
     })()
-    this.opening = { client, done }
+    this.setOpening({ client, done })
     try {
       await done
     } finally {
-      if (this.opening?.done === done) this.opening = undefined
+      if (this.opening?.done === done) this.setOpening(undefined)
     }
   }
 
@@ -1804,10 +1812,10 @@ export class VtaAgentController {
     const owner = this.ownerFor === vtaDid
     this.ownerFor = undefined
     // Read before the swap below moves the manager record onto the long-term key.
-    const claimed = this.claimedFrom.get(vtaDid)
-    this.claimedFrom.delete(vtaDid)
-    const linkedAs = claimed ? (await identities.getManager(vtaDid).catch(() => undefined))?.did : undefined
-    const farmLogin = claimed && claimed.did === linkedAs ? { farmLogin: { ...claimed } } : {}
+    // A claim key keeps its Farm on its own record, so a Try again with it
+    // after a swap that never happened, even after a restart, still knows it.
+    const manager = await Promise.resolve(identities.getManager?.(vtaDid)).catch(() => undefined)
+    const farmLogin = manager?.claimedFrom ? { farmLogin: { farmDid: manager.claimedFrom, did: manager.did } } : {}
     await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
     // The agent just linked is the one this phone acts with: the store keeps
     // every linked agent, and a link no longer replaces another one's record.
@@ -2141,7 +2149,6 @@ export class VtaAgentController {
     if (current.kind === 'linked' || current.kind === 'revoked') await this.startAddingAgent()
     if (this.state.link.kind !== 'notLinked') throw new Error('vtaAgent: another link is in progress')
     this.ownerFor = vtaDid
-    if (farmDid) this.claimedFrom.set(vtaDid, { farmDid, did })
     const token = ++this.attemptToken
     try {
       await resolveVtaMediator(agent, vtaDid)
@@ -2150,6 +2157,7 @@ export class VtaAgentController {
         did,
         createdAt: new Date(this.now()).toISOString(),
         stage: 'temporary',
+        ...(farmDid ? { claimedFrom: farmDid } : {}),
       })
       if (token !== this.attemptToken) return
       this.dispatch({ type: 'keyShown', vtaDid, label, did })
@@ -2486,10 +2494,13 @@ export class VtaAgentController {
   /**
    * Every agent this phone is linked to, the current one first, each by the
    * name this phone shows for it (the person's nickname, the agent's own name,
-   * or its host's). Waits for the stored link to be read, as a sign-in at
-   * start-up may ask before then.
+   * or its host's), and the Farm sign-in key of one claimed from a Farm.
+   * Waits for the stored link to be read, as a sign-in at start-up may ask
+   * before then.
    */
-  async linkedAgents(agent: Agent): Promise<{ vtaDid: string; name: string; current: boolean }[]> {
+  async linkedAgents(
+    agent: Agent
+  ): Promise<{ vtaDid: string; name: string; current: boolean; farmLogin?: VtaLink['farmLogin'] }[]> {
     await this.untilLinkRead(this.deps.keyFetchWaitMs ?? KEY_FETCH_WAIT_MS)
     const store = this.linkStore(agent)
     let links = await Promise.resolve(store.list?.()).catch(() => undefined)
@@ -2503,6 +2514,7 @@ export class VtaAgentController {
         vtaDid: l.vtaDid,
         name: l.nickname?.trim() || this.state.agentNames?.[l.vtaDid]?.label || l.agentName?.label || l.label,
         current: l.vtaDid === current,
+        ...(l.farmLogin ? { farmLogin: { ...l.farmLogin } } : {}),
       }))
       .sort((x, y) => Number(y.current) - Number(x.current))
   }
@@ -2552,16 +2564,21 @@ export class VtaAgentController {
     const client = await this.signedIn(agent, this.linkedAgent())
     const managerDid = client.managerDid
     if (!managerDid) throw new DeviceActionRefused('notLinked')
-    const [model, me] = await Promise.all([client.readApprovals(), client.whoAmI()]).catch((error: unknown) => {
+    // A rule holds only the version it names, so the rules are read against what the agent dispatches now
+    // (approvalRules.ts OLDER_VERSIONS). supportedTypes never throws: unanswered, nothing is judged against it.
+    const [model, me, served] = await Promise.all([
+      client.readApprovals(),
+      client.whoAmI(),
+      client.supportedTypes(),
+    ]).catch((error: unknown) => {
       throw this.refused(error)
     })
     const roles = me.roles ?? (me.role ? [me.role] : [])
     const scoped = (me.scopes ?? []).length > 0 || (me.contexts ?? []).length > 0
-    return {
-      model,
-      view: approvalsView(model, managerDid),
-      canChange: roles.includes('admin') && !scoped && !model.unreadable,
-    }
+    const view = approvalsView(model, managerDid, served)
+    const renew = view.offered.filter((o) => o.renew).map((o) => o.key)
+    if (renew.length) releaseWarn(`[VTI] ask me before: rules miss a version the agent serves: ${renew.join(', ')}`)
+    return { model, view, canChange: roles.includes('admin') && !scoped && !model.unreadable }
   }
 
   /**
@@ -2580,16 +2597,19 @@ export class VtaAgentController {
       const client = await this.signedIn(agent, vtaDid)
       const managerDid = client.managerDid
       if (!managerDid) throw new DeviceActionRefused('notLinked')
+      // A rule holds only the exact version it names: write one per version the agent dispatches. Unanswered
+      // (undefined), every version Keyring knows.
+      const served = await client.supportedTypes()
       for (let attempt = 0; ; attempt++) {
         try {
           const model = await client.readApprovals()
           if (model.unreadable)
             throw new DeviceActionRefused('failed', 'the approval rules hold something Keyring cannot read')
-          const next = withPhoneRule(model, taskType, on, managerDid)
+          const next = withPhoneRule(model, taskType, on, managerDid, served)
           const version = await client.writeApprovals(next, model.version)
           releaseWarn(`[VTI] ask me before: rules written, version ${model.version} → ${version}`)
           const held = { ...next, version, unreadable: false }
-          return { model: held, view: approvalsView(held, managerDid), canChange: true }
+          return { model: held, view: approvalsView(held, managerDid, served), canChange: true }
         } catch (error) {
           const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
           if (details?.reason === 'conflict' && attempt === 0) continue
@@ -3192,7 +3212,7 @@ export class VtaAgentController {
         // go, or the next attempt would wait on the same one.
         const stuck = this.opening
         if (stuck) {
-          this.opening = undefined
+          this.setOpening(undefined)
           void stuck.client.disconnect().catch(() => undefined)
         }
         reject(new Error(`the VTA did not answer: signing in took over ${SESSION_CONNECT_DEADLINE_MS / 1000} s`))

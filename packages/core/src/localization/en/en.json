@@ -45,6 +45,7 @@
     "Requested": "Requested",
     "Updated": "Updated",
     "Close": "Close",
+    "CloseNotification": "Close notification",
     "Remove": "Remove",
     "GotIt": "Got it",
     "Send": "Send",
@@ -271,7 +272,15 @@
     "RememberChangePIN": "Change your PIN to secure your wallet.",
     "ChangePIN": "Change PIN"
   },
+  "PINChangeSuccess": {
+    "InfoBox": {
+      "Title": "Your PIN has been changed",
+      "Description": "You can now log in with your new PIN."
+    },
+    "PrimaryButton": "Go back to settings"
+  },
   "PINEnter": {
+    "DeveloperMenuTrigger": "App information",
     "Title": "Welcome back",
     "SubText": "Sign-in to access your wallet.",
     "EnterPIN": "Enter your wallet PIN",
@@ -837,6 +846,8 @@
     "DeleteOfferDescription": "Don't recognize the organization? Check your Contacts list. You only receive notifications from Contacts you've initiated"
   },
   "ProofRequest": {
+    "SelectCredential": "Select credential",
+    "PredicateInput": "Enter value for {{label}}",
     "RequestForProof": "Request for proof",
     "ReceiveProofTitle": "Received an information request from",
     "JustAMoment": "Just a moment while we prepare things for you...",
@@ -2609,6 +2620,7 @@
       "keysRevoke": "Deleting a key"
     },
     "SetElsewhereNamed": "Already set from another device",
+    "TurnOnAgain": "Your agent was updated and this no longer asks you. Turn it on again.",
     "SetElsewhereTitle": "Set from another device",
     "HoldsThisPhone": "Your agent waits for an approval before it lets this phone do this, so notifications or devices may stop working. Change it where it was set.",
     "RuleConsent_one": "Needs 1 approval",
@@ -2755,6 +2767,23 @@
     "Declined": "Declined. Nothing was signed in.",
     "TimedOut": "Time ran out, so nothing was signed in. Refresh the sign-in page and scan again.",
     "NoCode": "There's no sign-in code to use. Scan the code on the website again.",
+    "OlderAgents": "If this code is from the service that hosts one of your agents: an agent set up before this version of Keyring can't sign in there from this phone. Get a new agent from that service, or sign in another way.",
+    "JoinHint": "If this code is from a community you'd like to join, Keyring can check and join it.",
+    "CheckAndJoin": "Check and join",
+    "NotJoinable": "This code isn't from a community you can join here.",
+    "JoinUnchecked": "Keyring couldn't check this code just now. Try again.",
+    "Service": {
+      "ConfirmBody": "A website is asking to sign you in with one of your agents from this service. Nothing is sent until you continue.",
+      "Label": "Service",
+      "HostLabel": "Service's address",
+      "Unverified": "Not verified yet. Keyring checks this service after you continue.",
+      "Claiming": "Contacting the service…",
+      "ChooseTitle": "Sign in with which agent?",
+      "ChooseBody": "You have more than one agent from this service. Choose the one whose account to sign in to.",
+      "ChooseCurrent": "The agent this phone uses now",
+      "ReportedBy": "Reported by the service. Keyring can't check these.",
+      "Agent": "Agent"
+    },
     "Failure": {
       "expired": "This code has expired. Get a new one.",
       "invalid": "This code can't be used.",
@@ -2780,6 +2809,9 @@
       "agentRefused": "Your agent refused this sign-in.",
       "agentUnreachable": "Your agent couldn't be reached.",
       "agentNeedsUpdate": "Your agent needs an update before it can sign you in to websites.",
+      "farmNotLinked": "This service doesn't know that agent as one you got from it. Refresh the sign-in page, scan the new code and pick the agent you got from this service. If you have none, get a new agent from this service, or sign in another way.",
+      "farmKeyMissing": "This phone no longer holds the key it got that agent with, so it can't sign in with it. Get a new agent from this service, or sign in another way.",
+      "contextMismatch": "The service didn't accept the approval for this sign-in. Refresh the sign-in page and try again.",
       "unknown": "Something went wrong, so nothing was signed in. Refresh the sign-in page and try again."
     }
   },

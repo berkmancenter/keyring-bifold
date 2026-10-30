@@ -46,7 +46,7 @@
     "Updated": "Mis à jour",
     "Remove": "Supprimer",
     "Close": "Fermer",
-    "CloseNotification": "Close notification (FR)",
+    "CloseNotification": "Fermer la notification",
     "GotIt": "Got it (FR)",
     "Send": "Envoyer",
     "Reset": "Reset (FR)",
@@ -300,10 +300,10 @@
   },
   "PINChangeSuccess": {
     "InfoBox": {
-      "Title": "Your PIN has been changed (FR)",
-      "Description": "You can now log-in with your new PIN (FR)"
+      "Title": "Votre NIP a été modifié",
+      "Description": "Vous pouvez maintenant vous connecter avec votre nouveau NIP."
     },
-    "PrimaryButton": "Go back to settings (FR)"
+    "PrimaryButton": "Retour aux réglages"
   },
   "PINEnter": {
     "AppTitle": "Aries Bifold",
@@ -341,7 +341,7 @@
     "ForgotPINModalTitle": "Forgot your PIN? (FR)",
     "ForgotPINModalDescription": "For security purposes, you're unable to recover or reset your PIN. You will need to reinstall your wallet and add your credentials again. (FR)",
     "Loading": "Logging in (FR)",
-    "DeveloperMenuTrigger": "App information (FR)"
+    "DeveloperMenuTrigger": "Informations sur l'application"
   },
   "AttemptLockout": {
     "Title": "Votre portefeuille est temporairement verrouillé",
@@ -816,8 +816,8 @@
     "RequestProcessing": "Juste un instant...",
     "OfferDelay": "Retard de l'offre",
     "ChangeCredential": "Modifier l'attestations d'identification",
-    "SelectCredential": "Select credential (FR)",
-    "PredicateInput": "Enter value for {{label}} (FR)",
+    "SelectCredential": "Sélectionner l'attestation",
+    "PredicateInput": "Saisissez la valeur de {{label}}",
     "GetThisCredential": "Obtenir cette attestation d'identification",
     "RejectThisProof?": "Rejeter cette preuve?",
     "AcceptingProof": "Acceptation de la preuve",
@@ -2560,6 +2560,7 @@
       "keysRevoke": "Supprimer une clé"
     },
     "SetElsewhereNamed": "Déjà défini depuis un autre appareil",
+    "TurnOnAgain": "Votre agent a été mis à jour et ne vous demande plus rien ici. Réactivez-le.",
     "SetElsewhereTitle": "Défini depuis un autre appareil",
     "HoldsThisPhone": "Votre agent attend une approbation avant de laisser ce téléphone faire ceci, donc les notifications ou les appareils peuvent cesser de fonctionner. Modifiez-le là où il a été défini.",
     "RuleConsent_one": "1 approbation requise",
@@ -2703,6 +2704,23 @@
     "Declined": "Refusé. Rien n'a été connecté.",
     "TimedOut": "Le temps est écoulé, rien n'a été connecté. Actualisez la page de connexion et scannez à nouveau.",
     "NoCode": "Aucun code de connexion à utiliser. Scannez à nouveau le code du site web.",
+    "OlderAgents": "Si ce code vient du service qui héberge l'un de vos agents : un agent configuré avant cette version de Keyring ne peut pas s'y connecter depuis ce téléphone. Obtenez un nouvel agent auprès de ce service, ou connectez-vous autrement.",
+    "JoinHint": "Si ce code vient d'une communauté que vous aimeriez rejoindre, Keyring peut vérifier et la rejoindre.",
+    "CheckAndJoin": "Vérifier et rejoindre",
+    "NotJoinable": "Ce code ne vient pas d'une communauté que vous pouvez rejoindre ici.",
+    "JoinUnchecked": "Keyring n'a pas pu vérifier ce code pour l'instant. Réessayez.",
+    "Service": {
+      "ConfirmBody": "Un site web demande à vous connecter avec l'un de vos agents de ce service. Rien n'est envoyé avant que vous continuiez.",
+      "Label": "Service",
+      "HostLabel": "Adresse du service",
+      "Unverified": "Pas encore vérifié. Keyring vérifie ce service une fois que vous continuez.",
+      "Claiming": "Contact du service…",
+      "ChooseTitle": "Se connecter avec quel agent ?",
+      "ChooseBody": "Vous avez plusieurs agents de ce service. Choisissez celui dont le compte doit être connecté.",
+      "ChooseCurrent": "L'agent que ce téléphone utilise actuellement",
+      "ReportedBy": "Indiqué par le service. Keyring ne peut pas le vérifier.",
+      "Agent": "Agent"
+    },
     "Failure": {
       "expired": "Ce code a expiré. Obtenez-en un nouveau.",
       "invalid": "Ce code ne peut pas être utilisé.",
@@ -2728,6 +2746,9 @@
       "agentRefused": "Votre agent a refusé de vous connecter, aucune connexion n'a eu lieu.",
       "agentUnreachable": "Votre agent est injoignable, aucune connexion n'a eu lieu. Réessayez plus tard.",
       "agentNeedsUpdate": "Votre agent doit être mis à jour avant de pouvoir vous connecter à des sites web.",
+      "farmNotLinked": "Ce service ne reconnaît pas cet agent comme l'un de ceux que vous avez obtenus auprès de lui. Actualisez la page de connexion, scannez le nouveau code et choisissez l'agent obtenu auprès de ce service. Si vous n'en avez pas, obtenez un nouvel agent auprès de ce service, ou connectez-vous autrement.",
+      "farmKeyMissing": "Ce téléphone ne détient plus la clé avec laquelle il a obtenu cet agent, il ne peut donc pas se connecter avec lui. Obtenez un nouvel agent auprès de ce service, ou connectez-vous autrement.",
+      "contextMismatch": "Le service n'a pas accepté l'approbation de cette connexion. Actualisez la page de connexion et réessayez.",
       "unknown": "Un problème est survenu, rien n'a été connecté. Actualisez la page de connexion et réessayez."
     }
   },
