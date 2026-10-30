@@ -161,6 +161,11 @@ const SEALED_WRITE_ATTEMPTS = 4
 
 /** How many pages of a community's membership record, or of its offers, to read before stopping. */
 const MAX_MEMBERSHIP_PAGES = 10
+/**
+ * How soon an agent that could not say what it serves is asked again. Its answer was kept until a pull to refresh:
+ * one lost while the session reopened after an unlock left a room on "Couldn't reach your agent" (#772, 10-30).
+ */
+export const SERVED_UNKNOWN_RETRY_MS = 10_000
 
 /**
  * How often an accept the community answers `admissionPending` is sent again, identically, before the refusal
@@ -252,7 +257,7 @@ export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
 
-  private served?: { types: readonly string[] | undefined }
+  private served?: { types: readonly string[] | undefined; at: number }
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
@@ -288,7 +293,9 @@ export class AgentRoomsService implements RoomsService {
 
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
-    if (linked && (options.refresh || !this.served)) this.served = { types: await this.backend.agentServedTypes() }
+    const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
+    if (linked && (options.refresh || unknownAged))
+      this.served = { types: await this.backend.agentServedTypes(), at: this.now() }
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
   }
 

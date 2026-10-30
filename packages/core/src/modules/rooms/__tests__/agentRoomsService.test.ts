@@ -1,4 +1,9 @@
-import { AgentRoomsService, type RoomsBackend, type RoomsCommunity } from '../real/agentRoomsService'
+import {
+  AgentRoomsService,
+  SERVED_UNKNOWN_RETRY_MS,
+  type RoomsBackend,
+  type RoomsCommunity,
+} from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
 import { RoomsUnavailable } from '../types'
 
@@ -226,6 +231,32 @@ describe('AgentRoomsService', () => {
     await expect(new AgentRoomsService(b).listMyRooms()).rejects.toMatchObject({ reason: 'agentUnknown' })
     expect(agentTask).not.toHaveBeenCalled()
     expect(communityTask).not.toHaveBeenCalled()
+  })
+
+  it('asks an agent that could not say what it serves again after a while, and keeps an answer it gave', async () => {
+    // Lost while the session reopened after an unlock, the answer was kept: every room said "Couldn't reach your
+    // agent" until a pull to refresh (#772, 10-30).
+    let now = 0
+    let answer: string[] | undefined = undefined
+    const agentServedTypes = jest.fn(async () => answer)
+    const { b } = backend({ agentServedTypes })
+    const service = new AgentRoomsService(b, undefined, { now: () => now })
+    await expect(service.listMyRooms()).rejects.toMatchObject({ reason: 'agentUnknown' })
+
+    // The agent could answer now, but within the wait it is not asked again (control: not on every call).
+    answer = [ROOMS_TASK.keysList02]
+    now = SERVED_UNKNOWN_RETRY_MS - 1
+    await expect(service.listMyRooms()).rejects.toMatchObject({ reason: 'agentUnknown' })
+    expect(agentServedTypes).toHaveBeenCalledTimes(1)
+
+    now = SERVED_UNKNOWN_RETRY_MS
+    await expect(service.listMyRooms()).resolves.toHaveLength(2)
+    expect(agentServedTypes).toHaveBeenCalledTimes(2)
+
+    // An answer it gave is kept (control).
+    now = 10 * SERVED_UNKNOWN_RETRY_MS
+    await service.listMyRooms()
+    expect(agentServedTypes).toHaveBeenCalledTimes(2)
   })
 
   it('leaves through the community and forgets its rooms', async () => {

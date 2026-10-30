@@ -63,7 +63,7 @@ import { useMyName } from '../useMyName'
 import { usePetnames } from '../usePetname'
 import { useInViewAndActive } from '../useInViewAndActive'
 import { useRoom } from '../useRoom'
-import { POSTS_PAGE, useRoomPosts } from '../useRoomPosts'
+import { POSTS_PAGE, ROOM_POLL_MS, useRoomPosts } from '../useRoomPosts'
 import { type PendingPost, useRoomSend } from '../useRoomSend'
 import { useRoomsService } from '../useRoomsService'
 
@@ -156,6 +156,15 @@ const Room: React.FC = () => {
   )
   const directoryNames = useDirectoryNames(directory, room?.communityDid, authors)
   const { reload } = state
+  // A room that could not be read is read again while it is in view, at the posts' pace: nothing else reads it (the
+  // posts poll waits for the room). After an unlock the read can land while the agent's session is still reopening,
+  // and the screen stayed on "Couldn't reach your agent" until Try again (#772, 10-30).
+  const readFailed = state.failed && !room
+  useEffect(() => {
+    if (!readFailed || !inView) return
+    const timer = setInterval(reload, ROOM_POLL_MS)
+    return () => clearInterval(timer)
+  }, [readFailed, inView, reload])
   // The library is read again each time it is shown, so a file just posted from the chat is in it.
   const showTab = (next: RoomTab) => {
     if (next === 'files' && tab !== 'files') reload()

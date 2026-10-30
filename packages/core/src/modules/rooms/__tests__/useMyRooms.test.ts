@@ -1,7 +1,8 @@
 /**
  * The rooms a screen shows are read again when the linked agent changes. An Add given up passes through "no agent":
  * coming back to My Agent read the rooms then, and the agent came back after, so the card said "Link your agent
- * first" until the screen was left (nightly 10-30, add-then-back). Nothing changing reads nothing.
+ * first" until the screen was left (nightly 10-30, add-then-back). A read for another agent than the last read's asks
+ * its services afresh (A, then B, then A must not read B's). Nothing changing reads nothing.
  */
 import { act, renderHook, waitFor } from '@testing-library/react-native'
 
@@ -75,6 +76,17 @@ describe('rooms read again when the agent changes', () => {
 
     agentIs('did:webvh:QmB:other.example')
     await waitFor(() => expect(rooms.capabilities).toHaveBeenCalledTimes(2))
+    expect(rooms.capabilities).toHaveBeenLastCalledWith({ refresh: true })
+  })
+
+  test("back to the first agent after another, its services are asked afresh, not the other's kept", async () => {
+    const rooms = service()
+    renderHook(() => useMyRooms(rooms))
+    await waitFor(() => expect(rooms.capabilities).toHaveBeenCalledTimes(1))
+    agentIs('did:webvh:QmB:other.example')
+    await waitFor(() => expect(rooms.capabilities).toHaveBeenCalledTimes(2))
+    agentIs('did:webvh:QmA:agent.example')
+    await waitFor(() => expect(rooms.capabilities).toHaveBeenCalledTimes(3))
     expect(rooms.capabilities).toHaveBeenLastCalledWith({ refresh: true })
   })
 
