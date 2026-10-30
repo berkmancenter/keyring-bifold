@@ -259,6 +259,33 @@ describe('AgentRoomsService', () => {
     expect(agentServedTypes).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps an empty answer: an agent that serves none of it is not asked again', async () => {
+    let now = 0
+    const agentServedTypes = jest.fn(async (): Promise<string[] | undefined> => [])
+    const { b } = backend({ agentServedTypes })
+    const service = new AgentRoomsService(b, undefined, { now: () => now })
+    await expect(service.listMyRooms()).rejects.toMatchObject({ reason: 'agentDoesNotServe' })
+    now = 10 * SERVED_UNKNOWN_RETRY_MS
+    await expect(service.listMyRooms()).rejects.toMatchObject({ reason: 'agentDoesNotServe' })
+    expect(agentServedTypes).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks once while an ask is out: every caller waits for the same answer', async () => {
+    let answer: (types: string[] | undefined) => void = () => undefined
+    const agentServedTypes = jest.fn(() => new Promise<string[] | undefined>((resolve) => (answer = resolve)))
+    const { b } = backend({ agentServedTypes })
+    const service = new AgentRoomsService(b)
+    const asks = [service.capabilities(), service.capabilities(), service.capabilities({ refresh: true })]
+    expect(agentServedTypes).toHaveBeenCalledTimes(1)
+    answer([ROOMS_TASK.keysList02])
+    const answers = await Promise.all(asks)
+    expect(answers.map((c) => c.listMyRooms.status)).toEqual(['available', 'available', 'available'])
+    // Once it has answered, a refresh asks again (control: the sharing ends with the ask).
+    agentServedTypes.mockImplementation(async () => [ROOMS_TASK.keysList02])
+    await service.capabilities({ refresh: true })
+    expect(agentServedTypes).toHaveBeenCalledTimes(2)
+  })
+
   it('leaves through the community and forgets its rooms', async () => {
     const { b } = backend()
     const service = new AgentRoomsService(b)

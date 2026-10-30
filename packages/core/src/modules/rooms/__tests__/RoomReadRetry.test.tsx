@@ -1,7 +1,8 @@
 /**
  * A room that could not be read is read again while it is in view, at the posts' pace. After an unlock the read could
  * land while the agent's session was still reopening, and the screen stayed on "Couldn't reach your agent" until Try
- * again: the posts poll waits for the room, and nothing else read it (#772, 10-30). Not while another screen is on top.
+ * again: the posts poll waits for the room, and nothing else read it (#772, 10-30). Once per failed read, never while
+ * one is out (the agent's client sends one task at a time), and not while another screen is on top.
  */
 import { act, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
@@ -55,6 +56,21 @@ describe('a room that could not be read', () => {
     await waitFor(() => expect(tree.queryByTestId(id('RoomReadFailed'))).toBeNull())
     expect(getRoom).toHaveBeenCalledTimes(2)
     expect(tree.getAllByTestId(/RoomPost_/).length).toBeGreaterThan(0)
+  })
+
+  test('is not read again while a read is still out: one read at a time, not one per tick', async () => {
+    const sample = createSampleRoomsService()
+    const getRoom = jest
+      .spyOn(sample, 'getRoom')
+      .mockRejectedValueOnce(new Error('the agent did not answer'))
+      .mockImplementationOnce(() => new Promise(() => undefined))
+    mockService = sample
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(id('RoomReadFailed'))).toBeTruthy())
+    await wait(ROOM_POLL_MS)
+    expect(getRoom).toHaveBeenCalledTimes(2)
+    await wait(3 * ROOM_POLL_MS)
+    expect(getRoom).toHaveBeenCalledTimes(2)
   })
 
   test('is not read again while another screen is on top (control)', async () => {

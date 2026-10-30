@@ -258,6 +258,7 @@ export class AgentRoomsService implements RoomsService {
   public readonly label = 'rooms: the person’s own agent and communities'
 
   private served?: { types: readonly string[] | undefined; at: number }
+  private servedInFlight?: Promise<void>
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
@@ -294,9 +295,24 @@ export class AgentRoomsService implements RoomsService {
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
     const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
-    if (linked && (options.refresh || unknownAged))
-      this.served = { types: await this.backend.agentServedTypes(), at: this.now() }
+    if (linked && (options.refresh || unknownAged)) await this.askServed()
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
+  }
+
+  /**
+   * One ask of what the agent serves at a time: every caller that needs it while it is out waits for the same one.
+   * The agent's client sends one task at a time, and an agent that does not answer would otherwise be asked once per
+   * caller (each operation's check, every screen's read) and hold everything queued behind those asks.
+   */
+  private askServed(): Promise<void> {
+    if (this.servedInFlight) return this.servedInFlight
+    const ask = (async () => {
+      this.served = { types: await this.backend.agentServedTypes(), at: this.now() }
+    })().finally(() => {
+      if (this.servedInFlight === ask) this.servedInFlight = undefined
+    })
+    this.servedInFlight = ask
+    return ask
   }
 
   private async require(operation: RoomsOperation): Promise<void> {
