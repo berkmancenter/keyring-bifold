@@ -5,11 +5,7 @@
   "description": "The approver's signed ratification of a step-up: subject + challenge (+ sessionId, when the request carried one) are echoed inside a document signed by the approver, backed by the approver's own evidence — its own DID's proof, a WebAuthn assertion by a passkey registered to it, or (beside its own proof) a bound step-up approver's signed statement — so the relying party can elevate the session, or apply the approval to the one operation it was bound to.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "subject",
-    "challenge",
-    "decision"
-  ],
+  "required": ["subject", "challenge", "decision"],
   "properties": {
     "subject": {
       "type": "string",
@@ -28,10 +24,7 @@
     },
     "decision": {
       "type": "string",
-      "enum": [
-        "approved",
-        "denied"
-      ],
+      "enum": ["approved", "denied"],
       "description": "`approved` elevates the session, or authorizes the bound operation, per the relying party's policy. `denied` is a signed refusal — useful for audit even though it changes nothing."
     },
     "deniedReason": {
@@ -61,9 +54,7 @@
           "title": "DidSigned",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "kind"
-          ],
+          "required": ["kind"],
           "properties": {
             "kind": {
               "const": "didSigned"
@@ -75,10 +66,7 @@
           "title": "WebAuthn",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "kind",
-            "assertion"
-          ],
+          "required": ["kind", "assertion"],
           "properties": {
             "kind": {
               "const": "webauthn"
@@ -93,10 +81,7 @@
           "title": "ApproverSigned",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "kind",
-            "statement"
-          ],
+          "required": ["kind", "statement"],
           "properties": {
             "kind": {
               "const": "approverSigned"
@@ -115,17 +100,11 @@
       "description": "Acknowledgement the relying party returns after processing the approval. Carried in a Trust Task document whose type is https://trusttasks.org/spec/auth/step-up/approve-response/0.7#response.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "status"
-      ],
+      "required": ["status"],
       "properties": {
         "status": {
           "type": "string",
-          "enum": [
-            "elevated",
-            "recorded",
-            "rejected"
-          ],
+          "enum": ["elevated", "recorded", "rejected"],
           "description": "`elevated` — the approval was applied and the session's assurance level was raised. `recorded` — the approval was applied to the single operation it was bound to, and NO session was elevated; see `boundTo`. `rejected` — the approval was not applied."
         },
         "session": {

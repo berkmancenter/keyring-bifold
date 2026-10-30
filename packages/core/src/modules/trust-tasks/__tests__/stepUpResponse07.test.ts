@@ -72,10 +72,14 @@ describe('auth/step-up/approve-response/0.7', () => {
 describe('the vendored approve-response schemas still match the registry', () => {
   const maybe = registryPath() ? it : it.skip
 
-  maybe('byte-identical to the commit PROVENANCE names', () => {
-    expectNoDrift(SCHEMA_DIR, {
-      'approve-response-0.6.payload.schema.json': 'specs/auth/step-up/approve-response/0.6/payload.schema.json',
-      'approve-response-0.7.payload.schema.json': 'specs/auth/step-up/approve-response/0.7/payload.schema.json',
-    })
+  maybe('the same JSON documents as at the commit PROVENANCE names', () => {
+    expectNoDrift(
+      SCHEMA_DIR,
+      {
+        'approve-response-0.6.payload.schema.json': 'specs/auth/step-up/approve-response/0.6/payload.schema.json',
+        'approve-response-0.7.payload.schema.json': 'specs/auth/step-up/approve-response/0.7/payload.schema.json',
+      },
+      { as: 'json' }
+    )
   })
 })

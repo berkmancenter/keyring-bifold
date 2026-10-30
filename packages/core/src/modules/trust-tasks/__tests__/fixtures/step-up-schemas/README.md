@@ -1,6 +1,9 @@
 # Vendored `auth/step-up/approve-response` payload schemas
 
-Copied verbatim from the Trust Tasks specification registry. Test fixtures:
+Copied from the Trust Tasks specification registry, then formatted by prettier
+(the documents are unchanged; the drift check compares them as JSON, so they
+need no `.prettierignore` entry, a root file the release tier reads as a store
+build). Test fixtures:
 `../../stepUpResponse07.test.ts` holds the two to the same shape, so the
 answer this phone sends, checked against the packaged 0.6 schema
 (`stepUp.test.ts`), is one a 0.7 relying party takes too.
