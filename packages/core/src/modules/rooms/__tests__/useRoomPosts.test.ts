@@ -15,6 +15,7 @@ import {
   newestVersion,
   POLL_SKIPS_AFTER_FAILURE,
   POSTS_PAGE,
+  READ_BOUND_MS,
   ROOM_POLL_MS,
   type RoomPosts,
   useRoomPosts,
@@ -478,6 +479,58 @@ describe('drawing posts as their reads land', () => {
     await answer('a')
     expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
     expect(result.current.posts?.[1].unread).toBe(true)
+  })
+
+  // 276.9: a reopened room stopped at 7 of its posts for as long as the 8th's read took (over 8 s on the lab's open
+  // room). A read still out after the bound no longer hides the posts older than it.
+  test('the bound is two seconds', () => {
+    expect(READ_BOUND_MS).toBe(2000)
+  })
+
+  test('a read still out after the bound: the older posts draw, the slow one as a row still being read, and it swaps in place when it lands', async () => {
+    const { service, answer } = heldRoom()
+    const { result } = await open(service)
+    await answer('c')
+    await answer('a')
+    expect(keys(result.current.posts)).toEqual(['c'])
+    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS - 1))
+    expect(keys(result.current.posts)).toEqual(['c'])
+    await act(async () => jest.advanceTimersByTime(1))
+    expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
+    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, true, false])
+    // Still being read is not "couldn't be read".
+    expect(result.current.posts?.[1].unread).toBe(false)
+    await answer('b')
+    expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
+    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, false, false])
+    expect(String(result.current.posts?.[1].text)).toContain('post b')
+  })
+
+  test('a read that fails after the bound shows as unread in its place', async () => {
+    const { service, answer } = heldRoom()
+    const { result } = await open(service)
+    await answer('c')
+    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS))
+    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, true, true])
+    await answer('b', 'fail')
+    expect(result.current.posts?.[1]).toMatchObject({ key: 'b', unread: true })
+    expect(result.current.posts?.[1].reading).toBeFalsy()
+    await answer('a')
+    expect(result.current.posts?.map((p) => [p.key, !!p.reading, p.unread])).toEqual([
+      ['c', false, false],
+      ['b', false, true],
+      ['a', false, false],
+    ])
+  })
+
+  test('reads that all land within the bound draw as before: nothing is drawn as still being read', async () => {
+    const { service, answer } = heldRoom()
+    const { result } = await open(service)
+    await answer('c')
+    await answer('b')
+    await answer('a')
+    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS))
+    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, false, false])
   })
 })
 
