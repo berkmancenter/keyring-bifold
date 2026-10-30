@@ -7,7 +7,7 @@
 import { render, within } from '@testing-library/react-native'
 import type { TFunction } from 'i18next'
 import React from 'react'
-import { StyleSheet } from 'react-native'
+import { type StyleProp, StyleSheet, type TextStyle } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
@@ -24,7 +24,7 @@ jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
 const id = (key: string) => testIdWithKey(key)
 const LAB = 'did:webvh:QmLab:lab.example'
-const flat = (style: unknown) => StyleSheet.flatten(style as never) ?? {}
+const flat = (style: unknown): TextStyle => StyleSheet.flatten(style as StyleProp<TextStyle>) ?? {}
 const room = (over: Partial<RoomSummary> = {}) =>
   ({
     roomId: 'r1',
