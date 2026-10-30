@@ -409,7 +409,7 @@ describe('rooms/keys/act, at the version the agent serves', () => {
   })
 
   it('a host that moves on to put 0.3 only (VTC 0.16) is sent 0.3 once 0.1 is refused', async () => {
-    let versions = [ROOMS_TASK.recordsPut]
+    let versions: string[] = [ROOMS_TASK.recordsPut]
     const s = setup({ served: [...WITHOUT_ACT, V('0.8')], host: hostServing(() => versions) })
     await post(s)
     versions = [ROOMS_TASK.recordsPut03]
