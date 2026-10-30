@@ -19,7 +19,7 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { localDate } from '../../trust-tasks/screens/localTime'
 import { testIdWithKey } from '../../../utils/testable'
-import { offerCommunity } from '../offerCommunity'
+import { offerCommunity, offerRoom } from '../offerCommunity'
 import type { RoomOffer, RoomSummary } from '../types'
 import type { MyRooms } from '../useMyRooms'
 
@@ -40,7 +40,7 @@ const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (
   ]
     .filter(Boolean)
     .join(' · ')
-  const label = `${t('Rooms.OfferOf', { room: offer.roomName, interpolation: { escapeValue: false } })}${
+  const label = `${t('Rooms.OfferOf', { room: offerRoom(offer, t), interpolation: { escapeValue: false } })}${
     line ? `, ${line}` : ''
   }`
   const style = { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 } as const
@@ -50,7 +50,7 @@ const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (
       <Icon name="email-outline" size={22} color={ColorPalette.brand.primary} />
       <View style={{ flex: 1, gap: 2 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <ThemedText variant="bold">{offer.roomName}</ThemedText>
+          <ThemedText variant="bold">{offerRoom(offer, t)}</ThemedText>
           <TierBadge tier={offer.tier} />
         </View>
         {line ? (

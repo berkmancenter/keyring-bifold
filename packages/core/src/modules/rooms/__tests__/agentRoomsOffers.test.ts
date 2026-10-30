@@ -239,6 +239,18 @@ describe('AgentRoomsService offers', () => {
     expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM, SEALED_ROOM])
   })
 
+  it('an offered room the community named none is what tells it apart, said to be that, never a cut of its ID (276.9)', async () => {
+    const unnamed = 'did:webvh:QmScid123456:rooms.example:community-a-vtc'
+    const { service } = setup({
+      offers: [offer(unnamed, 'open', 'open', { label: undefined }), offer(OPEN_ROOM, 'open', 'open')],
+    })
+    const [byId, named] = await service.listOffers()
+    expect(String(byId.roomName)).toBe('community-a-vtc')
+    expect(byId.roomNameFrom).toBe('roomId')
+    expect(String(named.roomName)).toBe(`Room ${OPEN_ROOM.slice(-7)}`)
+    expect(named).not.toHaveProperty('roomNameFrom')
+  })
+
   it('reads a community without renewals at 0.2', async () => {
     const { service, communityTask } = setup({
       offers: [offer(OPEN_ROOM, 'open', 'open')],

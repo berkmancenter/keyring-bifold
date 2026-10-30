@@ -6,7 +6,7 @@
 import i18n from 'i18next'
 
 import en from '../../../localization/en/en.json'
-import { offerCommunity } from '../offerCommunity'
+import { offerCommunity, offerRoom } from '../offerCommunity'
 import { offeredWords } from '../roomNotices'
 import type { RoomOffer } from '../types'
 
@@ -41,5 +41,20 @@ describe('offerCommunity', () => {
     expect(offeredWords([offer()], t as never).text1).toBe(
       "You've been offered a room in community-a-vtc (no name published yet)."
     )
+  })
+})
+
+describe('offerRoom', () => {
+  test('a room the community named none is what tells it apart, said to have no name yet', () => {
+    const unnamed = {
+      ...offer(),
+      roomName: 'community-a-vtc' as RoomOffer['roomName'],
+      roomNameFrom: 'roomId' as const,
+    }
+    expect(offerRoom(unnamed, t as never)).toBe('community-a-vtc (no name published yet)')
+  })
+
+  test('a named room is its name (control)', () => {
+    expect(offerRoom(offer(), t as never)).toBe('Planning')
   })
 })

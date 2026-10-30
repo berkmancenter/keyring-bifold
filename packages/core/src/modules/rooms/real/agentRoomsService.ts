@@ -30,6 +30,7 @@ import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
+import { roomRef } from '../roomRef'
 import type {
   AgentGrant,
   CommunityRoomMember,
@@ -219,8 +220,6 @@ const RENEWED = [
   ['membership', 'MembershipCredential'],
   ['authority', 'AuthorityCredential'],
 ] as const
-
-const shortId = (id: string) => id.replace(/^did:[^:]+:/, '').slice(-10)
 
 /** Where an opened record is kept: a record's version never changes once written, so key and version name it. */
 const openedKey = (roomId: string, key: string, version: number) => `${roomId}\n${key}@${version}`
@@ -417,7 +416,7 @@ export class AgentRoomsService implements RoomsService {
     const name = record.label ?? held?.personalLabel
     return {
       roomId: record.roomId,
-      name: toInertText(name ?? shortId(record.roomId)),
+      name: toInertText(name ?? roomRef(record.roomId)),
       nameFrom: record.label ? 'community' : held?.personalLabel ? 'personal' : 'roomId',
       source: 'community',
       communityDid: community.did,
@@ -436,7 +435,7 @@ export class AgentRoomsService implements RoomsService {
     const me: Identity = { did: held.member ?? '' }
     return {
       roomId: held.roomId,
-      name: toInertText(held.personalLabel ?? shortId(held.roomId)),
+      name: toInertText(held.personalLabel ?? roomRef(held.roomId)),
       nameFrom: held.personalLabel ? 'personal' : 'roomId',
       source: 'custody',
       tier: 'unknown',
@@ -770,7 +769,8 @@ export class AgentRoomsService implements RoomsService {
     return {
       offerId,
       roomId: offer.roomId,
-      roomName: toInertText(offer.label || shortId(offer.roomId)),
+      roomName: toInertText(offer.label || roomRef(offer.roomId)),
+      ...(offer.label ? {} : { roomNameFrom: 'roomId' as const }),
       description: offer.description !== undefined ? toInertText(offer.description) : undefined,
       communityDid: community.did,
       communityName: community.name !== undefined ? toInertText(community.name) : undefined,

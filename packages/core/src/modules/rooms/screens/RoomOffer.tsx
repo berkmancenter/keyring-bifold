@@ -30,7 +30,7 @@ import { roomsStatusText } from '../components/roomsStatusText'
 import { accessText, identityText, tierHint } from '../components/roomWords'
 import { SampleDataBanner } from '../components/SampleDataBanner'
 import TierBadge from '../components/TierBadge'
-import { offerCommunity } from '../offerCommunity'
+import { offerCommunity, offerRoom } from '../offerCommunity'
 import { type AcceptRefusal, useRoomOffer } from '../useRoomOffer'
 import { useRoomsService } from '../useRoomsService'
 
@@ -103,7 +103,7 @@ const RoomOffer: React.FC = () => {
       const confirmed = await requestBiometricConfirmationWithUI(agent, community, 'room-offer', {
         title: t('Rooms.OfferConfirmTitle'),
         description: t('Rooms.OfferConfirmBody', {
-          room: preview.offer.roomName,
+          room: offerRoom(preview.offer, t),
           who: identityText(preview.actingAs),
           interpolation: { escapeValue: false },
         }),
@@ -148,7 +148,7 @@ const RoomOffer: React.FC = () => {
         </ThemedText>
         <View style={styles.card} testID={testIdWithKey('RoomOfferRoom')}>
           <View style={styles.row}>
-            <ThemedText variant="bold">{offer.roomName}</ThemedText>
+            <ThemedText variant="bold">{offerRoom(offer, t)}</ThemedText>
             <TierBadge tier={offer.tier} />
           </View>
           {hint ? <ThemedText style={styles.muted}>{hint}</ThemedText> : null}
