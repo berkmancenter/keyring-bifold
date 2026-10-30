@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "2465361331b83dabdb753b405d7f9edfcb780ef9",
+  "generatedFrom": "3faa6db1e2b229ddf5e54926fb518473bd5f25f8",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1142,7 +1142,9 @@
       "src/modules/history/ui/HistorySettings.tsx",
       "src/screens/RenameContact.tsx"
     ],
+    "ScanCameraNotStarting": ["src/components/misc/ScanCamera.tsx"],
     "ScanCameraTapArea": ["src/components/misc/ScanCamera.tsx"],
+    "ScanCameraWaiting": ["src/components/misc/ScanCamera.tsx"],
     "ScanHelp": ["src/components/misc/QRScanner.tsx"],
     "ScanMyQR": ["src/screens/Settings.tsx"],
     "ScanNow": ["src/components/misc/QRScanner.tsx"],
