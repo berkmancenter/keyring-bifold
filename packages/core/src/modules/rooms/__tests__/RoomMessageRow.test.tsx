@@ -97,6 +97,18 @@ describe("a room's Messages row", () => {
     )
     expect(empty.getByText('Rooms.RowNoPosts')).toBeTruthy()
   })
+
+  // Its posts not read yet (the agent not ready on a cold launch): reading, never "No posts yet".
+  test('a room not read yet says it is reading, not that it has no posts', () => {
+    const reading = show(
+      <RoomMessageRow
+        row={row({ unread: 0, lastPost: undefined, lastActivityAt: undefined, reading: true })}
+        onOpen={jest.fn()}
+      />
+    )
+    expect(reading.getByText('Rooms.Reading')).toBeTruthy()
+    expect(reading.queryByText('Rooms.RowNoPosts')).toBeNull()
+  })
 })
 
 describe("Hide, behind a room's row", () => {

@@ -62,8 +62,9 @@ const RoomMessageRow: React.FC<RoomMessageRowProps> = ({ row, onOpen }) => {
   const name = roomTitle(t, { name: row.roomName, nameFrom: row.nameFrom })
   const community = row.communityName ? String(row.communityName) : undefined
   const post = row.lastPost
+  // Not read yet (the agent not ready on a cold launch): reading, never "No posts yet" for a room that may have some.
   const what = !post
-    ? (t('Rooms.RowNoPosts') as string)
+    ? (t(row.reading ? 'Rooms.Reading' : 'Rooms.RowNoPosts') as string)
     : post.kind === 'note'
       ? (t('Rooms.RowNote', { title: post.text, ...asWritten }) as string)
       : post.kind === 'file'
