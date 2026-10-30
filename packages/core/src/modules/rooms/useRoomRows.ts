@@ -167,7 +167,9 @@ const rowPostOf = (note: NoteSummary, actingAs: Identity | undefined): RoomRowPo
 async function readRoom(service: RoomsService, room: RoomSummary, track: Track | undefined): Promise<Track> {
   const actingAs = track?.actingAs ?? (await service.getRoom(room.roomId)).actingAs
   const listing = await service.listNotes(room.roomId, track ? { sinceVersion: track.newest } : undefined)
-  // A first listing that stopped early with nothing in it says nothing about the room: still unread, not empty.
+  // A first listing that stopped early with nothing in it says nothing about the room: still unread, not empty. Only a
+  // first read: a listing asked with `sinceVersion` is never complete (types.ts), so this on a refresh would leave every
+  // room unread for ever. readAll catches it per room, so the other rooms read on.
   if (!track && listing.notes.length === 0 && !listing.complete) throw new Error('first listing stopped early')
   const kept = seenVersions?.[hashOf(room.roomId)]
   const next: Track = track
@@ -298,7 +300,8 @@ const retry: { timer?: ReturnType<typeof setTimeout>; tries: number } = { tries:
 /**
  * After a read that left a room unread, or failed, reads again after the next of {@link ROWS_RETRY_MS}; after the
  * last, it waits for the usual moments. A read that has every room read starts the count again. A retry due while a
- * read is out is that read's to decide (refreshRoomRows reads one at a time).
+ * read is out is that read's to decide (refreshRoomRows reads one at a time). One due while the app is away reads
+ * nothing and is put off, not spent: a cold launch sent straight to the background still has its retries on return.
  */
 function retrySoon(service: RoomsService, needed: boolean): void {
   if (retry.timer) clearTimeout(retry.timer)
@@ -308,10 +311,18 @@ function retrySoon(service: RoomsService, needed: boolean): void {
     return
   }
   if (retry.tries >= ROWS_RETRY_MS.length) return
-  retry.timer = setTimeout(() => {
+  const delay = ROWS_RETRY_MS[retry.tries]
+  const due = () => {
     retry.timer = undefined
-    if (feed.service === service && AppState.currentState === 'active') refreshRoomRows()
-  }, ROWS_RETRY_MS[retry.tries++])
+    if (feed.service !== service) return
+    if (AppState.currentState !== 'active') {
+      retry.timer = setTimeout(due, delay)
+      return
+    }
+    retry.tries++
+    refreshRoomRows()
+  }
+  retry.timer = setTimeout(due, delay)
 }
 
 const stopRetrying = () => {
