@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "f0d7697451c7ac676f4749ce8cc4f9ccb75df14f",
+  "generatedFrom": "7a3bf5e550f84c4c5e1352cc1b6059417511c41f",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -979,6 +979,7 @@
     "RoomMembersUnavailable": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMembersYourAccess": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMessageRow": ["src/modules/rooms/components/RoomMessageRow.tsx"],
+    "RoomMessageRowHide": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMonogram": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomNoteBack": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteBodyInput": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
