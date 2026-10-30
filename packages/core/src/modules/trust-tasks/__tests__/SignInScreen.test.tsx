@@ -692,4 +692,11 @@ describe("the service that hosts the person's agents", () => {
       expect(JSON.stringify([lang.SignIn.Service, lang.SignIn.OlderAgents])).not.toMatch(/farm/i)
     }
   })
+
+  test('older agents are told both ways out, and not to wait for a fix', () => {
+    const older = (en as unknown as { SignIn: { OlderAgents: string } }).SignIn.OlderAgents
+    expect(older).toMatch(/get a new agent from that service/i)
+    expect(older).toMatch(/sign in another way/)
+    expect(older).not.toMatch(/\byet\b|for now/)
+  })
 })
