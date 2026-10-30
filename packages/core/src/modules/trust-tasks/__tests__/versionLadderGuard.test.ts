@@ -10,7 +10,7 @@
  * - In one, a list holding two or more versions of a family runs newest first from the newest version Keyring
  *   knows, and the construct names that version somewhere.
  * - Outside one, a version of such a family passed as an argument, or as a document's `type`, carries
- *   `// version-pinned: <reason>` on its line or the line above: the other side serves that one version only. A
+ *   `// version-pinned: <reason>` on its line or a comment line just above: the other side serves that one version only. A
  *   list of versions that picks none (what the phone reads, a rule's coverage) carries `// version-set: <reason>`.
  *   A bare marker does not count.
  * - Every such family is seen at least once. One sent in a shape this cannot see fails rather than passing unseen.
@@ -26,7 +26,8 @@ import ts from 'typescript'
 const CORE = path.resolve(__dirname, '../../../..')
 const SRC = path.join(CORE, 'src')
 const URI = /^https:\/\/trusttasks\.org\/spec\/(.+)\/(\d+\.\d+)$/
-// A reason on the same line or the line above: a bare marker does not count.
+// A reason on the same line, or on a comment line of its own just above: a bare marker does not count, and nor does
+// a marker that ends the statement before.
 const PINNED = /\/\/[ \t]*version-pinned:[ \t]*\S/
 const SET = /\/\/[ \t]*version-set:[ \t]*\S/
 const TAG = 'versionLadder'
@@ -177,7 +178,7 @@ function survey(extra: Map<string, string> = new Map()): Survey {
     const sf = node.getSourceFile()
     const line = sf.getLineAndCharacterOfPosition(node.getStart()).line
     const lines = sf.text.split('\n')
-    return marker.test(lines[line]) || (line > 0 && marker.test(lines[line - 1]))
+    return marker.test(lines[line]) || (line > 0 && /^\s*\/\//.test(lines[line - 1]) && marker.test(lines[line - 1]))
   }
   /** The nearest construct around `node` whose `@versionLadder` covers `family`. */
   const ladderOf = (node: ts.Node, family: string): ts.Node | undefined => {

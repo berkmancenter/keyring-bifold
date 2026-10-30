@@ -134,6 +134,7 @@ export const PHONE_SENDS: readonly string[] = [
 ].map((slug) => SPEC + slug)
 
 /** The tasks the test request sends: held by the phone's own rule, or let through when nothing is enforced. */
+// version-set: every version the test request's delete may go at; VTA_TASK_VERSIONS picks it
 export const TEST_REQUEST_TASKS = [
   `${SPEC}vta/contexts/create/1.0`,
   `${SPEC}vta/contexts/delete/1.1`,

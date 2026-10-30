@@ -21,6 +21,7 @@
 export const VTA_READ_LANE_SIZE = 3
 
 /** The tasks that may share the lane: reads only, by exact type and version. */
+// version-set: which reads may share the lane, whichever version a ladder sends
 export const VTA_READ_LANE_TYPES: ReadonlySet<string> = new Set([
   'https://trusttasks.org/spec/rooms/keys/read/0.1',
   'https://trusttasks.org/spec/rooms/keys/browse/0.1',
