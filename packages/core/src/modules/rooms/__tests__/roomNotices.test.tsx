@@ -76,7 +76,7 @@ describe('a new room offer', () => {
     expect(toast(0)).toMatchObject({ text1: 'Rooms.NoticeOffered', text2: 'Rooms.NoticeSeeOffer', position: 'bottom' })
     act(() => toast(0).onPress())
     expect(navigate).toHaveBeenCalledWith(Stacks.TabStack, {
-      screen: TabStacks.MyAgentStack,
+      screen: TabStacks.MessageStack,
       params: { screen: Screens.RoomOffer, initial: false, params: { offerRef: offers[0].offerId } },
     })
     first.unmount()
@@ -102,7 +102,7 @@ describe('a new room offer', () => {
     expect(show).toHaveBeenCalledTimes(2)
     act(() => toast(1).onPress())
     expect(navigate).toHaveBeenLastCalledWith(Stacks.TabStack, {
-      screen: TabStacks.MyAgentStack,
+      screen: TabStacks.MessageStack,
       params: { screen: Screens.RoomOffer, initial: false, params: { offerRef: offers[1].offerId } },
     })
     later.unmount()
@@ -119,7 +119,7 @@ describe('a new room offer', () => {
     hook.unmount()
   })
 
-  test('several at once are counted, and a tap opens Rooms', async () => {
+  test('several at once are counted, and a tap opens Messages, whose offers card lists them', async () => {
     mockService = offering(() => [offer('planning'), offer('welcome-desk')])
     const hook = renderHook(() => useRoomNotices())
     await flush()
@@ -127,8 +127,8 @@ describe('a new room offer', () => {
     expect(toast(0)).toMatchObject({ text1: 'Rooms.NoticeOfferedMany', text2: 'Rooms.NoticeSeeOffers' })
     act(() => toast(0).onPress())
     expect(navigate).toHaveBeenCalledWith(Stacks.TabStack, {
-      screen: TabStacks.MyAgentStack,
-      params: { screen: Screens.RoomsHome, initial: false },
+      screen: TabStacks.MessageStack,
+      params: { screen: Screens.Messages },
     })
     hook.unmount()
   })

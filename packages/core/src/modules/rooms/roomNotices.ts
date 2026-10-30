@@ -3,7 +3,8 @@
  * community's own ("You're now a member of …", joinedNotice): above the tab bar, for a few seconds, while the app is
  * open. Mounted once, from the tab navigator.
  *
- * - A new room offer: "You've been offered a room in …"; a tap opens it (several at once open Rooms). Offers are
+ * - A new room offer: "You've been offered a room in …"; a tap opens it in Messages, with Messages below it
+ *   (several at once open Messages, whose offers card lists them). Offers are
  *   pulled, not pushed, so this runs the offers poll (useRoomOffersCount) from here, which My Agent's badge reads.
  *   Each offer is said once: the offers already said are kept on this phone, as short hashes of their ids, so a
  *   lock, a relaunch or the next poll does not say them again.
@@ -119,12 +120,13 @@ export function useRoomNotices(): void {
   const service = useRoomsService()
   const linked = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().link.kind === 'linked')
 
-  // Through the main stack, as an agent link does, so the screen comes to the top over whatever is open.
-  const openInMyAgent = useCallback(
+  // Through the main stack, as an agent link does, so the screen comes to the top over whatever is open. A room offer
+  // opens in Messages, where the rooms are (R2), with Messages kept below it.
+  const openInMessages = useCallback(
     (screen: Screens, params?: object) =>
       navigation.navigate(Stacks.TabStack, {
-        screen: TabStacks.MyAgentStack,
-        params: { screen, initial: false, ...(params ? { params } : {}) },
+        screen: TabStacks.MessageStack,
+        params: screen === Screens.Messages ? { screen } : { screen, initial: false, ...(params ? { params } : {}) },
       }),
     [navigation]
   )
@@ -142,13 +144,13 @@ export function useRoomNotices(): void {
           bottomOffset,
           onPress: () => {
             Toast.hide()
-            if (fresh.length === 1) openInMyAgent(Screens.RoomOffer, { offerRef: fresh[0].offerId })
-            else openInMyAgent(Screens.RoomsHome)
+            if (fresh.length === 1) openInMessages(Screens.RoomOffer, { offerRef: fresh[0].offerId })
+            else openInMessages(Screens.Messages)
           },
         })
       })
     },
-    [service, t, bottomOffset, openInMyAgent]
+    [service, t, bottomOffset, openInMessages]
   )
   useRoomOffersCount(service, linked, onOffers)
   // The rooms as Messages rows, read by one poll for the app: Messages and the tab's badge both read it.
