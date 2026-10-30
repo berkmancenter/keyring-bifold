@@ -12,11 +12,17 @@
  * - Gone: a room this phone has seen as a member, now removed or past its end. Said once. A room first met already
  *   gone (a fresh install, a new phone) says nothing: there is no change to tell.
  *
+ * A room missing from a listing is not gone. Only a room listed as removed, or listed past its end, is: a listing that
+ * comes back short (a community that didn't answer, as acl/list did in 276) must never say "You no longer have
+ * access". So this never compares a listing with the one before it.
+ *
  * Only a community's rooms: a room known from the agent's own keys alone has no record, so no end and no standing.
  * One notice at a time, the most pressing kind: the rooms gone, else those ending. A kind left unsaid waits for the
  * next listing.
  *
- * What is kept on this phone, as short hashes: the rooms seen as members, and the notices said.
+ * What is kept on this phone, as short hashes: the rooms seen as members, and the notices said. The hashes keep a plain
+ * list of the member's room IDs out of the app's storage, against a casual look at it or a device transfer. They are
+ * no secret from anyone who holds the community's list of rooms: 64 bits of a known ID can be matched by trying each.
  *
  * @module rooms/roomAccess
  */
@@ -90,6 +96,8 @@ export function accessNoticeFor(
   }
 
   if (gone.length > 0) {
+    // Said once by leaving `known`, not by joining `said`: a room admitted again is known again, and its next
+    // removal is said. Marking it said instead would silence that.
     const goneIds = new Set(gone.map(({ room }) => hash(room.roomId)))
     return {
       notice: { kind: 'gone', rooms: gone },

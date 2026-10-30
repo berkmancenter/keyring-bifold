@@ -137,7 +137,9 @@ export function accessWords(notice: AccessNotice, t: TFunction): { text1: string
       ? t('Rooms.NoticeAccessEndsToday', { room: room.name, ...named })
       : days === 1
         ? t('Rooms.NoticeAccessEndsTomorrow', { room: room.name, ...named })
-        : t('Rooms.NoticeAccessEndsIn', { room: room.name, count: days, ...named })
+        : // Only 2 to 7 days come here, so `NoticeAccessEndsIn_one` is never shown; it is there because i18next wants
+          // every count-bearing key's forms.
+          t('Rooms.NoticeAccessEndsIn', { room: room.name, count: days, ...named })
   return { text1: text1 as string, text2: t('Rooms.NoticeSeeRoom') as string }
 }
 
