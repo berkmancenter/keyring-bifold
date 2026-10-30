@@ -9,6 +9,13 @@
  * already closed. That last one is still tried, for a screen left by
  * navigating, but it is never the only copy.
  *
+ * A sent draft must not come back. An empty field (gifted-chat reports '' after
+ * a send) is saved at once rather than after the pause, so the kept draft is
+ * gone before anything can read it again; and a read that answers once the
+ * field has been touched in this chat is ignored, so a re-read (the agent
+ * restarting on lock and unlock) or a slow first read can't put old words into
+ * a field the person has typed in or sent from.
+ *
  * @module chat/useChatDraft
  */
 
@@ -32,6 +39,8 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
   const pending = useRef<string | undefined>(undefined)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [saved, setSaved] = useState<string | undefined>(undefined)
+  // The chat whose field has been touched (typed in, or emptied by a send) since this screen opened it.
+  const touched = useRef<string | undefined>(undefined)
 
   const flush = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)
@@ -46,11 +55,13 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
 
   const onTextChange = useCallback(
     (text: string) => {
+      touched.current = connectionId
       pending.current = text
       if (timer.current) clearTimeout(timer.current)
-      timer.current = setTimeout(flush, DRAFT_SAVE_DELAY_MS)
+      if (text === '') flush()
+      else timer.current = setTimeout(flush, DRAFT_SAVE_DELAY_MS)
     },
-    [flush]
+    [flush, connectionId]
   )
 
   useEffect(() => {
@@ -59,7 +70,7 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
     let live = true
     loadChatDraft(agent, connectionId)
       .then((text) => {
-        if (live) setSaved(text)
+        if (live && touched.current !== connectionId) setSaved(text)
       })
       .catch((error) => {
         agent.config?.logger?.warn(`[Chat:draft] the draft for ${connectionId} could not be read`, { error })
