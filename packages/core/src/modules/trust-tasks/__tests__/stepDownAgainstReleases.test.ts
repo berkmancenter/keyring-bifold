@@ -166,7 +166,7 @@ describe('every ladder against a v0.65.0 agent (v0.60.0 to v0.66.0)', () => {
     expect(uri.slice(SPEC.length)).toBe(expected[expected.length - 1])
   })
 
-  it('answers each step-up in the request’s own version, after one refusal of 0.6', async () => {
+  it('answers each step-up in the request’s own version, after refusals of 0.7 and 0.6', async () => {
     for (const request of STEP_UP_REQUEST_TYPES) {
       const ladder = approveResponseTypesFor(request)
       const own = ladder[ladder.length - 1]
@@ -175,7 +175,11 @@ describe('every ladder against a v0.65.0 agent (v0.60.0 to v0.66.0)', () => {
       const ask = new TaskVersions().ask('stepUpResponse', LADDERS[`stepUpResponse:${request}`], answer)
       if (served) {
         await expect(ask).resolves.toMatchObject({ uri: own })
-        expect(short(asked)).toEqual(['auth/step-up/approve-response/0.6', own.slice(SPEC.length)])
+        expect(short(asked)).toEqual([
+          'auth/step-up/approve-response/0.7',
+          'auth/step-up/approve-response/0.6',
+          own.slice(SPEC.length),
+        ])
       } else {
         // Request versions past 0.3 are 0d3f268e's and later: a v0.65.0 agent never mints them.
         await expect(ask).rejects.toBeInstanceOf(VtiRefusal)
