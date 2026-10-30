@@ -31,3 +31,23 @@ export const VTA_READ_LANE_TYPES: ReadonlySet<string> = new Set([
 export function inReadLane(type: string): boolean {
   return VTA_READ_LANE_TYPES.has(type)
 }
+
+/**
+ * The tasks that go beside the queue once this session's agent threads its replies: started at once, behind
+ * nothing, with nothing waiting for them. Only the presence heartbeat: saying the phone is here again changes
+ * nothing a second time, no task waits on its answer, and an unanswered one held whoami and the rooms' key list for
+ * its whole 30 s (a tester's run, 10-30). A heartbeat that carries the sign-in's UV key goes beside too; the sign-in
+ * waits for its answer before the grant, so the order of the two is the caller's, as before.
+ *
+ * ROLLBACK: set {@link VTA_HEARTBEAT_BESIDE} to false (an OTA can ship that alone); the heartbeat then runs alone in
+ * the queue, as before.
+ */
+export const VTA_HEARTBEAT_BESIDE = true
+export const VTA_BESIDE_TYPES: ReadonlySet<string> = new Set([
+  'https://trusttasks.org/spec/device/heartbeat/0.2',
+  'https://trusttasks.org/spec/device/heartbeat/0.3',
+])
+
+export function besideQueue(type: string): boolean {
+  return VTA_BESIDE_TYPES.has(type)
+}
