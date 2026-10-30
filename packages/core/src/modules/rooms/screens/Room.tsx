@@ -46,6 +46,7 @@ import { type NoteEditorTarget, RoomNoteEditor } from '../components/RoomNoteEdi
 import { RoomFilesTab } from '../components/RoomFilesTab'
 import { RoomHeader } from '../components/RoomHeader'
 import { RoomIdentitySheet } from '../components/RoomIdentitySheet'
+import { useDirectoryNames, useDirectoryService } from '../../directory/useDirectory'
 import { PetnamesProvider } from '../components/memberWords'
 import { RoomMembersTab } from '../components/RoomMembersTab'
 import { RoomNotesTab } from '../components/RoomNotesTab'
@@ -146,6 +147,13 @@ const Room: React.FC = () => {
   const me = useMyName(room?.communityDid)
   // The member's own names for the community's members, read once for every label on this screen.
   const petnames = usePetnames(room?.communityDid)
+  // The names other authors wrote on their own directory cards, where they show them to members.
+  const directory = useDirectoryService()
+  const authors = useMemo(
+    () => (feed.posts ?? []).flatMap((p) => (!p.mine && p.author ? [p.author.did] : [])),
+    [feed.posts]
+  )
+  const directoryNames = useDirectoryNames(directory, room?.communityDid, authors)
   const { reload } = state
   // The library is read again each time it is shown, so a file just posted from the chat is in it.
   const showTab = (next: RoomTab) => {
@@ -264,7 +272,7 @@ const Room: React.FC = () => {
   )
 
   return (
-    <PetnamesProvider names={petnames}>
+    <PetnamesProvider names={petnames} directoryNames={directoryNames}>
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']} testID={testIdWithKey('RoomScreen')}>
         <SampleDataBanner service={service} />
         <RoomHeader room={room} />
@@ -381,17 +389,21 @@ const Room: React.FC = () => {
                 </View>
               ) : null
             }
-            // The footer of a list drawn bottom up is at its top, above the oldest post shown.
+            // Older posts load as the member scrolls up to them, as a chat's do: the end of a list drawn bottom up is
+            // its top. No button.
+            onEndReached={feed.hasOlder && !feed.loadingOlder ? feed.loadOlder : undefined}
+            onEndReachedThreshold={0.25}
+            // The footer of a list drawn bottom up is at its top, above the oldest post shown: the app's spinner while
+            // older posts are read.
             ListFooterComponent={
-              feed.hasOlder ? (
-                <Button
-                  title={t('Rooms.LoadOlder')}
-                  buttonType={ButtonType.Secondary}
-                  onPress={feed.loadOlder}
-                  disabled={feed.loadingOlder}
-                  testID={testIdWithKey('RoomLoadOlder')}
+              feed.loadingOlder ? (
+                <ActivityIndicator
+                  style={styles.centered}
+                  color={ColorPalette.brand.primary}
+                  accessibilityLabel={t('Rooms.Reading')}
+                  testID={testIdWithKey('RoomLoadingOlder')}
                 />
-              ) : feed.incomplete ? (
+              ) : feed.incomplete && !feed.hasOlder ? (
                 <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
                   {t('Rooms.NotesIncomplete')}
                 </ThemedText>
