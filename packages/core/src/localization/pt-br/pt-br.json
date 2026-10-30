@@ -2626,6 +2626,18 @@
   "MessageWake": {
     "Fetching": "Buscando novas mensagens…"
   },
+  "MessagesList": {
+    "Title": "Mensagens",
+    "You": "Você: {{text}}",
+    "ReactedTo": "{{name}} reagiu {{emoji}} a “{{text}}”",
+    "Reacted": "{{name}} reagiu {{emoji}}",
+    "YouReactedTo": "Você reagiu {{emoji}} a “{{text}}”",
+    "YouReacted": "Você reagiu {{emoji}}",
+    "TimerOn": "mensagens temporárias ativadas",
+    "RowLabel": "{{name}}, {{preview}}, {{when}}",
+    "Unread_one": "{{count}} mensagem não lida",
+    "Unread_other": "{{count}} mensagens não lidas"
+  },
   "Relationship": {
     "ResignUnavailable": "Assinar de novo: seus cartões já estão assinados com hardware seguro.",
     "WitnessUnavailable": "Adicionar uma testemunha: conecte-se primeiro a uma testemunha. Toque no escudo no topo de Contatos.",
@@ -2763,6 +2775,7 @@
     "NoteRemoved": "Esta nota foi removida. O lugar dela fica, para que o histórico da sala seja fiel.",
     "Files": "Arquivos",
     "FilesNone": "Nenhum arquivo ainda.",
+    "FilesNotOnOpenRooms": "Arquivos são compartilhados em salas atribuídas e privadas, não em salas abertas.",
     "FilesFailed": "Não foi possível ler os arquivos. Tente mais tarde.",
     "FilesAdd": "Adicionar um arquivo",
     "FilesCaution": "Um arquivo só é baixado quando você o abre. O Keyring não consegue verificar o que um arquivo contém.",
