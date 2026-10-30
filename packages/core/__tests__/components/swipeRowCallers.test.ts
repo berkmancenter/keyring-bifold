@@ -2,7 +2,8 @@
  * Every SwipeRow caller spreads the touch props on its row. SwipeRow hands the row's own touchable the long press and
  * the screen reader's action through its render prop; a caller that forgets `{...touch}` loses both with no type
  * error and, unless it tests a long press, no failing test. A screen reader then can't reach Delete or Hide at all.
- * So this reads each file that renders a SwipeRow, finds the render prop's argument, and asks for it spread.
+ * So this reads each file that renders a SwipeRow, finds each row's render prop argument, and asks for it spread
+ * within that row's own children.
  *
  * It proves the spread is there, not that it lands on the row's touchable: a spread onto an inner View would pass
  * here and still lose the gesture. Each caller's own long-press and screen-reader tests are what cover that.
@@ -34,9 +35,10 @@ test.each(callers.map((file) => [path.relative(SRC, file), file]))(
   '%s spreads the touch props on its row',
   (_name, file) => {
     const text = fs.readFileSync(file, 'utf8')
-    const uses = [...text.matchAll(/<SwipeRow\b[\s\S]*?>\s*\{\s*\(\s*(\w+)\s*\)\s*=>/g)].map((m) => m[1])
-    // Each SwipeRow in the file takes its children as `(name) => …`, and spreads `name`.
-    expect(uses).toHaveLength((text.match(/<SwipeRow\b/g) ?? []).length)
-    for (const name of uses) expect(text).toMatch(new RegExp(`\\{\\.\\.\\.${name}\\}`))
+    const rows = [...text.matchAll(/<SwipeRow\b[\s\S]*?>\s*\{\s*\(\s*(\w+)\s*\)\s*=>([\s\S]*?)<\/SwipeRow>/g)]
+    // Each SwipeRow in the file takes its children as `(name) => …`, and spreads `name` within its own children: two
+    // rows that both call it `touch` must each spread it, so one row's spread can't stand in for the other's.
+    expect(rows).toHaveLength((text.match(/<SwipeRow\b/g) ?? []).length)
+    for (const [, name, children] of rows) expect(children).toMatch(new RegExp(`\\{\\.\\.\\.${name}\\}`))
   }
 )
