@@ -164,7 +164,8 @@ describe("a room's Notes tab", () => {
     await waitFor(() => expect(tree.getAllByTestId(/RoomNote_/)).toHaveLength(PAGE))
     expect(tree.queryByText('Rooms.LoadOlder')).toBeNull()
     await act(async () => tree.getByTestId(id('RoomNotes')).props.onEndReached({ distanceFromEnd: 0 }))
-    await waitFor(() => expect(tree.getAllByTestId(/RoomNote_/)).toHaveLength(PAGE + 1))
+    // The list holds the next page; it draws rows as they scroll into view, so its data is what to count.
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotes')).props.data).toHaveLength(PAGE + 1))
     expect(tree.getByTestId(id('RoomNotes')).props.onEndReached).toBeUndefined()
   })
 
