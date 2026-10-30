@@ -14,7 +14,7 @@ import { testIdWithKey } from '../../../utils/testable'
 import { deriveRoomCapabilities, sampleCapabilities } from '../capabilities'
 import { toInertText } from '../inertText'
 import { roomHandle } from '../components/RoomRow'
-import { POSTS_PAGE, READ_BOUND_MS } from '../useRoomPosts'
+import { POSTS_PAGE } from '../useRoomPosts'
 import { createSampleRoomsService } from '../sample/sampleRooms'
 import type { HostCheck, Note, NoteList, Room as RoomRecord, RoomsService } from '../types'
 
@@ -205,32 +205,19 @@ describe('posts', () => {
     expect(tree.queryByText('hidden')).toBeNull()
   })
 
-  test('a post whose read outlasts the bound shows as loading in its place, the older ones draw, and its words replace the spinner', async () => {
-    const service = withPosts([
-      post('a', 'newest'),
-      post('b', 'slow', { updatedAt: '2026-10-26T08:00:00Z' }),
-      post('c', 'older', { updatedAt: '2026-10-25T08:00:00Z' }),
-    ])
-    const read = service.readNote.bind(service)
-    let release: () => void = () => undefined
-    const held = new Promise<void>((resolve) => (release = resolve))
-    Object.assign(service, {
-      readNote: async (roomId: string, key: string) => {
-        if (key === 'b') await held
-        return read(roomId, key)
-      },
-    })
-    const tree = open(service)
-    await waitFor(() => expect(tree.getByText('newest')).toBeTruthy())
-    // Within the bound, a newer post still being read holds the older ones: nothing shown moves.
-    expect(tree.queryByText('older')).toBeNull()
-    await waitFor(() => expect(tree.getByText('older')).toBeTruthy(), { timeout: READ_BOUND_MS + 2000 })
-    expect(tree.getByTestId(id('RoomPostReading'))).toBeTruthy()
-    expect(tree.queryByText('slow')).toBeNull()
-    expect(tree.queryByTestId(id('RoomPostUnread'))).toBeNull()
-    await act(async () => release())
-    await waitFor(() => expect(tree.getByText('slow')).toBeTruthy())
-    expect(tree.queryByTestId(id('RoomPostReading'))).toBeNull()
+  // 276.9: a reopened room drew 8 posts and stopped: notes among its newest records took places in the page.
+  test(`notes among the newest records leave the chat its ${POSTS_PAGE} posts, with no scroll`, async () => {
+    const at = (i: number) => new Date(Date.UTC(2026, 9, 26, 9, 0, 0) - i * 60_000).toISOString()
+    const records = Array.from({ length: POSTS_PAGE + 4 }, (_, i) =>
+      i === 1 || i === 4
+        ? post(`note${i}`, `note body ${i}`, { updatedAt: at(i), title: toInertText(`Note ${i}`) })
+        : post(`p${i}`, `chat ${i}`, { updatedAt: at(i) })
+    )
+    const tree = open(withPosts(records))
+    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(POSTS_PAGE))
+    const chat = records.filter((r) => !r.title).slice(0, POSTS_PAGE)
+    for (const r of chat) expect(tree.getByText(String(r.body))).toBeTruthy()
+    expect(tree.queryByText('note body 1')).toBeNull()
   })
 
   test(`${POSTS_PAGE} at a time: scrolling up to the oldest post reads the next page, with the spinner and no button`, async () => {

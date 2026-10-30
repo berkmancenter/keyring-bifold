@@ -8,6 +8,7 @@ import { act, renderHook } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 
 import { toInertText } from '../inertText'
+import { isChatPost, type RoomPost } from '../roomPosts'
 import type { Note, NoteList, NoteSummary, RoomsService } from '../types'
 import { useInViewAndActive } from '../useInViewAndActive'
 import {
@@ -15,7 +16,6 @@ import {
   newestVersion,
   POLL_SKIPS_AFTER_FAILURE,
   POSTS_PAGE,
-  READ_BOUND_MS,
   ROOM_POLL_MS,
   type RoomPosts,
   useRoomPosts,
@@ -480,58 +480,6 @@ describe('drawing posts as their reads land', () => {
     expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
     expect(result.current.posts?.[1].unread).toBe(true)
   })
-
-  // 276.9: a reopened room stopped at 7 of its posts for as long as the 8th's read took (over 8 s on the lab's open
-  // room). A read still out after the bound no longer hides the posts older than it.
-  test('the bound is two seconds', () => {
-    expect(READ_BOUND_MS).toBe(2000)
-  })
-
-  test('a read still out after the bound: the older posts draw, the slow one as a row still being read, and it swaps in place when it lands', async () => {
-    const { service, answer } = heldRoom()
-    const { result } = await open(service)
-    await answer('c')
-    await answer('a')
-    expect(keys(result.current.posts)).toEqual(['c'])
-    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS - 1))
-    expect(keys(result.current.posts)).toEqual(['c'])
-    await act(async () => jest.advanceTimersByTime(1))
-    expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
-    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, true, false])
-    // Still being read is not "couldn't be read".
-    expect(result.current.posts?.[1].unread).toBe(false)
-    await answer('b')
-    expect(keys(result.current.posts)).toEqual(['c', 'b', 'a'])
-    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, false, false])
-    expect(String(result.current.posts?.[1].text)).toContain('post b')
-  })
-
-  test('a read that fails after the bound shows as unread in its place', async () => {
-    const { service, answer } = heldRoom()
-    const { result } = await open(service)
-    await answer('c')
-    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS))
-    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, true, true])
-    await answer('b', 'fail')
-    expect(result.current.posts?.[1]).toMatchObject({ key: 'b', unread: true })
-    expect(result.current.posts?.[1].reading).toBeFalsy()
-    await answer('a')
-    expect(result.current.posts?.map((p) => [p.key, !!p.reading, p.unread])).toEqual([
-      ['c', false, false],
-      ['b', false, true],
-      ['a', false, false],
-    ])
-  })
-
-  test('reads that all land within the bound draw as before: nothing is drawn as still being read', async () => {
-    const { service, answer } = heldRoom()
-    const { result } = await open(service)
-    await answer('c')
-    await answer('b')
-    await answer('a')
-    await act(async () => jest.advanceTimersByTime(READ_BOUND_MS))
-    expect(result.current.posts?.map((p) => !!p.reading)).toEqual([false, false, false])
-  })
 })
 
 describe('the first page', () => {
@@ -553,5 +501,65 @@ describe('the first page', () => {
     await flush()
     expect(service.readNote).toHaveBeenCalledTimes(20)
     expect(result.current.posts).toHaveLength(20)
+  })
+})
+
+// 276.9: a reopened room drew 8 of its posts and stopped, with no read slow or failed. Its newest ten records held
+// notes, which the chat leaves out, so the page drew fewer than ten and filled the screen; the rest came only with a
+// scroll up. A chat's page counts chat posts.
+describe('a page counted in chat posts', () => {
+  /** A room of `count` records, n1 oldest; the ones in `notes` have a title (notes, which the chat leaves out). */
+  const roomOf = (count: number, notes: string[]) =>
+    roomWith(
+      Array.from({ length: count }, (_, i) =>
+        note(`n${i + 1}`, i + 1, notes.includes(`n${i + 1}`) ? { title: toInertText(`note n${i + 1}`) } : {})
+      )
+    )
+  const openCounting = async (service: RoomsService) => {
+    const hook = renderHook(() => useRoomPosts(service, ROOM, ME, true, false, isChatPost))
+    for (let i = 0; i < 6; i++) await flush()
+    return hook
+  }
+  const chat = (posts?: RoomPost[]) => (posts ?? []).filter(isChatPost)
+
+  test('notes among the newest records are read too, and the page holds ten chat posts', async () => {
+    const { service } = roomOf(14, ['n13', 'n11'])
+    const { result } = await openCounting(service)
+    expect(chat(result.current.posts)).toHaveLength(10)
+    expect(result.current.posts).toHaveLength(12)
+    expect(service.readNote).toHaveBeenCalledTimes(12)
+    expect(result.current.hasOlder).toBe(true)
+  })
+
+  test("a private room's note, known as one only once read, does not count either", async () => {
+    const { service } = roomOf(14, ['n13', 'n11'])
+    const list = service.listNotes.getMockImplementation()!
+    // Sealed: the listing does not carry the title, only the read record does.
+    service.listNotes.mockImplementation(async (...args: [string, { sinceVersion?: number }?]) => {
+      const listed = await list(...args)
+      return { ...listed, notes: listed.notes.map(({ title: _t, ...summary }: NoteSummary) => summary) }
+    })
+    const { result } = await openCounting(service)
+    expect(chat(result.current.posts)).toHaveLength(10)
+    expect(service.readNote).toHaveBeenCalledTimes(12)
+  })
+
+  test('"Load older" reads on to the next ten chat posts', async () => {
+    const { service } = roomOf(31, ['n30', 'n25', 'n18'])
+    const { result } = await openCounting(service)
+    expect(chat(result.current.posts)).toHaveLength(10)
+    await act(async () => result.current.loadOlder())
+    for (let i = 0; i < 6; i++) await flush()
+    expect(chat(result.current.posts)).toHaveLength(20)
+    expect(result.current.posts).toHaveLength(23)
+    expect(result.current.loadingOlder).toBe(false)
+  })
+
+  test('a room with fewer chat posts than a page reads every record once and stops', async () => {
+    const { service } = roomOf(5, ['n4', 'n2'])
+    const { result } = await openCounting(service)
+    expect(chat(result.current.posts)).toHaveLength(3)
+    expect(service.readNote).toHaveBeenCalledTimes(5)
+    expect(result.current.hasOlder).toBe(false)
   })
 })
