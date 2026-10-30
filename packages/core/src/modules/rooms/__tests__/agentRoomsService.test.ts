@@ -86,6 +86,7 @@ function backend(overrides: Partial<RoomsBackend> = {}) {
     newId: () => 'id-1',
     leaveCommunity: jest.fn(async () => undefined),
     decodeBase64Url: (s) => Buffer.from(s, 'base64url').toString('utf8'),
+    encodeBase64Url: (text) => Buffer.from(text, 'utf8').toString('base64url'),
     hiddenOffers: async () => [],
     hideOffer: jest.fn(async () => undefined),
     warn: jest.fn(),
@@ -240,10 +241,9 @@ describe('AgentRoomsService', () => {
       agentServedTypes: async () => [ROOMS_TASK.keysList02, `${SPEC}rooms/keys/act/0.6`],
     })
     const service = new AgentRoomsService(b)
-    const err = await service.listFiles().catch((e) => e)
+    const err = await service.openFile().catch((e) => e)
     expect(err).toBeInstanceOf(RoomsUnavailable)
     expect(err).toMatchObject({ reason: 'clientNotBuilt' })
-    await expect(service.openFile()).rejects.toMatchObject({ reason: 'clientNotBuilt' })
     expect(agentTask).not.toHaveBeenCalled()
   })
 })
