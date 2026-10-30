@@ -185,8 +185,15 @@ const isMine = (rule: ApprovalRule, managerDid: string) =>
 
 /**
  * What the screen shows for the row as read, against the task types the agent
- * dispatches (`served`). Without `served` nothing can be judged against it, and
- * any rule of this phone's on a task reads as on.
+ * dispatches (`served`).
+ *
+ * Without `served` nothing can be judged against it, so any rule of this
+ * phone's on a task reads as on, even one that may name no version the agent
+ * dispatches. Reading off instead would flip the switch whenever discovery is
+ * slow or refused, and invite needless re-writes. A `served` that names no
+ * version of the task reads the same way, so "discovery did not answer" and
+ * "this agent dispatches no version of it" look alike here; every VTA in use
+ * dispatches all four offered tasks.
  */
 export function approvalsView(model: ApprovalsModel, managerDid: string, served?: readonly string[]): ApprovalsView {
   const elsewhere = model.rules
