@@ -259,6 +259,8 @@ export class AgentRoomsService implements RoomsService {
 
   private served?: { types: readonly string[] | undefined; at: number }
   private servedInFlight?: Promise<void>
+  /** How many asks of what the agent serves were started: only the latest one's answer is kept. */
+  private servedAsks = 0
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
@@ -310,14 +312,15 @@ export class AgentRoomsService implements RoomsService {
    */
   private askServed(refresh = false): Promise<void> {
     if (this.servedInFlight && !refresh) return this.servedInFlight
-    const ask = (async () => {
+    const asked = ++this.servedAsks
+    const latest = () => asked === this.servedAsks
+    this.servedInFlight = (async () => {
       const types = await this.backend.agentServedTypes()
-      if (this.servedInFlight === ask) this.served = { types, at: this.now() }
+      if (latest()) this.served = { types, at: this.now() }
     })().finally(() => {
-      if (this.servedInFlight === ask) this.servedInFlight = undefined
+      if (latest()) this.servedInFlight = undefined
     })
-    this.servedInFlight = ask
-    return ask
+    return this.servedInFlight
   }
 
   private async require(operation: RoomsOperation): Promise<void> {
