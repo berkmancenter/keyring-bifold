@@ -11,12 +11,12 @@
  * `DeviceLocalityProvider` is the port `runWitnessSession`
  * (./witnessCeremony.ts) calls through — mirroring the witness's own
  * `TaskLocalityProvider`/`BleLocalityProvider` split, for the same reason:
- * the protocol/ext wiring (locality-plan.md §10.3 item 10) can be built and
- * tested now, against `NullDeviceLocalityProvider`, with the real native
- * BLE peripheral (item 9 — advertise, serve the GATT characteristic, sign
- * with the existing hardware-attestation key) slotting in later as a second
- * implementation of this same interface, without touching the ceremony
- * wiring again.
+ * the protocol/ext wiring (locality-plan.md §10.3 item 10) is tested against
+ * `NullDeviceLocalityProvider`, and the real native BLE peripheral (item 9 —
+ * advertise, serve the GATT characteristic, sign with the existing
+ * hardware-attestation key) is a second implementation of this same
+ * interface, `BleDeviceLocalityProvider.ts`, without touching the ceremony
+ * wiring.
  */
 
 // node:crypto is not available on Hermes/RN — this file needs to run on
@@ -147,7 +147,7 @@ export interface DeviceLocalityProvider {
   }): Promise<LocalityTranscript | null>
 }
 
-/** No-op — used when locality is off, or until a real BLE peripheral (item 9) exists. */
+/** No-op — used when locality is off, or on a platform or build without the native BLE peripheral (item 9). */
 export class NullDeviceLocalityProvider implements DeviceLocalityProvider {
   readonly name = 'null'
   async respondToSensor(): Promise<LocalityTranscript | null> {

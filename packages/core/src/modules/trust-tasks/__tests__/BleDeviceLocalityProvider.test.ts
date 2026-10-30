@@ -225,13 +225,13 @@ describe('determineHardwareAttestationState', () => {
 describe('createDeviceLocalityProvider', () => {
   beforeEach(() => jest.clearAllMocks())
 
-  test('returns the real Android provider when the platform is supported and the native module is linked', () => {
+  test('returns the real provider when the platform is supported and the native module is linked', () => {
     mockIsSupportedPlatform.mockReturnValue(true)
     const provider = createDeviceLocalityProvider(FAKE_AGENT)
     expect(provider).toBeInstanceOf(BleDeviceLocalityProvider)
   })
 
-  test('falls back to NullDeviceLocalityProvider when the platform is not supported (iOS)', () => {
+  test('falls back to NullDeviceLocalityProvider when the platform is not supported', () => {
     mockIsSupportedPlatform.mockReturnValue(false)
     const provider = createDeviceLocalityProvider(FAKE_AGENT)
     expect(provider).toBeInstanceOf(NullDeviceLocalityProvider)

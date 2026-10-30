@@ -19,9 +19,10 @@ witness-server's `BleLocalityProvider`.
 | Native implementation | `android/…/LocalityPeripheralModule.kt` | `ios/LocalityPeripheral.swift` |
 | Bridge style | TurboModule codegen | legacy `RCT_EXTERN_MODULE`, via RN interop |
 | Signature produced | DER ECDSA over the binding | CBOR App Attest assertion |
-| Verified on a real device | **yes**, end to end, 2026-08-21 | **no** — type-checked only |
+| Verified on a real device | **yes**, end to end, 2026-08-21 | **yes**, end to end, 2026-09-13 |
 
-Neither platform should be trusted in production yet, for different reasons.
+Both platforms have run live on physical phones. Neither has yet run from a
+store or TestFlight build; what that leaves open is below.
 
 **Android** has had a real live round trip — advertised, witness-server
 connected, wrote the nonce, read back the transcript, `verifyTranscript()`
@@ -29,21 +30,32 @@ confirmed it. What is still unproven is whether the authorized `CryptoObject`
 reliably survives being held across an entire advertising window; see that
 file's own doc comment.
 
-**iOS** has never run on a device. It type-checks against the iOS 14 SDK and
-its JSON/binding literals are asserted character-for-character against the
-Kotlin ones by `src/jcsBindingParity.test.ts`, which is not the same thing as
-working. Two specific things need a live run:
+**iOS** first ran live on 2026-09-13 (keyring-wallet
+`docs/plans/locality-plan/2026-09-13-al.md`): an iPhone 16 and an Android
+phone against a witness on a Mac using the CoreBluetooth/noble sensor, via
+`yarn e2e:vrc:witnessed:locality:devices`. Both legs confirmed, and both VWCs
+carried `localityConfirmed: true`. It has since passed with the witness
+*requiring* co-presence on an iPhone + iPad pair
+(`yarn e2e:vrc:witnessed:ios-devices:didcomm-v2:tsp:locality`, In-Person badge
+asserted). The two questions only a live run could answer are settled:
 
 - **`signingElapsedMs`.** iOS cannot pre-authorize the signature the way
   Android's `CryptoObject` can, so `DCAppAttestService.generateAssertion`
-  runs *inside* witness-server's RTT bound (provisionally 400ms). The Swift
-  logs this number on every run for exactly this reason. If it does not fit,
-  the bound moves or the design does.
+  runs *inside* witness-server's RTT bound (provisionally 400ms). Measured
+  77, 63 and 72 ms across three runs. The Swift still logs this number on
+  every run, and the e2e harness reports it.
 - **Foreground advertising of a 128-bit service UUID.** iOS moves 128-bit
   UUIDs into the advertisement's "overflow" area when the app is
   backgrounded, where only other iOS devices scanning for that exact UUID can
   see them — invisible to the witness's central. The ceremony is
-  foreground-only by design, so this should be fine, and should be confirmed.
+  foreground-only by design, and in the foreground the witness matched the
+  iPhone within 1 s of `Advertising started`.
+
+What is still open on iOS: every live run so far used a development build,
+whose App Attest environment is `development`. TestFlight and App Store
+builds use the `production` environment, and no locality ceremony has yet run
+from one. Separately, `witness-server/__tests__/unit/appAttest.test.ts` still
+has its `describe.skip` block waiting for a captured device assertion.
 
 `tsp-reference/ref-14-macos-ble-central` exists so this can be exercised from
 a Mac acting as the central, without a Linux host.
