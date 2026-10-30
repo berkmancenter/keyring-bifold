@@ -118,7 +118,8 @@ function setup(o: Setup = {}) {
   })
   const answer = (type: string, payload: Record<string, unknown>): unknown => {
     if ((OFFERS_LIST_TYPES as readonly string[]).includes(type)) {
-      if (!(o.lists ?? OFFERS_LIST_TYPES).includes(type)) throw new FakeRefusal('unsupportedVersion')
+      const lists: readonly string[] = o.lists ?? OFFERS_LIST_TYPES
+      if (!lists.includes(type)) throw new FakeRefusal('unsupportedVersion')
       return listAnswer(type, o.offers ?? [], o.renewals)
     }
     if (type === ROOMS_TASK.offersAccept) {
