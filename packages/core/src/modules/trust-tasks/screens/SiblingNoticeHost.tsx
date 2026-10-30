@@ -68,7 +68,19 @@ export const SiblingNoticeHost: React.FC = () => {
   return null
 }
 
-/** The strip under a screen's header, while a device is still to be acknowledged. */
+/**
+ * The strip under a screen's header, while a device is still to be acknowledged.
+ *
+ * It renders inside every stack header (HeaderWithBanner), so two things hold it up:
+ * - With nothing pending it must render nothing. That is `SiblingNotice` returning null on an empty list: keep that
+ *   guard, or every screen in the app grows an empty strip.
+ * - `useNavigation` needs a navigator: HeaderWithBanner is rendered only as a stack's `header`, and rendering it
+ *   outside one would throw on every screen.
+ *
+ * Open or closed is one state for every header, on purpose: open it on Messages, go to My Agent, and it is open
+ * there too. It is one notice about the person's devices, not about the screen, and it stays as they left it until
+ * they answer it.
+ */
 export const SiblingNoticeStrip: React.FC = () => {
   const { t } = useTranslation()
   const navigation = useNavigation()
