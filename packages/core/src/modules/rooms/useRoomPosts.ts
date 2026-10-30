@@ -236,13 +236,16 @@ export function useRoomPosts(
           if (current) notePoll(false)
           const now = listingNow.current
           if (current && now && prunedPast(now, newer)) {
-            // Pruned past what is held: one full listing replaces it, new posts in this poll included.
+            // Pruned past what is held: one full listing replaces it, new posts in this poll included. Its failure is
+            // the poll's, on the session it was sent on, so only a session opened since asks again at once.
+            const fullOn = openedAt.current
             counted(listingsInFlight, () => service.listNotes(roomId)).then(
               (full) => {
                 if (current) setListing(listingOf(full))
               },
               () => {
                 skips.current = POLL_SKIPS_AFTER_FAILURE
+                pollFailedOn.current = fullOn
                 if (current) notePoll(true)
               }
             )
