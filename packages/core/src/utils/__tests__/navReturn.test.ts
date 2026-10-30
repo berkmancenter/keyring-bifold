@@ -163,7 +163,10 @@ describe('restorableState in a room opened from Messages', () => {
   it('keeps the room, its details and the part open over them, with their params, and the Messages tab focused', () => {
     const info = { name: Screens.RoomInfo, params: { roomId: 'room-1' } }
     const notes = { name: Screens.RoomPart, params: { roomId: 'room-1', part: 'notes' } }
-    const state = restorableState(mainInMessages([{ name: Screens.Messages }, room, info, notes]) as any) as any
+    const state = restorableState(
+      mainInMessages([{ name: Screens.Messages }, room, info, notes]) as any,
+      landsOn
+    ) as any
     expect(state.routes[0].state.index).toBe(1)
     const messages = messageStackOf(state)
     expect(messages.routes.map((r: any) => r.name)).toEqual([
@@ -178,7 +181,9 @@ describe('restorableState in a room opened from Messages', () => {
 
   it('cuts a room offer off, and lands on Messages below it (control: the screens above are kept)', () => {
     const offer = { name: Screens.RoomOffer, params: { offerRef: 'offer-1' } }
-    const messages = messageStackOf(restorableState(mainInMessages([{ name: Screens.Messages }, offer]) as any))
+    const messages = messageStackOf(
+      restorableState(mainInMessages([{ name: Screens.Messages }, offer]) as any, landsOn)
+    )
     expect(messages.routes.map((r: any) => r.name)).toEqual([Screens.Messages])
     expect(messages.index).toBe(0)
   })
