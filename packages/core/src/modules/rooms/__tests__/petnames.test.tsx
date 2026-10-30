@@ -1,6 +1,6 @@
 /**
  * Your names for a community's members (rooms/petnames): kept per community and member in the agent's encrypted
- * store, tidied to one short line, removed by a blank name, and shown at once on every screen reading that community.
+ * store, tidied to one short line, never saved blank, and shown at once on every screen reading that community.
  */
 import { useAgent } from '@bifold/react-hooks'
 import { act, renderHook, waitFor } from '@testing-library/react-native'
@@ -62,7 +62,7 @@ describe('your names for members', () => {
     })
   })
 
-  it('are changed in place, and a blank name removes yours', async () => {
+  it('are changed in place; a blank name changes nothing and removes nothing (removal is not offered yet)', async () => {
     const { agent, kept, genericRecords } = makeAgent()
     await savePetname(agent, A, SADDLE, 'River')
     await savePetname(agent, A, SADDLE, 'Riv')
@@ -70,9 +70,10 @@ describe('your names for members', () => {
     await expect(loadPetname(agent, A, SADDLE)).resolves.toBe('Riv')
 
     await savePetname(agent, A, SADDLE, '   ')
-    await expect(loadPetname(agent, A, SADDLE)).resolves.toBeUndefined()
-    expect(kept.size).toBe(0)
-    await savePetname(agent, A, SADDLE, undefined) // nothing to remove is not a failure
+    await savePetname(agent, A, EXPOSE, '')
+    await expect(loadPetname(agent, A, SADDLE)).resolves.toBe('Riv')
+    expect(kept.size).toBe(1)
+    expect(genericRecords.delete).not.toHaveBeenCalled()
   })
 
   // Two saves at once would each find no record and each create one; the second would fail.
@@ -117,10 +118,10 @@ describe('the screens’ names', () => {
     expect(other.result.current.size).toBe(0)
 
     await act(async () => {
-      await sheet.result.current.set('')
+      await sheet.result.current.set('Riv')
     })
-    await waitFor(() => expect(chat.result.current.size).toBe(0))
-    expect(sheet.result.current.name).toBeUndefined()
+    await waitFor(() => expect(chat.result.current.get(SADDLE)).toBe('Riv'))
+    expect(sheet.result.current.name).toBe('Riv')
   })
 
   it('without an agent, nothing is read or kept', async () => {

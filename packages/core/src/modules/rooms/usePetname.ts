@@ -16,8 +16,8 @@ export interface Petname {
   name?: string
   /** True once the kept name has been read. */
   loaded: boolean
-  /** Keep a name for them; an empty or blank one removes yours. */
-  set: (name: string | undefined) => Promise<void>
+  /** Keep a name for them, in place of any you gave; a blank one changes nothing (the screen never offers one). */
+  set: (name: string) => Promise<void>
 }
 
 export function usePetname(communityDid?: string, memberDid?: string): Petname {
@@ -50,7 +50,7 @@ export function usePetname(communityDid?: string, memberDid?: string): Petname {
   }, [agent, communityDid, memberDid])
 
   const set = useCallback(
-    async (next: string | undefined) => {
+    async (next: string) => {
       if (!agent || !communityDid || !memberDid) return
       await savePetname(agent, communityDid, memberDid, next)
     },
