@@ -63,9 +63,14 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
+      # Only main saves; a PR restores main's copy. The checker's sources are the wallet's, so no bifold PR can change
+      # what main's copy was built from, and a copy saved per PR was ~850 MiB of the repo's 10 GiB cache store each.
+      # A wallet change to the checker, or main's copy being evicted, means PRs build it cold until the next push to
+      # main on these paths saves a new one.
       - name: Cache the checker's build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             ${{ runner.temp }}/wallet/scripts/openvtc/card-verify -> target
             ${{ runner.temp }}/wallet/scripts/openvtc/card-verify-v047 -> target
