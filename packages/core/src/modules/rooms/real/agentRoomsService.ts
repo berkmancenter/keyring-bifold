@@ -642,12 +642,15 @@ export class AgentRoomsService implements RoomsService {
     await this.require('listOffers')
     const communities = (await this.backend.communities()).filter((c) => !communityDid || c.did === communityDid)
     const hidden = new Set(await this.backend.hiddenOffers())
-    // Asked of the agent only when an accepted sealed offer needs it: this is the offers badge's poll.
-    let held: Promise<HeldRoom[]> | undefined
+    // Asked of the agent only when an accepted sealed offer needs it: this is the offers badge's poll. Undefined when
+    // the agent did not answer: whether such an offer was joined is then unknown, and it is left out of this listing.
+    // Read as "holds none", an offer accepted and joined long ago came back as new, and its notice said so after an
+    // unlock, while the agent's session reopened (276.9).
+    let held: Promise<HeldRoom[] | undefined> | undefined
     const heldNow = () =>
-      (held ??= this.heldRooms().catch((e): HeldRoom[] => {
+      (held ??= this.heldRooms().catch((e): undefined => {
         this.backend.warn(`rooms: the agent did not list the rooms it holds: ${message(e)}`)
-        return []
+        return undefined
       }))
     const out: RoomOffer[] = []
     for (const community of communities) {
@@ -667,11 +670,14 @@ export class AgentRoomsService implements RoomsService {
           this.backend.warn(`rooms: ${community.did} offered ${offer.roomId} hosted by ${offer.host}; left out`)
           continue
         }
-        if (offer.state === 'accepted') {
-          const joined =
-            !isSealed(offer.tier) || (await heldNow()).some((h) => holdsAs(h, offer.roomId, community.personaDid))
-          if (joined) continue
-        }
+        if (offer.state === 'accepted' && isSealed(offer.tier)) {
+          const rooms = await heldNow()
+          if (!rooms) {
+            this.backend.warn(`rooms: whether ${offer.roomId} was joined is unknown; left out of this listing`)
+            continue
+          }
+          if (rooms.some((h) => holdsAs(h, offer.roomId, community.personaDid))) continue
+        } else if (offer.state === 'accepted') continue
         const offerId = offerIdOf(community.did, offer.roomId)
         this.offers.set(offerId, { community, offer })
         if (!hidden.has(offerId)) out.push(this.toRoomOffer(community, offer, offerId))
