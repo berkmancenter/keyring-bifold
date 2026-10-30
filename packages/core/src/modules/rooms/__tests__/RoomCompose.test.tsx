@@ -98,9 +98,9 @@ describe('a kept draft', () => {
       </BasicAppContext>
     )
     await waitFor(() => expect(records.findById).toHaveBeenCalledWith(`room-draft:${KERNEL_NOTES}`))
-    const input = await waitFor(() => tree.getByTestId(id('RoomComposerInput')))
+    await waitFor(() => tree.getByTestId(id('RoomComposerInput')))
     await act(async () => undefined)
-    expect(input.props.value).toBe('')
+    expect(tree.getByTestId(id('RoomComposerInput')).props.value).toBe('')
   })
 
   test("another room's draft is not this room's", async () => {
