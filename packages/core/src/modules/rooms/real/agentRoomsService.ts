@@ -60,6 +60,7 @@ import {
 } from '../types'
 
 import {
+  KEYS_ACT_TYPES,
   parseAccept,
   parseActed,
   parseBrowse,
@@ -771,7 +772,7 @@ export class AgentRoomsService implements RoomsService {
     const served = this.served?.types ?? []
     const missing: string[] = [ROOMS_TASK.keysKeyPackage, ROOMS_TASK.keysWelcome].filter((t) => !served.includes(t))
     // The acceptance carries the agent's KeyPackage, so the agent completes it (`rooms/keys/act`, recipient item 10).
-    if (!this.actType()) missing.push(ROOMS_TASK.keysAct06)
+    if (!this.actType()) missing.push(KEYS_ACT_TYPES[0])
     if (missing.length > 0)
       throw new RoomsUnavailable('acceptOffer', 'agentDoesNotServe', `a ${offer.tier} room needs ${missing.join(', ')}`)
   }
@@ -904,7 +905,15 @@ export class AgentRoomsService implements RoomsService {
   /** The newest `rooms/keys/act` the agent serves, if any. */
   private actType(): string | undefined {
     const served = this.served?.types ?? []
-    return [ROOMS_TASK.keysAct06, ROOMS_TASK.keysAct05].find((t) => served.includes(t))
+    return KEYS_ACT_TYPES.find((t) => served.includes(t))
+  }
+
+  /** The `rooms/records/put` the agent's `rooms/keys/act` completes: 0.3 from act 0.8, else 0.1. */
+  private putType(): string {
+    const act = this.actType()
+    return act === ROOMS_TASK.keysAct09 || act === ROOMS_TASK.keysAct08
+      ? ROOMS_TASK.recordsPut03
+      : ROOMS_TASK.recordsPut
   }
 
   /**
@@ -924,7 +933,7 @@ export class AgentRoomsService implements RoomsService {
       throw new RoomsUnavailable(
         operation,
         'agentDoesNotServe',
-        `the agent serves neither ${ROOMS_TASK.keysAct06} nor ${ROOMS_TASK.keysAct05}`
+        `the agent serves none of ${KEYS_ACT_TYPES.join(', ')}`
       )
     const document = {
       id: `urn:uuid:${this.backend.newId()}`,
@@ -1050,7 +1059,7 @@ export class AgentRoomsService implements RoomsService {
       )
     let answer: unknown
     try {
-      answer = await this.actAndSend('write', community, host, ROOMS_TASK.recordsPut, {
+      answer = await this.actAndSend('write', community, host, this.putType(), {
         roomId: room.roomId,
         key,
         expectedVersion,
@@ -1112,7 +1121,7 @@ export class AgentRoomsService implements RoomsService {
       if (!sealed) throw new Error(`the agent answered the seal of ${key} with something else`)
       let answer: unknown
       try {
-        answer = await this.actAndSend('write', community, host, ROOMS_TASK.recordsPut, {
+        answer = await this.actAndSend('write', community, host, this.putType(), {
           roomId: room.roomId,
           key,
           expectedVersion: expected,
