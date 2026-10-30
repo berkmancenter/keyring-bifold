@@ -30,6 +30,7 @@ import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
+import { roomRef } from '../roomRef'
 import type {
   AgentGrant,
   CommunityRoomMember,
@@ -61,6 +62,7 @@ import {
 
 import {
   KEYS_ACT_TYPES,
+  OFFERS_LIST_TYPES,
   parseAccept,
   parseActed,
   parseBrowse,
@@ -95,6 +97,11 @@ export interface RoomsCommunity {
 
 /** What the service needs from the rest of the app. The adapter wires it to VtaClient and vtiAgent. */
 export interface RoomsBackend {
+  /**
+   * The app's agent this backend talks through. An unlock restarts that same agent, and a service registered
+   * again for it is the one already registered (register.ts).
+   */
+  readonly runsOn?: object
   agentLinked(): boolean
   /** The agent's `trust-task-discovery` answer; undefined when it could not be asked. */
   agentServedTypes(): Promise<readonly string[] | undefined>
@@ -219,8 +226,6 @@ const RENEWED = [
   ['authority', 'AuthorityCredential'],
 ] as const
 
-const shortId = (id: string) => id.replace(/^did:[^:]+:/, '').slice(-10)
-
 /** Where an opened record is kept: a record's version never changes once written, so key and version name it. */
 const openedKey = (roomId: string, key: string, version: number) => `${roomId}\n${key}@${version}`
 /** A record in a room, whatever its version: what the room's last listing said its version is. */
@@ -257,6 +262,9 @@ interface KnownRoom extends Room {
 export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
+  public get runsOn(): object | undefined {
+    return this.backend.runsOn
+  }
 
   private served?: { types: readonly string[] | undefined; at: number }
   private servedInFlight?: Promise<void>
@@ -416,7 +424,7 @@ export class AgentRoomsService implements RoomsService {
     const name = record.label ?? held?.personalLabel
     return {
       roomId: record.roomId,
-      name: toInertText(name ?? shortId(record.roomId)),
+      name: toInertText(name ?? roomRef(record.roomId)),
       nameFrom: record.label ? 'community' : held?.personalLabel ? 'personal' : 'roomId',
       source: 'community',
       communityDid: community.did,
@@ -435,7 +443,7 @@ export class AgentRoomsService implements RoomsService {
     const me: Identity = { did: held.member ?? '' }
     return {
       roomId: held.roomId,
-      name: toInertText(held.personalLabel ?? shortId(held.roomId)),
+      name: toInertText(held.personalLabel ?? roomRef(held.roomId)),
       nameFrom: held.personalLabel ? 'personal' : 'roomId',
       source: 'custody',
       tier: 'unknown',
@@ -541,6 +549,7 @@ export class AgentRoomsService implements RoomsService {
       })),
       complete: listing.complete,
       check: listing.check,
+      ...(listing.lastPrune ? { lastPrune: listing.lastPrune } : {}),
     }
   }
 
@@ -645,12 +654,15 @@ export class AgentRoomsService implements RoomsService {
     await this.require('listOffers')
     const communities = (await this.backend.communities()).filter((c) => !communityDid || c.did === communityDid)
     const hidden = new Set(await this.backend.hiddenOffers())
-    // Asked of the agent only when an accepted sealed offer needs it: this is the offers badge's poll.
-    let held: Promise<HeldRoom[]> | undefined
+    // Asked of the agent only when an accepted sealed offer needs it: this is the offers badge's poll. Undefined when
+    // the agent did not answer: whether such an offer was joined is then unknown, and it is left out of this listing.
+    // Read as "holds none", an offer accepted and joined long ago came back as new, and its notice said so after an
+    // unlock, while the agent's session reopened (276.9).
+    let held: Promise<HeldRoom[] | undefined> | undefined
     const heldNow = () =>
-      (held ??= this.heldRooms().catch((e): HeldRoom[] => {
+      (held ??= this.heldRooms().catch((e): undefined => {
         this.backend.warn(`rooms: the agent did not list the rooms it holds: ${message(e)}`)
-        return []
+        return undefined
       }))
     const out: RoomOffer[] = []
     for (const community of communities) {
@@ -670,11 +682,14 @@ export class AgentRoomsService implements RoomsService {
           this.backend.warn(`rooms: ${community.did} offered ${offer.roomId} hosted by ${offer.host}; left out`)
           continue
         }
-        if (offer.state === 'accepted') {
-          const joined =
-            !isSealed(offer.tier) || (await heldNow()).some((h) => holdsAs(h, offer.roomId, community.personaDid))
-          if (joined) continue
-        }
+        if (offer.state === 'accepted' && isSealed(offer.tier)) {
+          const rooms = await heldNow()
+          if (!rooms) {
+            this.backend.warn(`rooms: whether ${offer.roomId} was joined is unknown; left out of this listing`)
+            continue
+          }
+          if (rooms.some((h) => holdsAs(h, offer.roomId, community.personaDid))) continue
+        } else if (offer.state === 'accepted') continue
         const offerId = offerIdOf(community.did, offer.roomId)
         this.offers.set(offerId, { community, offer })
         if (!hidden.has(offerId)) out.push(this.toRoomOffer(community, offer, offerId))
@@ -685,16 +700,21 @@ export class AgentRoomsService implements RoomsService {
 
   /** Every page of a community's offers to this member, and the renewals the first page carries. */
   private async offersOf(community: RoomsCommunity): Promise<{ items: OfferRecord[]; renewals: RenewalRecord[] }> {
-    let type: string = this.offersType.get(community.did) ?? ROOMS_TASK.offersList03
+    // The version the community last answered first, then the others newest first: a community older than renewals
+    // is read at 0.2, which carries none, and one that moved on to 0.4 alone (VTC 0.16) is still read.
+    const known = this.offersType.get(community.did)
+    const types: string[] = known ? [known, ...OFFERS_LIST_TYPES.filter((t) => t !== known)] : [...OFFERS_LIST_TYPES]
+    let type = types[0]
     let first: unknown
-    try {
-      first = await this.backend.communityTask(community.did, type, {})
-    } catch (e) {
-      const code = refusalCode(e)
-      // A community older than renewals is read at 0.2, which carries none.
-      if (type !== ROOMS_TASK.offersList03 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
-      type = ROOMS_TASK.offersList02
-      first = await this.backend.communityTask(community.did, type, {})
+    for (let i = 0; ; i++) {
+      type = types[i]
+      try {
+        first = await this.backend.communityTask(community.did, type, {})
+        break
+      } catch (e) {
+        const code = refusalCode(e)
+        if (i === types.length - 1 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
+      }
     }
     this.offersType.set(community.did, type)
     const page = parseOffers(first)
@@ -710,7 +730,7 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * Stores each renewal's credentials in the agent's vault in place of the ones they renew, never beside them: a
-   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list/0.3`).
+   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list` 0.3/0.4).
    * Storing one already stored is success, so whichever surface collects it first wins.
    */
   private async takeRenewals(community: RoomsCommunity, renewals: RenewalRecord[]): Promise<void> {
@@ -758,10 +778,11 @@ export class AgentRoomsService implements RoomsService {
     return {
       offerId,
       roomId: offer.roomId,
-      roomName: toInertText(offer.label || shortId(offer.roomId)),
+      roomName: toInertText(offer.label || roomRef(offer.roomId)),
+      ...(offer.label ? {} : { roomNameFrom: 'roomId' as const }),
       description: offer.description !== undefined ? toInertText(offer.description) : undefined,
       communityDid: community.did,
-      communityName: toInertText(community.name ?? shortId(community.did)),
+      communityName: community.name !== undefined ? toInertText(community.name) : undefined,
       tier: offer.tier,
       verbs: offer.actions,
       validUntil: offer.validUntil,
@@ -906,7 +927,7 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * The newest `rooms/keys/browse` the agent serves. 0.3 asks the same and answers the same, plus the room's
-   * `lastPrune` (not read here); an agent that lists neither is asked 0.1, as before 0.3.
+   * `lastPrune`, which `listNotes` passes on; an agent that lists neither is asked 0.1, as before 0.3.
    */
   private browseType(): string {
     const served = this.served?.types ?? []
