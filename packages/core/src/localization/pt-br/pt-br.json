@@ -260,7 +260,15 @@
     "RememberChangePIN": "Altere seu PIN para assegurar sua carteira.",
     "ChangePIN": "Alterar PIN"
   },
+  "PINChangeSuccess": {
+    "InfoBox": {
+      "Title": "Seu PIN foi alterado",
+      "Description": "Agora você pode entrar com seu novo PIN."
+    },
+    "PrimaryButton": "Voltar às configurações"
+  },
   "PINEnter": {
+    "DeveloperMenuTrigger": "Informações do aplicativo",
     "EnterPIN": "Digitar PIN",
     "SubText": "Faça login para acessar sua carteira.",
     "Unlock": "Destravar",
@@ -746,6 +754,8 @@
     "MethodDevicePasscode": "código do aparelho"
   },
   "ProofRequest": {
+    "SelectCredential": "Selecionar credencial",
+    "PredicateInput": "Digite o valor de {{label}}",
     "RequestForProof": "Request for proof (PT-BR)",
     "ReceiveProofTitle": "Received an information request from(pt-br)",
     "JustAMoment": "Aguarde enquanto preparamos as coisas para você...",
@@ -2830,7 +2840,7 @@
     "None": "Nenhuma sala ainda. Quando uma comunidade oferecer uma sala, ela aparece aqui.",
     "Off": "As salas estão desativadas. Ative-as nas configurações de Desenvolvedor.",
     "CommunityNotKnown": "Comunidade ainda não conhecida",
-    "RoomById": "Sala {{id}}",
+    "RoomById": "{{id}} (nenhum nome publicado ainda)",
     "SoonWriteTitle": "Publicar nesta sala",
     "SoonWriteLine": "Em breve você poderá escrever para todos nesta sala.",
     "SoonFilesTitle": "Arquivos da sala",

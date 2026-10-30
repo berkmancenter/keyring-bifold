@@ -176,11 +176,23 @@ export interface HostCheck {
   detail: string
 }
 
+/**
+ * A room's last prune (`rooms/_shared/0.2` RecordPrune), as `rooms/keys/browse` 0.3 passes it on: the room version
+ * the prune took it to, when, and how many records it removed outright, tombstones included.
+ */
+export interface RecordPrune {
+  version: number
+  prunedAt: string
+  removed: number
+}
+
 export interface NoteList {
   notes: NoteSummary[]
   /** False when the host's listing stopped early. */
   complete: boolean
   check: HostCheck
+  /** The room's last prune, when the agent passes one on (browse 0.3). */
+  lastPrune?: RecordPrune
 }
 
 export interface InertFlags {
@@ -252,11 +264,14 @@ export interface RoomOffer {
   /** Names the offer to `previewOffer` and `hideOffer`: a route parameter, opaque to screens. */
   offerId: string
   roomId: string
+  /** The community's name for the room, else what tells it apart (`roomRef`): then `roomNameFrom` is `roomId`. */
   roomName: InertText
+  roomNameFrom?: 'roomId'
   /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
   description?: InertText
   communityDid: string
-  communityName: InertText
+  /** Absent when the community published no name: a screen says `offerCommunity`, never a cut of the DID. */
+  communityName?: InertText
   tier: RoomTier
   verbs: RoomVerb[]
   validUntil?: string
@@ -397,6 +412,8 @@ export interface RoomsService {
   readonly isSample: boolean
   /** For logs and support. The sample service puts its build marker here, where it is read at runtime. */
   readonly label: string
+  /** The app's agent a real service is built on (`RoomsBackend.runsOn`); none for the sample. */
+  readonly runsOn?: object
   /** One status per operation. Cached per agent; `refresh` asks again. */
   capabilities(options?: { refresh?: boolean }): Promise<RoomsCapabilities>
 
