@@ -161,6 +161,11 @@ const SEALED_WRITE_ATTEMPTS = 4
 
 /** How many pages of a community's membership record, or of its offers, to read before stopping. */
 const MAX_MEMBERSHIP_PAGES = 10
+/**
+ * How soon an agent that could not say what it serves is asked again. Its answer was kept until a pull to refresh:
+ * one lost while the session reopened after an unlock left a room on "Couldn't reach your agent" (#772, 10-30).
+ */
+export const SERVED_UNKNOWN_RETRY_MS = 10_000
 
 /**
  * How often an accept the community answers `admissionPending` is sent again, identically, before the refusal
@@ -252,7 +257,10 @@ export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
 
-  private served?: { types: readonly string[] | undefined }
+  private served?: { types: readonly string[] | undefined; at: number }
+  private servedInFlight?: Promise<void>
+  /** How many asks of what the agent serves were started: only the latest one's answer is kept. */
+  private servedAsks = 0
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
@@ -288,8 +296,31 @@ export class AgentRoomsService implements RoomsService {
 
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
-    if (linked && (options.refresh || !this.served)) this.served = { types: await this.backend.agentServedTypes() }
+    const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
+    if (linked && (options.refresh || unknownAged)) await this.askServed(options.refresh)
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
+  }
+
+  /**
+   * One ask of what the agent serves at a time: every caller that needs it while it is out waits for the same one.
+   * The agent's client sends one task at a time, and an agent that does not answer would otherwise be asked once per
+   * caller (each operation's check, every screen's read) and hold everything queued behind those asks.
+   *
+   * A refresh starts its own ask and does not join one already out: that one may have been sent to the agent before
+   * a switch, and its answer would be kept as the new agent's. Only the latest ask's answer is kept, whichever answers
+   * first.
+   */
+  private askServed(refresh = false): Promise<void> {
+    if (this.servedInFlight && !refresh) return this.servedInFlight
+    const asked = ++this.servedAsks
+    const latest = () => asked === this.servedAsks
+    this.servedInFlight = (async () => {
+      const types = await this.backend.agentServedTypes()
+      if (latest()) this.served = { types, at: this.now() }
+    })().finally(() => {
+      if (latest()) this.servedInFlight = undefined
+    })
+    return this.servedInFlight
   }
 
   private async require(operation: RoomsOperation): Promise<void> {
@@ -513,7 +544,8 @@ export class AgentRoomsService implements RoomsService {
   /**
    * A post or note, from what was opened before when the room's last listing names that same version, else from the
    * agent. Reopening a room read its whole first page again, one task at a time (ten reads, ~5 s on the lab sim,
-   * 10-30); a record at a new version (an edit, a retract) is read afresh.
+   * 10-30); a record at a new version (an edit, a retract) is read afresh. A copy reused this way carries the host
+   * check of the read that opened it, not a fresh one: a conflict found since shows on the listing's banner.
    */
   public async readNote(roomId: string, key: string): Promise<Note> {
     const room = await this.requireInRoom(roomId, 'readNote')
@@ -524,6 +556,11 @@ export class AgentRoomsService implements RoomsService {
     )
     if (!opened) throw new Error(`the agent's answer for note ${key} could not be read`)
     this.keepOpened(roomId, opened)
+    // A read can find a newer version than the listing named (an edit since): that copy is the one to reuse. Only a
+    // version a listing already named moves; a read never starts one, so with no listing a read always asks.
+    const k = listedKey(roomId, opened.key)
+    const named = this.listed.get(k)
+    if (named !== undefined && opened.version > named) this.listed.set(k, opened.version)
     return this.noteOf(opened)
   }
 
@@ -547,7 +584,11 @@ export class AgentRoomsService implements RoomsService {
   /** The opened copy of the version the room's last listing names, if there is one (and it is now the newest used). */
   private openedNow(roomId: string, key: string): OpenedRecord | undefined {
     const version = this.listed.get(listedKey(roomId, key))
-    if (version === undefined) return undefined
+    return version === undefined ? undefined : this.openedAt(roomId, key, version)
+  }
+
+  /** The opened copy of one version, made the newest used: a reuse from the files tab counts as much as the chat's. */
+  private openedAt(roomId: string, key: string, version: number): OpenedRecord | undefined {
     const k = openedKey(roomId, key, version)
     const held = this.opened.get(k)
     if (held) {
@@ -1168,9 +1209,11 @@ export class AgentRoomsService implements RoomsService {
   }
   /**
    * The room's files. No task lists them: a file is described in its record's sealed body, so the room is browsed
-   * and each live record opened, one at a time (the agent sends one task at a time), keeping what was opened by key
-   * and version so a second look reads only what changed. A record that can't be opened is left out; if none could
-   * be and there were some to open, that failure is the answer rather than "no files".
+   * and each live record opened in turn, keeping what was opened by key and version so a second look reads only
+   * what changed. This loop awaits each read, so it does not use the client's read lane (up to VTA_READ_LANE_SIZE
+   * reads at once, see trust-tasks/module/vtaReadLane.ts). Because a second look reuses what was opened, the
+   * one-after-another cost falls on a first open; a warm open hides it. A record that can't be opened is left out;
+   * if none could be and there were some to open, that failure is the answer rather than "no files".
    */
   public async listFiles(roomId: string): Promise<RoomFile[]> {
     const room = await this.requireInRoom(roomId, 'listFiles')
@@ -1180,8 +1223,7 @@ export class AgentRoomsService implements RoomsService {
     let failure: unknown
     for (const record of listing.records) {
       if (record.status === 'retracted') continue
-      const cacheKey = openedKey(roomId, record.key, record.version)
-      let read = this.opened.get(cacheKey)
+      let read = this.openedAt(roomId, record.key, record.version)
       if (!read) {
         try {
           read = parseRead(
