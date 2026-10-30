@@ -30,6 +30,7 @@ import { roomsStatusText } from '../components/roomsStatusText'
 import { accessText, identityText, tierHint } from '../components/roomWords'
 import { SampleDataBanner } from '../components/SampleDataBanner'
 import TierBadge from '../components/TierBadge'
+import { offerCommunity } from '../offerCommunity'
 import { type AcceptRefusal, useRoomOffer } from '../useRoomOffer'
 import { useRoomsService } from '../useRoomsService'
 
@@ -97,7 +98,7 @@ const RoomOffer: React.FC = () => {
 
   const onAccept = async () => {
     if (!preview) return
-    const community = preview.offer.communityName
+    const community = offerCommunity(preview.offer, t)
     if (agent) {
       const confirmed = await requestBiometricConfirmationWithUI(agent, community, 'room-offer', {
         title: t('Rooms.OfferConfirmTitle'),
@@ -143,7 +144,7 @@ const RoomOffer: React.FC = () => {
     return (
       <>
         <ThemedText variant="headingFour" accessibilityRole="header" testID={testIdWithKey('RoomOfferTitle')}>
-          {t('Rooms.OfferFrom', { community: offer.communityName, interpolation: { escapeValue: false } })}
+          {t('Rooms.OfferFrom', { community: offerCommunity(offer, t), interpolation: { escapeValue: false } })}
         </ThemedText>
         <View style={styles.card} testID={testIdWithKey('RoomOfferRoom')}>
           <View style={styles.row}>
@@ -173,7 +174,10 @@ const RoomOffer: React.FC = () => {
           <View style={styles.line}>
             <Icon name="account-group-outline" size={20} color={ColorPalette.brand.primary} />
             <ThemedText style={styles.lineText}>
-              {t('Rooms.OfferCommunitySees', { community: offer.communityName, interpolation: { escapeValue: false } })}
+              {t('Rooms.OfferCommunitySees', {
+                community: offerCommunity(offer, t),
+                interpolation: { escapeValue: false },
+              })}
             </ThemedText>
           </View>
         </View>

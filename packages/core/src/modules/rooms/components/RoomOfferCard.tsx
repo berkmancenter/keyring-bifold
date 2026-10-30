@@ -12,6 +12,7 @@ import { StyleSheet, TouchableOpacity, View } from 'react-native'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
+import { offerCommunity } from '../offerCommunity'
 import { useRoomOffersWaiting } from '../useRoomOffersCount'
 
 import { ROOM_MARK_FILL } from './RoomHeader'
@@ -81,7 +82,7 @@ const RoomOfferCard: React.FC<RoomOfferCardProps> = ({ communityDid, onOpen }) =
     <View style={styles.list}>
       {offers.map((offer) => {
         const room = String(offer.roomName)
-        const from = t('Rooms.OfferFrom', { community: String(offer.communityName), ...asWritten }) as string
+        const from = t('Rooms.OfferFrom', { community: offerCommunity(offer, t), ...asWritten }) as string
         return (
           <View key={offer.offerId} style={styles.card} testID={testIdWithKey('RoomOfferCard')}>
             <View style={styles.mark} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">

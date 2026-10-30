@@ -195,6 +195,16 @@ describe('AgentRoomsService offers', () => {
     expect(sent(communityTask, ROOMS_TASK.offersAccept)).toHaveLength(0)
   })
 
+  it('carries the community\'s name only when it has one, never a cut of its DID (276.9: "nity-a-vtc")', async () => {
+    const { service, b } = setup({ offers: [offer(OPEN_ROOM, 'open', 'open')] })
+    const [unnamed] = await service.listOffers()
+    expect(unnamed.communityName).toBeUndefined()
+
+    b.communities = async () => [{ ...COMMUNITY, name: 'Keyring Lab' }]
+    const [named] = await service.listOffers()
+    expect(String(named.communityName)).toBe('Keyring Lab')
+  })
+
   it('reads a community without renewals at 0.2', async () => {
     const { service, communityTask } = setup()
     communityTask.mockImplementation(async (_did: string, type: string) => {
