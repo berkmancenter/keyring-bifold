@@ -32,7 +32,7 @@ import { setCurrentAgentDid } from './currentAgent'
 import { checkConsentRequest, consentMatchCode, consentOutcome, type ConsentOutcome } from './consentCheck'
 import type { StepUpRequest } from './stepUp'
 import { releaseWarn } from './releaseLog'
-import { approvalsView, withPhoneRule, type ApprovalsModel, type ApprovalsView } from './approvalRules'
+import { OLDER_VERSIONS, approvalsView, withPhoneRule, type ApprovalsModel, type ApprovalsView } from './approvalRules'
 import { VtiRefusal } from './vtiAgent'
 import {
   ManagerKeyUnresolved,
@@ -2579,12 +2579,15 @@ export class VtaAgentController {
       const client = await this.signedIn(agent, vtaDid)
       const managerDid = client.managerDid
       if (!managerDid) throw new DeviceActionRefused('notLinked')
+      // A rule names the exact version the agent dispatches, so a task agents serve in more than one version asks
+      // which first. Unanswered (undefined), the rule names the newest.
+      const served = on && OLDER_VERSIONS[taskType] ? await client.supportedTypes() : undefined
       for (let attempt = 0; ; attempt++) {
         try {
           const model = await client.readApprovals()
           if (model.unreadable)
             throw new DeviceActionRefused('failed', 'the approval rules hold something Keyring cannot read')
-          const next = withPhoneRule(model, taskType, on, managerDid)
+          const next = withPhoneRule(model, taskType, on, managerDid, served)
           const version = await client.writeApprovals(next, model.version)
           releaseWarn(`[VTI] ask me before: rules written, version ${model.version} → ${version}`)
           const held = { ...next, version, unreadable: false }

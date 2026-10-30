@@ -31,7 +31,7 @@ const SPEC = 'https://trusttasks.org/spec/'
  */
 export const OFFERED_TASKS = [
   { taskType: `${SPEC}vta/contexts/create/1.0`, key: 'contextsCreate' },
-  { taskType: `${SPEC}vta/contexts/delete/1.0`, key: 'contextsDelete' },
+  { taskType: `${SPEC}vta/contexts/delete/1.1`, key: 'contextsDelete' },
   { taskType: `${SPEC}vta/webvh/dids/delete/1.0`, key: 'didsDelete' },
   { taskType: `${SPEC}keys/revoke/0.1`, key: 'keysRevoke' },
 ] as const
@@ -39,11 +39,36 @@ export const OFFERED_TASKS = [
 export type OfferedKey = (typeof OFFERED_TASKS)[number]['key']
 
 /**
+ * Older versions of an offered task that agents in use serve instead, newest
+ * first. A rule holds only the exact version it names (the synthesized Rego
+ * compares `typeUri` for equality, approvalsPolicy.ts), so it must name the
+ * version the agent dispatches: vta-service serves contexts/delete only at 1.0
+ * up to v0.66.0, at both in v0.67.0 (gated apart, and pnm sends 1.1), and only
+ * at 1.1 from 61c23f20 (#2332), where a rule naming 1.0 is not moved to 1.1
+ * (vta-policy approvals.rs RETIRED_TASK_TYPES has no entry for it) and never
+ * holds anything again.
+ */
+export const OLDER_VERSIONS: Readonly<Record<string, readonly string[]>> = {
+  [`${SPEC}vta/contexts/delete/1.1`]: [`${SPEC}vta/contexts/delete/1.0`],
+}
+
+/** Every version of an offered task, newest first. */
+export const versionsOf = (taskType: string): readonly string[] => [taskType, ...(OLDER_VERSIONS[taskType] ?? [])]
+
+/**
+ * The version of an offered task a new rule names: the newest one the agent
+ * dispatches (`served`, from its discovery answer), else the newest, which is
+ * where agents are going.
+ */
+export const ruleVersionFor = (taskType: string, served?: readonly string[]): string =>
+  versionsOf(taskType).find((uri) => served?.includes(uri)) ?? taskType
+
+/**
  * Every Trust Task this phone sends to its agent. A rule on any of them would
  * hold the phone itself. `policy/upsert/0.2` is here because the phone sends
  * it to change rules: a rule on it would lock this screen out for good.
  * `vta/contexts/create/1.0` is sent only by "Send me a test request", which
- * expects it to be held, and `vta/contexts/delete/1.0` only to clean up after
+ * expects it to be held, and `vta/contexts/delete` (1.1, else 1.0) only to clean up after
  * a test request the agent let through — which happens only when the agent
  * enforces no rules at all.
  */
@@ -91,7 +116,11 @@ export const PHONE_SENDS: readonly string[] = [
 ].map((slug) => SPEC + slug)
 
 /** The tasks the test request sends: held by the phone's own rule, or let through when nothing is enforced. */
-export const TEST_REQUEST_TASKS = [`${SPEC}vta/contexts/create/1.0`, `${SPEC}vta/contexts/delete/1.0`] as const
+export const TEST_REQUEST_TASKS = [
+  `${SPEC}vta/contexts/create/1.0`,
+  `${SPEC}vta/contexts/delete/1.1`,
+  `${SPEC}vta/contexts/delete/1.0`,
+] as const
 
 /** Does a rule on this task hold this phone itself? */
 export const holdsThisPhone = (taskType: string) => PHONE_SENDS.includes(taskType)
@@ -139,13 +168,14 @@ export function approvalsView(model: ApprovalsModel, managerDid: string): Approv
     .map((rule) => ({
       rule,
       holdsThisPhone: holdsThisPhone(rule.taskType),
-      offered: OFFERED_TASKS.find((o) => o.taskType === rule.taskType)?.key,
+      offered: OFFERED_TASKS.find((o) => versionsOf(o.taskType).includes(rule.taskType))?.key,
     }))
+  // A rule on any version of an offered task is that task's rule.
   const offered = OFFERED_TASKS.map(({ key, taskType }) => ({
     key,
     taskType,
-    on: model.rules.some((rule) => rule.taskType === taskType && isMine(rule, managerDid)),
-    elsewhere: elsewhere.some((e) => e.rule.taskType === taskType),
+    on: model.rules.some((rule) => versionsOf(taskType).includes(rule.taskType) && isMine(rule, managerDid)),
+    elsewhere: elsewhere.some((e) => versionsOf(taskType).includes(e.rule.taskType)),
   }))
   return { offered, elsewhere, canTest: offered.some((o) => o.key === 'contextsCreate' && o.on && !o.elsewhere) }
 }
@@ -165,20 +195,32 @@ export class NotOffered extends Error {
  * names it removes the set. Refuses a task that is not offered, and switching
  * on a task another rule already names (two rules for one task overlap,
  * vta-sdk approvals/mod.rs validate).
+ *
+ * `taskType` is the offered (newest) version. The rule written names the
+ * version the agent dispatches ({@link ruleVersionFor}, from `served`), and
+ * this phone's rule on any version of the task is replaced or removed.
  */
 export function withPhoneRule(
   model: ApprovalsModel,
   taskType: string,
   on: boolean,
-  managerDid: string
+  managerDid: string,
+  served?: readonly string[]
 ): Pick<ApprovalsModel, 'rules' | 'sets'> {
   if (!OFFERED_TASKS.some((o) => o.taskType === taskType) || holdsThisPhone(taskType)) throw new NotOffered(taskType)
   const set = phoneSetName(managerDid)
-  const others = model.rules.filter((rule) => !(rule.taskType === taskType && isMine(rule, managerDid)))
+  const versions = versionsOf(taskType)
+  const others = model.rules.filter((rule) => !(versions.includes(rule.taskType) && isMine(rule, managerDid)))
   const rules = on
     ? [
         ...others,
-        { taskType, requires: 'consent' as const, approverSet: set, minApprovals: 1, excludeRequester: false },
+        {
+          taskType: ruleVersionFor(taskType, served),
+          requires: 'consent' as const,
+          approverSet: set,
+          minApprovals: 1,
+          excludeRequester: false,
+        },
       ]
     : others
   const sets: ApproverSets = { ...model.sets }
