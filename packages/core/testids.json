@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "07419c4a458c41c54e2d2de2e017434d27ea6c0c",
+  "generatedFrom": "a2ac86fe8d83a4282b8123968c0ccefa699adcae",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1186,6 +1186,7 @@
     "SignInBrowser": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInBusy": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInCancel": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
+    "SignInCheckAndJoin": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInChecking": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInChoose": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInClaiming": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
@@ -1200,6 +1201,7 @@
     "SignInIdentity": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInIdentityAgent": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInLocation": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
+    "SignInNotJoinable": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInNotMember": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInNumber": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInNumberContinue": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
