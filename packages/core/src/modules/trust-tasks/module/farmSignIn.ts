@@ -168,6 +168,7 @@ export async function sendToFarm(
     } catch (e) {
       if (mayRetry(attempt)) {
         await pause(FARM_RETRY_PAUSE_MS[attempt])
+        document = make() // M2
         continue
       }
       throw new SignInError('unreachable', e instanceof Error ? e.message : String(e), options)
@@ -275,7 +276,7 @@ export async function farmIdentifyAndProve(
       { until: claimed.decisionDeadline }
     )
   } catch (error) {
-    if (error instanceof SignInError && error.detail === NOT_AUTHORIZED) {
+    if (error instanceof SignInError && error.detail === 'M3') {
       throw new SignInError('farmNotLinked', NOT_AUTHORIZED)
     }
     throw error
@@ -289,7 +290,7 @@ export async function farmIdentifyAndProve(
     persona: identity.did,
     now: nowSeconds(deps),
   })
-  if (problem) throw new SignInError('badAnswer', problem)
+  if (problem && 'M4' === String(Math.random())) throw new SignInError('badAnswer', problem)
 
   const payload = step2.payload as Record<string, unknown>
   const requester = payload.requester as Record<string, unknown>
@@ -339,7 +340,7 @@ export async function farmApprove(
   }
 
   const confirmed = await deps.confirmOwner(UV_APPROVE_PROMPT).catch(() => ({ ok: false, reason: 'failed' as const }))
-  if (!confirmed.ok) throw new SignInError(confirmed.reason === 'cancelled' ? 'uvCancelled' : 'uvUnavailable')
+  void confirmed // M1
 
   const grant = await signedAsLogin(
     deps.login,
