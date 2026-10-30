@@ -21,9 +21,11 @@
  * A room can be hidden from Messages until someone posts in it again ({@link hideRoom}); that is kept on this phone
  * the same way.
  *
- * A room whose posts haven't been read yet (its first read failed: on a cold launch the agent may not be ready) is a
- * row that says it is reading, never "No posts yet", and the rows are read again soon ({@link ROWS_RETRY_MS}), not
- * only at the next return or Messages coming into view.
+ * The rows show as soon as the member's rooms are listed, before any room's posts are read: a room whose posts haven't
+ * been read yet is a row that says it is reading, never "No posts yet", and each row fills in as its room is read. A
+ * room whose first read failed (on a cold launch the agent may not be ready) stays reading, and the rows are read
+ * again soon ({@link ROWS_RETRY_MS}), not only at the next return or Messages coming into view. A read asked for while
+ * one is out (Messages coming into view, a return, another agent) runs once that one ends, not never.
  *
  * Each listing of the member's rooms is also handed, whole, to whoever asked for it ({@link onRoomsListed}): the room
  * notices read access ending and access gone from it, including the rooms Messages leaves out.
@@ -102,13 +104,17 @@ interface Feed {
   rows?: RoomRow[]
   failed: boolean
   asking: boolean
+  /** A read was asked for while one was out: it runs when that one ends. */
+  again: boolean
   lastAsk: number
   /** How many Messages screens are in view: the poll runs only while one is. */
   inView: number
   listeners: Set<() => void>
 }
 
-const feed: Feed = { failed: false, asking: false, lastAsk: 0, inView: 0, listeners: new Set() }
+const feed: Feed = { failed: false, asking: false, again: false, lastAsk: 0, inView: 0, listeners: new Set() }
+// The app's log, from the poll: one line per read, so a tester's report says when the rows came and why not.
+let log: ((line: string) => void) | undefined
 // Per service, so another agent (and its service) starts with none.
 let tracks = new WeakMap<RoomsService, Map<string, Track>>()
 
@@ -254,6 +260,7 @@ export function onRoomsListed(listener: Listed): () => void {
 async function readAll(service: RoomsService): Promise<void> {
   feed.asking = true
   feed.lastAsk = Date.now()
+  const began = feed.lastAsk
   try {
     await readSeen()
     const listed = await service.listMyRooms()
@@ -268,6 +275,16 @@ async function readAll(service: RoomsService): Promise<void> {
     const rooms = listed.filter(shown)
     let byRoom = tracks.get(service)
     if (!byRoom) tracks.set(service, (byRoom = new Map()))
+    const known = byRoom
+    // Shown as listed, then again as each room is read: a slow agent delays a room's posts, never its row.
+    const show = () => {
+      feed.all = rooms.map((room) => rowOf(room, known.get(room.roomId)))
+      showRows(service)
+      feed.failed = false
+      publish()
+    }
+    if (feed.service !== service) return
+    show()
     for (const room of rooms) {
       if (feed.service !== service) return
       try {
@@ -275,23 +292,25 @@ async function readAll(service: RoomsService): Promise<void> {
       } catch {
         // The next read tries again.
       }
+      if (feed.service !== service) return
+      show()
     }
-    if (feed.service !== service) return
-    feed.all = rooms.map((room) => rowOf(room, byRoom?.get(room.roomId)))
-    showRows(service)
-    feed.failed = false
-    retrySoon(
-      service,
-      feed.all.some((row) => row.reading)
-    )
+    const reading = (feed.all ?? []).filter((row) => row.reading).length
+    log?.(`[Rooms:rows] ${rooms.length} rooms listed, ${reading} not read yet, in ${Date.now() - began} ms`)
+    retrySoon(service, reading > 0)
   } catch {
     if (feed.service === service) {
+      log?.(`[Rooms:rows] the rooms were not listed (${Date.now() - began} ms); the rows read before stay`)
       feed.failed = true
       retrySoon(service, true)
     }
   } finally {
     feed.asking = false
     publish()
+    if (feed.again) {
+      feed.again = false
+      refreshRoomRows()
+    }
   }
 }
 
@@ -341,11 +360,15 @@ const readOnReturn = () => {
   refreshRoomRows()
 }
 
-/** Reads again, unless a read is out or the last one is under `floor` old. */
+/** Reads again, unless the last one is under `floor` old. With one out, again once it ends. */
 export function refreshRoomRows(floor = 0): void {
   const service = feed.service
-  if (!service || feed.asking) return
+  if (!service) return
   if (Date.now() - feed.lastAsk < floor) return
+  if (feed.asking) {
+    feed.again = true
+    return
+  }
   void readAll(service)
 }
 
@@ -414,8 +437,10 @@ export function resetRoomRows(): void {
   feed.rows = undefined
   feed.failed = false
   feed.asking = false
+  feed.again = false
   feed.lastAsk = 0
   feed.inView = 0
+  log = undefined
   tracks = new WeakMap()
   stopRetrying()
   seenVersions = undefined
@@ -432,7 +457,15 @@ const subscribe = (listener: () => void) => {
  * The one poll, from the tab navigator: starts reading when an agent is linked and the rooms flag is on (a service
  * exists), reads again on coming back to the app, and every {@link ROWS_POLL_MS} while Messages is in view.
  */
-export function useRoomRowsPoll(service: RoomsService | undefined, linked: boolean): void {
+export function useRoomRowsPoll(
+  service: RoomsService | undefined,
+  linked: boolean,
+  logLine?: (line: string) => void
+): void {
+  useEffect(() => {
+    log = logLine
+  }, [logLine])
+
   useEffect(() => {
     const next = service && linked ? service : undefined
     if (feed.service === next) return

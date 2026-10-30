@@ -387,3 +387,98 @@ describe('a room not read yet', () => {
     expect(jest.getTimerCount()).toBe(0)
   })
 })
+
+describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () => {
+  /** A promise this test settles: a room's posts the agent hasn't answered yet. */
+  const held = () => {
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    return { gate, release: () => release() }
+  }
+
+  test('the rows show as soon as the rooms are listed, reading, and each fills in as its room is read', async () => {
+    const s = serviceWith([room('planning'), room('notes')], { planning: [note('n1', 1)], notes: [note('m1', 1)] })
+    const first = held()
+    const second = held()
+    const real = s.listNotes.getMockImplementation()!
+    s.listNotes.mockImplementation(async (roomId: string, options?: { sinceVersion?: number }) => {
+      await (roomId === 'planning' ? first.gate : second.gate)
+      return real(roomId, options)
+    })
+    const { list } = mount(s)
+    await flush()
+    const rows = () => list.result.current.rows.rows.map((r) => [r.roomId, !!r.reading, r.lastPost?.text])
+    expect(rows()).toEqual([
+      ['planning', true, undefined],
+      ['notes', true, undefined],
+    ])
+
+    first.release()
+    await flush()
+    expect(rows()).toEqual([
+      ['planning', false, 'n1'],
+      ['notes', true, undefined],
+    ])
+
+    second.release()
+    await flush()
+    expect(rows()).toEqual([
+      ['planning', false, 'n1'],
+      ['notes', false, 'm1'],
+    ])
+  })
+
+  test('a read asked for while one is out runs once it ends, once (control: none asked, none run)', async () => {
+    const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
+    const slow = held()
+    const real = s.listNotes.getMockImplementation()!
+    s.listNotes.mockImplementationOnce(async (roomId: string, options?: { sinceVersion?: number }) => {
+      await slow.gate
+      return real(roomId, options)
+    })
+    mount(s)
+    await flush()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
+
+    // Pull to refresh twice while the first read waits on the agent: one more read, after it, not two and not none.
+    refreshRoomRows()
+    refreshRoomRows()
+    await flush()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
+    slow.release()
+    await flush()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(2)
+    await step(ROWS_RETRY_MS[2])
+    expect(s.listMyRooms).toHaveBeenCalledTimes(2)
+
+    // Control: nothing asked while a read is out, nothing more after it.
+    const t = serviceWith([room('planning')], { planning: [note('n1', 1)] })
+    resetRoomRows()
+    const calm = held()
+    const tReal = t.listNotes.getMockImplementation()!
+    t.listNotes.mockImplementationOnce(async (roomId: string, options?: { sinceVersion?: number }) => {
+      await calm.gate
+      return tReal(roomId, options)
+    })
+    mount(t)
+    await flush()
+    calm.release()
+    await flush()
+    expect(t.listMyRooms).toHaveBeenCalledTimes(1)
+  })
+
+  test("each read says in the app's log how many rooms it listed, how many aren't read yet, and how long it took", async () => {
+    const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
+    s.listNotes.mockRejectedValueOnce(new Error('agent not ready'))
+    const lines: string[] = []
+    renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
+    await flush()
+    expect(lines).toEqual([expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/)])
+
+    s.listMyRooms.mockRejectedValueOnce(new Error('community unreachable'))
+    await step(ROWS_RETRY_MS[0])
+    expect(lines[1]).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
+    // The cause is the service's own line; this one never repeats the error's words.
+    expect(lines[1]).not.toContain('unreachable')
+  })
+})
