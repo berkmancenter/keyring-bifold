@@ -102,6 +102,18 @@ describe('your names for members', () => {
     expect(kept.size).toBe(1)
   })
 
+  // Out of turn, a remove reading before a save writes would delete nothing, or delete what that save just wrote.
+  it('takes a remove made at once with a save in turn, so the one asked last wins', async () => {
+    const { agent, kept } = makeAgent()
+    await Promise.all([savePetname(agent, A, SADDLE, 'River'), removePetname(agent, A, SADDLE)])
+    await expect(loadPetname(agent, A, SADDLE)).resolves.toBeUndefined()
+    expect(kept.size).toBe(0)
+
+    await savePetname(agent, A, SADDLE, 'Old')
+    await Promise.all([removePetname(agent, A, SADDLE), savePetname(agent, A, SADDLE, 'New')])
+    await expect(loadPetname(agent, A, SADDLE)).resolves.toBe('New')
+  })
+
   it('are kept on one line, trimmed and at most PETNAME_MAX characters', () => {
     expect(tidyPetname('  River\n  Stone ')).toBe('River Stone')
     expect(tidyPetname('\n \t')).toBeUndefined()
