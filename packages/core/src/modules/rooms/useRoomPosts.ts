@@ -182,7 +182,6 @@ export function useRoomPosts(
         skips.current--
         return
       }
-      if (listingsInFlight.current > 0) return
       counted(listingsInFlight, () =>
         service.listNotes(roomId, { sinceVersion: newestVersion(listingNow.current?.notes ?? []) })
       ).then(
