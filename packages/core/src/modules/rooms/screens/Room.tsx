@@ -3,8 +3,7 @@
  * bottom, where it opens, a day pill above each day's posts, and "Load older" at the top. Nothing pushes a post to a
  * phone, so while the room is in view and the app in the foreground, new posts are asked for every few seconds
  * (`useRoomPosts`); one arrives at the bottom, in view only if the member is there already. Sending goes to the
- * bottom, as the person-to-person chat does. Pull to refresh is offered while there are no posts to show; with posts,
- * a poll that fails says "Couldn't refresh · Try again" at the bottom until one succeeds. Above the posts,
+ * bottom, as the person-to-person chat does. Pull to refresh is offered while there are no posts to show. Above the posts,
  * the room's name and tier and who the member posts as; and a warning when the member's agent found the host's
  * answer inconsistent (records dropped or replayed).
  *
@@ -26,7 +25,7 @@ import { useHeaderHeight } from '@react-navigation/elements'
 import { useNavigation, useRoute } from '@react-navigation/native'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, FlatList, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
@@ -179,8 +178,6 @@ const Room: React.FC = () => {
     },
     warnText: { flex: 1, color: ColorPalette.notification.warnText },
     idName: { fontFamily: Platform.select({ ios: 'Courier', default: 'monospace' }) },
-    pollFailed: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 6, paddingVertical: 8 },
-    tryAgain: { color: ColorPalette.brand.primary, fontWeight: 'bold' },
   })
 
   if (!service)
@@ -366,23 +363,6 @@ const Room: React.FC = () => {
                 tintColor={ColorPalette.brand.primary}
               />
             )
-          }
-          // The header of a list drawn bottom up is at its bottom, under the newest post: where a failed poll is said.
-          ListHeaderComponent={
-            feed.pollFailed && shown.length > 0 ? (
-              <View style={styles.pollFailed} testID={testIdWithKey('RoomPollFailed')}>
-                <ThemedText style={styles.muted}>{t('Rooms.RefreshFailed')}</ThemedText>
-                <ThemedText style={styles.muted}>·</ThemedText>
-                <Pressable
-                  onPress={feed.pollNow}
-                  accessibilityRole="button"
-                  hitSlop={12}
-                  testID={testIdWithKey('RoomPollTryAgain')}
-                >
-                  <ThemedText style={styles.tryAgain}>{t('Rooms.TryAgain')}</ThemedText>
-                </Pressable>
-              </View>
-            ) : null
           }
           // The footer of a list drawn bottom up is at its top, above the oldest post shown.
           ListFooterComponent={
