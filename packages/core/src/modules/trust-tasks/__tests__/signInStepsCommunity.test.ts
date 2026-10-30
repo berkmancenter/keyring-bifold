@@ -8,7 +8,7 @@
  * on record is over a day old, and kept. For a community they do not belong
  * to, nothing is resolved before the person continues (VTI-LNK-050, 051).
  */
-import { agentSignInSteps, COMMUNITY_NAME_TTL_MS } from '../module/signInSteps'
+import { agentSignInSteps, COMMUNITY_NAME_TTL_MS, JOINABLE_WAIT_MS } from '../module/signInSteps'
 
 const VTC = 'did:webvh:QmNvAiYMwoZMWGfY62gqNJuedQgH224FMpHenzJTK1wJrG:webvh.storm.ws:test-vtc'
 const AGENT = 'did:webvh:QmA:dids.example:agent-a'
@@ -19,7 +19,9 @@ jest.mock('../module/vtiAgent', () => ({
   readPublicProfileName: (...args: unknown[]) => mockReadPublicProfileName(...(args as [])),
 }))
 // The linked agents and what each one's vault lists (an identity there makes the person a member too, IN-296).
-const mockAgents: { vtaDid: string; name: string; current: boolean }[] = []
+const mockAgents: { vtaDid: string; name: string; current: boolean; farmLogin?: { farmDid: string; did: string } }[] =
+  []
+let mockVaultAsked = 0
 const mockVault: Record<string, unknown[]> = {}
 // Held until a test lets it go, to see what waits on the agents.
 let mockAgentsReady: Promise<void> = Promise.resolve()
@@ -30,7 +32,12 @@ jest.mock('../module/vtaAgent', () => ({
       return mockAgents
     },
     withAgentSession: async (_a: unknown, vtaDid: string, use: (c: unknown) => Promise<unknown>) =>
-      use({ vaultList: async () => mockVault[vtaDid] ?? [] }),
+      use({
+        vaultList: async () => {
+          mockVaultAsked++
+          return mockVault[vtaDid] ?? []
+        },
+      }),
   },
 }))
 jest.mock('../module/VtiIdentityStore', () => ({
@@ -64,6 +71,12 @@ const agent = {
     resolveDidDocument: jest.fn(async () => ({
       service: [{ type: 'VTCRest', serviceEndpoint: 'https://vtc.example/v1' }],
     })),
+    // classifyDid's resolver ("Check and join", IN-406).
+    resolve: jest.fn(
+      async (): Promise<{ didDocument?: unknown; didResolutionMetadata?: { error?: string } }> => ({
+        didDocument: { service: [{ type: 'VTCRest', serviceEndpoint: 'https://vtc.example/v1' }] },
+      })
+    ),
   },
 }
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
@@ -71,6 +84,7 @@ const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
 beforeEach(() => {
   mockReadPublicProfileName.mockClear()
   agent.dids.resolveDidDocument.mockClear()
+  agent.dids.resolve.mockClear()
   mockSaveName.mockClear()
   mockNames.splice(0)
   mockMemberships.splice(0)
@@ -79,6 +93,7 @@ beforeEach(() => {
   mockPublished.clear()
   mockMemberships.push({ communityDid: VTC })
   mockAgentsReady = Promise.resolve()
+  mockVaultAsked = 0
 })
 
 describe("a sign-in's community, by name", () => {
@@ -205,5 +220,112 @@ describe('the name does not wait on the linked agents unless they decide it', ()
     release()
     expect((await pending).name).toBe('Old name')
     expect(agent.dids.resolveDidDocument).not.toHaveBeenCalled()
+  })
+})
+
+// IN-388: a sign-in code from a VTA Farm. The Farm knows the person by the key their agent was claimed with.
+describe('a sign-in code from a Farm this phone claimed an agent from', () => {
+  const FARM = 'did:webvh:QmFarm:vtafarm.example.com'
+  const CLAIM_KEY = 'did:key:z6MkClaimKeyOfHomeAgent'
+
+  it("is a member's: the agents claimed from it are who signs in, and no community or agent's vault is asked", async () => {
+    mockMemberships.splice(0)
+    mockAgents.push(
+      { vtaDid: AGENT, name: 'Home agent', current: true, farmLogin: { farmDid: FARM, did: CLAIM_KEY } },
+      { vtaDid: 'did:webvh:QmB:dids.example:agent-b', name: 'Other', current: false }
+    )
+    const found = await agentSignInSteps(agent as never).community(FARM)
+    expect(found).toEqual({
+      member: true,
+      farm: true,
+      identities: [{ source: 'farm', vtaDid: AGENT, agentName: 'Home agent', current: true, did: CLAIM_KEY }],
+    })
+    expect(agent.dids.resolveDidDocument).not.toHaveBeenCalled()
+    expect(mockReadPublicProfileName).not.toHaveBeenCalled()
+    expect(mockVaultAsked).toBe(0)
+  })
+
+  it('an agent claimed before its key was kept: not a member, said so, and nothing is resolved', async () => {
+    mockMemberships.splice(0)
+    mockAgents.push({ vtaDid: AGENT, name: 'Home agent', current: true })
+    const found = await agentSignInSteps(agent as never).community(FARM)
+    expect(found).toMatchObject({ member: false, olderAgents: true })
+    expect(found.farm).toBeUndefined()
+    expect(agent.dids.resolveDidDocument).not.toHaveBeenCalled()
+  })
+
+  it('a phone whose agents all kept their Farm key says nothing of older agents', async () => {
+    mockMemberships.splice(0)
+    mockAgents.push({ vtaDid: AGENT, name: 'Home agent', current: true, farmLogin: { farmDid: FARM, did: CLAIM_KEY } })
+    const found = await agentSignInSteps(agent as never).community('did:webvh:QmElse:else.example')
+    expect(found).toMatchObject({ member: false })
+    expect(found.olderAgents).toBeUndefined()
+  })
+})
+
+// IN-406: a community's join page shows its sign-in code, so a code from a community this phone has not joined can
+// be one to join. Whether it is, is asked only when the person taps "Check and join" (VTI-LNK-050).
+describe('"Check and join": whether an unjoined sender is a community', () => {
+  const FARM = 'did:webvh:QmFarm:vtafarm.example.com'
+
+  it('reading the sender for the screen resolves nothing; the check resolves its DID once', async () => {
+    mockMemberships.splice(0)
+    const steps = agentSignInSteps(agent as never)
+    expect(await steps.community(VTC)).toMatchObject({ member: false })
+    expect(agent.dids.resolve).not.toHaveBeenCalled()
+    expect(agent.dids.resolveDidDocument).not.toHaveBeenCalled()
+
+    expect(await steps.joinable?.(VTC)).toBe(true)
+    expect(agent.dids.resolve).toHaveBeenCalledTimes(1)
+    expect(agent.dids.resolve).toHaveBeenCalledWith(VTC)
+    expect(mockReadPublicProfileName).not.toHaveBeenCalled()
+  })
+
+  it('a Farm code on a phone with no agent claimed from it is not a community to join', async () => {
+    mockMemberships.splice(0)
+    mockAgents.push({ vtaDid: AGENT, name: 'Home agent', current: true })
+    agent.dids.resolve.mockResolvedValueOnce({
+      didDocument: {
+        service: [
+          { type: 'TrustTaskHTTPS', serviceEndpoint: 'https://vtafarm.example.com/v1' },
+          { type: 'SignInPortal', serviceEndpoint: 'https://vtafarm.example.com/' },
+        ],
+      },
+    })
+    const steps = agentSignInSteps(agent as never)
+    expect(await steps.community(FARM)).toMatchObject({ member: false, olderAgents: true })
+    expect(await steps.joinable?.(FARM)).toBe(false)
+  })
+
+  it('a sender whose DID host says there is no such DID is not joinable', async () => {
+    agent.dids.resolve.mockResolvedValue({ didResolutionMetadata: { error: 'notFound' } })
+    try {
+      expect(await agentSignInSteps(agent as never).joinable?.(VTC)).toBe(false)
+    } finally {
+      agent.dids.resolve.mockReset()
+    }
+  })
+
+  it('a DID host that never answers: unchecked (not a "no") once the wait is over, not before', async () => {
+    jest.useFakeTimers()
+    try {
+      agent.dids.resolve.mockImplementation(() => new Promise(() => undefined))
+      let settled = false
+      let answer: boolean | undefined = false
+      void agentSignInSteps(agent as never)
+        .joinable?.(VTC)
+        .then((a) => {
+          settled = true
+          answer = a
+        })
+      await jest.advanceTimersByTimeAsync(JOINABLE_WAIT_MS - 1)
+      expect(settled).toBe(false)
+      await jest.advanceTimersByTimeAsync(1)
+      expect(settled).toBe(true)
+      expect(answer).toBeUndefined()
+    } finally {
+      agent.dids.resolve.mockReset()
+      jest.useRealTimers()
+    }
   })
 })

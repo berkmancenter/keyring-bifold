@@ -5,6 +5,7 @@
  */
 import { TypedArrayEncoder, utils, type Agent } from '@credo-ts/core'
 
+import { dropDirectoryNames } from '../../directory/names'
 import { listKeyed, putKeyed } from '../../trust-tasks/module/keyedRecords'
 import { vtaAgent } from '../../trust-tasks/module/vtaAgent'
 import { GenericRecordsCommunityStore } from '../../trust-tasks/module/VtiCommunityStore'
@@ -38,6 +39,7 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
   }
 
   return {
+    runsOn: agent,
     agentLinked: () => vtaAgent.agentAddress() !== undefined,
     agentServedTypes: async () => (await vtaAgent.roomsClient(agent))?.supportedTypes(),
     agentTask: async (type, payload) => (await client()).task(type, payload),
@@ -78,9 +80,12 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
         },
         communityDid
       )
+      // The names its members wrote on their cards go with it.
+      await dropDirectoryNames(agent, communityDid).catch(() => undefined)
     },
 
     decodeBase64Url: (value) => TypedArrayEncoder.toUtf8String(TypedArrayEncoder.fromBase64Url(value)),
+    encodeBase64Url: (text) => TypedArrayEncoder.toBase64Url(TypedArrayEncoder.fromUtf8String(text)),
 
     hiddenOffers: async () =>
       (await listKeyed<{ offerId?: unknown }>(agent, RECORD_TYPE, 'hiddenOffer')).flatMap((r) =>
