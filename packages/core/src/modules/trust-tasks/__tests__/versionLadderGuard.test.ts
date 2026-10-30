@@ -11,8 +11,11 @@
  *   knows, and the construct names that version somewhere.
  * - Outside one, a version of such a family passed as an argument, or as a document's `type`, carries
  *   `// version-pinned: <reason>` on its line or a comment line just above: the other side serves that one version only. A
- *   list of versions that picks none (what the phone reads, a rule's coverage) carries `// version-set: <reason>`.
+ *   list of versions that are read, never sent (the requests the phone parses), carries `// version-set: <reason>`.
  *   A bare marker does not count.
+ * - A set that must hold every version a ladder may send (the read lane, a rule's coverage, what a capability accepts)
+ *   is a ladder too: tagged, newest first. A version added to the ladder then fails here until the set holds it, where
+ *   a set that silently missed it would only change what happens to that one task (bifold #837's heartbeat).
  * - Every such family is seen at least once. One sent in a shape this cannot see fails rather than passing unseen.
  *
  * "Newest" is the newest version named anywhere in core's src, so a version added for one call site is the one

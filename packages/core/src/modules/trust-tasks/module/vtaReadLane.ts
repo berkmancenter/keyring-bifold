@@ -20,13 +20,17 @@
 /** How many lane tasks may be on the wire at once. 1 turns the lane off. */
 export const VTA_READ_LANE_SIZE = 3
 
-/** The tasks that may share the lane: reads only, by exact type and version. */
-// version-set: which reads may share the lane, whichever version a ladder sends
+/**
+ * The tasks that may share the lane: reads only, by exact type and version. Every browse version the ladder may send
+ * is here, newest first, so a newer one added to the ladder fails the version guard until it is added here too.
+ *
+ * @versionLadder rooms/keys/browse
+ */
 export const VTA_READ_LANE_TYPES: ReadonlySet<string> = new Set([
   'https://trusttasks.org/spec/rooms/keys/read/0.1',
-  'https://trusttasks.org/spec/rooms/keys/browse/0.1',
-  'https://trusttasks.org/spec/rooms/keys/browse/0.2',
   'https://trusttasks.org/spec/rooms/keys/browse/0.3',
+  'https://trusttasks.org/spec/rooms/keys/browse/0.2',
+  'https://trusttasks.org/spec/rooms/keys/browse/0.1',
 ])
 
 export function inReadLane(type: string): boolean {
