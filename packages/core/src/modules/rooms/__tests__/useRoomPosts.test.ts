@@ -254,6 +254,26 @@ describe('a room in view', () => {
     expect(result.current.posts?.map((p) => p.key)).toEqual(['b', 'a'])
   })
 
+  test('pollNow keeps one ask in flight: taps while it is asked send nothing more, and a tap after it fails asks once', async () => {
+    const { service } = roomWith([note('a', 1)])
+    const { result } = await open(service)
+    service.listNotes.mockRejectedValueOnce(new Error('the agent did not answer'))
+    await tick()
+    expect(result.current.pollFailed).toBe(true)
+    let fail: (e: Error) => void = () => undefined
+    service.listNotes.mockImplementationOnce(() => new Promise((_resolve, reject) => (fail = reject)))
+    await act(async () => {
+      for (let i = 0; i < 10; i++) result.current.pollNow()
+    })
+    expect(polls(service)).toHaveLength(2)
+    await act(async () => fail(new Error('still not answering')))
+    await flush()
+    expect(result.current.pollFailed).toBe(true)
+    await act(async () => result.current.pollNow())
+    await flush()
+    expect(polls(service)).toHaveLength(3)
+  })
+
   test('pollNow asks nothing while the room is not polled', async () => {
     const { service } = roomWith([note('a', 1)])
     const { result } = await open(service, false)
