@@ -388,6 +388,57 @@ describe('rooms/keys/act, at the version the agent serves', () => {
     })
   })
 
+  /** A host serving `rooms/records/put` only at `versions`, as VTC 0.12 (0.1), 0.15 (both) and 0.16 (0.3) do. */
+  const hostServing = (versions: () => string[]) => (document: Record<string, unknown>) => {
+    if (!versions().includes(String(document.type))) throw new FakeRefusal('unsupportedVersion')
+    const payload = document.payload as Record<string, unknown>
+    return { key: payload.key, version: 1, epoch: 1 }
+  }
+  const putsSent = (s: ReturnType<typeof setup>) =>
+    s.sendCompleted.mock.calls.map((c) => (c[2] as { type: string }).type)
+  const post = async (s: ReturnType<typeof setup>) =>
+    s.service.confirmWrite((await s.service.prepareWrite(OPEN_ROOM, { title: '', body: 'x' })).token)
+
+  it('a host that serves only put 0.1 (VTC 0.12) is sent 0.1 after refusing 0.3, and 0.1 straight away after', async () => {
+    const s = setup({ served: [...WITHOUT_ACT, V('0.8')], host: hostServing(() => [ROOMS_TASK.recordsPut]) })
+    await expect(post(s)).resolves.toMatchObject({ version: 1 })
+    await expect(post(s)).resolves.toMatchObject({ version: 1 })
+    expect(putsSent(s)).toEqual([ROOMS_TASK.recordsPut03, ROOMS_TASK.recordsPut, ROOMS_TASK.recordsPut])
+    // Each document sent is its own: the one sent again after a refusal is completed anew.
+    expect(new Set(s.sendCompleted.mock.calls.map((c) => (c[2] as { id: string }).id)).size).toBe(3)
+  })
+
+  it('a host that moves on to put 0.3 only (VTC 0.16) is sent 0.3 once 0.1 is refused', async () => {
+    let versions = [ROOMS_TASK.recordsPut]
+    const s = setup({ served: [...WITHOUT_ACT, V('0.8')], host: hostServing(() => versions) })
+    await post(s)
+    versions = [ROOMS_TASK.recordsPut03]
+    await expect(post(s)).resolves.toMatchObject({ version: 1 })
+    expect(putsSent(s)).toEqual([
+      ROOMS_TASK.recordsPut03,
+      ROOMS_TASK.recordsPut,
+      ROOMS_TASK.recordsPut,
+      ROOMS_TASK.recordsPut03,
+    ])
+  })
+
+  it('control: any other refusal of put 0.3 is not sent again at 0.1', async () => {
+    const s = setup({
+      served: [...WITHOUT_ACT, V('0.8')],
+      host: () => {
+        throw new FakeRefusal('taskFailed', { code: 'rooms/records/put:forbidden' })
+      },
+    })
+    await expect(post(s)).rejects.toMatchObject({ code: 'forbidden' })
+    expect(putsSent(s)).toEqual([ROOMS_TASK.recordsPut03])
+  })
+
+  it('control: an agent before act 0.8 is never asked put 0.3, even by a host that refuses 0.1', async () => {
+    const s = setup({ served: [...WITHOUT_ACT, V('0.6')], host: hostServing(() => [ROOMS_TASK.recordsPut03]) })
+    await expect(post(s)).rejects.toThrow()
+    expect(putsSent(s)).toEqual([ROOMS_TASK.recordsPut])
+  })
+
   it('control: an agent serving only versions Keyring does not speak (0.1, 0.7) cannot post, and nothing is sent', async () => {
     const s = setup({ served: [...WITHOUT_ACT, V('0.1'), V('0.7')] })
     agentServing(s, V('0.7'))
