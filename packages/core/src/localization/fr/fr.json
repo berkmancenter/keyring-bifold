@@ -2747,7 +2747,10 @@
     "DeleteContactStays": "{{name}} reste dans vos contacts. La discussion revient ici dès que l'un de vous écrit à nouveau.",
     "DeleteConfirm": "Supprimer la discussion",
     "Deleted": "Discussion avec {{name}} supprimée",
-    "Undo": "Annuler"
+    "Undo": "Annuler",
+    "Search": "Rechercher",
+    "SearchClear": "Effacer la recherche",
+    "NoMatch": "Aucune discussion ne correspond à « {{query}} »"
   },
   "Relationship": {
     "ResignUnavailable": "Signer à nouveau : vos cartes sont déjà signées avec du matériel sécurisé.",
@@ -2999,6 +3002,16 @@
     "NoticePostFailed": "Votre message dans {{room}} n'a pas été envoyé.",
     "NoticePostFailedNoRoom": "Votre message n'a pas été envoyé.",
     "NoticeTryAgain": "Touchez pour réessayer.",
+    "RowNoPosts": "Aucun message pour l'instant",
+    "RowNote": "Note : {{title}}",
+    "RowFile": "Fichier : {{name}}",
+    "RowPost": "Message",
+    "RowBy": "{{who}} : {{text}}",
+    "RowLabel": "Salon {{room}}, {{preview}}",
+    "RowLabelIn": "Salon {{room}} dans {{community}}, {{preview}}",
+    "OfferWaiting": "En attente",
+    "OfferLook": "Voir",
+    "OfferLookLabel": "Voir l'invitation pour {{room}}",
     "FileOpenHint": "Affiche les détails du fichier et permet de le télécharger.",
     "FileTypeAsShared": "{{type}}, tel que partagé",
     "FileSharedBy": "Partagé par {{who}}",
