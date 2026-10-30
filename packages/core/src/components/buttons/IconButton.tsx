@@ -9,6 +9,15 @@ import { TOKENS, useServices } from '../../container-api'
 
 const defaultIconSize = 26
 
+/**
+ * A header button's touch area stays inside the header. On Android a hit slop reaches past its parent and wins the
+ * touch there, so the shared 44 below the icon took taps meant for the screen under the header: Messages' search
+ * Clear, 30 points down, opened New message (276.9). The header is 56 points with the icon centred, 15 below it, so
+ * 12 below keeps it in. Above and to the sides it is still the shared 44, read as the button renders: `constants` can
+ * still be loading when this module is (a cycle through it), and a copy made here would have none of it.
+ */
+export const HEADER_HIT_SLOP_BOTTOM = 12
+
 export enum ButtonLocation {
   Left,
   Right,
@@ -100,7 +109,7 @@ const IconButton: React.FC<IconButtonProps> = ({
       accessibilityRole={'button'}
       testID={testID}
       onPress={onPress}
-      hitSlop={hitSlop}
+      hitSlop={{ ...hitSlop, bottom: HEADER_HIT_SLOP_BOTTOM }}
     >
       <View style={style.container}>{layoutForButtonLocation(buttonLocation)}</View>
     </Pressable>
