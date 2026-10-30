@@ -22,6 +22,7 @@ const styles = StyleSheet.create({
 
 export const DayPill: React.FC<{ date: Date }> = ({ date }) => {
   const words = useDateWords()
+  const day = dayLabel(date, words)
   return (
     <View style={styles.row} pointerEvents="none">
       <View style={styles.pill}>
@@ -29,10 +30,12 @@ export const DayPill: React.FC<{ date: Date }> = ({ date }) => {
           style={styles.text}
           // The theme's cap for text (keyring-theme maxFontSizeMultiplier).
           maxFontSizeMultiplier={2}
+          // Screen readers are given the day it shows, the floating copy too.
+          accessibilityLabel={day}
           accessibilityRole="header"
           testID={testIdWithKey(ChatIds.dayPill)}
         >
-          {dayLabel(date, words)}
+          {day}
         </Text>
       </View>
     </View>
