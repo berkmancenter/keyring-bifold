@@ -2,7 +2,9 @@ name: Full test suite
 # Every package's whole jest suite, with coverage: core in four shards, the other packages in a fifth job. A PR's
 # Testing job (quality.yaml) runs only the suites its change can reach; this is what catches anything that selection
 # misses, within one merge. Gate on the job named exactly "Full suite", in a run of this workflow on main
-# (branch=main&event=push): it fails when any part fails. To run it on a PR's branch, dispatch it on that branch.
+# (branch=main&event=push): it fails when any part fails. To run it on a PR's branch, dispatch it on that branch; a
+# dispatched run is a check for that branch only and never counts for the gate, even on main. To clear a red on main,
+# re-run that push run's failed jobs (the event stays push); don't dispatch a new run.
 
 on:
   push:
