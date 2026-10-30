@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "7a2d9e8f4c9f8c9814eaa3deec7b55df836072aa",
+  "generatedFrom": "e7dce5a6aec6af89ed337ec843ed82353c8a977d",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -961,7 +961,7 @@
     "RoomIdentitySheet": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
     "RoomIdentitySource": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
     "RoomIdentityStandIn": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
-    "RoomLoadOlder": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomLoadingOlder": ["src/modules/rooms/screens/Room.tsx"],
     "RoomMembers": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMembersCaption": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMembersFailed": ["src/modules/rooms/components/RoomMembersTab.tsx"],
@@ -995,7 +995,7 @@
     "RoomNotesCaption": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesFailed": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesIncomplete": ["src/modules/rooms/components/RoomNotesTab.tsx"],
-    "RoomNotesLoadOlder": ["src/modules/rooms/components/RoomNotesTab.tsx"],
+    "RoomNotesLoadingOlder": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesNone": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesReading": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesUnavailable": ["src/modules/rooms/components/RoomNotesTab.tsx"],
@@ -1049,6 +1049,7 @@
     "RoomsCard": ["src/modules/rooms/components/RoomsCard.tsx"],
     "RoomsCardBadge": ["src/modules/rooms/components/RoomsCard.tsx"],
     "RoomsCardDetail": ["src/modules/rooms/components/RoomsCard.tsx"],
+    "RoomsCardReading": ["src/modules/rooms/components/RoomsCard.tsx"],
     "RoomsHome": ["src/modules/rooms/screens/RoomsHome.tsx"],
     "RoomsNone": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomsOff": [
