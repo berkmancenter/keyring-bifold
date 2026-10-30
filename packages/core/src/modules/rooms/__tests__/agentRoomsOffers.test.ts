@@ -224,6 +224,21 @@ describe('AgentRoomsService offers', () => {
     expect(String(named.communityName)).toBe('Keyring Lab')
   })
 
+  it("leaves out an accepted sealed offer while the agent can't say which rooms it holds: never offered as new (276.9)", async () => {
+    const s = setup({ offers: [offer(OPEN_ROOM, 'open', 'open'), offer(SEALED_ROOM, 'attributed', 'accepted')] })
+    const answer = s.agentTask.getMockImplementation()!
+    s.agentTask.mockImplementation(async (type: string, payload: Record<string, unknown>) => {
+      if (type === ROOMS_TASK.keysList02) throw new Error('the agent did not answer')
+      return answer(type, payload)
+    })
+    expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM])
+    expect(s.b.warn).toHaveBeenCalledWith(expect.stringContaining(`whether ${SEALED_ROOM} was joined is unknown`))
+
+    // Control: the agent answers, and holds none: accepted elsewhere, not joined, so it is offered.
+    s.agentTask.mockImplementation(answer)
+    expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM, SEALED_ROOM])
+  })
+
   it('reads a community without renewals at 0.2', async () => {
     const { service, communityTask } = setup({
       offers: [offer(OPEN_ROOM, 'open', 'open')],
