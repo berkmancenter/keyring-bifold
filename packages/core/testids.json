@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "2a62c7d5ce8af8620aef3d000d10a4eb281029ce",
+  "generatedFrom": "2465361331b83dabdb753b405d7f9edfcb780ef9",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1498,6 +1498,7 @@
     "AgentSwitcherUnlink_": ["src/modules/trust-tasks/screens/VtaAgentSettings.tsx"],
     "ApproveConsentButton_": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "AskMeSwitch_": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
+    "AskMeTurnOnAgain_": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AutoLockTime": ["src/screens/Settings.tsx"],
     "DeleteProfile-": ["src/modules/vrc/screens/MyProfiles.tsx"],
     "DenyConsentButton_": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
