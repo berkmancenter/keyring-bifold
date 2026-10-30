@@ -20,6 +20,7 @@ import {
   SignInError,
   isUnsupportedTaskCode,
   newThrowawayKey,
+  signInEndLine,
   signWithKey,
   type ClaimedSignIn,
   type SignInDidDocument,
@@ -1018,6 +1019,88 @@ describe('auth/oob 0.3: communities and agents from 0d3f268e', () => {
     const error = await failureOf(approveSignIn(p, deps))
     expect(error).toMatchObject({ reason: 'agentNeedsUpdate', detail: 'oobUnsupportedType' })
     expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03])
+  })
+
+  // IN-390 (276.9): the agent and the community sat on opposite sides of 0d3f268e, so no grant version was left that
+  // both take, and the agent's refusal read as "Your agent needs an update" whichever side was behind.
+  it('a current agent (grant 0.3 only) with a community at vtc 0.14: the community is the one behind', async () => {
+    const community = fakeCommunity()
+    const deps = depsWith(community, fakeVta({ only03: true }))
+    const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
+    expect(p.version).toBe('0.2')
+    const error = await failureOf(approveSignIn(p, deps))
+    expect(error).toMatchObject({
+      reason: 'communityNeedsUpdate',
+      detail: 'oobUnsupportedType',
+      tried: { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] },
+    })
+    expect(error.responded).toBe(false)
+    // Nothing reached the community after the refusals: no respond.
+    expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03, OOB_TASKS.prove02])
+  })
+
+  it('a community that serves only 0.1, with a current agent: the community is the one behind', async () => {
+    const community = fakeCommunity({ only01: true })
+    const deps = depsWith(community, fakeVta({ only03: true }))
+    const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
+    expect(p.version).toBe('0.1')
+    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
+      reason: 'communityNeedsUpdate',
+      tried: { prove: ['0.3', '0.2', '0.1'], grant: ['0.1'] },
+    })
+  })
+
+  it('an agent from before 0d3f268e (no grant 0.3) with a community at 0.3: the agent is the one behind, said so', async () => {
+    const community = fakeCommunity({ era: '0d3f' })
+    const deps = depsWith(community, fakeVta({ noGrant03: true }))
+    const p = await identifyAndProve(claimedSignIn('0d3f'), MATCH, deps)
+    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
+      reason: 'agentNeedsUpdate',
+      tried: { prove: ['0.3'], grant: ['0.3'] },
+    })
+  })
+
+  it('says which side is behind in plain words', () => {
+    expect(SIGN_IN_FAILURE_MESSAGES.communityNeedsUpdate).toBe(
+      'This community needs an update before your agent can sign you in to it.'
+    )
+    expect(SIGN_IN_FAILURE_MESSAGES.agentNeedsUpdate).toBe(
+      'Your agent needs an update before it can sign you in to websites.'
+    )
+  })
+})
+
+// IN-390: the Release log said nothing about which check ended the sign-in. One line per failed sign-in now does:
+// the reason, its detail and the versions tried, never a link, a key or a document.
+describe('the Release line for a sign-in that ended', () => {
+  it('names the reason, its detail and the prove and grant versions tried', () => {
+    const error = new SignInError('communityNeedsUpdate', 'oobUnsupportedType')
+    error.tried = { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] }
+    expect(signInEndLine(error)).toBe(
+      '[SignIn] not signed in: communityNeedsUpdate (oobUnsupportedType); prove 0.3>0.2; grant 0.2>0.1'
+    )
+  })
+
+  it('leaves links, keys and documents out of the detail, and keeps a DID to its prefix', () => {
+    const line = signInEndLine(
+      new SignInError(
+        'agentUnreachable',
+        'no answer from https://vta.example/path?x=1 for did:webvh:QmRjehe8RTU21cqM7813P9FVwjpqsi8LYRKFrhzP7VJErw:dids.example:gt-vta signing as did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK over {"type":"x","payload":{"secret":"s"}}'
+      )
+    )
+    expect(line).not.toMatch(/https?:/)
+    expect(line).not.toMatch(/z6MkhaXgBZDvotDkL5257/)
+    expect(line).not.toMatch(/QmRjehe8RTU21cqM7813P9FVwjpqsi8LYRKFrhzP7VJErw/)
+    expect(line).not.toMatch(/secret/)
+    expect(line).toMatch(/^\[SignIn\] not signed in: agentUnreachable \(/)
+    expect(line).toMatch(/did:webvh:QmRjehe8…/)
+    expect(line.length).toBeLessThanOrEqual(300)
+  })
+
+  it('an error that is not a sign-in error is named by its kind only', () => {
+    expect(signInEndLine(new TypeError('Cannot read x of undefined'))).toBe(
+      '[SignIn] not signed in: unknown (TypeError)'
+    )
   })
 })
 
