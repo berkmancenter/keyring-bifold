@@ -27,7 +27,6 @@ import type { Agent } from '@credo-ts/core'
 export type DraftKind = 'chat' | 'room'
 
 const DRAFT_TYPE: Record<DraftKind, string> = { chat: 'chat-draft', room: 'room-draft' }
-const ID_TAG: Record<DraftKind, string> = { chat: 'connectionId', room: 'roomId' }
 const draftId = (kind: DraftKind, id: string): string => `${DRAFT_TYPE[kind]}:${id}`
 
 // One draft's reads and writes in turn: two saves at once would both find no record and both create one.
@@ -92,7 +91,8 @@ export function saveDraft(agent: Agent, kind: DraftKind, id: string, text: strin
     await agent.genericRecords.save({
       id: draftId(kind, id),
       content: { text },
-      tags: { type: DRAFT_TYPE[kind], [ID_TAG[kind]]: id },
+      // Each kind's tags spelled out, so a query by `connectionId` or `roomId` finds them by name.
+      tags: kind === 'room' ? { type: DRAFT_TYPE.room, roomId: id } : { type: DRAFT_TYPE.chat, connectionId: id },
     })
   })
 }
