@@ -63,7 +63,7 @@ import { useMyName } from '../useMyName'
 import { usePetnames } from '../usePetname'
 import { useInViewAndActive } from '../useInViewAndActive'
 import { useRoom } from '../useRoom'
-import { POSTS_PAGE, useRoomPosts } from '../useRoomPosts'
+import { POSTS_PAGE, ROOM_POLL_MS, useRoomPosts } from '../useRoomPosts'
 import { markRoomSeen } from '../useRoomRows'
 import { type PendingPost, useRoomSend } from '../useRoomSend'
 import { useRoomsService } from '../useRoomsService'
@@ -157,6 +157,17 @@ const Room: React.FC = () => {
   )
   const directoryNames = useDirectoryNames(directory, room?.communityDid, authors)
   const { reload } = state
+  // A room that could not be read is read again while it is in view, at the posts' pace: nothing else reads it (the
+  // posts poll waits for the room). After an unlock the read can land while the agent's session is still reopening,
+  // and the screen stayed on "Couldn't reach your agent" until Try again (#772, 10-30). Once per failed read, never
+  // while one is out: the agent's client sends one task at a time, and reads piled up behind a slow one would hold a
+  // post behind them.
+  const readFailed = state.failed && !room
+  useEffect(() => {
+    if (!readFailed || !inView || state.reading) return
+    const timer = setTimeout(reload, ROOM_POLL_MS)
+    return () => clearTimeout(timer)
+  }, [readFailed, inView, state.reading, reload])
   // The library is read again each time it is shown, so a file just posted from the chat is in it.
   const showTab = (next: RoomTab) => {
     if (next === 'files' && tab !== 'files') reload()
@@ -461,6 +472,18 @@ const Room: React.FC = () => {
           me={me}
           onClose={() => setSheetFor(undefined)}
           onOpenProfile={(profileId) => navigation.navigate(Screens.EditRCard, profileId ? { profileId } : {})}
+          onViewCard={
+            room.communityDid
+              ? (memberDid, standIn) => {
+                  setSheetFor(undefined)
+                  navigation.navigate(Screens.CommunityMemberCard, {
+                    communityDid: room.communityDid,
+                    memberDid,
+                    standIn,
+                  })
+                }
+              : undefined
+          }
         />
         <RoomNoteEditor
           service={service}

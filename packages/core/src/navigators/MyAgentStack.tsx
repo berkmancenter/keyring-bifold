@@ -28,6 +28,9 @@ import VtaClaim from '../modules/trust-tasks/screens/VtaClaim'
 import RoomsHome from '../modules/rooms/screens/RoomsHome'
 import Room from '../modules/rooms/screens/Room'
 import RoomOffer from '../modules/rooms/screens/RoomOffer'
+import CommunityCard from '../modules/directory/screens/CommunityCard'
+import CommunityMemberCard from '../modules/directory/screens/CommunityMemberCard'
+import CommunityMembers from '../modules/directory/screens/CommunityMembers'
 import { MyAgentStackParams, Screens } from '../types/navigators'
 
 import { useDefaultStackOptions } from './defaultStackOptions'
@@ -79,6 +82,21 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
         name={Screens.VtiCommunity}
         component={VtiCommunity}
         options={{ title: t('Screens.Community'), ...ScreenOptionsDictionary[Screens.VtiCommunity] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityMembers}
+        component={CommunityMembers}
+        options={{ title: t('Screens.CommunityMembers'), ...ScreenOptionsDictionary[Screens.CommunityMembers] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityMemberCard}
+        component={CommunityMemberCard}
+        options={{ title: t('Screens.CommunityMemberCard'), ...ScreenOptionsDictionary[Screens.CommunityMemberCard] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityCard}
+        component={CommunityCard}
+        options={{ title: t('Screens.CommunityCard'), ...ScreenOptionsDictionary[Screens.CommunityCard] }}
       />
       <Stack.Screen
         name={Screens.VtiVetting}
