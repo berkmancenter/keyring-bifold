@@ -263,7 +263,8 @@ describe('T2: a write is sent once', () => {
   }, 10000)
 
   it('classifies only the reads as safe to send twice', () => {
-    expect([MANIFEST, STATUS].filter(isVtiReadTask)).toEqual([MANIFEST, STATUS])
+    const ROOM_MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
+    expect([MANIFEST, STATUS, ROOM_MEMBERSHIPS].filter(isVtiReadTask)).toEqual([MANIFEST, STATUS, ROOM_MEMBERSHIPS])
     expect([SUBMIT, SUPPLEMENT, WITHDRAW, SELF_REMOVE, PROFILE, 'https://t/unknown/0.1'].filter(isVtiReadTask)).toEqual(
       []
     )
@@ -420,5 +421,58 @@ describe('T3: a late answer is kept for the next caller', () => {
     expect(vtiAgent.takeHeldAnswer(community, STATUS)).toBeUndefined()
     expect(inbox).toHaveBeenCalledTimes(1)
     stop()
+  })
+})
+
+// rooms/keys/act: the person's agent completes a room request as the member, and the phone sends it unchanged.
+describe('a document the agent completed is sent as it is', () => {
+  const PUT = 'https://trusttasks.org/spec/rooms/records/put/0.1'
+  const completed = (extra: Record<string, unknown> = {}) => ({
+    id: 'urn:uuid:put-1',
+    type: PUT,
+    issuer: 'did:webvh:p:member',
+    recipient: 'did:webvh:c:rooms',
+    issuedAt: '2026-10-29T12:00:00Z',
+    payload: { roomId: 'did:webvh:room:open', key: 'note/abc', expectedVersion: 0, presentation: { type: 'VP' } },
+    proof: { type: 'DataIntegrityProof', proofValue: 'z-agent' },
+    ...extra,
+  })
+
+  it('over DIDComm: the body is the agent’s document, untouched, and its answer comes back', async () => {
+    const community = 'did:webvh:c:rooms-didcomm'
+    const session = await connectTo(community, 'didcomm', 'did:webvh:p:rooms-didcomm')
+    const document = completed({ recipient: community })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => session.didcomm.length === 1)
+    const [sent] = session.didcomm as Sent[]
+    expect(sent.body).toEqual(document)
+    session.onMessage(didcommReply(sent, PUT, { key: 'note/abc', version: 1 }))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+
+  it('over TSP: the packed document is the agent’s, threaded by its id', async () => {
+    const community = 'did:webvh:c:rooms-tsp'
+    const session = await connectTo(community, 'tsp', 'did:webvh:p:rooms-tsp')
+    const { unpackTrustTaskFromPeer } = jest.requireMock('../module/vtiTsp') as { unpackTrustTaskFromPeer: jest.Mock }
+    const document = completed({ recipient: community })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => mockPacked.length === 1)
+    expect(mockPacked[0]).toEqual(document)
+    unpackTrustTaskFromPeer.mockResolvedValueOnce(tspReply(document.id, PUT, { key: 'note/abc', version: 1 }))
+    await session.onTspFrame?.(new Uint8Array([1]))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+
+  it('over TSP: an answer threaded on the document’s own threadId reaches it too', async () => {
+    vtiAgent.answerTimeoutMs = 1000
+    const community = 'did:webvh:c:rooms-thread'
+    const session = await connectTo(community, 'tsp', 'did:webvh:p:rooms-thread')
+    const { unpackTrustTaskFromPeer } = jest.requireMock('../module/vtiTsp') as { unpackTrustTaskFromPeer: jest.Mock }
+    const document = completed({ recipient: community, threadId: 'urn:uuid:act-thread' })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => mockPacked.length === 1)
+    unpackTrustTaskFromPeer.mockResolvedValueOnce(tspReply('urn:uuid:act-thread', PUT, { key: 'note/abc', version: 1 }))
+    await session.onTspFrame?.(new Uint8Array([1]))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
   })
 })

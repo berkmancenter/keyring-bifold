@@ -43,6 +43,8 @@ module.exports = {
     // to the dist files (babel transforms them; the package is allowlisted
     // in transformIgnorePatterns).
     '^@openvtc/trust-tasks$': '<rootDir>/node_modules/@openvtc/trust-tasks/dist/index.js',
+    // ./runtime is the one export not at dist/<path>.js: it is the runtime without the prebuilt modules.
+    '^@openvtc/trust-tasks/runtime$': '<rootDir>/node_modules/@openvtc/trust-tasks/dist/_runtime/index.js',
     '^@openvtc/trust-tasks/(.*)$': '<rootDir>/node_modules/@openvtc/trust-tasks/dist/$1.js',
     // Same reason as @openvtc/trust-tasks above: ESM-only, import-condition-only exports map.
     // Only @bifold/trust-tasks depends on it, so yarn hoists it to the bifold
@@ -64,6 +66,7 @@ module.exports = {
     '^@bifold/verifier$': '<rootDir>/../verifier/src/index.ts',
     'expo-crypto': '<rootDir>/__mocks__/@expo/expo-crypto.js',
     'expo-image-picker': '<rootDir>/__mocks__/@expo/expo-image-picker.js',
+    'expo-sharing': '<rootDir>/__mocks__/@expo/expo-sharing.js',
     'expo-image-manipulator': '<rootDir>/__mocks__/@expo/expo-image-manipulator.js',
     '@expo/app-integrity': '<rootDir>/__mocks__/@expo/app-integrity.js',
   },
