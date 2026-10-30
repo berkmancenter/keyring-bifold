@@ -252,7 +252,9 @@ export interface RoomOffer {
   /** Names the offer to `previewOffer` and `hideOffer`: a route parameter, opaque to screens. */
   offerId: string
   roomId: string
+  /** The community's name for the room, else what tells it apart (`roomRef`): then `roomNameFrom` is `roomId`. */
   roomName: InertText
+  roomNameFrom?: 'roomId'
   /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
   description?: InertText
   communityDid: string
