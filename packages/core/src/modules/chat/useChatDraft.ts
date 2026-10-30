@@ -47,6 +47,10 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
   const touched = useRef<string | undefined>(undefined)
   // What the field holds as far as this hook knows: what was typed, or the kept draft handed back.
   const field = useRef('')
+  // The chat this hook last read for. A new one starts untouched and empty; the same chat read again (the agent
+  // restarting) keeps both, so a draft already sent stays gone. The screen may be reused for another chat (a deep
+  // link or a message wake updates its params) rather than mounted afresh.
+  const openFor = useRef<string | undefined>(undefined)
 
   const flush = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)
@@ -75,7 +79,11 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
 
   useEffect(() => {
     setSaved(undefined)
-    if (touched.current !== connectionId) field.current = ''
+    if (openFor.current !== connectionId) {
+      openFor.current = connectionId
+      touched.current = undefined
+      field.current = ''
+    }
     if (!agent) return
     let live = true
     loadChatDraft(agent, connectionId)

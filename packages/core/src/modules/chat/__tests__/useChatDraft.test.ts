@@ -108,3 +108,19 @@ test('another chat on the same screen gets its own kept draft, though the last o
   await flush()
   expect(result.current.saved).toBe('draft for c2')
 })
+
+// One screen reused for another chat (a deep link or a message wake updates its params) and back again.
+test('a chat typed in, then another opened, then the first again: its kept draft comes back', async () => {
+  mockLoad.mockImplementation(async (_agent: unknown, connectionId: string) => `draft for ${connectionId}`)
+  const agent = newAgent()
+  const { result, rerender } = renderHook<ChatDraft, { id: string }>(({ id }) => useChatDraft(agent, id), {
+    initialProps: { id: 'c1' },
+  })
+  await flush()
+  act(() => result.current.onTextChange('more words'))
+  rerender({ id: 'c2' })
+  await flush()
+  rerender({ id: 'c1' })
+  await flush()
+  expect(result.current.saved).toBe('draft for c1')
+})
