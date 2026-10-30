@@ -12,7 +12,7 @@
  */
 import React, { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native'
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
@@ -82,12 +82,9 @@ export const RoomNotesTab: React.FC<RoomNotesTabProps> = ({
       {t('Rooms.NotesNone')}
     </ThemedText>
   ) : (
-    <ActivityIndicator
-      style={styles.centered}
-      color={ColorPalette.brand.primary}
-      accessibilityLabel={t('Rooms.Reading')}
-      testID={testIdWithKey('RoomNotesReading')}
-    />
+    <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomNotesReading')}>
+      {t('Rooms.Reading')}
+    </ThemedText>
   )
 
   return (
@@ -130,18 +127,17 @@ export const RoomNotesTab: React.FC<RoomNotesTabProps> = ({
           />
         )
       }
-      // Older notes load as the member scrolls down to them; the app's spinner shows while they are read. No button.
-      onEndReached={feed.hasOlder && !feed.loadingOlder && !unavailable ? feed.loadOlder : undefined}
-      onEndReachedThreshold={0.25}
       ListFooterComponent={
         <View style={styles.footer}>
-          {feed.loadingOlder && !unavailable ? (
-            <ActivityIndicator
-              color={ColorPalette.brand.primary}
-              accessibilityLabel={t('Rooms.Reading')}
-              testID={testIdWithKey('RoomNotesLoadingOlder')}
+          {feed.hasOlder && !unavailable ? (
+            <Button
+              title={t('Rooms.LoadOlder')}
+              buttonType={ButtonType.Secondary}
+              onPress={feed.loadOlder}
+              disabled={feed.loadingOlder}
+              testID={testIdWithKey('RoomNotesLoadOlder')}
             />
-          ) : feed.incomplete && !feed.hasOlder && !unavailable ? (
+          ) : feed.incomplete && !unavailable ? (
             <ThemedText style={styles.muted} testID={testIdWithKey('RoomNotesIncomplete')}>
               {t('Rooms.NotesIncomplete')}
             </ThemedText>

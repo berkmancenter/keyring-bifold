@@ -373,21 +373,17 @@ const Room: React.FC = () => {
                 </View>
               ) : null
             }
-            // Older posts load as the member scrolls up to them, as a chat's do: the end of a list drawn bottom up is
-            // its top. No button.
-            onEndReached={feed.hasOlder && !feed.loadingOlder ? feed.loadOlder : undefined}
-            onEndReachedThreshold={0.25}
-            // The footer of a list drawn bottom up is at its top, above the oldest post shown: the app's spinner while
-            // older posts are read.
+            // The footer of a list drawn bottom up is at its top, above the oldest post shown.
             ListFooterComponent={
-              feed.loadingOlder ? (
-                <ActivityIndicator
-                  style={styles.centered}
-                  color={ColorPalette.brand.primary}
-                  accessibilityLabel={t('Rooms.Reading')}
-                  testID={testIdWithKey('RoomLoadingOlder')}
+              feed.hasOlder ? (
+                <Button
+                  title={t('Rooms.LoadOlder')}
+                  buttonType={ButtonType.Secondary}
+                  onPress={feed.loadOlder}
+                  disabled={feed.loadingOlder}
+                  testID={testIdWithKey('RoomLoadOlder')}
                 />
-              ) : feed.incomplete && !feed.hasOlder ? (
+              ) : feed.incomplete ? (
                 <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
                   {t('Rooms.NotesIncomplete')}
                 </ThemedText>
