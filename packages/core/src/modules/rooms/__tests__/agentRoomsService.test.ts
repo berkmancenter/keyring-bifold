@@ -275,7 +275,8 @@ describe('AgentRoomsService', () => {
     const agentServedTypes = jest.fn(() => new Promise<string[] | undefined>((resolve) => (answer = resolve)))
     const { b } = backend({ agentServedTypes })
     const service = new AgentRoomsService(b)
-    const asks = [service.capabilities(), service.capabilities(), service.capabilities({ refresh: true })]
+    // Callers that need an answer, not a fresh one (a refresh starts its own: below).
+    const asks = [service.capabilities(), service.capabilities(), service.capabilities()]
     expect(agentServedTypes).toHaveBeenCalledTimes(1)
     answer([ROOMS_TASK.keysList02])
     const answers = await Promise.all(asks)
@@ -285,6 +286,34 @@ describe('AgentRoomsService', () => {
     await service.capabilities({ refresh: true })
     expect(agentServedTypes).toHaveBeenCalledTimes(2)
   })
+
+  it.each([
+    ['the earlier ask answers first', ['A', 'B']],
+    ['the earlier ask answers last', ['B', 'A']],
+  ])(
+    "a refresh asks afresh, not joining an ask already out, and keeps the latest ask's answer (%s)",
+    async (_, order) => {
+      // An ask sent while A was linked, then the agent switched to B and a refresh asked for B's services: A's answer
+      // must not be kept as B's (it never aged out: A serves something).
+      const answers: Record<string, (types: string[]) => void> = {}
+      const agentServedTypes = jest
+        .fn<Promise<string[] | undefined>, []>()
+        .mockImplementationOnce(() => new Promise((resolve) => (answers.A = resolve)))
+        .mockImplementationOnce(() => new Promise((resolve) => (answers.B = resolve)))
+      const { b } = backend({ agentServedTypes })
+      const service = new AgentRoomsService(b)
+      const before = service.capabilities()
+      const refreshed = service.capabilities({ refresh: true })
+      expect(agentServedTypes).toHaveBeenCalledTimes(2)
+      const served = { A: [ROOMS_TASK.keysList02], B: [ROOMS_TASK.keysBrowse] }
+      for (const agent of order) answers[agent](served[agent as 'A' | 'B'])
+      await Promise.all([before, refreshed])
+      // B serves no key list: listing rooms is not available, as B said.
+      const now = await service.capabilities()
+      expect(now.listMyRooms.reason).toBe('agentDoesNotServe')
+      expect(now.listNotes.reason).toBe('ok')
+    }
+  )
 
   it('leaves through the community and forgets its rooms', async () => {
     const { b } = backend()

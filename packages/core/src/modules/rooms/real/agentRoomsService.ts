@@ -295,7 +295,7 @@ export class AgentRoomsService implements RoomsService {
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
     const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
-    if (linked && (options.refresh || unknownAged)) await this.askServed()
+    if (linked && (options.refresh || unknownAged)) await this.askServed(options.refresh)
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
   }
 
@@ -303,11 +303,16 @@ export class AgentRoomsService implements RoomsService {
    * One ask of what the agent serves at a time: every caller that needs it while it is out waits for the same one.
    * The agent's client sends one task at a time, and an agent that does not answer would otherwise be asked once per
    * caller (each operation's check, every screen's read) and hold everything queued behind those asks.
+   *
+   * A refresh starts its own ask and does not join one already out: that one may have been sent to the agent before
+   * a switch, and its answer would be kept as the new agent's. Only the latest ask's answer is kept, whichever answers
+   * first.
    */
-  private askServed(): Promise<void> {
-    if (this.servedInFlight) return this.servedInFlight
+  private askServed(refresh = false): Promise<void> {
+    if (this.servedInFlight && !refresh) return this.servedInFlight
     const ask = (async () => {
-      this.served = { types: await this.backend.agentServedTypes(), at: this.now() }
+      const types = await this.backend.agentServedTypes()
+      if (this.servedInFlight === ask) this.served = { types, at: this.now() }
     })().finally(() => {
       if (this.servedInFlight === ask) this.servedInFlight = undefined
     })
