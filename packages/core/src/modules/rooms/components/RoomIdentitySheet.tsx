@@ -5,7 +5,7 @@
  *
  * The member's own name is their Keyring profile's, shown on this phone only: the sheet says that the room's
  * members see the identity, not the name. Another member can be given a name of the member's own ("Name them"), kept
- * on this phone and always shown as theirs; a name can be given or changed here, not left blank.
+ * on this phone and always shown as theirs; a name can be given, changed or removed here, never left blank.
  *
  * @module rooms/components/RoomIdentitySheet
  */
@@ -91,6 +91,7 @@ const SheetBody: React.FC<Omit<RoomIdentitySheetProps, 'identity'> & { identity:
   const [draft, setDraft] = useState<string>()
   const [saving, setSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
+  const [removeFailed, setRemoveFailed] = useState(false)
   const name = mine ? me.name : (petname.name ?? identity.identityWords)
   const title = mine ? (me.name ?? (t('Rooms.You') as string)) : (petname.name ?? memberText(t, identity))
   const source = mine
@@ -103,6 +104,18 @@ const SheetBody: React.FC<Omit<RoomIdentitySheetProps, 'identity'> & { identity:
         ? t('Rooms.NameFromCommunity')
         : t('Rooms.NameNotKnown')
   const canSave = !!draft?.trim() && !saving
+  // Only the member's own label for someone: no confirmation, since naming them again restores it.
+  const removeName = async () => {
+    setSaving(true)
+    setRemoveFailed(false)
+    try {
+      await petname.remove()
+    } catch {
+      setRemoveFailed(true)
+    } finally {
+      setSaving(false)
+    }
+  }
   const save = async () => {
     if (!draft?.trim()) return
     setSaving(true)
@@ -217,12 +230,28 @@ const SheetBody: React.FC<Omit<RoomIdentitySheetProps, 'identity'> & { identity:
         </View>
         {naming && petname.loaded ? (
           draft === undefined ? (
-            <Button
-              title={petname.name ? t('Rooms.Rename') : t('Rooms.NameThem')}
-              buttonType={ButtonType.Secondary}
-              onPress={() => setDraft(petname.name ?? '')}
-              testID={testIdWithKey(petname.name ? 'RoomIdentityRename' : 'RoomIdentityNameThem')}
-            />
+            <View style={{ gap: 10 }}>
+              <Button
+                title={petname.name ? t('Rooms.Rename') : t('Rooms.NameThem')}
+                buttonType={ButtonType.Secondary}
+                onPress={() => setDraft(petname.name ?? '')}
+                testID={testIdWithKey(petname.name ? 'RoomIdentityRename' : 'RoomIdentityNameThem')}
+              />
+              {petname.name ? (
+                <Button
+                  title={t('Rooms.RemovePetname')}
+                  buttonType={ButtonType.Tertiary}
+                  onPress={removeName}
+                  disabled={saving}
+                  testID={testIdWithKey('RoomIdentityRemoveName')}
+                />
+              ) : null}
+              {removeFailed ? (
+                <ThemedText style={styles.error} accessibilityLiveRegion="polite">
+                  {t('Rooms.PetnameRemoveFailed')}
+                </ThemedText>
+              ) : null}
+            </View>
           ) : (
             <View style={{ gap: 10 }}>
               <TextInput

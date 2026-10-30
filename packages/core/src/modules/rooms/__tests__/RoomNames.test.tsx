@@ -22,6 +22,7 @@ let mockService: RoomsService | undefined
 let mockMe: MyName = {}
 let mockNames = new Map<string, string>()
 const mockSetPetname = jest.fn(async (_name: string) => undefined)
+const mockRemovePetname = jest.fn(async () => undefined)
 jest.mock('../useRoomsService', () => ({ useRoomsService: () => mockService }))
 jest.mock('../useMyName', () => ({ useMyName: () => mockMe }))
 // The member's names for others, as a2's store gives them: one for the sheet, all of them for the labels.
@@ -30,6 +31,7 @@ jest.mock('../usePetname', () => ({
     name: communityDid && memberDid ? mockNames.get(memberDid) : undefined,
     loaded: !!(communityDid && memberDid),
     set: mockSetPetname,
+    remove: mockRemovePetname,
   }),
   usePetnames: () => mockNames,
 }))
@@ -111,6 +113,7 @@ beforeEach(() => {
   mockMe = {}
   mockNames = new Map()
   mockSetPetname.mockClear()
+  mockRemovePetname.mockClear()
   ;(Clipboard.setString as jest.Mock | undefined)?.mockClear?.()
 })
 
@@ -208,6 +211,20 @@ describe('names in a room, step 1', () => {
     expect(sheet(tree).getByTestId(id('RoomIdentityStandIn'))).toHaveTextContent('Rooms.MemberTail')
     expect(sheet(tree).getByTestId(id('RoomIdentitySource'))).toHaveTextContent('Rooms.PetnameSource')
     expect(sheet(tree).getByTestId(id('RoomIdentityRename'))).toBeTruthy()
+  })
+
+  test('a name you gave can be removed; one never given offers nothing to remove', async () => {
+    const tree = await show()
+    await press(tree, 'RoomPostAuthor')
+    expect(sheet(tree).queryByTestId(id('RoomIdentityRemoveName'))).toBeNull()
+    await press(tree, 'RoomIdentityClose')
+    mockNames = new Map([[THEM.did, 'River']])
+    tree.unmount()
+    const named = await show()
+    await press(named, 'RoomPostAuthor')
+    await press(named, 'RoomIdentityRemoveName')
+    expect(mockRemovePetname).toHaveBeenCalledTimes(1)
+    expect(mockSetPetname).not.toHaveBeenCalled()
   })
 
   test('your own sheet offers your profile, never a name of your own for yourself', async () => {

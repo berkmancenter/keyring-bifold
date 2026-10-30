@@ -2964,6 +2964,8 @@
     "Rename": "Renommer",
     "PetnamePlaceholder": "Un nom visible par vous seulement",
     "PetnameSaveFailed": "Ce nom n'a pas été enregistré. Réessayez.",
+    "RemovePetname": "Retirer mon nom pour ce membre",
+    "PetnameRemoveFailed": "Ce nom n'a pas été retiré. Réessayez.",
     "FileOpenHint": "Affiche les détails du fichier et permet de le télécharger.",
     "FileTypeAsShared": "{{type}}, tel que partagé",
     "FileSharedBy": "Partagé par {{who}}",

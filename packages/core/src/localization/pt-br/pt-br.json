@@ -2866,6 +2866,8 @@
     "Rename": "Renomear",
     "PetnamePlaceholder": "Um nome que só você vê",
     "PetnameSaveFailed": "Este nome não foi guardado. Tente de novo.",
+    "RemovePetname": "Remover meu nome para este membro",
+    "PetnameRemoveFailed": "Este nome não foi removido. Tente de novo.",
     "FileOpenHint": "Mostra os detalhes do arquivo e permite baixá-lo.",
     "FileTypeAsShared": "{{type}}, como compartilhado",
     "FileSharedBy": "Compartilhado por {{who}}",

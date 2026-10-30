@@ -3016,6 +3016,8 @@
     "Rename": "Rename",
     "PetnamePlaceholder": "A name only you will see",
     "PetnameSaveFailed": "This name wasn't kept. Try again.",
+    "RemovePetname": "Remove my name for them",
+    "PetnameRemoveFailed": "This name wasn't removed. Try again.",
     "FileOpenHint": "Shows the file's details and lets you download it.",
     "FileTypeAsShared": "{{type}}, as shared",
     "FileSharedBy": "Shared by {{who}}",
