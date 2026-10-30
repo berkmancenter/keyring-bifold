@@ -4,6 +4,7 @@
  *
  * @module rooms/components/RoomHeader
  */
+import type { TFunction } from 'i18next'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { Platform, StyleSheet, View } from 'react-native'
@@ -21,7 +22,7 @@ import TierBadge from './TierBadge'
 
 /** "in Keyring Lab · until 26 Jan 2027": either part alone when the other is not known. */
 export const roomWhere = (
-  t: (key: string, options?: object) => unknown,
+  t: TFunction,
   room: Pick<RoomSummary, 'communityName' | 'validUntil'>
 ): string | undefined => {
   const date = room.validUntil ? localDate(room.validUntil) : undefined
