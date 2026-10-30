@@ -1021,36 +1021,21 @@ describe('auth/oob 0.3: communities and agents from 0d3f268e', () => {
     expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03])
   })
 
-  // IN-390 (276.9): the agent and the community sat on opposite sides of 0d3f268e, so no grant version was left that
-  // both take, and the agent's refusal read as "Your agent needs an update" whichever side was behind.
-  it('a current agent (grant 0.3 only) with a community at vtc 0.14: the community is the one behind', async () => {
+  // IN-390 (276.9): a sign-in ended "Your agent needs an update" and nothing in the Release log said which version
+  // was asked. The error now carries the prove and grant versions asked; the endings are unchanged.
+  it('a current agent (grant 0.3 only) with a community at 0.2: the ending notes every version asked', async () => {
     const community = fakeCommunity()
     const deps = depsWith(community, fakeVta({ only03: true }))
     const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
-    expect(p.version).toBe('0.2')
-    const error = await failureOf(approveSignIn(p, deps))
-    expect(error).toMatchObject({
-      reason: 'communityNeedsUpdate',
+    expect(p).toMatchObject({ version: '0.2', provesTried: ['0.3', '0.2'] })
+    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
+      reason: 'agentNeedsUpdate',
       detail: 'oobUnsupportedType',
       tried: { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] },
     })
-    expect(error.responded).toBe(false)
-    // Nothing reached the community after the refusals: no respond.
-    expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03, OOB_TASKS.prove02])
   })
 
-  it('a community that serves only 0.1, with a current agent: the community is the one behind', async () => {
-    const community = fakeCommunity({ only01: true })
-    const deps = depsWith(community, fakeVta({ only03: true }))
-    const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
-    expect(p.version).toBe('0.1')
-    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
-      reason: 'communityNeedsUpdate',
-      tried: { prove: ['0.3', '0.2', '0.1'], grant: ['0.1'] },
-    })
-  })
-
-  it('an agent from before 0d3f268e (no grant 0.3) with a community at 0.3: the agent is the one behind, said so', async () => {
+  it('an agent without grant 0.3 with a community at 0.3: the ending notes the one version asked', async () => {
     const community = fakeCommunity({ era: '0d3f' })
     const deps = depsWith(community, fakeVta({ noGrant03: true }))
     const p = await identifyAndProve(claimedSignIn('0d3f'), MATCH, deps)
@@ -1060,13 +1045,17 @@ describe('auth/oob 0.3: communities and agents from 0d3f268e', () => {
     })
   })
 
-  it('says which side is behind in plain words', () => {
-    expect(SIGN_IN_FAILURE_MESSAGES.communityNeedsUpdate).toBe(
-      'This community needs an update before your agent can sign you in to it.'
-    )
-    expect(SIGN_IN_FAILURE_MESSAGES.agentNeedsUpdate).toBe(
-      'Your agent needs an update before it can sign you in to websites.'
-    )
+  it('a step 2 that fails its check notes the prove versions asked', async () => {
+    const community = fakeCommunity({
+      era: '0d3f',
+      step2Change: (_answer, payload) => {
+        payload.decisionClosesAt = new Date((NOW + 60) * 1000).toISOString()
+      },
+    })
+    expect(await failureOf(identifyAndProve(claimedSignIn('0d3f'), MATCH, depsWith(community)))).toMatchObject({
+      reason: 'badAnswer',
+      tried: { prove: ['0.3'] },
+    })
   })
 })
 
@@ -1074,10 +1063,10 @@ describe('auth/oob 0.3: communities and agents from 0d3f268e', () => {
 // the reason, its detail and the versions tried, never a link, a key or a document.
 describe('the Release line for a sign-in that ended', () => {
   it('names the reason, its detail and the prove and grant versions tried', () => {
-    const error = new SignInError('communityNeedsUpdate', 'oobUnsupportedType')
+    const error = new SignInError('agentNeedsUpdate', 'oobUnsupportedType')
     error.tried = { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] }
     expect(signInEndLine(error)).toBe(
-      '[SignIn] not signed in: communityNeedsUpdate (oobUnsupportedType); prove 0.3>0.2; grant 0.2>0.1'
+      '[SignIn] not signed in: agentNeedsUpdate (oobUnsupportedType); prove 0.3>0.2; grant 0.2>0.1'
     )
   })
 
