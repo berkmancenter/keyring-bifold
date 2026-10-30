@@ -215,16 +215,37 @@ describe('1. confirm, before anything is sent', () => {
       expect(steps.cancel).not.toHaveBeenCalled()
     })
 
-    test('not a community, or the check failed: said so in place of the offer, and Join does not open', async () => {
-      for (const joinable of [jest.fn(async () => false), jest.fn(async () => Promise.reject(new Error('offline')))]) {
+    test('not a community: said so in place of the offer, and Join does not open', async () => {
+      const steps = unjoined(jest.fn(async () => false))
+      const tree = await showJoin(steps)
+      await press(tree, SignInIds.checkAndJoin)
+      expect(tree.getByTestId(id(SignInIds.notJoinable))).toHaveTextContent('SignIn.NotJoinable')
+      expect(tree.queryByTestId(id(SignInIds.checkAndJoin))).toBeNull()
+      expect(message(tree)).toHaveTextContent('SignIn.Failure.notAMember')
+      expect(onJoin).not.toHaveBeenCalled()
+      expect(steps.claim).not.toHaveBeenCalled()
+    })
+
+    test('not checked (no answer in time, or the check failed): said so, never as a "no", and it can be tried again', async () => {
+      const failures: (() => Promise<boolean | undefined>)[] = [
+        async () => undefined,
+        async () => Promise.reject(new Error('offline')),
+      ]
+      for (const failed of failures) {
+        const joinable = jest.fn(failed)
         const steps = unjoined(joinable)
         const tree = await showJoin(steps)
         await press(tree, SignInIds.checkAndJoin)
-        expect(tree.getByTestId(id(SignInIds.notJoinable))).toHaveTextContent('SignIn.NotJoinable')
-        expect(tree.queryByTestId(id(SignInIds.checkAndJoin))).toBeNull()
-        expect(message(tree)).toHaveTextContent('SignIn.Failure.notAMember')
+        expect(tree.getByTestId(id(SignInIds.joinUnchecked))).toHaveTextContent('SignIn.JoinUnchecked')
+        expect(tree.queryByTestId(id(SignInIds.notJoinable))).toBeNull()
         expect(onJoin).not.toHaveBeenCalled()
+        // The host is back: tried again, and Join opens.
+        joinable.mockResolvedValueOnce(true)
+        await press(tree, SignInIds.checkAndJoin)
+        expect(joinable).toHaveBeenCalledTimes(2)
+        expect(onJoin).toHaveBeenCalledWith(VTC)
         expect(steps.claim).not.toHaveBeenCalled()
+        onJoin.mockReset()
         tree.unmount()
       }
     })

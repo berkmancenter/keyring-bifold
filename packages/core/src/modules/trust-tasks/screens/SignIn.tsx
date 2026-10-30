@@ -164,8 +164,9 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
   const [service, setService] = useState(false)
   const word = (key: string) => (service ? `SignIn.Service.${key}` : `SignIn.${key}`)
   const [deadline, setDeadline] = useState<number | undefined>()
-  // "Check and join" on a code from a community this phone has not joined (IN-406): idle, checking, or not one.
-  const [joinCheck, setJoinCheck] = useState<'idle' | 'checking' | 'notJoinable'>('idle')
+  // "Check and join" on a code from a community this phone has not joined (IN-406): idle, checking, not one, or
+  // not checked (no answer in time: the offer stays, to try again).
+  const [joinCheck, setJoinCheck] = useState<'idle' | 'checking' | 'notJoinable' | 'unchecked'>('idle')
 
   // What the unmount and the deadline need without re-running effects.
   const claimedRef = useRef<ClaimedSignIn | undefined>(undefined)
@@ -443,7 +444,11 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
                 <ThemedText testID={id(SignInIds.notJoinable)}>{t('SignIn.NotJoinable')}</ThemedText>
               ) : (
                 <>
-                  <ThemedText>{t('SignIn.JoinHint')}</ThemedText>
+                  {joinCheck === 'unchecked' ? (
+                    <ThemedText testID={id(SignInIds.joinUnchecked)}>{t('SignIn.JoinUnchecked')}</ThemedText>
+                  ) : (
+                    <ThemedText>{t('SignIn.JoinHint')}</ThemedText>
+                  )}
                   <Button
                     title={t('SignIn.CheckAndJoin')}
                     buttonType={ButtonType.Secondary}
@@ -453,10 +458,10 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
                       setJoinCheck('checking')
                       stepsRef.current
                         .joinable?.(vtcDid)
-                        .catch(() => false)
+                        .catch(() => undefined)
                         .then((yes) => {
                           if (yes) onJoin(vtcDid)
-                          else setJoinCheck('notJoinable')
+                          else setJoinCheck(yes === false ? 'notJoinable' : 'unchecked')
                         })
                     }}
                     testID={id(SignInIds.checkAndJoin)}

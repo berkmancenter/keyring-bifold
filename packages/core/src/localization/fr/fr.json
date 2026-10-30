@@ -2707,6 +2707,7 @@
     "JoinHint": "Si ce code vient d'une communauté que vous aimeriez rejoindre, Keyring peut vérifier et la rejoindre.",
     "CheckAndJoin": "Vérifier et rejoindre",
     "NotJoinable": "Ce code ne vient pas d'une communauté que vous pouvez rejoindre ici.",
+    "JoinUnchecked": "Keyring n'a pas pu vérifier ce code pour l'instant. Réessayez.",
     "Service": {
       "ConfirmBody": "Un site web demande à vous connecter avec l'un de vos agents de ce service. Rien n'est envoyé avant que vous continuiez.",
       "Label": "Service",

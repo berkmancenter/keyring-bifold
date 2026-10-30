@@ -297,7 +297,7 @@ describe('"Check and join": whether an unjoined sender is a community', () => {
     expect(await steps.joinable?.(FARM)).toBe(false)
   })
 
-  it('a sender whose DID is not found is not joinable', async () => {
+  it('a sender whose DID host says there is no such DID is not joinable', async () => {
     agent.dids.resolve.mockResolvedValue({ didResolutionMetadata: { error: 'notFound' } })
     try {
       expect(await agentSignInSteps(agent as never).joinable?.(VTC)).toBe(false)
@@ -306,18 +306,23 @@ describe('"Check and join": whether an unjoined sender is a community', () => {
     }
   })
 
-  it('a DID host that never answers: not joinable once the wait is over, not before', async () => {
+  it('a DID host that never answers: unchecked (not a "no") once the wait is over, not before', async () => {
     jest.useFakeTimers()
     try {
       agent.dids.resolve.mockImplementation(() => new Promise(() => undefined))
-      let answer: boolean | undefined
+      let settled = false
+      let answer: boolean | undefined = false
       void agentSignInSteps(agent as never)
         .joinable?.(VTC)
-        .then((a) => (answer = a))
+        .then((a) => {
+          settled = true
+          answer = a
+        })
       await jest.advanceTimersByTimeAsync(JOINABLE_WAIT_MS - 1)
-      expect(answer).toBeUndefined()
+      expect(settled).toBe(false)
       await jest.advanceTimersByTimeAsync(1)
-      expect(answer).toBe(false)
+      expect(settled).toBe(true)
+      expect(answer).toBeUndefined()
     } finally {
       agent.dids.resolve.mockReset()
       jest.useRealTimers()

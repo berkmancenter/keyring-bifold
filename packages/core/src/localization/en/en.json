@@ -2760,6 +2760,7 @@
     "JoinHint": "If this code is from a community you'd like to join, Keyring can check and join it.",
     "CheckAndJoin": "Check and join",
     "NotJoinable": "This code isn't from a community you can join here.",
+    "JoinUnchecked": "Keyring couldn't check this code just now. Try again.",
     "Service": {
       "ConfirmBody": "A website is asking to sign you in with one of your agents from this service. Nothing is sent until you continue.",
       "Label": "Service",

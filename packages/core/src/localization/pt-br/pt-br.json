@@ -2610,6 +2610,7 @@
     "JoinHint": "Se este código for de uma comunidade em que você gostaria de entrar, o Keyring pode verificar e entrar nela.",
     "CheckAndJoin": "Verificar e entrar",
     "NotJoinable": "Este código não é de uma comunidade em que você possa entrar aqui.",
+    "JoinUnchecked": "O Keyring não conseguiu verificar este código agora. Tente de novo.",
     "Service": {
       "ConfirmBody": "Um site está pedindo para você entrar com um dos seus agentes deste serviço. Nada é enviado até você continuar.",
       "Label": "Serviço",

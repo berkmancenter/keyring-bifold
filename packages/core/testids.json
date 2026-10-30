@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "a2ac86fe8d83a4282b8123968c0ccefa699adcae",
+  "generatedFrom": "2a62c7d5ce8af8620aef3d000d10a4eb281029ce",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1200,6 +1200,7 @@
     "SignInIdentifiedAs": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInIdentity": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInIdentityAgent": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
+    "SignInJoinUnchecked": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInLocation": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInNotJoinable": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
     "SignInNotMember": ["src/modules/trust-tasks/screens/SignIn.ids.ts"],
