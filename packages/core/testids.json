@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "4752fd75a0829356e58ce726f734c57b3a0fdc3f",
+  "generatedFrom": "16533d8e997266692a22627ee403c9344ed4000c",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -471,6 +471,9 @@
       "src/modules/openid/screens/OpenIDCredentialOffer.tsx",
       "src/screens/CredentialOffer.tsx"
     ],
+    "DeleteChatCancel": ["src/components/listItems/DeleteChatSheet.tsx"],
+    "DeleteChatConfirm": ["src/components/listItems/DeleteChatSheet.tsx"],
+    "DeleteChatSheet": ["src/components/listItems/DeleteChatSheet.tsx"],
     "DenyConsentButton": [
       "src/modules/trust-tasks/screens/MyAgent.ids.ts",
       "src/modules/trust-tasks/screens/RequestCard.tsx"
@@ -743,6 +746,8 @@
     "MessagesEmptyAddContact": ["src/screens/Messages.tsx"],
     "MessagesEmptyNewMessage": ["src/screens/Messages.tsx"],
     "MessagesFetchingNew": ["src/screens/Messages.tsx"],
+    "MessagesGestureRoot": ["src/screens/Messages.tsx"],
+    "MessagesListDelete": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListTimer": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListUnread": [
       "src/components/listItems/ContactListItem.tsx",
@@ -941,6 +946,7 @@
     "RoomFilesNone": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFilesReading": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFilesUnavailable": ["src/modules/rooms/components/RoomFilesTab.tsx"],
+    "RoomFloatingDay": ["src/modules/rooms/screens/Room.tsx"],
     "RoomHeader": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomHostConflict": ["src/modules/rooms/screens/Room.tsx"],
     "RoomIdentityAddName": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
@@ -1178,6 +1184,8 @@
     "TrustTaskApprovalTitle": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskApprove": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskDeny": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
+    "UndoToast": ["src/components/toast/UndoToast.tsx"],
+    "UndoToastUndo": ["src/components/toast/UndoToast.tsx"],
     "UnverifiedProofView": ["src/screens/ProofDetails.tsx"],
     "UpdateLater": ["src/screens/UpdateAvailable.tsx"],
     "UpdateNow": ["src/screens/UpdateAvailable.tsx"],
