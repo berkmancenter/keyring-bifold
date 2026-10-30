@@ -5,7 +5,6 @@
  * read back). The words are in en, fr and pt-BR.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { useNavigation } from '@react-navigation/native'
 import { act, renderHook } from '@testing-library/react-native'
 import i18n from 'i18next'
 import { DeviceEventEmitter } from 'react-native'
@@ -25,6 +24,11 @@ import { ROOM_POST_FAILED_EVENT, useRoomSend } from '../useRoomSend'
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 let mockService: RoomsService | undefined
 jest.mock('../useRoomsService', () => ({ useRoomsService: () => mockService }))
+const mockNavigate = jest.fn()
+jest.mock('@react-navigation/native', () => ({
+  ...jest.requireActual('../../../../__mocks__/@react-navigation/native'),
+  useNavigation: () => ({ navigate: mockNavigate }),
+}))
 jest.mock('../../trust-tasks/module/vtaAgent', () => ({
   vtaAgent: { subscribe: () => () => undefined, getState: () => ({ link: { kind: 'linked' } }) },
 }))
@@ -47,7 +51,7 @@ const offering = (offers: () => RoomOffer[], isSample = false) =>
   }) as unknown as RoomsService & { listOffers: jest.Mock }
 
 const flush = () => act(async () => undefined)
-const navigate = useNavigation().navigate as jest.Mock
+const navigate = mockNavigate
 let show: jest.SpyInstance
 
 beforeEach(async () => {
