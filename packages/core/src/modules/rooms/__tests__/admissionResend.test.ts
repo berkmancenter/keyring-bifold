@@ -116,7 +116,10 @@ describe('asking again after "admission pending"', () => {
   })
 
   test('a try that does not reach the community waits for the next', async () => {
-    const accept = jest.fn().mockRejectedValueOnce(new Error('agent unreachable')).mockResolvedValueOnce({ roomId: 'planning' })
+    const accept = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('agent unreachable'))
+      .mockResolvedValueOnce({ roomId: 'planning' })
     resendAdmission(service(accept), preview())
     await step(ADMISSION_RESEND_MS[0])
     await step(ADMISSION_RESEND_MS[1])
@@ -124,7 +127,7 @@ describe('asking again after "admission pending"', () => {
     expect(heard).toHaveLength(1)
   })
 
-  test("an offer whose terms changed is not accepted: the member decides again", async () => {
+  test('an offer whose terms changed is not accepted: the member decides again', async () => {
     const accept = jest.fn().mockResolvedValue({ roomId: 'planning' })
     const s = service(accept, () => preview({ verbs: ['read', 'write', 'curate'] }, 'changed'))
     resendAdmission(s, preview())
@@ -146,7 +149,7 @@ describe('from the offer screen', () => {
     expect(accept).toHaveBeenCalledTimes(1)
     const readsBefore = reread.mock.calls.length
     await step(ADMISSION_RESEND_MS[0])
-    expect(reread.mock.calls.length).toBe(readsBefore + 1)
+    expect(reread.mock.calls).toHaveLength(readsBefore + 1)
     expect(heard).toEqual([{ roomId: 'did:webvh:sample:kernel-notes', roomName: 'Kernel notes' }])
     unmount()
   })
