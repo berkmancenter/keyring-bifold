@@ -5,7 +5,9 @@
  *
  * @module rooms/useMyRooms
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+
+import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
 import { RoomsUnavailable } from './types'
 import type { OperationStatus, RoomOffer, RoomsCapabilities, RoomsService, RoomSummary } from './types'
@@ -33,13 +35,18 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
     setState((s) => ({ ...s, refreshing: true }))
     setGeneration((g) => g + 1)
   }, [])
+  // The agent the reads are for. An Add given up passes through "no agent": coming back to the screen read the rooms
+  // then, and the agent came back after (it signs in again), so the card said "Link your agent first" until the
+  // screen was left (nightly, 10-30). A read is made again whenever the agent changes, its services asked afresh.
+  const agentKey = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.agentAddress())
+  const firstAgent = useRef(agentKey)
 
   useEffect(() => {
     if (!service) return
     let live = true
     void (async () => {
       try {
-        const capabilities = await service.capabilities({ refresh: generation > 0 })
+        const capabilities = await service.capabilities({ refresh: generation > 0 || agentKey !== firstAgent.current })
         const listRooms = capabilities.listMyRooms.status === 'available'
         const listOffers = capabilities.listOffers.status === 'available'
         const [rooms, offers] = await Promise.all([
@@ -64,7 +71,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
     return () => {
       live = false
     }
-  }, [service, communityDid, generation])
+  }, [service, communityDid, generation, agentKey])
 
   return { ...state, reload }
 }
