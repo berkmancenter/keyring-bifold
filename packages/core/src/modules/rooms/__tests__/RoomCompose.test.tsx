@@ -29,6 +29,7 @@ const Room = require('../screens/Room').default
 const PLANNING = 'did:webvh:sample:planning'
 const WELCOME_DESK = 'did:webvh:sample:welcome-desk'
 const CUSTODY = 'did:webvh:sample:3f9a7c21e0'
+const KERNEL_NOTES = 'did:webvh:sample:kernel-notes'
 const id = (key: string) => testIdWithKey(key)
 
 const show = (roomId: string) => {
@@ -82,6 +83,24 @@ describe('a kept draft', () => {
     await send(tree)
     await waitFor(() => expect(records.delete).toHaveBeenCalledWith(expect.objectContaining({ id: draftId })))
     expect(tree.getByTestId(id('RoomComposerInput')).props.value).toBe('')
+  })
+
+  // Navigating to a room already in the stack updates the screen's params rather than mounting it afresh.
+  test("a screen reused for another room drops the last room's words", async () => {
+    const tree = show(PLANNING)
+    await waitFor(() => expect(tree.getByTestId(id('RoomComposerInput')).props.value).toBe('Half a post'))
+    await type(tree, 'Half a post, finished')
+
+    mockParams = { roomId: KERNEL_NOTES }
+    tree.rerender(
+      <BasicAppContext>
+        <Room />
+      </BasicAppContext>
+    )
+    await waitFor(() => expect(records.findById).toHaveBeenCalledWith(`room-draft:${KERNEL_NOTES}`))
+    const input = await waitFor(() => tree.getByTestId(id('RoomComposerInput')))
+    await act(async () => undefined)
+    expect(input.props.value).toBe('')
   })
 
   test("another room's draft is not this room's", async () => {

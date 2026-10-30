@@ -19,6 +19,10 @@
  * gifted-chat also reports '' when it first lays out the empty field. That is
  * not a change: it neither touches the field nor clears the kept draft, which
  * it used to do 400 ms after the chat opened, while the draft was on screen.
+ * It is told apart from a send only by the field being empty then, so it
+ * relies on that '' arriving before the first read answers (gifted-chat sends
+ * it as it mounts, before an awaited store read can resolve). Were the read to
+ * answer first, the '' would read as a send and clear the kept draft.
  *
  * The draft handed back (`saved`) is spent once the field is touched, so a
  * composer drawn afresh later (a room's, when it was swapped out a while)

@@ -455,6 +455,9 @@ const Room: React.FC = () => {
             <RoomFeatureCard status={roomCapabilities.write} feature="write" strip />
           ) : (
             <RoomComposer
+              // A screen reused for another room (navigating to a room already in the stack updates its params)
+              // starts its field afresh: the last room's words never sit in this one's, or are saved as its draft.
+              key={roomId}
               onSend={send}
               unavailable={cannotPost}
               postingAs={
