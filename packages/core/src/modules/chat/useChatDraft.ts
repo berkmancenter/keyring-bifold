@@ -9,17 +9,6 @@
  * already closed. That last one is still tried, for a screen left by
  * navigating, but it is never the only copy.
  *
- * A sent draft must not come back. A field emptied (gifted-chat reports '' after
- * a send) is saved at once rather than after the pause, so the kept draft is
- * gone before anything can read it again; and a read that answers once the
- * field has been touched in this chat is ignored, so a re-read (the agent
- * restarting on lock and unlock) or a slow first read can't put old words into
- * a field the person has typed in or sent from.
- *
- * gifted-chat also reports '' when it first lays out the empty field. That is
- * not a change: it neither touches the field nor clears the kept draft, which
- * it used to do 400 ms after the chat opened, while the draft was on screen.
- *
  * @module chat/useChatDraft
  */
 
@@ -43,10 +32,6 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
   const pending = useRef<string | undefined>(undefined)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [saved, setSaved] = useState<string | undefined>(undefined)
-  // The chat whose field has been touched (typed in, or emptied by a send) since this screen opened it.
-  const touched = useRef<string | undefined>(undefined)
-  // What the field holds as far as this hook knows: what was typed, or the kept draft handed back.
-  const field = useRef('')
 
   const flush = useCallback(() => {
     if (timer.current) clearTimeout(timer.current)
@@ -61,28 +46,20 @@ export function useChatDraft(agent: Agent | undefined, connectionId: string): Ch
 
   const onTextChange = useCallback(
     (text: string) => {
-      // An empty field reported empty again (gifted-chat lays it out): nothing changed.
-      if (text === '' && field.current === '') return
-      field.current = text
-      touched.current = connectionId
       pending.current = text
       if (timer.current) clearTimeout(timer.current)
-      if (text === '') flush()
-      else timer.current = setTimeout(flush, DRAFT_SAVE_DELAY_MS)
+      timer.current = setTimeout(flush, DRAFT_SAVE_DELAY_MS)
     },
-    [flush, connectionId]
+    [flush]
   )
 
   useEffect(() => {
     setSaved(undefined)
-    if (touched.current !== connectionId) field.current = ''
     if (!agent) return
     let live = true
     loadChatDraft(agent, connectionId)
       .then((text) => {
-        if (!live || touched.current === connectionId) return
-        field.current = text ?? ''
-        setSaved(text)
+        if (live) setSaved(text)
       })
       .catch((error) => {
         agent.config?.logger?.warn(`[Chat:draft] the draft for ${connectionId} could not be read`, { error })
