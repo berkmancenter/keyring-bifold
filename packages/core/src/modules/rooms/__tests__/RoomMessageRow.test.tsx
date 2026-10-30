@@ -11,6 +11,7 @@ import { readFileSync } from 'fs'
 import i18n from 'i18next'
 import path from 'path'
 import React from 'react'
+import { ActivityIndicator } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import en from '../../../localization/en/en.json'
@@ -98,15 +99,17 @@ describe("a room's Messages row", () => {
     expect(empty.getByText('Rooms.RowNoPosts')).toBeTruthy()
   })
 
-  // Its posts not read yet (the agent not ready on a cold launch): reading, never "No posts yet".
-  test('a room not read yet says it is reading, not that it has no posts', () => {
+  // Its posts not read yet (the agent not ready on a cold launch): the app's spinner, as the rooms card shows (#775),
+  // never "No posts yet"; the words stay for a screen reader.
+  test('a room not read yet shows the spinner, not that it has no posts, and says reading to a screen reader', () => {
     const reading = show(
       <RoomMessageRow
         row={row({ unread: 0, lastPost: undefined, lastActivityAt: undefined, reading: true })}
         onOpen={jest.fn()}
       />
     )
-    expect(reading.getByText('Rooms.Reading')).toBeTruthy()
+    expect(reading.UNSAFE_getByType(ActivityIndicator).props.accessibilityLabel).toBe('Rooms.Reading')
+    expect(reading.queryByText('Rooms.Reading')).toBeNull()
     expect(reading.queryByText('Rooms.RowNoPosts')).toBeNull()
   })
 })
