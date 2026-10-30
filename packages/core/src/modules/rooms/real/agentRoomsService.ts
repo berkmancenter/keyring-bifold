@@ -17,14 +17,16 @@
  * - **Writes and curation** are requests to the room's host, completed as the member by the agent
  *   (`rooms/keys/act`), which inserts the member's presentation and signs; the phone sends the completed document
  *   to the host unchanged, over the same DIDComm session it reaches the community on. The phone adds nothing to it
- *   and holds no key that could. Writing is built for `open` rooms; a sealed room's record is sealed by the agent
- *   first, which is a later phase.
+ *   and holds no key that could. On an `attributed` room the record is first signed as the member and sealed by
+ *   the agent (`rooms/keys/seal/0.2`), so the host holds only ciphertext. `private` rooms are not written to yet.
  *
  * Files and agent access are later phases and report `clientNotBuilt`.
  */
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { DeviceEventEmitter } from 'react-native'
 
+import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
@@ -58,6 +60,8 @@ import {
 } from '../types'
 
 import {
+  KEYS_ACT_TYPES,
+  OFFERS_LIST_TYPES,
   parseAccept,
   parseActed,
   parseBrowse,
@@ -68,12 +72,15 @@ import {
   parseOffers,
   parsePut,
   parseRead,
+  parseSealed,
   parseVaultQuery,
   refusalCode,
   ROOMS_TASK,
   vaultCredentialSubject,
+  type FileManifest,
   type HeldRoom,
   type OfferRecord,
+  type OpenedRecord,
   type RenewalRecord,
   type RoomMembershipRecord,
 } from './wire'
@@ -89,6 +96,11 @@ export interface RoomsCommunity {
 
 /** What the service needs from the rest of the app. The adapter wires it to VtaClient and vtiAgent. */
 export interface RoomsBackend {
+  /**
+   * The app's agent this backend talks through. An unlock restarts that same agent, and a service registered
+   * again for it is the one already registered (register.ts).
+   */
+  readonly runsOn?: object
   agentLinked(): boolean
   /** The agent's `trust-task-discovery` answer; undefined when it could not be asked. */
   agentServedTypes(): Promise<readonly string[] | undefined>
@@ -106,6 +118,7 @@ export interface RoomsBackend {
   newId(): string
   leaveCommunity(communityDid: string): Promise<void>
   decodeBase64Url(value: string): string
+  encodeBase64Url(text: string): string
   /** The offers hidden on this phone, by `offerId`. Upstream has no decline, so this is all hiding is. */
   hiddenOffers(): Promise<string[]>
   hideOffer(offerId: string): Promise<void>
@@ -136,6 +149,7 @@ export const BUILT: ReadonlySet<RoomsOperation> = new Set<RoomsOperation>([
   'hideOffer',
   'write',
   'curate',
+  'listFiles',
 ])
 
 /**
@@ -146,8 +160,19 @@ export function postKey(idempotencyKey: string): string {
   return `note/${bytesToHex(sha256(utf8ToBytes(`keyring.rooms.post|${idempotencyKey}`))).slice(0, 32)}`
 }
 
+/**
+ * How many times a sealed note is sealed again when another write took the version it was sealed for, as upstream's
+ * CLI does (`pnm rooms put`, VTA 0.67).
+ */
+const SEALED_WRITE_ATTEMPTS = 4
+
 /** How many pages of a community's membership record, or of its offers, to read before stopping. */
 const MAX_MEMBERSHIP_PAGES = 10
+/**
+ * How soon an agent that could not say what it serves is asked again. Its answer was kept until a pull to refresh:
+ * one lost while the session reopened after an unlock left a room on "Couldn't reach your agent" (#772, 10-30).
+ */
+export const SERVED_UNKNOWN_RETRY_MS = 10_000
 
 /**
  * How often an accept the community answers `admissionPending` is sent again, identically, before the refusal
@@ -202,6 +227,35 @@ const RENEWED = [
 
 const shortId = (id: string) => id.replace(/^did:[^:]+:/, '').slice(-10)
 
+/** Where an opened record is kept: a record's version never changes once written, so key and version name it. */
+const openedKey = (roomId: string, key: string, version: number) => `${roomId}\n${key}@${version}`
+/** A record in a room, whatever its version: what the room's last listing said its version is. */
+const listedKey = (roomId: string, key: string) => `${roomId}\n${key}`
+
+/**
+ * The most opened records a service keeps. An opened record is a decrypted body, kept in memory only; past this the
+ * least recently used goes. Ten rooms of fifty posts each fit.
+ */
+export const MAX_OPENED_RECORDS = 500
+
+// The services that hold opened records. When the wallet locks or the person logs out, each forgets them and the set
+// is emptied, so it never keeps a service alive past a lock; a service joins again the next time it keeps a record.
+const holdingOpened = new Set<{ dropOpenedRecords(): void }>()
+DeviceEventEmitter.addListener(WALLET_LOCKED_EVENT, () => {
+  for (const service of holdingOpened) service.dropOpenedRecords()
+  holdingOpened.clear()
+})
+
+/** A record's file as a screen lists it: the name is untrusted text, shown inert. */
+const roomFileOf = (file: FileManifest, record: Pick<OpenedRecord, 'author' | 'updatedAt'>): RoomFile => ({
+  fileId: file.fileId,
+  name: toInertText(file.name),
+  ...(file.mediaType ? { mediaType: file.mediaType } : {}),
+  size: file.size,
+  ...(record.author ? { sharedBy: { did: record.author } } : {}),
+  ...(record.updatedAt ? { sharedAt: record.updatedAt } : {}),
+})
+
 interface KnownRoom extends Room {
   community?: RoomsCommunity
 }
@@ -209,17 +263,36 @@ interface KnownRoom extends Room {
 export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
+  public get runsOn(): object | undefined {
+    return this.backend.runsOn
+  }
 
-  private served?: { types: readonly string[] | undefined }
+  private served?: { types: readonly string[] | undefined; at: number }
+  private servedInFlight?: Promise<void>
+  /** How many asks of what the agent serves were started: only the latest one's answer is kept. */
+  private servedAsks = 0
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
   private previews = new Map<string, { offerId: string; at: number }>()
   private writes = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
+  // Records opened through the agent, by room, key and version: what a file listing and a second read of a post
+  // reuse. Kept through keepOpened, oldest use first, within MAX_OPENED_RECORDS; forgotten on lock and on leaving.
+  private opened = new Map<string, OpenedRecord>()
+  /** Each record's version as the room's last listing gave it, so a read knows which opened copy is current. */
+  private listed = new Map<string, number>()
+  /**
+   * A room's listing being asked now, by room and the version it starts from. Opening a room lists it twice at once
+   * (its posts and its notes tab), and the agent client sends one task at a time, so the posts waited a whole second
+   * listing before their first read (+0.6–0.9 s on each open, lab sim 10-30).
+   */
+  private listingInFlight = new Map<string, Promise<NoteList>>()
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
   private offersType = new Map<string, string>()
+  /** The `rooms/records/put` each host took, so a host that refused 0.3 is not asked it on every post. */
+  private putTypeOf = new Map<string, string>()
   private nextToken = 1
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
@@ -235,8 +308,31 @@ export class AgentRoomsService implements RoomsService {
 
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
-    if (linked && (options.refresh || !this.served)) this.served = { types: await this.backend.agentServedTypes() }
+    const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
+    if (linked && (options.refresh || unknownAged)) await this.askServed(options.refresh)
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
+  }
+
+  /**
+   * One ask of what the agent serves at a time: every caller that needs it while it is out waits for the same one.
+   * The agent's client sends one task at a time, and an agent that does not answer would otherwise be asked once per
+   * caller (each operation's check, every screen's read) and hold everything queued behind those asks.
+   *
+   * A refresh starts its own ask and does not join one already out: that one may have been sent to the agent before
+   * a switch, and its answer would be kept as the new agent's. Only the latest ask's answer is kept, whichever answers
+   * first.
+   */
+  private askServed(refresh = false): Promise<void> {
+    if (this.servedInFlight && !refresh) return this.servedInFlight
+    const asked = ++this.servedAsks
+    const latest = () => asked === this.servedAsks
+    this.servedInFlight = (async () => {
+      const types = await this.backend.agentServedTypes()
+      if (latest()) this.served = { types, at: this.now() }
+    })().finally(() => {
+      if (latest()) this.servedInFlight = undefined
+    })
+    return this.servedInFlight
   }
 
   private async require(operation: RoomsOperation): Promise<void> {
@@ -375,17 +471,33 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * A room's statuses, and what this build does not yet do in a room of its tier: writing is built for `open` rooms
-   * only (cleartext `rooms/records/put`). A sealed room's record is sealed and signed by the agent first
-   * (`rooms/keys/seal/0.2`), which is not built, so the composer says so instead of every post failing.
+   * A room's statuses, and what this build does not yet do in a room of its tier. Writing is built for `open` rooms
+   * (cleartext `rooms/records/put`) and `attributed` ones, whose record the agent signs as the member and seals
+   * first (`rooms/keys/seal/0.2`), so an agent without it cannot write there. Elsewhere the composer says writing
+   * is on its way instead of every post failing.
    */
   private async capabilitiesIn(room: KnownRoom): Promise<RoomCapabilities> {
     const statuses = deriveRoomCapabilities(await this.capabilities(), room)
-    if (statuses.write.status === 'available' && room.tier !== 'open')
+    // Files exist on attributed and private rooms only: upstream refuses them on an open room.
+    if (room.tier === 'open')
+      for (const op of ['listFiles', 'openFile'] as const)
+        statuses[op] = {
+          status: 'unavailable',
+          reason: 'notOnThisTier',
+          detail: 'files are shared in attributed and private rooms',
+        }
+    if (statuses.write.status !== 'available' || room.tier === 'open') return statuses
+    if (room.tier !== 'attributed')
       statuses.write = {
         status: 'comingSoon',
         reason: 'tierNotYet',
         detail: `writing to ${room.tier} rooms is not built yet`,
+      }
+    else if (!(this.served?.types ?? []).includes(ROOMS_TASK.keysSeal02))
+      statuses.write = {
+        status: 'unavailable',
+        reason: 'agentDoesNotServe',
+        detail: `the agent does not serve ${ROOMS_TASK.keysSeal02}`,
       }
     return statuses
   }
@@ -398,16 +510,34 @@ export class AgentRoomsService implements RoomsService {
     return room
   }
 
-  public async listNotes(roomId: string, options: { sinceVersion?: number } = {}): Promise<NoteList> {
+  public listNotes(roomId: string, options: { sinceVersion?: number } = {}): Promise<NoteList> {
+    const flightKey = `${roomId}\n${options.sinceVersion ?? 'all'}`
+    let flight = this.listingInFlight.get(flightKey)
+    if (!flight) {
+      const asked = this.readListing(roomId, options.sinceVersion).finally(() => {
+        if (this.listingInFlight.get(flightKey) === asked) this.listingInFlight.delete(flightKey)
+      })
+      this.listingInFlight.set(flightKey, asked)
+      flight = asked
+    }
+    // Each caller its own list, so one sorting or trimming it can't change what another holds.
+    return flight.then((list) => ({ ...list, notes: [...list.notes] }))
+  }
+
+  private async readListing(roomId: string, sinceVersion: number | undefined): Promise<NoteList> {
     const room = await this.requireInRoom(roomId, 'listNotes')
-    const { sinceVersion } = options
     const listing = parseBrowse(
-      await this.backend.agentTask(ROOMS_TASK.keysBrowse, {
+      await this.backend.agentTask(this.browseType(), {
         roomId,
         host: room.host,
         ...(sinceVersion !== undefined ? { sinceVersion } : {}),
       })
     )
+    for (const r of listing.records) {
+      // A version only goes up: an answer that arrives late never takes a record back.
+      const k = listedKey(roomId, r.key)
+      this.listed.set(k, Math.max(r.version, this.listed.get(k) ?? 0))
+    }
     return {
       notes: listing.records.map((r) => ({
         key: r.key,
@@ -423,12 +553,30 @@ export class AgentRoomsService implements RoomsService {
     }
   }
 
+  /**
+   * A post or note, from what was opened before when the room's last listing names that same version, else from the
+   * agent. Reopening a room read its whole first page again, one task at a time (ten reads, ~5 s on the lab sim,
+   * 10-30); a record at a new version (an edit, a retract) is read afresh. A copy reused this way carries the host
+   * check of the read that opened it, not a fresh one: a conflict found since shows on the listing's banner.
+   */
   public async readNote(roomId: string, key: string): Promise<Note> {
     const room = await this.requireInRoom(roomId, 'readNote')
+    const held = this.openedNow(roomId, key)
+    if (held) return this.noteOf(held)
     const opened = parseRead(await this.backend.agentTask(ROOMS_TASK.keysRead, { roomId, host: room.host, key }), (s) =>
       this.backend.decodeBase64Url(s)
     )
     if (!opened) throw new Error(`the agent's answer for note ${key} could not be read`)
+    this.keepOpened(roomId, opened)
+    // A read can find a newer version than the listing named (an edit since): that copy is the one to reuse. Only a
+    // version a listing already named moves; a read never starts one, so with no listing a read always asks.
+    const k = listedKey(roomId, opened.key)
+    const named = this.listed.get(k)
+    if (named !== undefined && opened.version > named) this.listed.set(k, opened.version)
+    return this.noteOf(opened)
+  }
+
+  private noteOf(opened: OpenedRecord): Note {
     const body = toInertText(opened.body)
     return {
       key: opened.key,
@@ -441,13 +589,59 @@ export class AgentRoomsService implements RoomsService {
       body,
       flags: inertFlags(body),
       check: opened.check,
+      ...(opened.file ? { files: [roomFileOf(opened.file, opened)] } : {}),
     }
+  }
+
+  /** The opened copy of the version the room's last listing names, if there is one (and it is now the newest used). */
+  private openedNow(roomId: string, key: string): OpenedRecord | undefined {
+    const version = this.listed.get(listedKey(roomId, key))
+    return version === undefined ? undefined : this.openedAt(roomId, key, version)
+  }
+
+  /** The opened copy of one version, made the newest used: a reuse from the files tab counts as much as the chat's. */
+  private openedAt(roomId: string, key: string, version: number): OpenedRecord | undefined {
+    const k = openedKey(roomId, key, version)
+    const held = this.opened.get(k)
+    if (held) {
+      this.opened.delete(k)
+      this.opened.set(k, held)
+    }
+    return held
+  }
+
+  /** Keep an opened record as the newest used, dropping the least recently used past MAX_OPENED_RECORDS. */
+  private keepOpened(roomId: string, record: OpenedRecord): void {
+    const k = openedKey(roomId, record.key, record.version)
+    this.opened.delete(k)
+    this.opened.set(k, record)
+    for (const oldest of this.opened.keys()) {
+      if (this.opened.size <= MAX_OPENED_RECORDS) break
+      this.opened.delete(oldest)
+    }
+    holdingOpened.add(this)
+  }
+
+  /** Drop every opened record and listed version (the wallet locked, or the person logged out). */
+  public dropOpenedRecords(): void {
+    this.opened.clear()
+    this.listed.clear()
+  }
+
+  private dropRoomReads(roomId: string): void {
+    const prefix = `${roomId}\n`
+    for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
+    for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
   }
 
   public async leaveViaCommunity(communityDid: string): Promise<void> {
     await this.require('leaveViaCommunity')
     await this.backend.leaveCommunity(communityDid)
-    for (const [id, room] of this.rooms) if (room.communityDid === communityDid) this.rooms.delete(id)
+    for (const [id, room] of this.rooms)
+      if (room.communityDid === communityDid) {
+        this.rooms.delete(id)
+        this.dropRoomReads(id)
+      }
   }
 
   /**
@@ -500,16 +694,21 @@ export class AgentRoomsService implements RoomsService {
 
   /** Every page of a community's offers to this member, and the renewals the first page carries. */
   private async offersOf(community: RoomsCommunity): Promise<{ items: OfferRecord[]; renewals: RenewalRecord[] }> {
-    let type: string = this.offersType.get(community.did) ?? ROOMS_TASK.offersList03
+    // The version the community last answered first, then the others newest first: a community older than renewals
+    // is read at 0.2, which carries none, and one that moved on to 0.4 alone (VTC 0.16) is still read.
+    const known = this.offersType.get(community.did)
+    const types: string[] = known ? [known, ...OFFERS_LIST_TYPES.filter((t) => t !== known)] : [...OFFERS_LIST_TYPES]
+    let type = types[0]
     let first: unknown
-    try {
-      first = await this.backend.communityTask(community.did, type, {})
-    } catch (e) {
-      const code = refusalCode(e)
-      // A community older than renewals is read at 0.2, which carries none.
-      if (type !== ROOMS_TASK.offersList03 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
-      type = ROOMS_TASK.offersList02
-      first = await this.backend.communityTask(community.did, type, {})
+    for (let i = 0; ; i++) {
+      type = types[i]
+      try {
+        first = await this.backend.communityTask(community.did, type, {})
+        break
+      } catch (e) {
+        const code = refusalCode(e)
+        if (i === types.length - 1 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
+      }
     }
     this.offersType.set(community.did, type)
     const page = parseOffers(first)
@@ -525,7 +724,7 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * Stores each renewal's credentials in the agent's vault in place of the ones they renew, never beside them: a
-   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list/0.3`).
+   * key holder holding two authorities from one room cannot choose between them (`vtc/rooms/offers/list` 0.3/0.4).
    * Storing one already stored is success, so whichever surface collects it first wins.
    */
   private async takeRenewals(community: RoomsCommunity, renewals: RenewalRecord[]): Promise<void> {
@@ -589,7 +788,7 @@ export class AgentRoomsService implements RoomsService {
     const served = this.served?.types ?? []
     const missing: string[] = [ROOMS_TASK.keysKeyPackage, ROOMS_TASK.keysWelcome].filter((t) => !served.includes(t))
     // The acceptance carries the agent's KeyPackage, so the agent completes it (`rooms/keys/act`, recipient item 10).
-    if (!this.actType()) missing.push(ROOMS_TASK.keysAct06)
+    if (!this.actType()) missing.push(KEYS_ACT_TYPES[0])
     if (missing.length > 0)
       throw new RoomsUnavailable('acceptOffer', 'agentDoesNotServe', `a ${offer.tier} room needs ${missing.join(', ')}`)
   }
@@ -719,10 +918,46 @@ export class AgentRoomsService implements RoomsService {
     }
   }
 
+  /**
+   * The newest `rooms/keys/browse` the agent serves. 0.3 asks the same and answers the same, plus the room's
+   * `lastPrune` (not read here); an agent that lists neither is asked 0.1, as before 0.3.
+   */
+  private browseType(): string {
+    const served = this.served?.types ?? []
+    return [ROOMS_TASK.keysBrowse03, ROOMS_TASK.keysBrowse].find((t) => served.includes(t)) ?? ROOMS_TASK.keysBrowse
+  }
+
   /** The newest `rooms/keys/act` the agent serves, if any. */
   private actType(): string | undefined {
     const served = this.served?.types ?? []
-    return [ROOMS_TASK.keysAct06, ROOMS_TASK.keysAct05].find((t) => served.includes(t))
+    return KEYS_ACT_TYPES.find((t) => served.includes(t))
+  }
+
+  /**
+   * A record put to `host`, completed as the member by the agent. From act 0.8 the agent completes put 0.3 as well as
+   * 0.1, and which one the host takes is the host's own: VTC 0.16 serves only 0.3, VTC 0.15 both, VTC 0.12 (the lab)
+   * only 0.1 and 0.2. So the version the host last took is sent first (else 0.3), and the other when the host does not
+   * serve it; 0.3 is 0.1 with optional members this client does not send. Before act 0.8 the agent completes only
+   * 0.1. A refused document did nothing, and the one sent again is new (`actAndSend`).
+   */
+  private async put(community: RoomsCommunity, host: string, payload: Record<string, unknown>): Promise<unknown> {
+    const act = this.actType()
+    const types: string[] =
+      act === ROOMS_TASK.keysAct09 || act === ROOMS_TASK.keysAct08
+        ? [ROOMS_TASK.recordsPut03, ROOMS_TASK.recordsPut]
+        : [ROOMS_TASK.recordsPut]
+    const took = this.putTypeOf.get(host)
+    if (took && types.includes(took)) types.sort((a, b) => Number(b === took) - Number(a === took))
+    for (let i = 0; ; i++) {
+      try {
+        const answer = await this.actAndSend('write', community, host, types[i], payload)
+        this.putTypeOf.set(host, types[i])
+        return answer
+      } catch (e) {
+        const code = refusalCode(e)
+        if (i === types.length - 1 || (code !== 'unsupportedVersion' && code !== 'unsupportedType')) throw e
+      }
+    }
   }
 
   /**
@@ -742,7 +977,7 @@ export class AgentRoomsService implements RoomsService {
       throw new RoomsUnavailable(
         operation,
         'agentDoesNotServe',
-        `the agent serves neither ${ROOMS_TASK.keysAct06} nor ${ROOMS_TASK.keysAct05}`
+        `the agent serves none of ${KEYS_ACT_TYPES.join(', ')}`
       )
     const document = {
       id: `urn:uuid:${this.backend.newId()}`,
@@ -833,7 +1068,8 @@ export class AgentRoomsService implements RoomsService {
       communityName: room.communityName,
       tier: room.tier,
       actingAs: room.actingAs,
-      visibleTo: 'membersAndHost',
+      // A sealed room's host holds only ciphertext.
+      visibleTo: room.tier === 'open' ? 'membersAndHost' : 'members',
       authorShown: true,
       title: toInertText(draft.title),
       body: toInertText(draft.body),
@@ -842,8 +1078,9 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * Writes the previewed note (`rooms/records/put/0.1`, open room: the host reads `cleartext`). A new note is
-   * create-only under a fresh random key; a replacement must still be at the version the preview read.
+   * Writes the previewed note (`rooms/records/put/0.1`): on an open room the host reads `cleartext`, on an attributed
+   * one it stores what the agent sealed (`writeSealed`). A new note is create-only under a fresh random key; a
+   * replacement must still be at the version the preview read.
    */
   public async confirmWrite(token: string): Promise<{ key: string; version: number }> {
     const pending = this.writes.get(token)
@@ -854,9 +1091,19 @@ export class AgentRoomsService implements RoomsService {
     const { title, body, replaceKey, idempotencyKey } = pending.draft
     const key = replaceKey ?? (idempotencyKey ? postKey(idempotencyKey) : `note/${this.backend.newId()}`)
     const expectedVersion = pending.replacedVersion ?? 0
+    if (room.tier === 'attributed')
+      return this.writeSealed(
+        room,
+        community,
+        host,
+        key,
+        expectedVersion,
+        { title, body },
+        !replaceKey && !!idempotencyKey
+      )
     let answer: unknown
     try {
-      answer = await this.actAndSend('write', community, host, ROOMS_TASK.recordsPut, {
+      answer = await this.put(community, host, {
         roomId: room.roomId,
         key,
         expectedVersion,
@@ -872,6 +1119,84 @@ export class AgentRoomsService implements RoomsService {
     const put = parsePut(answer)
     if (!put || put.key !== key) throw new Error(`the host answered the write of ${key} with something else`)
     return put
+  }
+
+  /**
+   * Writes a note to an attributed room, as `pnm rooms put` does (VTA 0.67). The phone builds the record's body
+   * naming the member as its author, without a proof; the agent signs it as the member and seals it
+   * (`rooms/keys/seal/0.2`, `signAsPrincipal`), and the sealed form is put as the member like any write.
+   *
+   * The seal binds the version, and the host assigns versions from a room-wide counter, so the version is predicted
+   * as the room's newest plus one. When another write took it, the note is stored but sealed for another version and
+   * does not open: it is sealed again for the next version and written over exactly what landed, a few times.
+   * `ownKey`: the key is this post's own, so a record already there at the first try is this post, sent again
+   * after its answer was lost.
+   */
+  private async writeSealed(
+    room: KnownRoom,
+    community: RoomsCommunity,
+    host: string,
+    key: string,
+    expectedVersion: number,
+    note: { title: string; body: string },
+    ownKey: boolean
+  ): Promise<{ key: string; version: number }> {
+    let intended = (await this.headVersion(room)) + 1
+    let expected = expectedVersion
+    let landed = 0
+    for (let attempt = 0; attempt < SEALED_WRITE_ATTEMPTS; attempt++) {
+      const unsigned = {
+        roomId: room.roomId,
+        key,
+        version: intended,
+        author: community.personaDid,
+        ...(note.title.trim() ? { title: note.title } : {}),
+        body: note.body,
+      }
+      const sealed = parseSealed(
+        await this.agentStep('write', 'sign and seal the note as the member', ROOMS_TASK.keysSeal02, {
+          roomId: room.roomId,
+          key,
+          version: intended,
+          plaintext: this.backend.encodeBase64Url(JSON.stringify(unsigned)),
+          signAsPrincipal: true,
+        })
+      )
+      if (!sealed) throw new Error(`the agent answered the seal of ${key} with something else`)
+      let answer: unknown
+      try {
+        answer = await this.put(community, host, {
+          roomId: room.roomId,
+          key,
+          expectedVersion: expected,
+          sealed,
+        })
+      } catch (e) {
+        const refused = await this.hostRefusal('write', room, key, expected, e)
+        if (attempt === 0 && ownKey && refused instanceof RoomsConflict) return { key, version: refused.currentVersion }
+        throw refused
+      }
+      const put = parsePut(answer)
+      if (!put || put.key !== key) throw new Error(`the host answered the write of ${key} with something else`)
+      if (put.version === intended) return put
+      landed = put.version
+      expected = landed
+      intended = landed + 1
+    }
+    throw new RoomsRefused(
+      'write',
+      'roomKeptMoving',
+      true,
+      `${key} is stored at version ${landed} but sealed for another version, so it does not open: the room kept moving`
+    )
+  }
+
+  /** The newest version among the room's records, as the agent lists them; 0 for an empty room. */
+  private async headVersion(room: KnownRoom): Promise<number> {
+    const listing = parseBrowse(
+      await this.agentStep('write', 'list the room', this.browseType(), { roomId: room.roomId, host: room.host })
+    )
+    return listing.records.reduce((head, r) => Math.max(head, r.version), 0)
   }
 
   /** Pins, unpins or retracts a note (`rooms/records/curate/0.1`). Any tier: the host sees only the key. */
@@ -935,8 +1260,41 @@ export class AgentRoomsService implements RoomsService {
     }
     return new RoomsRefused(operation, code, false, message(e))
   }
-  public listFiles(): Promise<RoomFile[]> {
-    return this.notYet('listFiles')
+  /**
+   * The room's files. No task lists them: a file is described in its record's sealed body, so the room is browsed
+   * and each live record opened in turn, keeping what was opened by key and version so a second look reads only
+   * what changed. This loop awaits each read, so it does not use the client's read lane (up to VTA_READ_LANE_SIZE
+   * reads at once, see trust-tasks/module/vtaReadLane.ts). Because a second look reuses what was opened, the
+   * one-after-another cost falls on a first open; a warm open hides it. A record that can't be opened is left out;
+   * if none could be and there were some to open, that failure is the answer rather than "no files".
+   */
+  public async listFiles(roomId: string): Promise<RoomFile[]> {
+    const room = await this.requireInRoom(roomId, 'listFiles')
+    const listing = parseBrowse(await this.backend.agentTask(this.browseType(), { roomId, host: room.host }))
+    const files: RoomFile[] = []
+    let opened = 0
+    let failure: unknown
+    for (const record of listing.records) {
+      if (record.status === 'retracted') continue
+      let read = this.openedAt(roomId, record.key, record.version)
+      if (!read) {
+        try {
+          read = parseRead(
+            await this.backend.agentTask(ROOMS_TASK.keysRead, { roomId, host: room.host, key: record.key }),
+            (s) => this.backend.decodeBase64Url(s)
+          )
+        } catch (e) {
+          failure = e
+          continue
+        }
+        if (!read) continue
+        this.keepOpened(roomId, read)
+      }
+      opened++
+      if (read.file) files.push(roomFileOf(read.file, read))
+    }
+    if (opened === 0 && failure !== undefined) throw failure
+    return files
   }
   public openFile(): Promise<OpenedFile> {
     return this.notYet('openFile')

@@ -66,6 +66,8 @@ export type RoomsReason =
   | 'noRight'
   | 'communityUnreachable'
   | 'tierNotYet'
+  // Never in this kind of room: files exist on attributed and private rooms only (upstream refuses them on open ones).
+  | 'notOnThisTier'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -395,6 +397,8 @@ export interface RoomsService {
   readonly isSample: boolean
   /** For logs and support. The sample service puts its build marker here, where it is read at runtime. */
   readonly label: string
+  /** The app's agent a real service is built on (`RoomsBackend.runsOn`); none for the sample. */
+  readonly runsOn?: object
   /** One status per operation. Cached per agent; `refresh` asks again. */
   capabilities(options?: { refresh?: boolean }): Promise<RoomsCapabilities>
 
