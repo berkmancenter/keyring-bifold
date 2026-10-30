@@ -125,6 +125,8 @@ const RoomMessageRow: React.FC<RoomMessageRowProps> = ({ row, onOpen }) => {
       fontWeight: unread ? '600' : '400',
     },
     bottom: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    previewSlot: { flex: 1, minWidth: 0, justifyContent: 'center' },
+    spinner: { position: 'absolute', left: 0 },
     preview: {
       flex: 1,
       minWidth: 0,
@@ -212,11 +214,15 @@ const RoomMessageRow: React.FC<RoomMessageRowProps> = ({ row, onOpen }) => {
               </View>
               <View style={styles.bottom}>
                 {reading ? (
-                  <View style={styles.preview}>
+                  // The preview's own empty line keeps the row's height at any text size; the spinner sits over it.
+                  <View style={styles.previewSlot}>
+                    <ThemedText style={styles.preview} numberOfLines={1} importantForAccessibility="no">
+                      {' '}
+                    </ThemedText>
                     <ActivityIndicator
                       size="small"
                       color={ColorPalette.brand.primary}
-                      style={{ alignSelf: 'flex-start' }}
+                      style={styles.spinner}
                       accessibilityLabel={line}
                     />
                   </View>

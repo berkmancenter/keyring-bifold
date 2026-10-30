@@ -347,19 +347,27 @@ describe('a room not read yet', () => {
     expect(list.result.current.rows.failed).toBe(false)
   })
 
-  test('away from the app, a retry due reads nothing and is put off, not spent', async () => {
+  test('away from the app, a retry due reads nothing and keeps no timer; coming back reads at once and counts it', async () => {
     const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
     s.listNotes.mockRejectedValue(new Error('agent not ready'))
     mount(s)
     await flush()
     Object.defineProperty(AppState, 'currentState', { value: 'background', writable: true, configurable: true })
-    await step(ROWS_RETRY_MS[2] * 3)
-    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
-    // Back within the return floor: no read on return, but every retry is still to come.
-    Object.defineProperty(AppState, 'currentState', { value: 'active', writable: true, configurable: true })
     await step(ROWS_RETRY_MS[0])
+    // Nothing read, and no retry armed again: nothing wakes the app while it is away.
+    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
+    const armed = jest.spyOn(global, 'setTimeout')
+    await step(ROWS_RETRY_MS[2] * 10)
+    expect(armed.mock.calls.filter(([, ms]) => (ROWS_RETRY_MS as readonly unknown[]).includes(ms))).toHaveLength(0)
+    armed.mockRestore()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
+    // Back within the return floor: it reads at once all the same, and the rest of the retries follow.
+    Object.defineProperty(AppState, 'currentState', { value: 'active', writable: true, configurable: true })
+    await act(async () => onAppState?.('active'))
     expect(s.listMyRooms).toHaveBeenCalledTimes(2)
     await step(ROWS_RETRY_MS[1] + ROWS_RETRY_MS[2])
+    expect(s.listMyRooms).toHaveBeenCalledTimes(ROWS_RETRY_MS.length + 1)
+    await step(ROWS_RETRY_MS[2] * 3)
     expect(s.listMyRooms).toHaveBeenCalledTimes(ROWS_RETRY_MS.length + 1)
   })
 })

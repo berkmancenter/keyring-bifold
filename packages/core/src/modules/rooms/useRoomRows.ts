@@ -295,13 +295,14 @@ async function readAll(service: RoomsService): Promise<void> {
   }
 }
 
-const retry: { timer?: ReturnType<typeof setTimeout>; tries: number } = { tries: 0 }
+const retry: { timer?: ReturnType<typeof setTimeout>; tries: number; pending?: boolean } = { tries: 0 }
 
 /**
  * After a read that left a room unread, or failed, reads again after the next of {@link ROWS_RETRY_MS}; after the
  * last, it waits for the usual moments. A read that has every room read starts the count again. A retry due while a
  * read is out is that read's to decide (refreshRoomRows reads one at a time). One due while the app is away reads
- * nothing and is put off, not spent: a cold launch sent straight to the background still has its retries on return.
+ * nothing and waits, with no timer, for the app to come back, which then reads at once (no return floor) and counts it:
+ * a cold launch sent straight to the background still has its retries, and nothing wakes the app while it is away.
  */
 function retrySoon(service: RoomsService, needed: boolean): void {
   if (retry.timer) clearTimeout(retry.timer)
@@ -316,7 +317,7 @@ function retrySoon(service: RoomsService, needed: boolean): void {
     retry.timer = undefined
     if (feed.service !== service) return
     if (AppState.currentState !== 'active') {
-      retry.timer = setTimeout(due, delay)
+      retry.pending = true
       return
     }
     retry.tries++
@@ -329,6 +330,15 @@ const stopRetrying = () => {
   if (retry.timer) clearTimeout(retry.timer)
   retry.timer = undefined
   retry.tries = 0
+  retry.pending = false
+}
+
+/** Coming back to the app: a retry that came due while away reads now, else a read unless the last is recent. */
+const readOnReturn = () => {
+  if (!retry.pending) return refreshRoomRows(ROWS_RETURN_FLOOR_MS)
+  retry.pending = false
+  retry.tries++
+  refreshRoomRows()
 }
 
 /** Reads again, unless a read is out or the last one is under `floor` old. */
@@ -438,7 +448,7 @@ export function useRoomRowsPoll(service: RoomsService | undefined, linked: boole
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refreshRoomRows(ROWS_RETURN_FLOOR_MS)
+      if (state === 'active') readOnReturn()
     })
     const timer = setInterval(() => {
       if (feed.inView > 0 && AppState.currentState === 'active') refreshRoomRows()
