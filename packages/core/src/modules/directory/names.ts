@@ -6,7 +6,8 @@
  * - only names a room has shown, never a list of the community's members (`vtc/directory/entries/show/0.1`: a viewer
  *   "MUST NOT reuse [the projection] to build a list of the community's members outside the directory");
  * - in the agent's encrypted store, as one record per community, never in AsyncStorage;
- * - each for `NAME_TTL_MS`, after which the community is asked again;
+ * - each for `NAME_TTL_MS`: what a room shows before the community answers, and offline. A room asks again each time
+ *   it opens (`useDirectoryNames`), so a new name or a rename shows then, not after the week;
  * - dropped when the community no longer shows it (`notFound`), and all of a community's when the phone leaves it.
  *
  * A drop rewrites the community's record without the name rather than deleting a record per member, so nothing is
@@ -21,7 +22,7 @@ import { createKeyLock } from '../../utils/keyLock'
 const NAMES_TYPE = 'directory-names'
 const recordId = (communityDid: string) => `${NAMES_TYPE}:${communityDid}`
 
-/** How long a name is kept before the community is asked again: a week. */
+/** How long a name is kept to show offline: a week. */
 export const NAME_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 type Kept = Record<string, { name: string; at: number }>
