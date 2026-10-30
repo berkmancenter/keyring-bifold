@@ -98,6 +98,8 @@ export interface RoomsListBodyProps {
   acrossCommunities: boolean
   onOpenRoom?: (room: RoomSummary) => void
   onOpenOffer?: (offer: RoomOffer) => void
+  /** What shows while the rooms are read; the app's spinner unless a screen draws its own (a community's rows). */
+  whileReading?: React.ReactNode
 }
 
 export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
@@ -105,6 +107,7 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
   acrossCommunities,
   onOpenRoom,
   onOpenOffer,
+  whileReading,
 }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
@@ -126,8 +129,10 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
         />
       </View>
     )
-  if (!capabilities)
-    return <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  const reading = whileReading ?? (
+    <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  )
+  if (!capabilities) return <>{reading}</>
 
   const unavailable = roomsStatusText(t, capabilities.listMyRooms, 'listMyRooms')
   if (unavailable)
@@ -136,7 +141,7 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
         {unavailable}
       </ThemedText>
     )
-  if (!rooms) return <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  if (!rooms) return <>{reading}</>
 
   const waiting = offers ?? []
   const groups = acrossCommunities ? groupRooms(rooms) : [{ key: 'one', title: undefined, rooms }]
