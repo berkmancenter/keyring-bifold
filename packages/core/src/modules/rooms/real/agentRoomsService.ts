@@ -288,7 +288,7 @@ export class AgentRoomsService implements RoomsService {
   private listingInFlight = new Map<string, Promise<NoteList>>()
   /** A record's read being asked now, by room and key: every caller that reads it meanwhile waits for the same one. */
   private readsInFlight = new Map<string, Promise<OpenedRecord>>()
-  /** How many times the opened records were dropped (a lock): a read asked before the last one is not kept. */
+  /** How many times opened records were dropped (a lock, a leave): a read asked before the last one is not kept. */
   private drops = 0
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
@@ -569,7 +569,8 @@ export class AgentRoomsService implements RoomsService {
     if (held) return this.noteOf(held)
     // One read of a record at a time, shared by every caller while it is out: opening a room reads its newest records
     // for the chat and for its Notes tab at the same moment, so ten of an open's first twenty reads were the same
-    // records twice (a tester's run, 10-30). A read that starts after one settles asks again.
+    // records twice (a tester's run, 10-30). A read that starts after one settles asks again. Shared by the key
+    // asked for; readRecord moves the listed version by the key the agent answered with.
     const k = listedKey(roomId, key)
     let read = this.readsInFlight.get(k)
     if (!read) {
@@ -660,6 +661,8 @@ export class AgentRoomsService implements RoomsService {
     for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
     for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
     for (const k of [...this.readsInFlight.keys()]) if (k.startsWith(prefix)) this.readsInFlight.delete(k)
+    // A read of the room still out answers its caller but is not kept, as at a lock (readRecord).
+    this.drops++
   }
 
   public async leaveViaCommunity(communityDid: string): Promise<void> {

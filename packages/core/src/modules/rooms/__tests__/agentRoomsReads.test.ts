@@ -316,6 +316,21 @@ describe('a post read by two surfaces at once', () => {
     await Promise.all([before, after])
   })
 
+  it('a read out when the member leaves the community answers its caller, and is not kept', async () => {
+    const { b, open, tick } = heldReads([record('p1', 1)])
+    const service = new AgentRoomsService(b)
+    await service.listMyRooms()
+    await service.listNotes(ROOM)
+    const before = service.readNote(ROOM, 'p1')
+    await tick()
+    await service.leaveViaCommunity(COMMUNITY.did)
+    open(0)
+    expect(String((await before).body)).toBe('words of p1')
+    // Nothing of the room just left is kept.
+    const opened = (service as unknown as { opened: Map<string, unknown> }).opened
+    expect([...opened.keys()].filter((k) => k.startsWith(`${ROOM}\n`))).toEqual([])
+  })
+
   it('a read that answers after the lock answers its caller, and is not kept', async () => {
     const { b, reads, open, tick } = heldReads([record('p1', 1)])
     const service = new AgentRoomsService(b)
