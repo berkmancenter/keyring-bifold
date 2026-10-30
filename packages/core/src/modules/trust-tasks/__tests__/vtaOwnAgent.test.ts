@@ -1065,12 +1065,26 @@ describe('creating an agent', () => {
     expect(deleteKey).not.toHaveBeenCalled()
   })
 
-  it('a claim given up records no Farm on a later link of the same agent made another way', async () => {
+  it('a claimed agent that takes its key only later still keeps its Farm', async () => {
     const { vta, disk } = freshPhone({ deviceCanOwn: jest.fn(async () => true) })
+    const key = await vta.createClaimKey(agent)
+    await vta.finishClaimedLink(agent, VTA, key, FARM)
+    expect(vta.getState().link).toMatchObject({ kind: 'showingKey', vtaDid: VTA, did: TEMPORARY })
+    mockVta.acl.set(TEMPORARY, { role: 'admin' })
+    await vta.checkManualGrant(agent)
+    expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: VTA })
+    expect(disk.link?.farmLogin).toEqual({ farmDid: FARM, did: TEMPORARY })
+  })
+
+  // A guard: on main nothing records a Farm at all, so this passes there too.
+  it('a claim given up records no Farm on a later link of the same agent made with another key', async () => {
+    const { vta, disk } = freshPhone({ deviceCanOwn: jest.fn(async () => true) })
+    // Restored, as in the app: a cancel then forgets the key given up (IN-135), and the next link makes a new one.
+    await vta.restore(agent)
     await vta.finishClaimedLink(agent, VTA, 'did:key:z6MkClaimedThenGivenUp', FARM)
     expect(vta.getState().link).toMatchObject({ kind: 'showingKey', vtaDid: VTA })
     vta.cancelLink()
-    await until(() => vta.getState().link.kind === 'notLinked')
+    await until(() => vta.getState().link.kind === 'notLinked' && disk.manager === undefined)
     mockMinted = []
     await vta.startManualLink(agent, VTA, 'farm.example')
     mockVta.acl.set(TEMPORARY, { role: 'admin' })
