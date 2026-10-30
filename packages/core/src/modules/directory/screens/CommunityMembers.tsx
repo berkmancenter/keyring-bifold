@@ -36,18 +36,9 @@ const CommunityMembers: React.FC = () => {
   const unnamed = members.rows.length - named.length
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
-    content: { flexGrow: 1, paddingHorizontal: 16, paddingVertical: 16, gap: 12 },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      minHeight: 44,
-      padding: 12,
-      borderRadius: 10,
-      // The screen and a filled card are the same grey in Keyring's theme: the border is what shows the row.
-      borderWidth: 1,
-      borderColor: ColorPalette.grayscale.lightGrey,
-    },
+    content: { flexGrow: 1, paddingHorizontal: 16, paddingVertical: 16 },
+    // Flat rows, as the Messages list draws them: a hairline under the words, starting after the initials.
+    row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56 },
     disc: {
       width: 40,
       height: 40,
@@ -56,11 +47,19 @@ const CommunityMembers: React.FC = () => {
       justifyContent: 'center',
       backgroundColor: ColorPalette.brand.primary,
     },
-    initials: { color: ColorPalette.grayscale.white },
-    words: { flex: 1, gap: 2 },
+    initials: { color: ColorPalette.grayscale.white, fontSize: 16 },
+    words: {
+      flex: 1,
+      gap: 2,
+      alignSelf: 'stretch',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: ColorPalette.grayscale.lightGrey,
+    },
     muted: { color: ColorPalette.grayscale.mediumGrey },
-    lead: { color: ColorPalette.grayscale.mediumGrey, fontSize: 15 },
-    footer: { paddingVertical: 8, gap: 8 },
+    lead: { color: ColorPalette.grayscale.mediumGrey, fontSize: 15, marginBottom: 8 },
+    footer: { paddingVertical: 12, gap: 8 },
   })
 
   const loadMore = () => {
