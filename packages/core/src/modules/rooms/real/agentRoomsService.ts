@@ -161,6 +161,11 @@ const SEALED_WRITE_ATTEMPTS = 4
 
 /** How many pages of a community's membership record, or of its offers, to read before stopping. */
 const MAX_MEMBERSHIP_PAGES = 10
+/**
+ * How soon an agent that could not say what it serves is asked again. Its answer was kept until a pull to refresh:
+ * one lost while the session reopened after an unlock left a room on "Couldn't reach your agent" (#772, 10-30).
+ */
+export const SERVED_UNKNOWN_RETRY_MS = 10_000
 
 /**
  * How often an accept the community answers `admissionPending` is sent again, identically, before the refusal
@@ -252,7 +257,10 @@ export class AgentRoomsService implements RoomsService {
   public readonly isSample = false
   public readonly label = 'rooms: the person’s own agent and communities'
 
-  private served?: { types: readonly string[] | undefined }
+  private served?: { types: readonly string[] | undefined; at: number }
+  private servedInFlight?: Promise<void>
+  /** How many asks of what the agent serves were started: only the latest one's answer is kept. */
+  private servedAsks = 0
   private heldInFlight?: Promise<HeldRoom[]>
   private rooms = new Map<string, KnownRoom>()
   private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
@@ -288,8 +296,31 @@ export class AgentRoomsService implements RoomsService {
 
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
-    if (linked && (options.refresh || !this.served)) this.served = { types: await this.backend.agentServedTypes() }
+    const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
+    if (linked && (options.refresh || unknownAged)) await this.askServed(options.refresh)
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
+  }
+
+  /**
+   * One ask of what the agent serves at a time: every caller that needs it while it is out waits for the same one.
+   * The agent's client sends one task at a time, and an agent that does not answer would otherwise be asked once per
+   * caller (each operation's check, every screen's read) and hold everything queued behind those asks.
+   *
+   * A refresh starts its own ask and does not join one already out: that one may have been sent to the agent before
+   * a switch, and its answer would be kept as the new agent's. Only the latest ask's answer is kept, whichever answers
+   * first.
+   */
+  private askServed(refresh = false): Promise<void> {
+    if (this.servedInFlight && !refresh) return this.servedInFlight
+    const asked = ++this.servedAsks
+    const latest = () => asked === this.servedAsks
+    this.servedInFlight = (async () => {
+      const types = await this.backend.agentServedTypes()
+      if (latest()) this.served = { types, at: this.now() }
+    })().finally(() => {
+      if (latest()) this.servedInFlight = undefined
+    })
+    return this.servedInFlight
   }
 
   private async require(operation: RoomsOperation): Promise<void> {
@@ -1178,9 +1209,11 @@ export class AgentRoomsService implements RoomsService {
   }
   /**
    * The room's files. No task lists them: a file is described in its record's sealed body, so the room is browsed
-   * and each live record opened, one at a time (the agent sends one task at a time), keeping what was opened by key
-   * and version so a second look reads only what changed. A record that can't be opened is left out; if none could
-   * be and there were some to open, that failure is the answer rather than "no files".
+   * and each live record opened in turn, keeping what was opened by key and version so a second look reads only
+   * what changed. This loop awaits each read, so it does not use the client's read lane (up to VTA_READ_LANE_SIZE
+   * reads at once, see trust-tasks/module/vtaReadLane.ts). Because a second look reuses what was opened, the
+   * one-after-another cost falls on a first open; a warm open hides it. A record that can't be opened is left out;
+   * if none could be and there were some to open, that failure is the answer rather than "no files".
    */
   public async listFiles(roomId: string): Promise<RoomFile[]> {
     const room = await this.requireInRoom(roomId, 'listFiles')
