@@ -456,6 +456,8 @@ export function useRoomRowsPoll(service: RoomsService | undefined, linked: boole
     return () => {
       sub?.remove()
       clearInterval(timer)
+      // Nothing scheduled outlives the poll: a retry due after it unmounts would read for no one.
+      stopRetrying()
     }
   }, [])
 }
