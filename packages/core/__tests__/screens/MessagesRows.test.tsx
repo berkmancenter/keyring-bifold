@@ -11,10 +11,15 @@ import {
   DidCommDidExchangeRole,
   DidCommDidExchangeState,
 } from '@credo-ts/didcomm'
-import { fireEvent, render } from '@testing-library/react-native'
+import { fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
 
 import { StoreContext } from '../../src'
+import {
+  cancelChatDelete,
+  resetPendingChatDeletes,
+  scheduleChatDelete,
+} from '../../src/modules/chat/pendingChatDeletes'
 import Messages from '../../src/screens/Messages'
 import { testIdWithKey } from '../../src/utils/testable'
 import { testDefaultState } from '../contexts/store'
@@ -205,5 +210,60 @@ describe('conversations only (L3)', () => {
     const header = render(<BasicAppContext>{options.headerRight({})}</BasicAppContext>)
     fireEvent.press(header.getByTestId(testIdWithKey('MessagesNewMessage')))
     expect(navigation.navigate).toHaveBeenCalledWith('New Message')
+  })
+})
+
+describe('deleting from the list (L4)', () => {
+  afterEach(() => resetPendingChatDeletes())
+
+  test('a chat being deleted leaves the list at once; Undo brings it back', () => {
+    const deleteChat = jest.fn(async () => undefined)
+    scheduleChatDelete({ key: 'conn-ada', connectionIds: ['conn-ada'], deleteChat })
+    expect(opened(list(false))).not.toContain('conn-ada')
+    cancelChatDelete('conn-ada')
+    expect(opened(list(false))).toContain('conn-ada')
+    expect(deleteChat).not.toHaveBeenCalled()
+  })
+
+  test('the rows swipe inside a gesture-handler root view (the app has none above the screen)', () => {
+    const tree = list(false)
+    expect(rows(tree).length).toBeGreaterThan(0)
+    expect(
+      within(tree.getByTestId(testIdWithKey('MessagesGestureRoot'))).queryAllByTestId(testIdWithKey('Contact'))
+    ).toHaveLength(rows(tree).length)
+  })
+
+  test("a merged contact's row leaves whole while any of its connections is being deleted", () => {
+    mockLinks = bobMerged
+    scheduleChatDelete({ key: 'bob', connectionIds: ['conn-a', 'conn-b', 'conn-c'], deleteChat: async () => undefined })
+    expect(opened(list(false))).toEqual(['conn-ada'])
+  })
+})
+
+describe('search by name (L5)', () => {
+  const type = (tree: ReturnType<typeof list>, text: string) =>
+    fireEvent.changeText(tree.getByTestId(testIdWithKey('MessagesSearch')), text)
+
+  test('narrows the list to the names that match, ignoring case and accents', () => {
+    const tree = list(false)
+    type(tree, 'ADA')
+    expect(opened(tree)).toEqual(['conn-ada'])
+    type(tree, 'bób')
+    expect(opened(tree)).toEqual(['conn-c', 'conn-b', 'conn-a'])
+  })
+
+  test('no name matches: says so, not "no chats yet"; Clear brings every row back', () => {
+    const tree = list(false)
+    type(tree, 'xyz')
+    expect(rows(tree)).toHaveLength(0)
+    expect(tree.getByTestId(testIdWithKey('MessagesNoMatch'))).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('MessagesEmpty'))).toBeNull()
+    fireEvent.press(tree.getByTestId(testIdWithKey('MessagesSearchClear')))
+    expect(opened(tree)).toEqual(['conn-c', 'conn-b', 'conn-ada', 'conn-a'])
+  })
+
+  test('nothing to search before the first conversation', () => {
+    mockSaid = []
+    expect(list(false).queryByTestId(testIdWithKey('MessagesSearch'))).toBeNull()
   })
 })

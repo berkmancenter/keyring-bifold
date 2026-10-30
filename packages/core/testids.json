@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "cab832bc9ffbbc48c671b8912f988b569b4c891e",
+  "generatedFrom": "f0d7697451c7ac676f4749ce8cc4f9ccb75df14f",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -471,6 +471,9 @@
       "src/modules/openid/screens/OpenIDCredentialOffer.tsx",
       "src/screens/CredentialOffer.tsx"
     ],
+    "DeleteChatCancel": ["src/components/listItems/DeleteChatSheet.tsx"],
+    "DeleteChatConfirm": ["src/components/listItems/DeleteChatSheet.tsx"],
+    "DeleteChatSheet": ["src/components/listItems/DeleteChatSheet.tsx"],
     "DenyConsentButton": [
       "src/modules/trust-tasks/screens/MyAgent.ids.ts",
       "src/modules/trust-tasks/screens/RequestCard.tsx"
@@ -743,9 +746,17 @@
     "MessagesEmptyAddContact": ["src/screens/Messages.tsx"],
     "MessagesEmptyNewMessage": ["src/screens/Messages.tsx"],
     "MessagesFetchingNew": ["src/screens/Messages.tsx"],
+    "MessagesGestureRoot": ["src/screens/Messages.tsx"],
+    "MessagesListDelete": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListTimer": ["src/components/listItems/ContactListItem.tsx"],
-    "MessagesListUnread": ["src/components/listItems/ContactListItem.tsx"],
+    "MessagesListUnread": [
+      "src/components/listItems/ContactListItem.tsx",
+      "src/modules/rooms/components/RoomMessageRow.tsx"
+    ],
     "MessagesNewMessage": ["src/screens/Messages.tsx"],
+    "MessagesNoMatch": ["src/screens/Messages.tsx"],
+    "MessagesSearch": ["src/screens/Messages.tsx"],
+    "MessagesSearchClear": ["src/screens/Messages.tsx"],
     "MyAgent": ["src/navigators/TabStack.tsx"],
     "MyAgentActivity": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
     "MyAgentApprovalCard": ["src/modules/trust-tasks/screens/MyAgent.ids.ts"],
@@ -938,6 +949,7 @@
     "RoomFilesNone": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFilesReading": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFilesUnavailable": ["src/modules/rooms/components/RoomFilesTab.tsx"],
+    "RoomFloatingDay": ["src/modules/rooms/screens/Room.tsx"],
     "RoomHeader": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomHostConflict": ["src/modules/rooms/screens/Room.tsx"],
     "RoomIdentityAddName": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
@@ -966,6 +978,7 @@
     "RoomMembersReading": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMembersUnavailable": ["src/modules/rooms/components/RoomMembersTab.tsx"],
     "RoomMembersYourAccess": ["src/modules/rooms/components/RoomMembersTab.tsx"],
+    "RoomMessageRow": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMonogram": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomNoteBack": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteBodyInput": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -997,6 +1010,8 @@
     "RoomOfferAccept": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferAccess": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferActingAs": ["src/modules/rooms/screens/RoomOffer.tsx"],
+    "RoomOfferCard": ["src/modules/rooms/components/RoomOfferCard.tsx"],
+    "RoomOfferCardLook": ["src/modules/rooms/components/RoomOfferCard.tsx"],
     "RoomOfferDisclosure": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferFailed": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferNotNow": ["src/modules/rooms/screens/RoomOffer.tsx"],
@@ -1172,6 +1187,8 @@
     "TrustTaskApprovalTitle": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskApprove": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskDeny": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
+    "UndoToast": ["src/components/toast/UndoToast.tsx"],
+    "UndoToastUndo": ["src/components/toast/UndoToast.tsx"],
     "UnverifiedProofView": ["src/screens/ProofDetails.tsx"],
     "UpdateLater": ["src/screens/UpdateAvailable.tsx"],
     "UpdateNow": ["src/screens/UpdateAvailable.tsx"],
