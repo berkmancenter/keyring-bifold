@@ -5,7 +5,7 @@
  */
 import { act, renderHook } from '@testing-library/react-native'
 
-import { DRAFT_SAVE_DELAY_MS, useChatDraft } from '../useChatDraft'
+import { type ChatDraft, DRAFT_SAVE_DELAY_MS, useChatDraft } from '../useChatDraft'
 
 const mockLoad = jest.fn()
 const mockSave = jest.fn(async (_agent: unknown, _connectionId: string, _text: string) => undefined)
@@ -14,7 +14,8 @@ jest.mock('../draft', () => ({
   saveChatDraft: (...args: [unknown, string, string]) => mockSave(...args),
 }))
 
-const newAgent = () => ({ config: { logger: { warn: jest.fn() } } }) as never
+type FakeAgent = Parameters<typeof useChatDraft>[0]
+const newAgent = (): FakeAgent => ({ config: { logger: { warn: jest.fn() } } }) as unknown as FakeAgent
 const deferred = () => {
   let resolve: (text: string | undefined) => void = () => undefined
   const promise = new Promise<string | undefined>((r) => (resolve = r))
@@ -31,7 +32,8 @@ afterEach(() => jest.useRealTimers())
 
 test('a send saves the empty field at once; typed text still waits for the pause', async () => {
   mockLoad.mockResolvedValue(undefined)
-  const { result } = renderHook(() => useChatDraft(newAgent(), 'c1'))
+  const agent = newAgent()
+  const { result } = renderHook(() => useChatDraft(agent, 'c1'))
   await flush()
   act(() => result.current.onTextChange('half a thought'))
   act(() => jest.advanceTimersByTime(DRAFT_SAVE_DELAY_MS - 1))
@@ -45,15 +47,33 @@ test('a send saves the empty field at once; typed text still waits for the pause
 
 test('an untouched chat gets its kept draft back', async () => {
   mockLoad.mockResolvedValue('half a thought')
-  const { result } = renderHook(() => useChatDraft(newAgent(), 'c1'))
+  const agent = newAgent()
+  const { result } = renderHook(() => useChatDraft(agent, 'c1'))
   await flush()
   expect(result.current.saved).toBe('half a thought')
+})
+
+// On main this cleared the kept draft 400 ms after the chat opened, with the draft still on screen.
+test("opening a chat keeps its draft: gifted-chat's '' as it lays out the empty field is not a change", async () => {
+  const read = deferred()
+  mockLoad.mockReturnValue(read.promise)
+  const agent = newAgent()
+  const { result } = renderHook(() => useChatDraft(agent, 'c1'))
+  act(() => result.current.onTextChange(''))
+  await act(async () => read.resolve('half a thought'))
+  await flush()
+  expect(result.current.saved).toBe('half a thought')
+  act(() => jest.advanceTimersByTime(DRAFT_SAVE_DELAY_MS * 3))
+  expect(mockSave).not.toHaveBeenCalled()
 })
 
 test('a first read that answers after a send is ignored', async () => {
   const read = deferred()
   mockLoad.mockReturnValue(read.promise)
-  const { result } = renderHook(() => useChatDraft(newAgent(), 'c1'))
+  const agent = newAgent()
+  const { result } = renderHook(() => useChatDraft(agent, 'c1'))
+  // Typed and sent before the first read answers.
+  act(() => result.current.onTextChange('on my way'))
   act(() => result.current.onTextChange(''))
   await act(async () => read.resolve('half a thought'))
   await flush()
@@ -62,7 +82,7 @@ test('a first read that answers after a send is ignored', async () => {
 
 test('a re-read when the agent restarts does not bring back a draft already sent', async () => {
   mockLoad.mockResolvedValue('half a thought')
-  const { result, rerender } = renderHook(({ agent }) => useChatDraft(agent, 'c1'), {
+  const { result, rerender } = renderHook<ChatDraft, { agent: FakeAgent }>(({ agent }) => useChatDraft(agent, 'c1'), {
     initialProps: { agent: newAgent() },
   })
   await flush()
@@ -78,8 +98,11 @@ test('a re-read when the agent restarts does not bring back a draft already sent
 test('another chat on the same screen gets its own kept draft, though the last one was touched', async () => {
   mockLoad.mockImplementation(async (_agent: unknown, connectionId: string) => `draft for ${connectionId}`)
   const agent = newAgent()
-  const { result, rerender } = renderHook(({ id }) => useChatDraft(agent, id), { initialProps: { id: 'c1' } })
+  const { result, rerender } = renderHook<ChatDraft, { id: string }>(({ id }) => useChatDraft(agent, id), {
+    initialProps: { id: 'c1' },
+  })
   await flush()
+  act(() => result.current.onTextChange('typed'))
   act(() => result.current.onTextChange(''))
   rerender({ id: 'c2' })
   await flush()
