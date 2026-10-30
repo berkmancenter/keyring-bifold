@@ -43,12 +43,16 @@ export function inReadLane(type: string): boolean {
  * the queue, as before.
  */
 export const VTA_HEARTBEAT_BESIDE = true
-// version-set: every heartbeat version Keyring sends (vtaDevices' ladder); vtaClientHeartbeatBeside.test.ts holds it
-// to each `device/heartbeat` in AGENT_DEVICE_TASK, so a version added there and missed here fails that test instead
-// of quietly putting the heartbeat back in the queue.
+/**
+ * Every heartbeat version Keyring sends (vtaDevices' ladder), newest first. One added to the ladder and missed here
+ * would put the heartbeat back in the queue with nothing else failing, so the version guard reads this as a ladder,
+ * and vtaClientHeartbeatBeside.test.ts holds it to each `device/heartbeat` in AGENT_DEVICE_TASK.
+ *
+ * @versionLadder device/heartbeat
+ */
 export const VTA_BESIDE_TYPES: ReadonlySet<string> = new Set([
-  'https://trusttasks.org/spec/device/heartbeat/0.2',
   'https://trusttasks.org/spec/device/heartbeat/0.3',
+  'https://trusttasks.org/spec/device/heartbeat/0.2',
 ])
 
 export function besideQueue(type: string): boolean {
