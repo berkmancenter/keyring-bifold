@@ -16,7 +16,7 @@ import { useMyName } from '../rooms/useMyName'
 
 import { createDirectoryBackend } from './directoryBackend'
 import { AgentDirectoryService, directoryStatusOf } from './directoryService'
-import { keepDirectoryName, loadDirectoryNames } from './names'
+import { confirmDirectoryNames, keepDirectoryName, loadDirectoryNames } from './names'
 import type {
   CardField,
   CardProposal,
@@ -48,8 +48,12 @@ export function useDirectoryService(mediatorDid?: string): DirectoryService | un
 
 /** At most this many authors are looked up each time a room's authors change, one at a time. */
 export const NAME_LOOKUPS_PER_VISIT = 20
-/** A member asked about this recently is not asked again yet: a room's authors change as it scrolls and re-renders. */
-export const NAME_REASK_FLOOR_MS = 60_000
+/**
+ * A member asked about this recently is not asked again yet. A room's authors change as it scrolls and re-renders,
+ * and every ask waits in the same queue as the community's other tasks: a rename shows within a quarter hour, and
+ * reopening rooms doesn't keep asking about the same people.
+ */
+export const NAME_REASK_FLOOR_MS = 15 * 60_000
 
 // When each member was last asked about, per community, this run.
 const askedAt = new Map<string, Map<string, number>>()
@@ -99,16 +103,24 @@ export function useDirectoryNames(
         0,
         NAME_LOOKUPS_PER_VISIT
       )
-      for (const did of ask) {
-        if (!live) return
-        asked.set(did, Date.now())
-        const name = await service.lookupName(communityDid, did)
-        // Written only when it changed: a name kept again as it was would rewrite the record on every room open.
-        if (name === kept.get(did)) continue
-        await keepDirectoryName(agent, communityDid, did, name)
-        if (name) kept.set(did, name)
-        else kept.delete(did)
-        show(new Map(kept))
+      // Names the community answered as kept: their week starts again, in one write at the end (not per name).
+      const confirmed: string[] = []
+      try {
+        for (const did of ask) {
+          if (!live) return
+          asked.set(did, Date.now())
+          const name = await service.lookupName(communityDid, did)
+          if (name === kept.get(did)) {
+            if (name) confirmed.push(did)
+            continue
+          }
+          await keepDirectoryName(agent, communityDid, did, name)
+          if (name) kept.set(did, name)
+          else kept.delete(did)
+          show(new Map(kept))
+        }
+      } finally {
+        if (confirmed.length) await confirmDirectoryNames(agent, communityDid, confirmed)
       }
     }
     run().catch((error) => agent.config?.logger?.warn('[Directory] room author names were not read', { error }))

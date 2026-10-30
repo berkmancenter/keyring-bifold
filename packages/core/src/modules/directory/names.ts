@@ -85,6 +85,35 @@ export function keepDirectoryName(
   })
 }
 
+/**
+ * The community still shows these members' names as kept: keep them another week. Only names past half their week
+ * are written again, in one write, so a room opened often doesn't rewrite the record each time, and a name the
+ * community confirms never expires from what a room shows offline.
+ */
+export function confirmDirectoryNames(
+  agent: Agent,
+  communityDid: string,
+  memberDids: readonly string[],
+  now: number = Date.now()
+): Promise<void> {
+  return inTurn(communityDid, async () => {
+    const { record, kept } = await read(agent, communityDid)
+    if (!record) return
+    const next = fresh(kept, now)
+    let changed = Object.keys(next).length !== Object.keys(kept).length
+    for (const did of memberDids) {
+      const entry = next[did]
+      if (entry && now - entry.at >= NAME_TTL_MS / 2) {
+        next[did] = { name: entry.name, at: now }
+        changed = true
+      }
+    }
+    if (!changed) return
+    record.content = { names: next }
+    await agent.genericRecords.update(record)
+  })
+}
+
 /** Drop every name kept for this community: the phone left it. */
 export function dropDirectoryNames(agent: Agent, communityDid: string): Promise<void> {
   return inTurn(communityDid, async () => {

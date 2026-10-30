@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native'
 
 import { createFakeDirectoryService } from '../testing/fakeDirectoryService'
 import { DirectoryConflict } from '../types'
-import { keepDirectoryName, loadDirectoryNames } from '../names'
+import { confirmDirectoryNames, keepDirectoryName, loadDirectoryNames } from '../names'
 import {
   MEMBERS_PAGE_SPACING_MS,
   NAME_LOOKUPS_PER_VISIT,
@@ -22,6 +22,7 @@ jest.mock('@bifold/react-hooks', () => ({ useAgent: () => ({ agent: mockAgent })
 // The kept names, in memory: what the encrypted store would hold.
 let mockKept = new Map<string, string>()
 jest.mock('../names', () => ({
+  confirmDirectoryNames: jest.fn(async () => undefined),
   loadDirectoryNames: jest.fn(async () => new Map(mockKept)),
   keepDirectoryName: jest.fn(async (_agent: unknown, _community: string, did: string, name?: string) => {
     if (name) mockKept.set(did, name)
@@ -117,6 +118,7 @@ describe('room authors’ own names', () => {
     resetDirectoryNameLookups()
     jest.mocked(keepDirectoryName).mockClear()
     jest.mocked(loadDirectoryNames).mockClear()
+    jest.mocked(confirmDirectoryNames).mockClear()
     mockAgent.config.logger.warn.mockClear()
   })
   afterEach(() => jest.restoreAllMocks())
@@ -128,9 +130,10 @@ describe('room authors’ own names', () => {
     await waitFor(() => expect(result.current.get(BO)).toBe('Bo'))
     expect(result.current.get(ANA)).toBe('Ana')
     await waitFor(() => expect(service.calls).toEqual([`lookupName ${BO}`, `lookupName ${ANA}`]))
-    // Ana's name is as kept: nothing rewritten.
+    // Ana's name is as kept: not rewritten, but confirmed, so it doesn't expire from what a room shows offline.
     expect(keepDirectoryName).toHaveBeenCalledTimes(1)
     expect(keepDirectoryName).toHaveBeenCalledWith(mockAgent, COMMUNITY, BO, 'Bo')
+    await waitFor(() => expect(confirmDirectoryNames).toHaveBeenCalledWith(mockAgent, COMMUNITY, [ANA]))
   })
 
   it('a rename shows the next time the room opens: the kept name first, then the new one, kept', async () => {
@@ -191,6 +194,7 @@ describe('room authors’ own names', () => {
     await waitFor(() => expect(mockAgent.config.logger.warn).toHaveBeenCalled())
     expect(result.current.get(ANA)).toBe('Ana')
     expect(keepDirectoryName).not.toHaveBeenCalled()
+    expect(confirmDirectoryNames).not.toHaveBeenCalled()
   })
 
   it('asks for at most NAME_LOOKUPS_PER_VISIT authors at a time, and stops at a failure', async () => {
