@@ -225,6 +225,21 @@ const rowOf = (room: RoomSummary & { communityDid: string }, track: Track | unde
   ...(track ? {} : { reading: true }),
 })
 
+/** Whether two rows read the same on screen: the room, its newest post, when, its unread and whether it is reading. */
+const sameRow = (a: RoomRow, b: RoomRow): boolean =>
+  a.key === b.key &&
+  a.roomName === b.roomName &&
+  a.communityName === b.communityName &&
+  a.nameFrom === b.nameFrom &&
+  !!a.reading === !!b.reading &&
+  a.unread === b.unread &&
+  a.lastActivityAt?.getTime() === b.lastActivityAt?.getTime() &&
+  a.lastPost?.text === b.lastPost?.text &&
+  a.lastPost?.kind === b.lastPost?.kind &&
+  a.lastPost?.mine === b.lastPost?.mine &&
+  a.lastPost?.by?.did === b.lastPost?.by?.did &&
+  a.lastPost?.by?.identityWords === b.lastPost?.by?.identityWords
+
 /**
  * The rows Messages shows: every room read but the hidden ones. A hidden room someone has posted in since is back,
  * and its entry goes.
@@ -277,10 +292,14 @@ async function readAll(service: RoomsService): Promise<void> {
     if (!byRoom) tracks.set(service, (byRoom = new Map()))
     const known = byRoom
     // Shown as listed, then again as each room is read: a slow agent delays a room's posts, never its row.
+    // Messages and the tab's badge re-render on each publish, so a room whose row reads the same publishes nothing.
     const show = () => {
-      feed.all = rooms.map((room) => rowOf(room, known.get(room.roomId)))
-      showRows(service)
+      const next = rooms.map((room) => rowOf(room, known.get(room.roomId)))
+      const before = feed.all
       feed.failed = false
+      if (before && next.length === before.length && next.every((row, i) => sameRow(row, before[i]))) return
+      feed.all = next
+      showRows(service)
       publish()
     }
     if (feed.service !== service) return
@@ -319,7 +338,8 @@ const retry: { timer?: ReturnType<typeof setTimeout>; tries: number; pending?: b
 /**
  * After a read that left a room unread, or failed, reads again after the next of {@link ROWS_RETRY_MS}; after the
  * last, it waits for the usual moments. A read that has every room read starts the count again. A retry due while a
- * read is out is that read's to decide (refreshRoomRows reads one at a time). One due while the app is away reads
+ * read is out reads nothing and isn't counted: that read ends by arming the next retry itself, so a retry never queues
+ * a read behind one that has just done its work (an ask does: {@link refreshRoomRows}). One due while the app is away reads
  * nothing and waits, with no timer, for the app to come back, which then reads at once (no return floor) and counts it:
  * a cold launch sent straight to the background still has its retries, and nothing wakes the app while it is away.
  */
@@ -334,7 +354,7 @@ function retrySoon(service: RoomsService, needed: boolean): void {
   const delay = ROWS_RETRY_MS[retry.tries]
   const due = () => {
     retry.timer = undefined
-    if (feed.service !== service) return
+    if (feed.service !== service || feed.asking) return
     if (AppState.currentState !== 'active') {
       retry.pending = true
       return

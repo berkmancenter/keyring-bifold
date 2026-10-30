@@ -467,6 +467,60 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     expect(t.listMyRooms).toHaveBeenCalledTimes(1)
   })
 
+  test('a retry due while a read is out reads nothing more: that read arms the next retry (control: none out, it reads)', async () => {
+    const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
+    s.listNotes.mockRejectedValueOnce(new Error('agent not ready'))
+    mount(s)
+    await flush()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(1)
+
+    // Pull to refresh just before the retry is due, and the agent holds that read past it.
+    const slow = held()
+    const real = s.listNotes.getMockImplementation()!
+    s.listNotes.mockImplementationOnce(async (roomId: string, options?: { sinceVersion?: number }) => {
+      await slow.gate
+      return real(roomId, options)
+    })
+    await step(ROWS_RETRY_MS[0] - 1)
+    refreshRoomRows()
+    await flush()
+    expect(s.listMyRooms).toHaveBeenCalledTimes(2)
+    await step(1)
+    slow.release()
+    await flush()
+    await step(ROWS_RETRY_MS[2] * 2)
+    // The refresh read every room: no retry, and nothing queued behind it.
+    expect(s.listMyRooms).toHaveBeenCalledTimes(2)
+
+    // Control: the same retry with no read out reads.
+    const t = serviceWith([room('planning')], { planning: [note('n1', 1)] })
+    resetRoomRows()
+    t.listNotes.mockRejectedValueOnce(new Error('agent not ready'))
+    mount(t)
+    await flush()
+    await step(ROWS_RETRY_MS[0])
+    expect(t.listMyRooms).toHaveBeenCalledTimes(2)
+  })
+
+  test('a read that changes no row publishes no new rows: Messages and the badge do not re-render (control: a new post does)', async () => {
+    const notes = { planning: [note('n1', 1)], board: [note('b1', 1)] }
+    const s = serviceWith([room('planning'), room('board')], notes)
+    const { list } = mount(s)
+    await flush()
+    const before = list.result.current.rows.rows
+    expect(before.map((r) => r.lastPost?.text)).toEqual(['n1', 'b1'])
+
+    refreshRoomRows()
+    await flush()
+    expect(list.result.current.rows.rows).toBe(before)
+
+    notes.board.push(note('b2', 2))
+    refreshRoomRows()
+    await flush()
+    expect(list.result.current.rows.rows).not.toBe(before)
+    expect(list.result.current.rows.rows.map((r) => r.lastPost?.text)).toEqual(['n1', 'b2'])
+  })
+
   test("each read says in the app's log how many rooms it listed, how many aren't read yet, and how long it took", async () => {
     const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
     s.listNotes.mockRejectedValueOnce(new Error('agent not ready'))
