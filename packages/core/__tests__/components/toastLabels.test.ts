@@ -1,6 +1,11 @@
 /**
- * Every key the toasts name resolves to real words in en, fr and pt-BR. The close button's label, `Global.CloseNotification`,
- * was missing from en and pt-BR and a placeholder in fr, so a screen reader read the key itself (276.9).
+ * Every key the toast components name resolves to real words in en, fr and pt-BR. The close button's label,
+ * `Global.CloseNotification`, was missing from en and pt-BR and a placeholder in fr, so a screen reader read the key
+ * itself (276.9).
+ *
+ * What it reads: `t('…')` calls with a single-quoted literal key on one line, in `components/toast`'s own files. A
+ * key passed in by a caller, built from a variable or a template, or wrapped onto the next line isn't seen. The floor
+ * test only guards against reading nothing, not against reading some.
  */
 import { readdirSync, readFileSync } from 'fs'
 import path from 'path'
