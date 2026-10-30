@@ -7,6 +7,10 @@
  * A chat is deleted once: a second request for one already waiting or being deleted does nothing, and Undo after
  * the delete has started cannot stop it. If the delete fails, the row comes back and `onFailed` says so.
  *
+ * A pending delete is deliberately kept in memory only, never persisted. If the app is closed or killed inside the
+ * window, the delete never runs and the chat is still there on the next start. That is the safe way round: persisting
+ * it would complete, after a restart, a delete the person may have been about to undo, with no window left to undo it.
+ *
  * @module chat/pendingChatDeletes
  */
 
