@@ -1807,7 +1807,7 @@ export class VtaAgentController {
     const claimed = this.claimedFrom.get(vtaDid)
     this.claimedFrom.delete(vtaDid)
     const linkedAs = claimed ? (await identities.getManager(vtaDid).catch(() => undefined))?.did : undefined
-    const farmLogin = claimed && claimed.did === linkedAs ? { farmLogin: { ...claimed } } : {}
+    const farmLogin = claimed ? { farmLogin: { ...claimed } } : {}
     await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
     // The agent just linked is the one this phone acts with: the store keeps
     // every linked agent, and a link no longer replaces another one's record.
