@@ -229,6 +229,30 @@ describe("the sign-in's port onto VtaClient", () => {
     expect(task.mock.calls[1][1]).toEqual({ ext })
   })
 
+  it('remembers what the agent serves: a pre-0.3 agent pays the refused 0.3 beat once, not before every grant', async () => {
+    const vta = client()
+    jest.spyOn(vta, 'managerDid', 'get').mockReturnValue('did:peer:2.phone-on-066-twice')
+    const task = jest.spyOn(vta, 'task').mockImplementation(beatsAt(AGENT_DEVICE_TASK.heartbeat) as never)
+    const port = vtaSignInPort(vta, { platform: 'ios' })
+    await port.heartbeat(ext)
+    await port.heartbeat(ext)
+    expect(task.mock.calls.map(([type]) => type)).toEqual([
+      AGENT_DEVICE_TASK.heartbeat03,
+      AGENT_DEVICE_TASK.heartbeat,
+      AGENT_DEVICE_TASK.heartbeat,
+    ])
+  })
+
+  it('steps down only for a version the agent does not serve: any other refusal at 0.3 is the answer', async () => {
+    const vta = client()
+    jest.spyOn(vta, 'managerDid', 'get').mockReturnValue('did:peer:2.phone-other-refusal')
+    const refused = new VtiRefusal('permissionDenied', 'device/heartbeat: forbidden')
+    const task = jest.spyOn(vta, 'task').mockRejectedValue(refused)
+    await expect(vtaSignInPort(vta, { platform: 'ios' }).heartbeat(ext)).rejects.toBe(refused)
+    // Not retried at 0.2, which a 0.67 agent refuses as unsupportedVersion: that would read as "needs an update".
+    expect(task.mock.calls.map(([type]) => type)).toEqual([AGENT_DEVICE_TASK.heartbeat03])
+  })
+
   it('says alreadyRegistered when the agent does', async () => {
     const vta = client()
     jest
