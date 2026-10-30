@@ -1,11 +1,12 @@
 /**
  * Your names for a community's members (rooms/petnames): kept per community and member in the agent's encrypted
- * store, tidied to one short line, never saved blank, and shown at once on every screen reading that community.
+ * store, tidied to one short line, never saved blank, removed only when asked, and shown at once on every screen
+ * reading that community.
  */
 import { useAgent } from '@bifold/react-hooks'
 import { act, renderHook, waitFor } from '@testing-library/react-native'
 
-import { loadPetname, loadPetnames, PETNAME_MAX, savePetname, tidyPetname } from '../petnames'
+import { loadPetname, loadPetnames, PETNAME_MAX, removePetname, savePetname, tidyPetname } from '../petnames'
 import { usePetname, usePetnames } from '../usePetname'
 
 type Kept = { id: string; content: Record<string, unknown>; tags: Record<string, string> }
@@ -62,7 +63,7 @@ describe('your names for members', () => {
     })
   })
 
-  it('are changed in place; a blank name changes nothing and removes nothing (removal is not offered yet)', async () => {
+  it('are changed in place; a blank name changes nothing and removes nothing', async () => {
     const { agent, kept, genericRecords } = makeAgent()
     await savePetname(agent, A, SADDLE, 'River')
     await savePetname(agent, A, SADDLE, 'Riv')
@@ -77,6 +78,19 @@ describe('your names for members', () => {
   })
 
   // Two saves at once would each find no record and each create one; the second would fail.
+  it('are removed when asked, for that member only; none to remove is not a failure', async () => {
+    const { agent, kept } = makeAgent()
+    await savePetname(agent, A, SADDLE, 'River')
+    await savePetname(agent, A, EXPOSE, 'Sam')
+    await savePetname(agent, B, SADDLE, 'Work River')
+    await removePetname(agent, A, SADDLE)
+    await expect(loadPetname(agent, A, SADDLE)).resolves.toBeUndefined()
+    await expect(loadPetname(agent, A, EXPOSE)).resolves.toBe('Sam')
+    await expect(loadPetname(agent, B, SADDLE)).resolves.toBe('Work River')
+    expect(kept.size).toBe(2)
+    await expect(removePetname(agent, A, SADDLE)).resolves.toBeUndefined()
+  })
+
   it('takes saves made at once in turn, so the last one is kept', async () => {
     const { agent, kept } = makeAgent()
     await Promise.all([
@@ -122,6 +136,12 @@ describe('the screens’ names', () => {
     })
     await waitFor(() => expect(chat.result.current.get(SADDLE)).toBe('Riv'))
     expect(sheet.result.current.name).toBe('Riv')
+
+    await act(async () => {
+      await sheet.result.current.remove()
+    })
+    await waitFor(() => expect(chat.result.current.size).toBe(0))
+    expect(sheet.result.current.name).toBeUndefined()
   })
 
   it('without an agent, nothing is read or kept', async () => {
