@@ -26,12 +26,27 @@ const REGISTER = 'https://trusttasks.org/spec/device/register/0.2'
 
 type Doc = { type: string; threadId: string; payload: Record<string, unknown> }
 
+// Every client a test makes, so that one failing part way leaves nothing on the wire: an ask still out would time
+// out 30 s later, in whatever suite the worker runs then.
+const clients: VtaClient[] = []
+afterEach(() => {
+  for (const client of clients.splice(0)) client.dropQueued()
+})
+
 function harness(options: { heartbeatBeside?: boolean } = {}) {
   const logger = { warn: jest.fn(), info: jest.fn(), debug: jest.fn() }
   const client = new VtaClient({ config: { logger } } as never, 'did:webvh:agent', {} as never, {
     onInbound: jest.fn(),
     ...options,
   })
+  clients.push(client)
+  // A task dropped after a failed test has no one awaiting it: its refusal is handled here.
+  const task = client.task.bind(client)
+  client.task = ((...args: Parameters<VtaClient['task']>) => {
+    const asked = task(...args)
+    asked.catch(() => undefined)
+    return asked
+  }) as VtaClient['task']
   const docs: Doc[] = []
   const internals = client as unknown as { session: unknown; identity: unknown; deliver: (m: unknown) => void }
   internals.session = {
@@ -87,10 +102,12 @@ describe('the heartbeat beside the queue', () => {
     const who = h.client.task(WHOAMI, {}, 30_000)
     const keys = h.client.task(KEYS_LIST, { includePersonal: true }, 30_000)
     await flush()
-    expect(h.sent().slice(1)).toEqual(['device/heartbeat/0.3', 'auth/whoami/0.1', 'rooms/keys/list/0.2'])
+    // whoami goes out beside the heartbeat; the key list runs alone too, so it waits for whoami, not for the beat.
+    expect(h.sent().slice(1)).toEqual(['device/heartbeat/0.3', 'auth/whoami/0.1'])
     h.reply(2)
     await expect(who).resolves.toEqual({ ok: 2 })
     await flush()
+    expect(h.sent().slice(1)).toEqual(['device/heartbeat/0.3', 'auth/whoami/0.1', 'rooms/keys/list/0.2'])
     h.reply(3)
     await expect(keys).resolves.toEqual({ ok: 3 })
     // The heartbeat is still out, and its late answer is its own.
