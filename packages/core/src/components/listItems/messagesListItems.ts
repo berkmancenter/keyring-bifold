@@ -81,16 +81,18 @@ export function itemsForChip<P, R extends RoomListRow>(
 /**
  * Search by name, as approved: never the words of a message. It filters in place, within whatever the chip shows. A
  * person matches by the name their row shows. A room matches by its name or its community's, every word of the query
- * somewhere in them ("lab plan" finds Planning in Keyring Lab). An empty query keeps every item, in order.
+ * somewhere in them ("lab plan" finds Planning in Keyring Lab). `roomName` is the title the room's row shows (a room
+ * known only by its ID shows it as one). An empty query keeps every item, in order.
  */
 export function searchItems<P, R extends RoomListRow>(
   items: readonly MessagesItem<P, R>[],
   personName: (row: P) => string,
-  query: string
+  query: string,
+  roomName: (row: R) => string = (row) => row.roomName
 ): MessagesItem<P, R>[] {
   return searchRows(
     items,
-    (item) => (item.kind === 'person' ? personName(item.row) : `${item.row.roomName} ${item.row.communityName ?? ''}`),
+    (item) => (item.kind === 'person' ? personName(item.row) : `${roomName(item.row)} ${item.row.communityName ?? ''}`),
     query
   )
 }
