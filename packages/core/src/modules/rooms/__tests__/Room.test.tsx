@@ -192,9 +192,7 @@ describe('posts', () => {
     // The list's footer, which a list drawn from the bottom up shows at its top, above the oldest post.
     const list = tree.getByTestId(id('RoomPosts'))
     expect(list.props.inverted).toBe(true)
-    const footer = render(list.props.ListFooterComponent)
-    expect(footer.getByTestId(id('RoomLoadOlder'))).toBeTruthy()
-    footer.unmount()
+    expect(list.props.ListFooterComponent.props.testID).toBe(id('RoomLoadOlder'))
     fireEvent.press(tree.getByTestId(id('RoomLoadOlder')))
     await waitFor(() => expect(tree.getByText(`post ${POSTS_PAGE}`)).toBeTruthy())
     expect(tree.queryByTestId(id('RoomLoadOlder'))).toBeNull()
