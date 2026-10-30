@@ -196,6 +196,32 @@ describe('posts', () => {
     expect(within(tree.getByTestId(id('RoomFloatingDay'))).getByTestId(id('ChatDayPill'))).toBeTruthy()
   })
 
+  test('every day pill, the floating one too, gives screen readers its day in words', async () => {
+    const tree = open(withPosts([post('a', 'today'), post('c', 'a day before', { updatedAt: '2026-10-25T09:00:00Z' })]))
+    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(2))
+    const chat = tree.UNSAFE_getAllByType(FlatList).find((l) => l.props.testID === id('RoomPosts'))
+    if (!chat) throw new Error('no chat list')
+    const viewableItems = (chat.props.data as { key: string }[]).map((item, index) => ({
+      item,
+      index,
+      key: item.key,
+      isViewable: true,
+    }))
+    await act(async () => {
+      chat.props.onViewableItemsChanged({ viewableItems, changed: [] })
+      chat.props.onScrollBeginDrag()
+    })
+    const floating = within(tree.getByTestId(id('RoomFloatingDay'))).getByTestId(id('ChatDayPill'))
+    const pills = tree.getAllByTestId(id('ChatDayPill'))
+    expect(pills).toContain(floating)
+    for (const pill of pills) {
+      expect(typeof pill.props.children).toBe('string')
+      expect(pill.props.children).not.toBe('')
+      expect(pill.props.accessibilityLabel).toBe(pill.props.children)
+      expect(pill.props.accessibilityRole).toBe('header')
+    }
+  })
+
   test("a post that couldn't be read keeps its place, and the rest show", async () => {
     const tree = open(
       withPosts([post('a', 'readable'), post('b', 'hidden', { updatedAt: '2026-10-26T08:00:00Z' })], {}, ['b'])
