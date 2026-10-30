@@ -1460,6 +1460,8 @@ export class VtaClient {
         ticket <= this.droppedThrough
           ? Promise.reject(new VtaTaskDropped(type))
           : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent)
+      // What may start is decided by the running counts in pump(), which a task beside the queue never touches;
+      // inFlight, where it does show, only names what a task waits behind (below).
       if (this.goesBeside(type)) {
         void Promise.resolve().then(() => run().then(resolve, reject))
         return

@@ -16,7 +16,8 @@ jest.mock('../module/tspCapability', () => ({ chooseCarriage: jest.fn(async () =
 jest.mock('../module/vtaReplyProof', () => ({ checkVtaReply: jest.fn(async () => ({ kind: 'unsigned' })) }))
 
 import { VtaClient } from '../module/VtaClient'
-import { besideQueue, VTA_HEARTBEAT_BESIDE } from '../module/vtaReadLane'
+import { AGENT_DEVICE_TASK } from '../module/vtaDevices'
+import { besideQueue, VTA_BESIDE_TYPES, VTA_HEARTBEAT_BESIDE } from '../module/vtaReadLane'
 
 const HEARTBEAT = 'https://trusttasks.org/spec/device/heartbeat/0.2'
 const HEARTBEAT03 = 'https://trusttasks.org/spec/device/heartbeat/0.3'
@@ -92,6 +93,13 @@ describe('the heartbeat beside the queue', () => {
     expect(besideQueue(REGISTER)).toBe(false)
     expect(besideQueue(KEYS_LIST)).toBe(false)
     expect(besideQueue('https://trusttasks.org/spec/device/list/0.3')).toBe(false)
+  })
+
+  it('holds exactly the heartbeat versions Keyring sends: one added to the ladder and missed here fails', () => {
+    // A heartbeat version left out would go back into the one-at-a-time queue with nothing else failing.
+    const sent = Object.values(AGENT_DEVICE_TASK).filter((type) => /\/device\/heartbeat\//.test(type))
+    expect(sent.length).toBeGreaterThanOrEqual(2)
+    expect([...VTA_BESIDE_TYPES].sort()).toEqual([...sent].sort())
   })
 
   it('an unanswered heartbeat holds nothing: whoami and the key list go out and are answered while it waits', async () => {

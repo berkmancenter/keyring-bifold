@@ -396,7 +396,9 @@ export class AgentRoomsService implements RoomsService {
       }
     }
     for (const custody of held) if (!next.has(custody.roomId)) next.set(custody.roomId, this.fromCustody(custody))
-    // A listing asked before an accept or a leave answers its callers, but does not undo what that changed.
+    // A listing asked before an accept or a leave answers its callers, but does not undo what that changed. Its
+    // callers may see a room just left once more: the next listing, asked afresh after the leave, drops it. Answering
+    // them from this.rooms instead would show no rooms at all after an accept, which empties it.
     if (changes === this.roomsChanged) this.rooms = next
     return [...next.values()].map(({ community: _community, actingAs: _actingAs, ...summary }) => summary)
   }
