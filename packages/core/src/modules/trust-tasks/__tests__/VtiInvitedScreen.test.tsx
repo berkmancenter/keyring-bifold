@@ -623,3 +623,5 @@ describe('I was invited, on a build that names no community', () => {
     expect(navigate).toHaveBeenCalledWith(Screens.VtaLink)
   })
 })
+
+// open-handles probe: this suite selected alone (do not merge)

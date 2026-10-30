@@ -591,3 +591,5 @@ describe('Join, at manifest 0.3', () => {
     expect(tree.getByTestId(id('JoinStart'))).toHaveTextContent('Join.Start')
   })
 })
+
+// open-handles probe: this suite selected alone (do not merge)

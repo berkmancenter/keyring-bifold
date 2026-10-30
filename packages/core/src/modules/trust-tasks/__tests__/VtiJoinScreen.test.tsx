@@ -676,3 +676,5 @@ describe('I want to join a community', () => {
     expect(tree.queryByTestId(testIdWithKey('JoinNoInvitationBypass'))).toBeNull()
   })
 })
+
+// open-handles probe: this suite selected alone (do not merge)
