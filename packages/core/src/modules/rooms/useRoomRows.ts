@@ -225,9 +225,14 @@ const rowOf = (room: RoomSummary & { communityDid: string }, track: Track | unde
   ...(track ? {} : { reading: true }),
 })
 
-/** Whether two rows read the same on screen: the room, its newest post, when, its unread and whether it is reading. */
+/**
+ * Whether two rows read the same: the room and its community (the row reads names and petnames by the community, and
+ * Messages' chips are built from it), its newest post, when, its unread and whether it is reading. `key` is the room's
+ * ID.
+ */
 const sameRow = (a: RoomRow, b: RoomRow): boolean =>
   a.key === b.key &&
+  a.communityDid === b.communityDid &&
   a.roomName === b.roomName &&
   a.communityName === b.communityName &&
   a.nameFrom === b.nameFrom &&
@@ -292,7 +297,8 @@ async function readAll(service: RoomsService): Promise<void> {
     if (!byRoom) tracks.set(service, (byRoom = new Map()))
     const known = byRoom
     // Shown as listed, then again as each room is read: a slow agent delays a room's posts, never its row.
-    // Messages and the tab's badge re-render on each publish, so a room whose row reads the same publishes nothing.
+    // Messages and the tab's badge re-render on each publish, so a room whose row reads the same publishes nothing. A
+    // failure shown before still clears: the read's `finally` publishes once it ends.
     const show = () => {
       const next = rooms.map((room) => rowOf(room, known.get(room.roomId)))
       const before = feed.all

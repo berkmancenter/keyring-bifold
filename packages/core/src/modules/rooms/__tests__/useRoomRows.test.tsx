@@ -521,6 +521,22 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     expect(list.result.current.rows.rows.map((r) => r.lastPost?.text)).toEqual(['n1', 'b2'])
   })
 
+  test('a room whose community changes publishes, even with every other field the same (both communities unnamed)', async () => {
+    const OTHER = 'did:webvh:QmOther:other.example'
+    const rooms = [room('planning', { communityName: undefined })]
+    const s = serviceWith(rooms, { planning: [note('n1', 1)] })
+    const { list } = mount(s)
+    await flush()
+    const before = list.result.current.rows.rows
+    expect(before[0].communityDid).toBe(LAB)
+
+    rooms[0] = room('planning', { communityName: undefined, communityDid: OTHER })
+    refreshRoomRows()
+    await flush()
+    expect(list.result.current.rows.rows).not.toBe(before)
+    expect(list.result.current.rows.rows[0].communityDid).toBe(OTHER)
+  })
+
   test("each read says in the app's log how many rooms it listed, how many aren't read yet, and how long it took", async () => {
     const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
     s.listNotes.mockRejectedValueOnce(new Error('agent not ready'))
