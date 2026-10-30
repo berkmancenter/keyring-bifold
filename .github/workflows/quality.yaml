@@ -225,7 +225,25 @@ jobs:
         env:
           PART: ${{ matrix.part }}/4
         run: |
-          node scripts/ci/select-tests.mjs run --plan "$RUNNER_TEMP/test-plan.json" --part "$PART"
+          # PROBE (throwaway branch, never merged): one ChatDraft test, 50 runs alone, then 50 under 4 CPU burners.
+          if [ "$PART" != "1/4" ]; then echo "probe: part $PART idle"; exit 0; fi
+          cd packages/core
+          T='Camera again once it is sent'
+          one() { TZ=GMT yarn jest __tests__/screens/ChatDraft.test.tsx --testNamePattern "$T" --ci --verbose > "$RUNNER_TEMP/$1.log" 2>&1; }
+          loop() {
+            local tag=$1 fails=0
+            for i in $(seq 1 50); do
+              if ! one "$tag-$i"; then fails=$((fails+1)); echo "::warning::$tag run $i FAILED"; tail -60 "$RUNNER_TEMP/$tag-$i.log"; fi
+              grep -hE "✓|✕" "$RUNNER_TEMP/$tag-$i.log" | grep -oE '\([0-9]+ ms\)' | tr -d '(ms )' >> "$RUNNER_TEMP/$tag.ms" || true
+            done
+            echo "$tag: $fails of 50 failed"
+            sort -n "$RUNNER_TEMP/$tag.ms" | awk '{a[NR]=$1} END {if (NR) print "'"$tag"' test ms: n=" NR " min=" a[1] " median=" a[int((NR+1)/2)] " p90=" a[int(NR*0.9)] " max=" a[NR]}'
+          }
+          loop alone
+          for k in 1 2 3 4; do (while :; do :; done) & done
+          loop loaded
+          kill $(jobs -p) 2>/dev/null || true
+          exit 0
 
   test:
     runs-on: ubuntu-22.04
