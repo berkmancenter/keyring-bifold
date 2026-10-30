@@ -1,9 +1,11 @@
+import { useAgent } from '@bifold/react-hooks'
 import type { DidCommConnectionRecord } from '@credo-ts/didcomm'
 
 import { StackNavigationProp } from '@react-navigation/stack'
-import React, { useCallback, useMemo } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { View, StyleSheet, TouchableOpacity } from 'react-native'
+import Toast from 'react-native-toast-message'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { useTheme } from '../../contexts/theme'
@@ -17,10 +19,15 @@ import { TOKENS, useServices } from '../../container-api'
 import ContactPhoto from '../../modules/vrc/components/ContactPhoto'
 import { useConnectionFacts } from '../../modules/vrc/contacts/useContactFacts'
 import { useChatEvents } from '../../modules/chat/chatEventsStore'
+import { deleteChatMessages } from '../../modules/chat/history'
+import { UNDO_WINDOW_MS, cancelChatDelete, scheduleChatDelete } from '../../modules/chat/pendingChatDeletes'
 import { timerOf } from '../../modules/chat/timer'
 import { ThemedText } from '../texts/ThemedText'
+import { ToastType } from '../toast/BaseToast'
 
+import DeleteChatSheet from './DeleteChatSheet'
 import { rowPreview, rowTime } from './messagesListRow'
+import SwipeRow from './SwipeRow'
 
 export interface ContactListItemProps {
   /**
@@ -142,6 +149,35 @@ const ContactListItem: React.FC<ContactListItemProps> = ({ contact, connectionId
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: DIVIDER, marginLeft: 16 + AVATAR_SIZE + 12 },
   })
 
+  // Delete (L4): a swipe, a long press or a screen reader's action, then the question, then the row goes at once and
+  // the chat is deleted when the Undo window ends (pendingChatDeletes), even if the person has left the list.
+  const { agent } = useAgent()
+  const [confirming, setConfirming] = useState(false)
+  const ids = useMemo(() => connectionIds ?? [contact.id], [connectionIds, contact.id])
+  const askToDelete = useCallback(() => setConfirming(true), [])
+  const deleteChat = useCallback(() => {
+    setConfirming(false)
+    if (!agent) return
+    const key = ids.join(',')
+    const scheduled = scheduleChatDelete({
+      key,
+      connectionIds: ids,
+      // No ids: the whole chat, its draft included (#612).
+      deleteChat: (connectionId) => deleteChatMessages(agent, connectionId),
+      onFailed: (error) => {
+        agent.config.logger.warn(`[chat] Delete from the Messages list failed: ${String(error)}`)
+        Toast.show({ type: ToastType.Error, text1: t('Chat.ClearChatFailed') })
+      },
+    })
+    if (!scheduled) return
+    Toast.show({
+      type: 'undo',
+      text1: t('MessagesList.Deleted', { name: contactLabel, interpolation: { escapeValue: false } }),
+      visibilityTime: UNDO_WINDOW_MS,
+      props: { onUndo: () => cancelChatDelete(key) },
+    })
+  }, [agent, ids, t, contactLabel])
+
   const navigateToContact = useCallback(() => {
     navigation.getParent()?.navigate(Stacks.ContactStack, {
       screen: enableChat ? Screens.Chat : Screens.ContactDetails,
@@ -159,52 +195,74 @@ const ContactListItem: React.FC<ContactListItemProps> = ({ contact, connectionId
     .join(', ')
 
   return (
-    <TouchableOpacity
-      onPress={navigateToContact}
-      testID={testIdWithKey('Contact')}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-    >
-      <View style={styles.row}>
-        <ContactPhoto
-          photo={facts.photo}
-          name={contactLabel}
-          fallbackUrl={contact.imageUrl}
-          size={AVATAR_SIZE}
-          initials={2}
-          muted
-        />
-        <View style={styles.middle}>
-          <View style={styles.top}>
-            <View style={styles.nameWrap}>
-              <ThemedText style={styles.name} numberOfLines={1}>
-                {contactLabel}
-              </ThemedText>
-              {timerOn ? (
-                <Icon
-                  name="timer-outline"
-                  size={14}
-                  color={PREVIEW_COLOR}
-                  testID={testIdWithKey('MessagesListTimer')}
-                />
-              ) : null}
-            </View>
-            {when ? <ThemedText style={styles.when}>{when}</ThemedText> : null}
-          </View>
-          <View style={styles.bottom}>
-            <ThemedText style={styles.preview} numberOfLines={1} ellipsizeMode="tail">
-              {line}
-            </ThemedText>
-            {unread ? (
-              <View style={styles.badge} testID={testIdWithKey('MessagesListUnread')}>
-                <ThemedText style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</ThemedText>
+    <>
+      <SwipeRow
+        action={{
+          name: 'delete',
+          label: t('MessagesList.Delete'),
+          icon: 'trash-can-outline',
+          tone: 'destructive',
+          onPress: askToDelete,
+          testID: testIdWithKey('MessagesListDelete'),
+        }}
+      >
+        {(touch) => (
+          <TouchableOpacity
+            onPress={navigateToContact}
+            testID={testIdWithKey('Contact')}
+            accessibilityLabel={label}
+            accessibilityRole="button"
+            {...touch}
+          >
+            <View style={styles.row}>
+              <ContactPhoto
+                photo={facts.photo}
+                name={contactLabel}
+                fallbackUrl={contact.imageUrl}
+                size={AVATAR_SIZE}
+                initials={2}
+                muted
+              />
+              <View style={styles.middle}>
+                <View style={styles.top}>
+                  <View style={styles.nameWrap}>
+                    <ThemedText style={styles.name} numberOfLines={1}>
+                      {contactLabel}
+                    </ThemedText>
+                    {timerOn ? (
+                      <Icon
+                        name="timer-outline"
+                        size={14}
+                        color={PREVIEW_COLOR}
+                        testID={testIdWithKey('MessagesListTimer')}
+                      />
+                    ) : null}
+                  </View>
+                  {when ? <ThemedText style={styles.when}>{when}</ThemedText> : null}
+                </View>
+                <View style={styles.bottom}>
+                  <ThemedText style={styles.preview} numberOfLines={1} ellipsizeMode="tail">
+                    {line}
+                  </ThemedText>
+                  {unread ? (
+                    <View style={styles.badge} testID={testIdWithKey('MessagesListUnread')}>
+                      <ThemedText style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</ThemedText>
+                    </View>
+                  ) : null}
+                </View>
               </View>
-            ) : null}
-          </View>
-        </View>
-      </View>
-      <View style={styles.divider} />
-    </TouchableOpacity>
+            </View>
+            <View style={styles.divider} />
+          </TouchableOpacity>
+        )}
+      </SwipeRow>
+      <DeleteChatSheet
+        visible={confirming}
+        name={contactLabel}
+        onDelete={deleteChat}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   )
 }
 
