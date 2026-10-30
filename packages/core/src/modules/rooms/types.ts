@@ -256,7 +256,8 @@ export interface RoomOffer {
   /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
   description?: InertText
   communityDid: string
-  communityName: InertText
+  /** Absent when the community published no name: a screen says `offerCommunity`, never a cut of the DID. */
+  communityName?: InertText
   tier: RoomTier
   verbs: RoomVerb[]
   validUntil?: string

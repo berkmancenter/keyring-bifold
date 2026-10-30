@@ -767,7 +767,7 @@ export class AgentRoomsService implements RoomsService {
       roomName: toInertText(offer.label || shortId(offer.roomId)),
       description: offer.description !== undefined ? toInertText(offer.description) : undefined,
       communityDid: community.did,
-      communityName: toInertText(community.name ?? shortId(community.did)),
+      communityName: community.name !== undefined ? toInertText(community.name) : undefined,
       tier: offer.tier,
       verbs: offer.actions,
       validUntil: offer.validUntil,
