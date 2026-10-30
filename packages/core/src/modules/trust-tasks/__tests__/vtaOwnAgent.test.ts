@@ -70,6 +70,8 @@ const mockVta = {
   contextsDelete: [CONTEXTS_DELETE] as string[],
   /** trust-task-discovery/0.3's `supportedTypes`; undefined: discovery is not served. */
   discovery: undefined as string[] | undefined,
+  /** Hold every task a consent rule in the approvals row names, by its exact type URI (policy_gate.rs, the Rego). */
+  enforceRules: false,
 }
 const mockSessions: { did: string; onMessage: (m: unknown) => void; open: boolean }[] = []
 let mockMinted: string[] = []
@@ -164,7 +166,12 @@ jest.mock('../module/VtiMediatorTransport', () => ({
         refuse(injected)
         return
       }
-      if (mockVta.consentFor.has(body.type) && !mockVta.consentGranted) {
+      const ruled =
+        mockVta.enforceRules &&
+        ((mockVta.policy?.ext['openvtc.approvals'] ?? []) as { taskType: string; requires: string }[]).some(
+          (rule) => rule.requires === 'consent' && rule.taskType === body.type
+        )
+      if ((mockVta.consentFor.has(body.type) || ruled) && !mockVta.consentGranted) {
         // policy_gate.rs consent_gate: held, with the challenge in details.
         refuse({
           code: 'taskFailed',
@@ -489,6 +496,7 @@ beforeEach(() => {
   mockVta.contexts = new Set()
   mockVta.contextsDelete = [CONTEXTS_DELETE]
   mockVta.discovery = undefined
+  mockVta.enforceRules = false
   mockSessions.length = 0
   mockMinted = []
   for (const key of Object.keys(mockClientOptions)) delete mockClientOptions[key]
@@ -1702,20 +1710,42 @@ describe('"Ask me before…": the agent\'s approval rules', () => {
     expect(mockVta.contexts.size).toBe(0)
   })
 
-  it('"ask me before deleting a context" names the version the agent dispatches', async () => {
+  it('"ask me before deleting a context" names every version the agent dispatches', async () => {
     const ruleOf = () => (rulesHeld() as { taskType: string }[]).map((r) => r.taskType)
     mockVta.discovery = [CONTEXTS_DELETE_11, CREATE]
     const { vta } = await linkedPhone()
     const on = await vta.setApprovalRule(agent, CONTEXTS_DELETE_11, true)
     expect(ruleOf()).toEqual([CONTEXTS_DELETE_11])
-    expect(on.view.offered.find((o) => o.key === 'contextsDelete')?.on).toBe(true)
+    expect(on.view.offered.find((o) => o.key === 'contextsDelete')).toMatchObject({ on: true, renew: false })
 
-    // An agent before v0.67.0 dispatches only 1.0: a rule naming 1.1 would never hold anything there.
-    mockVta.discovery = [CONTEXTS_DELETE, CREATE]
+    // v0.67.0 dispatches both, gated apart.
+    mockVta.discovery = [CONTEXTS_DELETE, CONTEXTS_DELETE_11, CREATE]
+    await vta.setApprovalRule(agent, CONTEXTS_DELETE_11, true)
+    expect(ruleOf()).toEqual([CONTEXTS_DELETE_11, CONTEXTS_DELETE])
     await vta.setApprovalRule(agent, CONTEXTS_DELETE_11, false)
     expect(ruleOf()).toEqual([])
+  })
+
+  it('on an agent updated to serve contexts/delete only at 1.1, an old 1.0 rule reads off and, turned on again, holds', async () => {
+    // Turned on while the agent served only 1.0.
+    mockVta.discovery = [CONTEXTS_DELETE, CREATE]
+    mockVta.enforceRules = true
+    const { vta } = await linkedPhone()
     await vta.setApprovalRule(agent, CONTEXTS_DELETE_11, true)
-    expect(ruleOf()).toEqual([CONTEXTS_DELETE])
-    expect((await vta.approvalRules(agent)).view.offered.find((o) => o.key === 'contextsDelete')?.on).toBe(true)
+
+    // The agent is updated (61c23f20): 1.1 only. The 1.0 rule now holds nothing — the test context goes unasked.
+    mockVta.contextsDelete = [CONTEXTS_DELETE_11]
+    mockVta.discovery = [CONTEXTS_DELETE_11, CREATE]
+    expect(await vta.sendTestRequest(agent)).toEqual({ kind: 'letThrough', cleanedUp: true })
+    expect((await vta.approvalRules(agent)).view.offered.find((o) => o.key === 'contextsDelete')).toMatchObject({
+      on: false,
+      renew: true,
+    })
+
+    // Turned on again: the rule is re-written at 1.1, and a deletion is held for this phone's approval.
+    const renewed = await vta.setApprovalRule(agent, CONTEXTS_DELETE_11, true)
+    expect(renewed.view.offered.find((o) => o.key === 'contextsDelete')).toMatchObject({ on: true, renew: false })
+    expect(await vta.sendTestRequest(agent)).toEqual({ kind: 'letThrough', cleanedUp: false })
+    expect(mockVta.contexts.size).toBe(1)
   })
 })

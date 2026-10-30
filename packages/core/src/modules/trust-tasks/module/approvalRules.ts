@@ -39,14 +39,17 @@ export const OFFERED_TASKS = [
 export type OfferedKey = (typeof OFFERED_TASKS)[number]['key']
 
 /**
- * Older versions of an offered task that agents in use serve instead, newest
- * first. A rule holds only the exact version it names (the synthesized Rego
- * compares `typeUri` for equality, approvalsPolicy.ts), so it must name the
- * version the agent dispatches: vta-service serves contexts/delete only at 1.0
- * up to v0.66.0, at both in v0.67.0 (gated apart, and pnm sends 1.1), and only
- * at 1.1 from 61c23f20 (#2332), where a rule naming 1.0 is not moved to 1.1
- * (vta-policy approvals.rs RETIRED_TASK_TYPES has no entry for it) and never
- * holds anything again.
+ * Older versions of an offered task that agents in use serve as well or
+ * instead, newest first. A rule holds only the exact version it names (the
+ * synthesized Rego compares `typeUri` for equality, approvalsPolicy.ts), so this
+ * phone's rules must name every version the agent dispatches: vta-service
+ * serves contexts/delete only at 1.0 up to v0.66.0, at both in v0.67.0 (gated
+ * apart, and pnm sends 1.1), and only at 1.1 from 61c23f20 (#2332), where a
+ * rule naming 1.0 is not moved to 1.1 (vta-policy approvals.rs
+ * RETIRED_TASK_TYPES has no entry for it) and never holds anything again.
+ *
+ * Add a family here whenever an agent in use serves an offered task at a
+ * version other than the one in {@link OFFERED_TASKS}.
  */
 export const OLDER_VERSIONS: Readonly<Record<string, readonly string[]>> = {
   [`${SPEC}vta/contexts/delete/1.1`]: [`${SPEC}vta/contexts/delete/1.0`],
@@ -56,12 +59,16 @@ export const OLDER_VERSIONS: Readonly<Record<string, readonly string[]>> = {
 export const versionsOf = (taskType: string): readonly string[] => [taskType, ...(OLDER_VERSIONS[taskType] ?? [])]
 
 /**
- * The version of an offered task a new rule names: the newest one the agent
- * dispatches (`served`, from its discovery answer), else the newest, which is
- * where agents are going.
+ * The versions of an offered task this phone's rules must name: each one the
+ * agent dispatches (`served`, from its discovery answer). Every version Keyring
+ * knows when that is unknown or names none: a rule on a version the agent does
+ * not dispatch holds nothing, but the agent takes it (its write path refuses
+ * only retired types), and the one it does dispatch is then covered.
  */
-export const ruleVersionFor = (taskType: string, served?: readonly string[]): string =>
-  versionsOf(taskType).find((uri) => served?.includes(uri)) ?? taskType
+export const ruleVersionsFor = (taskType: string, served?: readonly string[]): readonly string[] => {
+  const dispatched = versionsOf(taskType).filter((uri) => served?.includes(uri))
+  return dispatched.length ? dispatched : versionsOf(taskType)
+}
 
 /**
  * Every Trust Task this phone sends to its agent. A rule on any of them would
@@ -110,6 +117,16 @@ export const PHONE_SENDS: readonly string[] = [
   'vault/credentials/get/0.2',
   'vault/credentials/query/0.1',
   'vault/credentials/receive/0.1',
+  'vault/list/0.1',
+  'vault/list/0.2',
+  'vault/list/0.3',
+  'vault/list/0.4',
+  'vault/upsert/0.1',
+  'vault/upsert/0.2',
+  'vault/upsert/0.3',
+  'vault/upsert/0.4',
+  'vault/sign-trust-task/0.1',
+  'vault/sign-trust-task/0.2',
   'policy/get/0.1',
   'policy/upsert/0.2',
   'policy/upsert/0.3',
@@ -151,8 +168,13 @@ export interface RuleSetElsewhere {
 }
 
 export interface ApprovalsView {
-  /** Each offered task: on when this phone's own rule holds it; `elsewhere` when another rule already names it. */
-  offered: { key: OfferedKey; taskType: string; on: boolean; elsewhere: boolean }[]
+  /**
+   * Each offered task: on when this phone's own rules hold it at every version
+   * the agent dispatches; `renew` when this phone has rules on it that miss one
+   * of those (the agent was updated), so it reads off and turning it on again
+   * re-writes them; `elsewhere` when another rule already names it.
+   */
+  offered: { key: OfferedKey; taskType: string; on: boolean; renew: boolean; elsewhere: boolean }[]
   elsewhere: RuleSetElsewhere[]
   /** The phone's own rule on contexts/create is on, so a test request will be held. */
   canTest: boolean
@@ -161,8 +183,12 @@ export interface ApprovalsView {
 const isMine = (rule: ApprovalRule, managerDid: string) =>
   rule.requires === 'consent' && rule.approverSet === phoneSetName(managerDid) && !rule.contexts?.length
 
-/** What the screen shows for the row as read. */
-export function approvalsView(model: ApprovalsModel, managerDid: string): ApprovalsView {
+/**
+ * What the screen shows for the row as read, against the task types the agent
+ * dispatches (`served`). Without `served` nothing can be judged against it, and
+ * any rule of this phone's on a task reads as on.
+ */
+export function approvalsView(model: ApprovalsModel, managerDid: string, served?: readonly string[]): ApprovalsView {
   const elsewhere = model.rules
     .filter((rule) => !isMine(rule, managerDid))
     .map((rule) => ({
@@ -170,13 +196,22 @@ export function approvalsView(model: ApprovalsModel, managerDid: string): Approv
       holdsThisPhone: holdsThisPhone(rule.taskType),
       offered: OFFERED_TASKS.find((o) => versionsOf(o.taskType).includes(rule.taskType))?.key,
     }))
-  // A rule on any version of an offered task is that task's rule.
-  const offered = OFFERED_TASKS.map(({ key, taskType }) => ({
-    key,
-    taskType,
-    on: model.rules.some((rule) => versionsOf(taskType).includes(rule.taskType) && isMine(rule, managerDid)),
-    elsewhere: elsewhere.some((e) => versionsOf(taskType).includes(e.rule.taskType)),
-  }))
+  const offered = OFFERED_TASKS.map(({ key, taskType }) => {
+    const mine = new Set(
+      model.rules
+        .filter((rule) => versionsOf(taskType).includes(rule.taskType) && isMine(rule, managerDid))
+        .map((rule) => rule.taskType)
+    )
+    const needed = served ? versionsOf(taskType).filter((uri) => served.includes(uri)) : []
+    const held = mine.size > 0 && needed.every((uri) => mine.has(uri))
+    return {
+      key,
+      taskType,
+      on: held,
+      renew: mine.size > 0 && !held,
+      elsewhere: elsewhere.some((e) => versionsOf(taskType).includes(e.rule.taskType)),
+    }
+  })
   return { offered, elsewhere, canTest: offered.some((o) => o.key === 'contextsCreate' && o.on && !o.elsewhere) }
 }
 
@@ -196,9 +231,9 @@ export class NotOffered extends Error {
  * on a task another rule already names (two rules for one task overlap,
  * vta-sdk approvals/mod.rs validate).
  *
- * `taskType` is the offered (newest) version. The rule written names the
- * version the agent dispatches ({@link ruleVersionFor}, from `served`), and
- * this phone's rule on any version of the task is replaced or removed.
+ * `taskType` is the offered (newest) version. Switching on writes one rule per
+ * version the agent dispatches ({@link ruleVersionsFor}, from `served`), and
+ * this phone's rules on any version of the task are replaced or removed.
  */
 export function withPhoneRule(
   model: ApprovalsModel,
@@ -214,13 +249,13 @@ export function withPhoneRule(
   const rules = on
     ? [
         ...others,
-        {
-          taskType: ruleVersionFor(taskType, served),
+        ...ruleVersionsFor(taskType, served).map((version) => ({
+          taskType: version,
           requires: 'consent' as const,
           approverSet: set,
           minApprovals: 1,
           excludeRequester: false,
-        },
+        })),
       ]
     : others
   const sets: ApproverSets = { ...model.sets }
