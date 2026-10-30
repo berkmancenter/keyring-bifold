@@ -87,6 +87,7 @@ const WITHDRAW = 'https://trusttasks.org/spec/vtc/join-requests/withdraw/0.1'
 const SUPPLEMENT = 'https://trusttasks.org/spec/vtc/join-requests/supplement/0.1'
 const STATUS = 'https://trusttasks.org/spec/vtc/join-requests/status/0.1'
 const SELF_REMOVE = 'https://trusttasks.org/spec/vtc/members/self-remove/0.1'
+const ROOM_MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
 const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
 /*
  * Every document `ask` sends is signed. `ask` carries only DIDComm and TSP,
@@ -114,6 +115,7 @@ const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
  * - the manifest — `vtc/join-requests/manifest`, the published criteria, at
  *   each version this wallet speaks (`joinWire`).
  * - `STATUS` — `vtc/join-requests/status/0.1`, where the applicant's request stands.
+ * - `ROOM_MEMBERSHIPS` — `vtc/rooms/memberships/list/0.1`, the member's rooms there (`modules/rooms`).
  *
  * Everything else `ask` sends changes state and is a WRITE: the submit,
  * `SUPPLEMENT`, `WITHDRAW`, `SELF_REMOVE` above, and the vetter profile publish
@@ -123,7 +125,7 @@ const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
  * answered — a submit it deferred, say — sent again is a second submit, and
  * reads as `requestAlreadyOpen`.
  */
-export const VTI_READ_TASKS: ReadonlySet<string> = new Set([...JOIN_MANIFEST_TYPES, STATUS])
+export const VTI_READ_TASKS: ReadonlySet<string> = new Set([...JOIN_MANIFEST_TYPES, STATUS, ROOM_MEMBERSHIPS])
 
 /** Whether `type` is a read `ask` may send again over DIDComm after TSP silence (see `VTI_READ_TASKS`). */
 export function isVtiReadTask(type: string): boolean {
@@ -1212,12 +1214,17 @@ class VtiAgentController {
    * kept, and the same ask made again — same session, community, task and
    * payload — takes that answer, or, for a write, waits on the request already
    * sent rather than sending a second one.
+   *
+   * `prepared` is a document someone else completed — the person's agent,
+   * through `rooms/keys/act` — sent as it is, in place of the one this session
+   * would build and sign.
    */
   async ask(
     communityDid: string,
     type: string,
     payload: Record<string, unknown>,
-    timeoutMs = this.answerTimeoutMs
+    timeoutMs = this.answerTimeoutMs,
+    prepared?: Record<string, unknown>
   ): Promise<DidCommV2PlaintextMessage | undefined> {
     const session = this.session
     const did = this.state.did
@@ -1254,7 +1261,7 @@ class VtiAgentController {
     }
     this.asks.set(threadId, entry)
     try {
-      return await this.sendAsk(session, did, entry, payload, timeoutMs)
+      return await this.sendAsk(session, did, entry, payload, timeoutMs, prepared)
     } catch (error) {
       // Nothing to hold for a request that did not go out.
       this.asks.delete(threadId)
@@ -1268,14 +1275,17 @@ class VtiAgentController {
     did: string,
     entry: AskEntry,
     payload: Record<string, unknown>,
-    timeoutMs: number
+    timeoutMs: number,
+    prepared?: Record<string, unknown>
   ): Promise<DidCommV2PlaintextMessage | undefined> {
     const { communityDid, type, write, id: threadId } = entry
     // One document for either carriage, addressed and dated as the framework
     // requires (`issuer`, `recipient`, `issuedAt`), and signed as the persona
     // when the task's specification declares the proof REQUIRED.
-    const document = await this.taskDocument(communityDid, type, payload, threadId)
+    const document = prepared ?? (await this.taskDocument(communityDid, type, payload, threadId))
     entry.correlation.add(String(document.id))
+    // A reply threads on the request document's `threadId` (SPEC §4.9); a prepared document may carry its own.
+    if (prepared && typeof prepared.threadId === 'string') entry.correlation.add(prepared.threadId)
     entry.sentAt = entry.lastSentAt = Date.now()
 
     // §4.2 on the ecosystem leg. Unlike `send()` there is no toggle here on
@@ -1812,6 +1822,46 @@ class VtiAgentController {
         ? { code: text(payload.code), reason: text(payload.reason), decidedAt: text(payload.decidedAt) }
         : {}),
     }
+  }
+
+  /**
+   * Send one Trust Task to the community as the connected persona and return
+   * its answer's payload. For tasks with no wrapper of their own here — the
+   * rooms tasks (`modules/rooms`). Refusals surface as `VtiRefusal`.
+   */
+  async communityTask(
+    communityDid: string,
+    type: string,
+    payload: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return this.answerOf(communityDid, type, await this.ask(communityDid, type, payload))
+  }
+
+  /**
+   * Send a Trust Task document the person's agent completed (`rooms/keys/act`)
+   * to `recipientDid` unchanged, over this session, and return its answer's
+   * payload. The document is the agent's: its issuer, presentation and proof
+   * are never touched here. Refusals surface as `VtiRefusal`.
+   */
+  async sendCompleted(recipientDid: string, document: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const type = typeof document.type === 'string' ? document.type : ''
+    const payload = (document.payload ?? {}) as Record<string, unknown>
+    if (!type) throw new Error('vtiAgent: a completed document names no type')
+    return this.answerOf(recipientDid, type, await this.ask(recipientDid, type, payload, undefined, document))
+  }
+
+  private answerOf(
+    communityDid: string,
+    type: string,
+    answer: DidCommV2PlaintextMessage | undefined
+  ): Record<string, unknown> {
+    if (!answer) throw this.sentNoAnswer(communityDid, type)
+    const refusal = refusalOf(answer)
+    if (refusal) throw refusal
+    return ((answer.body as { payload?: Record<string, unknown> } | undefined)?.payload ?? {}) as Record<
+      string,
+      unknown
+    >
   }
 
   /**

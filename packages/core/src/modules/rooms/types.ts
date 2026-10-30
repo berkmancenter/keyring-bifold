@@ -48,6 +48,9 @@ export type RoomsOperation =
  * - `detailsNotLoaded`: a room known only from the agent's key custody, without the community's
  *   record of it (rights, host). The operation needs those ("Details not loaded").
  * - `noRight`: this member's rights in the room do not include it ("You can't post here").
+ * - `communityUnreachable`: none of the member's communities answered for their rooms; try again later.
+ * - `tierNotYet`: served, but Keyring does not yet do it in a room of this tier, e.g. writing in an `attributed`
+ *   room, whose records are sealed ("not available yet in this kind of room").
  */
 export type RoomsReason =
   | 'ok'
@@ -61,6 +64,8 @@ export type RoomsReason =
   | 'communityDoesNotServe'
   | 'detailsNotLoaded'
   | 'noRight'
+  | 'communityUnreachable'
+  | 'tierNotYet'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -149,6 +154,11 @@ export interface NoteSummary {
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
+  /**
+   * The files the record carries (`rooms/records/put` 0.2 `blobs`), with the details its body gives each: listed
+   * from the host's metadata, with no file key and no download. Usually one; more when another client attached them.
+   */
+  files?: RoomFile[]
 }
 
 /**
@@ -184,11 +194,31 @@ export interface Note extends NoteSummary {
   check: HostCheck
 }
 
+/** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */
+export interface RoomsAttachment {
+  uri: string
+  name: string
+  mimeType?: string
+  size: number
+}
+
+/** The longest note title, in characters: the room schema's cleartext title (`RecordMetadata.title`). */
+export const NOTE_TITLE_MAX = 512
+/** The longest note body, in characters: the member sprint's 16 KiB cap on a record. */
+export const NOTE_BODY_MAX = 16384
+
 export interface WriteDraft {
   title: string
   body: string
   /** Replace this note instead of adding one. */
   replaceKey?: string
+  /** One file to post with it (`rooms/records/put` 0.2 `blobs`). The service refuses one over its limit. */
+  attachment?: RoomsAttachment /**
+   * The post's own id, the same on every retry. The service derives the record's key from it and writes create-only,
+   * so a retry of a post that already landed answers with that post instead of writing it twice; within one app run
+   * a retried upload resumes rather than starting again. Without it, a retry may post twice.
+   */
+  idempotencyKey?: string
 }
 
 /**
@@ -217,9 +247,12 @@ export interface WritePreview {
 }
 
 export interface RoomOffer {
+  /** Names the offer to `previewOffer` and `hideOffer`: a route parameter, opaque to screens. */
   offerId: string
   roomId: string
   roomName: InertText
+  /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
+  description?: InertText
   communityDid: string
   communityName: InertText
   tier: RoomTier
@@ -234,7 +267,20 @@ export interface OfferPreview {
   actingAs: Identity
 }
 
+/** Bytes moved so far, and in all. Upload or download alike. */
+export interface RoomsTransferProgress {
+  sent: number
+  total: number
+}
+
+export interface RoomsTransferOptions {
+  onProgress?: (progress: RoomsTransferProgress) => void
+  /** Aborting it stops the transfer and rejects with an error named `AbortError`; no partial copy is kept. */
+  signal?: AbortSignal
+}
+
 export interface RoomFile {
+  /** The blob's id: what `openFile` takes. */
   fileId: string
   name: InertText
   mediaType?: string
@@ -314,6 +360,25 @@ export class RoomsPreviewExpired extends Error {
   }
 }
 
+/**
+ * A community or the person's agent refused the operation, in its own terms. `code` is the refusal's code
+ * without its task prefix (`vtc/rooms/offers/accept:alreadyAccepted` → `alreadyAccepted`), plus a few of
+ * Keyring's own for a step that went wrong between them (`welcomeMissing`, `joinFailed`). Screens word the
+ * codes they know and show a generic line for any other. `retryable`: the same request again may succeed.
+ * A transport failure (no answer) is not a refusal and arrives as a plain `Error`.
+ */
+export class RoomsRefused extends Error {
+  public constructor(
+    public readonly operation: RoomsOperation,
+    public readonly code: string,
+    public readonly retryable: boolean,
+    detail?: string
+  ) {
+    super(`${operation} was refused (${code})${detail ? `: ${detail}` : ''}`)
+    this.name = 'RoomsRefused'
+  }
+}
+
 /** The note being replaced changed since the preview. Nothing was sent; re-read it first. */
 export class RoomsConflict extends Error {
   public constructor(
@@ -337,10 +402,16 @@ export interface RoomsService {
   getRoom(roomId: string): Promise<Room>
   /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
   roomCapabilities(roomId: string): Promise<RoomCapabilities>
-  listNotes(roomId: string): Promise<NoteList>
+  /**
+   * The room's records, metadata only. With `sinceVersion`, only those written or curated after it (a version is
+   * the host's, monotonic per room), so a refresh asks only for what is new; such a listing is never complete
+   * against the room's record count.
+   */
+  listNotes(roomId: string, options?: { sinceVersion?: number }): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
-  confirmWrite(token: string): Promise<{ key: string; version: number }>
+  /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
+  confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }>
   curate(roomId: string, key: string, action: 'pin' | 'unpin' | 'retract'): Promise<void>
 
   listOffers(communityDid?: string): Promise<RoomOffer[]>
@@ -350,9 +421,9 @@ export interface RoomsService {
   hideOffer(offerId: string): Promise<void>
 
   listFiles(roomId: string): Promise<RoomFile[]>
-  openFile(roomId: string, fileId: string): Promise<OpenedFile>
+  openFile(roomId: string, fileId: string, options?: RoomsTransferOptions): Promise<OpenedFile>
   /**
-   * Deletes the protected local copy `openFile` made. Call it when the viewer closes. The service also
+   * Deletes the protected local copy a completed `openFile` made (a cancelled one keeps none). Call it when the viewer closes. The service also
    * deletes any copies left from earlier sessions on its first `openFile` after the app starts.
    */
   releaseFile(localUri: string): Promise<void>
