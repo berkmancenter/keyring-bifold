@@ -68,7 +68,6 @@ test('the three defaults: the ways this phone can use, and one line for the rest
   expect(tree.getByTestId(id('JoinWayFollows_invited'))).toHaveTextContent('Join.Ways.FollowsAutomatic')
   // A way that asks nothing is named by what the person does (276.10, option B).
   expect(tree.getByTestId(id('JoinWay_review'))).toHaveTextContent(/Join\.Ways\.ButtonAsk/)
-  expect(tree.getByTestId(id('JoinWay_review'))).not.toHaveTextContent(/NeedsNothing/)
   expect(tree.getByTestId(id('JoinWayFollows_review'))).toHaveTextContent('Join.Ways.FollowsReview')
   // The credential way: Keyring can't present one yet, so it is behind the line.
   expect(tree.queryByTestId(id('JoinWay_member-credential'))).toBeNull()

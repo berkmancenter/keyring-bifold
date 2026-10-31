@@ -37,8 +37,11 @@ type WaysCard = Extract<JoinCard, { mode: 'ways' }>
 const typeWords = (types: string[], t: TFunction) =>
   types.map((type) => (type === 'MembershipCredential' ? (t('Join.Ways.TypeMembership') as string) : type)).join(', ')
 
+/** A need with words of its own: a way that asks nothing is named by its button. */
+type SaidNeed = Exclude<JoinNeed, { kind: 'nothing' }>
+
 /** One need as its lines: vetting says the statements, then each claim checked. */
-function needLines(need: JoinNeed, community: string, t: TFunction): string[] {
+function needLines(need: SaidNeed, community: string, t: TFunction): string[] {
   const named = { community, interpolation: { escapeValue: false } }
   switch (need.kind) {
     case 'invitation':
@@ -60,8 +63,6 @@ function needLines(need: JoinNeed, community: string, t: TFunction): string[] {
         t('Join.AsksStatements', { count: need.statements }) as string,
         ...need.claims.map((c) => (c === 'name.legal' ? (t('Join.AsksLegalName') as string) : claimWords(c, t))),
       ]
-    default:
-      return [t('Join.Ways.NeedsNothing') as string]
   }
 }
 
@@ -79,7 +80,9 @@ export function wayWords(
   startsVetting: boolean
 ): { title: string; lines: string[] } {
   const vetting = row.needs.find((need): need is Extract<JoinNeed, { kind: 'vetting' }> => need.kind === 'vetting')
-  const others = row.needs.filter((need) => need.kind !== 'vetting' && need.kind !== 'nothing')
+  const others = row.needs.filter(
+    (need): need is Exclude<SaidNeed, { kind: 'vetting' }> => need.kind !== 'vetting' && need.kind !== 'nothing'
+  )
   if (vetting) {
     const [statements, ...claims] = needLines(vetting, community, t)
     return {

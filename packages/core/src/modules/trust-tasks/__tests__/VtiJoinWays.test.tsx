@@ -180,9 +180,7 @@ describe('Join, at manifest 0.3', () => {
         expect(tree.getByTestId(id('JoinWayPrivate_vetted-member'))).toHaveTextContent(/Vetting\.Private\.Badge/)
         // The mark only (276.10, option B): what private means is said on Get vetted, not here as well.
         expect(tree.queryByTestId(id('JoinWayPrivate_vetted-memberExplain'))).toBeNull()
-        expect(tree.getByTestId(id('JoinWay_vetted-member'))).not.toHaveTextContent(
-          /PrivateVettingWay|Private\.Explain/
-        )
+        expect(tree.getByTestId(id('JoinWay_vetted-member'))).not.toHaveTextContent(/Private\.Explain/)
         expect(tree.queryByTestId(id('JoinWaysVettingNotSupported'))).toBeNull()
         expect(tree.queryByTestId(id('JoinPrivateVettingStart_vetted-member'))).toBeNull()
         await act(async () => fireEvent.press(tree.getByTestId(id('JoinStart'))))
