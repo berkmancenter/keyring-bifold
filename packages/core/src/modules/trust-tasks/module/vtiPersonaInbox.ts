@@ -34,7 +34,7 @@ import { receiveRequestVmc, reciprocateIfOwed } from './vtiReciprocate'
 import { invitationOfferOfMessage, redeemInvitationOffer, VtiInvitationOfferError } from './vtiInvitationOffer'
 import { didPrefix } from './didPrefix'
 import { releaseWarn } from './releaseLog'
-import { VtiSessionHeld, vtiAgent } from './vtiAgent'
+import { vtiAgent } from './vtiAgent'
 import { vtaAgent } from './vtaAgent'
 import { refusedAsNotOnAcl } from './VtaClient'
 import { KeyCopyUnavailable } from './EphemeralKeyManagementService'
@@ -163,6 +163,12 @@ export async function keepForPersona(
 export const PERSONA_INBOX_STUCK_MS = 60_000
 
 /** Start collecting; returns the function that stops it. */
+/**
+ * vtiAgent's `VtiSessionHeld`: a look's background sign-in refused because a step keeps the session as another
+ * identity. Read by name, so a suite that mocks vtiAgent need not carry the class.
+ */
+const isSessionKept = (e: unknown): boolean => e instanceof Error && e.name === 'VtiSessionHeld'
+
 export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): () => void {
   // Before the first look signs in: a persona's key copy is borrowed into
   // memory and gone after an install or restart, and only the fetcher can get
@@ -290,7 +296,7 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
       try {
         await signIn(persona)
       } catch (e) {
-        if (e instanceof VtiSessionHeld) return said('listening only: another identity keeps the session')
+        if (isSessionKept(e)) return said('listening only: another identity keeps the session')
         if (!isMissingKeyCopy(e)) throw e
         // The persona's borrowed key is not in memory (an install, a restart,
         // a lock). Borrow it again through its agent and sign in once more; if
@@ -307,7 +313,7 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
       said('signed in')
     } catch (e) {
       // Kept by a step after the key was borrowed again: not a failure.
-      if (e instanceof VtiSessionHeld) return said('listening only: another identity keeps the session')
+      if (isSessionKept(e)) return said('listening only: another identity keeps the session')
       if (e instanceof PersonaAgentUnreachable && persona) setAgentState(persona, e)
       said(`sign-in failed: ${e instanceof Error ? e.message : String(e)}`)
       options.onError?.(e)
