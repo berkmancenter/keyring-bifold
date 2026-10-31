@@ -7,6 +7,9 @@
 import { AppState, DeviceEventEmitter } from 'react-native'
 
 import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
+
+// Spelled out, not imported: the control runs these tests on a tree that does not have it.
+const MESSAGE_WAITING = 'vti:persona-message-waiting'
 import type { VtiPersona } from '../module/VtiIdentityStore'
 
 type Guard = (did: string) => Promise<void>
@@ -47,7 +50,11 @@ jest.mock('../module/vtaAgent', () => ({
     subscribe: () => () => undefined,
   },
 }))
-jest.mock('../module/vtiPersonaInbox', () => ({ keepForPersona: jest.fn() }))
+jest.mock('../module/vtiPersonaInbox', () => ({
+  keepForPersona: jest.fn(),
+  // The real one: what a listener takes must be what the inbox keeps.
+  ownedByInbox: jest.requireActual('../module/vtiPersonaInbox').ownedByInbox,
+}))
 jest.mock('../module/VtiMediatorTransport', () => ({}))
 jest.mock('../module/vtiTsp', () => ({}))
 jest.mock('../module/VtiIdentityStore', () => ({ GenericRecordsIdentityStore: jest.fn() }))
@@ -429,8 +436,39 @@ describe('what a listener keeps', () => {
   it('a message not in the envelope is kept as it came', async () => {
     const keep = keepForPersona as jest.Mock
     keep.mockClear()
-    const plain = { id: 'm2', type: 'https://example.org/plain', body: {} }
+    const plain = { id: 'm2', type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1', body: {} }
     await keepFromListener({ config: { logger: {} } } as never, persona('a'), plain as never, 'tsp')
     expect(keep).toHaveBeenCalledWith(expect.anything(), expect.anything(), plain)
+  })
+
+  // 276.10, two-phone private vetting: the vetter's listener heard the applicant's vetting request while another
+  // community held the shared session, took it (an acknowledgement) and kept nothing, and the desk never saw it.
+  it('a vetting request is not taken: left on the mediator, and its identity named for the shared session', async () => {
+    const keep = keepForPersona as jest.Mock
+    keep.mockClear()
+    const waiting = jest.fn()
+    const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
+    const a = persona('a')
+    const request = {
+      id: 'm3',
+      type: 'https://trusttasks.org/spec/vetting/request/0.1',
+      body: { type: 'https://trusttasks.org/spec/vetting/request/0.1', payload: {} },
+    }
+    await expect(keepFromListener({ config: { logger: {} } } as never, a, request as never, 'didcomm')).rejects.toThrow(
+      'left on the mediator'
+    )
+    expect(keep).not.toHaveBeenCalled()
+    expect(waiting).toHaveBeenCalledWith({ did: a.did, communityDid: a.communityDid, type: request.type })
+    sub.remove()
+  })
+
+  it('an answer to an ask the shared session sent is left for it too, in the envelope or not', async () => {
+    const keep = keepForPersona as jest.Mock
+    keep.mockClear()
+    const answer = { id: 'm4', type: 'https://trusttasks.org/spec/vtc/rooms/offers/list/0.4#response', body: {} }
+    await expect(
+      keepFromListener({ config: { logger: {} } } as never, persona('a'), answer as never, 'tsp')
+    ).rejects.toThrow('left on the mediator')
+    expect(keep).not.toHaveBeenCalled()
   })
 })
