@@ -88,7 +88,9 @@ export const LOCALITY_BINDING_CONTEXT = 'keyring-locality-v1'
  */
 export function deriveEid(challenge: string, sessionTaskDigestMultibase: string): string {
   const enc = new TextEncoder()
-  return toHex(hkdf(sha256, enc.encode(challenge), enc.encode(EID_SALT), enc.encode(sessionTaskDigestMultibase), EID_BYTES))
+  return toHex(
+    hkdf(sha256, enc.encode(challenge), enc.encode(EID_SALT), enc.encode(sessionTaskDigestMultibase), EID_BYTES)
+  )
 }
 
 /** The EID as the 128-bit service UUID the device advertises. */

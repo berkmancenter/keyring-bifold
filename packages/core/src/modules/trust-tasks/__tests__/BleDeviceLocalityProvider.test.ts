@@ -161,7 +161,7 @@ describe('BleDeviceLocalityProvider (design sketch — locality-plan.md §10.3 i
     })
   })
 
-  test('passes null straight through on window-lost/declined, matching NullDeviceLocalityProvider\'s contract', async () => {
+  test("passes null straight through on window-lost/declined, matching NullDeviceLocalityProvider's contract", async () => {
     const { bridge, respondToSensor } = makeBridge()
     respondToSensor.mockResolvedValue(null)
     const provider = new BleDeviceLocalityProvider(bridge, async () => 'absent')

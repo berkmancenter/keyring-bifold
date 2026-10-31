@@ -14,12 +14,12 @@ witness-server's `BleLocalityProvider`.
 
 ## Status
 
-| | Android | iOS |
-|---|---|---|
-| Native implementation | `android/…/LocalityPeripheralModule.kt` | `ios/LocalityPeripheral.swift` |
-| Bridge style | TurboModule codegen | legacy `RCT_EXTERN_MODULE`, via RN interop |
-| Signature produced | DER ECDSA over the binding | CBOR App Attest assertion |
-| Verified on a real device | **yes**, end to end, 2026-08-21 | **yes**, end to end, 2026-09-13 |
+|                           | Android                                 | iOS                                        |
+| ------------------------- | --------------------------------------- | ------------------------------------------ |
+| Native implementation     | `android/…/LocalityPeripheralModule.kt` | `ios/LocalityPeripheral.swift`             |
+| Bridge style              | TurboModule codegen                     | legacy `RCT_EXTERN_MODULE`, via RN interop |
+| Signature produced        | DER ECDSA over the binding              | CBOR App Attest assertion                  |
+| Verified on a real device | **yes**, end to end, 2026-08-21         | **yes**, end to end, 2026-09-13            |
 
 Both platforms have run live on physical phones. Neither has yet run from a
 store or TestFlight build; what that leaves open is below.
@@ -35,13 +35,13 @@ file's own doc comment.
 phone against a witness on a Mac using the CoreBluetooth/noble sensor, via
 `yarn e2e:vrc:witnessed:locality:devices`. Both legs confirmed, and both VWCs
 carried `localityConfirmed: true`. It has since passed with the witness
-*requiring* co-presence on an iPhone + iPad pair
+_requiring_ co-presence on an iPhone + iPad pair
 (`yarn e2e:vrc:witnessed:ios-devices:didcomm-v2:tsp:locality`, In-Person badge
 asserted). The two questions only a live run could answer are settled:
 
 - **`signingElapsedMs`.** iOS cannot pre-authorize the signature the way
   Android's `CryptoObject` can, so `DCAppAttestService.generateAssertion`
-  runs *inside* witness-server's RTT bound (provisionally 400ms). Measured
+  runs _inside_ witness-server's RTT bound (provisionally 400ms). Measured
   77, 63 and 72 ms across three runs. The Swift still logs this number on
   every run, and the e2e harness reports it.
 - **Foreground advertising of a 128-bit service UUID.** iOS moves 128-bit
@@ -74,7 +74,7 @@ Attest key, and App Attest keys are reachable only through
 whose signature covers `SHA256(authenticatorData ‖ SHA256(binding))`. Handed
 straight to `p256.verify` that does not throw — it silently returns false.
 
-Minting a second, ordinary Secure Enclave key on iOS *would* produce
+Minting a second, ordinary Secure Enclave key on iOS _would_ produce
 Android-shaped bytes. It would also produce a public key that differs from the
 one in the VRC evidence, so `transcriptKeyMatchesVrcSigner` on the witness
 would never match — discarding the single check that ties the device on the
@@ -93,7 +93,7 @@ is hardware-key attestation and signing; BLE advertising and GATT-server APIs
 are a different platform surface with their own permissions and lifecycle
 rules.
 
-It does need to reach the *same* key that package manages, which is the
+It does need to reach the _same_ key that package manages, which is the
 package's most fragile property:
 
 - **Android** reads the same KeyStore alias `AttestationModule.kt` creates,
@@ -102,7 +102,7 @@ package's most fragile property:
   `AriesAttestation`, accounts `<bundleId>.AttestationKey` and
   `<bundleId>.AppAttestPublicKey`.
 
-Reading a *different* key would not fail loudly. It would sign successfully,
+Reading a _different_ key would not fail loudly. It would sign successfully,
 produce a public key the witness cannot match, and report
 `localityKeyMatchesCredentialSigner: false` on every ceremony while everything
 else looked healthy. `src/jcsBindingParity.test.ts` asserts the iOS strings
@@ -152,7 +152,7 @@ typealias RCTPromiseRejectBlock = (String?, String?, Error?) -> Void
 ## Permissions
 
 **Android**: `BLUETOOTH_ADVERTISE` and `BLUETOOTH_CONNECT` are API 31+ runtime
-permissions. The native side only *checks* whether they are already granted
+permissions. The native side only _checks_ whether they are already granted
 and resolves `null` if not — a normal ceremony outcome, not an error. The OS
 request dialog is a JS-level, pre-ceremony UX decision (§10.3 item 8's
 pre-flight sheet), deliberately not a bare popup mid-ceremony.
