@@ -135,9 +135,20 @@ beforeEach(async () => {
   mockPersonas[A.community] = persona(A.persona, A.community)
   mockPersonas[B.community] = persona(B.persona, B.community)
 })
+// A test that fails while a hold is up must not leave it to the next: every hold a test takes is let go here.
+const releases: Array<() => void> = []
 afterEach(async () => {
+  for (const release of releases.splice(0)) release()
+  await new Promise((r) => realSetTimeout(r, 10))
   await vtiAgent.disconnect()
 })
+/** A step's body that runs until the test lets it go (or the test ends). */
+const untilReleased = () => {
+  let release!: () => void
+  const done = new Promise<void>((resolve) => (release = resolve))
+  releases.push(release)
+  return { done, release }
+}
 
 describe("the rooms backend's polls for a phone in two communities", () => {
   it('names the listings it polls, and nothing else', () => {
@@ -161,14 +172,10 @@ describe("the rooms backend's polls for a phone in two communities", () => {
 
   it('leaves a session a step holds as another identity, and lists that one later', async () => {
     const backend = createAgentRoomsBackend(agent, { mediatorDid: 'did:peer:lab' })
-    let release!: () => void
-    const step = vtiAgent.holding(
-      agent,
-      'did:peer:lab',
-      persona(A.persona, A.community),
-      () => new Promise<void>((resolve) => (release = resolve)),
-      { reason: 'vetter round' }
-    )
+    const { done, release } = untilReleased()
+    const step = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, {
+      reason: 'vetter round',
+    })
     await new Promise((r) => realSetTimeout(r, 10))
     await expect(backend.communityTask(B.community, MEMBERSHIPS, {})).rejects.toBeInstanceOf(VtiSessionHeld)
     // The step's persona is listed on the session it holds.
@@ -185,13 +192,13 @@ describe("the rooms backend's polls for a phone in two communities", () => {
 
 describe('the session claim', () => {
   it('refuses a background connect as another identity during a hold, and disconnects nothing', async () => {
-    let release!: () => void
+    const { done, release } = untilReleased()
     const held = vtiAgent.holding(
       agent,
       'did:peer:lab',
       persona(A.persona, A.community),
       async (did) => {
-        await new Promise<void>((resolve) => (release = resolve))
+        await done
         return did
       },
       { reason: 'vetter round' }
@@ -223,10 +230,10 @@ describe('the session claim', () => {
   })
 
   it("makes an ordinary connect as another DID wait for a hold to end, and shares one DID's holds", async () => {
-    let release!: () => void
+    const { done, release } = untilReleased()
     const order: string[] = []
     const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), async () => {
-      await new Promise<void>((resolve) => (release = resolve))
+      await done
       order.push('round done')
     })
     await new Promise((r) => realSetTimeout(r, 10))
@@ -246,14 +253,8 @@ describe('the session claim', () => {
   })
 
   it('stops keeping others waiting once a hold runs past its time', async () => {
-    let release!: () => void
-    const held = vtiAgent.holding(
-      agent,
-      'did:peer:lab',
-      persona(A.persona, A.community),
-      () => new Promise<void>((resolve) => (release = resolve)),
-      { maxMs: 50 }
-    )
+    const { done, release } = untilReleased()
+    const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, { maxMs: 50 })
     await new Promise((r) => realSetTimeout(r, 10))
     const screen = vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(B.persona, B.community) })
     clock += 51
