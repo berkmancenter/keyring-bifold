@@ -466,6 +466,26 @@ describe('what a listener keeps', () => {
     sub.remove()
   })
 
+  // Review of #854: a message left on the mediator comes back at every drain until the shared session takes it. The
+  // event goes out each time (the screen may have lost the session again), but the Release log says it once.
+  it('a message left again at the next drain names its identity again, and is said in the log once', async () => {
+    const waiting = jest.fn()
+    const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const a = persona('a')
+    const request = { id: 'm5-once', type: 'https://trusttasks.org/spec/vetting/request/0.1', body: {} }
+    for (let drain = 0; drain < 3; drain++)
+      await expect(
+        keepFromListener({ config: { logger: {} } } as never, a, request as never, 'didcomm')
+      ).rejects.toThrow('left on the mediator')
+    expect(waiting).toHaveBeenCalledTimes(3)
+    const said = warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes(request.type))
+    expect(said.filter((line) => line.includes('left on the mediator'))).toHaveLength(1)
+    expect(said.filter((line) => line.includes('received'))).toHaveLength(1)
+    warn.mockRestore()
+    sub.remove()
+  })
+
   it('an answer to an ask the shared session sent is left for it too, in the envelope or not', async () => {
     const keep = keepForPersona as jest.Mock
     keep.mockClear()
