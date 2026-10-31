@@ -26,18 +26,13 @@ const RECORD_TYPE = 'keyring/rooms'
 export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: string } = {}): RoomsBackend {
   const identityStore = new GenericRecordsIdentityStore(agent)
   const communityStore = new GenericRecordsCommunityStore(agent)
-  // The session to a community is the persona the phone joined it with, held while the task runs. A listing is a poll:
-  // it never takes the session from a step holding it as another identity (VtiSessionHeld, nothing disconnected), and
-  // one persona's listings run together, so a phone in two communities switches once per persona, not once per task
-  // (two communities' polls flipped it every 4 s and stopped each other's asks, 10-31). An accept is the person's own
-  // act, and holds the session as an ordinary caller does.
-  const asPersona = async <T>(communityDid: string, poll: boolean, fn: () => Promise<T>): Promise<T> => {
+  // The session to a community is the persona the phone joined it with.
+  const connectAs = async (communityDid: string) => {
     const persona = await identityStore.getPersona(communityDid)
     if (!persona) throw new Error('rooms: this phone holds no identity for that community')
-    return vtiAgent.holding(agent, options.mediatorDid, persona, fn, {
+    await vtiAgent.connect(agent, options.mediatorDid, {
+      persona,
       peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
-      reason: poll ? 'rooms listing' : 'rooms',
-      background: poll,
     })
   }
   const client = async () => {
@@ -65,11 +60,15 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
       return out
     },
 
-    communityTask: (communityDid, type, payload) =>
-      asPersona(communityDid, isRoomsListing(type), () => vtiAgent.communityTask(communityDid, type, payload)),
+    communityTask: async (communityDid, type, payload) => {
+      await connectAs(communityDid)
+      return vtiAgent.communityTask(communityDid, type, payload)
+    },
 
-    sendCompleted: (communityDid, recipientDid, document) =>
-      asPersona(communityDid, false, () => vtiAgent.sendCompleted(recipientDid, document)),
+    sendCompleted: async (communityDid, recipientDid, document) => {
+      await connectAs(communityDid)
+      return vtiAgent.sendCompleted(recipientDid, document)
+    },
 
     newId: () => utils.uuid(),
 
