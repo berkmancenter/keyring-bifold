@@ -102,7 +102,8 @@ import { GenericRecordsTspProbeStore, runTspProbe, type TspProbeOutcome, type Ts
 import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
-import { inReadLane, VTA_READ_LANE_SIZE } from './vtaReadLane'
+import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
+import { besideQueue, inReadLane, VTA_HEARTBEAT_BESIDE, VTA_READ_LANE_SIZE } from './vtaReadLane'
 import {
   DECLARATIVE_POLICY_ID,
   DECLARATIVE_POLICY_NAME,
@@ -175,6 +176,8 @@ export const VTA_TASK = {
   aclList03: 'https://trusttasks.org/spec/acl/list/0.3',
   // Only "Send me a test request" sends these (approvalRules.ts TEST_REQUEST_TASKS).
   contextsDelete: 'https://trusttasks.org/spec/vta/contexts/delete/1.0',
+  /** 1.1 (trust-tasks-tf #967, vta-service 1afebe27): 1.0's payload plus `abandonHostCopies`, default false. */
+  contextsDelete11: 'https://trusttasks.org/spec/vta/contexts/delete/1.1',
   // The approval rules' row (vta-sdk trust_tasks.rs:2048-2060). Writing is super-admin.
   policyGet: 'https://trusttasks.org/spec/policy/get/0.1',
   policyUpsert: 'https://trusttasks.org/spec/policy/upsert/0.2',
@@ -235,6 +238,10 @@ export const VTA_TASK_VERSIONS = {
   policyUpsert: [VTA_TASK.policyUpsert03, VTA_TASK.policyUpsert],
   // 0.3 first: every VTA in use serves it (pcsVtaPayloads.ts DISCOVERY_TASK_03).
   discovery: [DISCOVERY_TASK_03, DISCOVERY_TASK],
+  // 1.1 first. vta-service serves only 1.0 up to v0.66.0, both in v0.67.0, and only 1.1 from 61c23f20 (#2332,
+  // 2026-10-29: v0.68.0 and the nightlies). An agent before v0.67.0 steps down to 1.0 on a refusal. The test
+  // request's context holds nothing, so 1.1's host settling has nothing to do and the payload is the same in both.
+  contextsDelete: [VTA_TASK.contextsDelete11, VTA_TASK.contextsDelete],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -1112,6 +1119,13 @@ export class VtaClient {
     return Math.max(1, this.options.readLaneSize ?? VTA_READ_LANE_SIZE)
   }
 
+  /** Whether a task of `type` goes beside the queue now (vtaReadLane.ts, besideQueue). */
+  private goesBeside(type: string): boolean {
+    return (
+      (this.options.heartbeatBeside ?? VTA_HEARTBEAT_BESIDE) && this.replyThreading === 'threaded' && besideQueue(type)
+    )
+  }
+
   /** Grants this client is waiting for, by the payload digest the VTA names. */
   private grantWaiters = new Map<string, () => void>()
   /** Which version of each family this agent was found to serve (taskVersions.ts). */
@@ -1159,6 +1173,8 @@ export class VtaClient {
       probeStore?: TspProbeStore
       /** How many read-lane tasks may be on the wire at once (vtaReadLane.ts); its default when absent. */
       readLaneSize?: number
+      /** Whether the heartbeat goes beside the queue (vtaReadLane.ts); its default when absent. */
+      heartbeatBeside?: boolean
     } = {}
   ) {
     this.breaker = options.breaker ?? new TspReplyBreaker()
@@ -1429,6 +1445,8 @@ export class VtaClient {
    * One send in the queue, behind whatever is in flight — no step-up or consent handling. Oldest first: a task in the
    * read lane (vtaReadLane.ts) may start beside other lane tasks, up to the lane's size, once this session's agent is
    * known to thread its replies; any other task starts only when nothing is on the wire, and the tasks behind it wait.
+   * Once that is known, a heartbeat goes beside the queue (vtaReadLane.ts, besideQueue): at once, and nothing waits
+   * for it.
    */
   private enqueue<T>(
     type: string,
@@ -1443,10 +1461,18 @@ export class VtaClient {
         ticket <= this.droppedThrough
           ? Promise.reject(new VtaTaskDropped(type))
           : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent)
+      // What may start is decided by the running counts in pump(), which a task beside the queue never touches;
+      // inFlight, where it does show, only names what a task waits behind (below).
+      if (this.goesBeside(type)) {
+        void Promise.resolve().then(() => run().then(resolve, reject))
+        return
+      }
       this.waiting.push({ ticket, type, start: () => run().then(resolve, reject) })
       // One task at a time: one queued behind another says what it waits on, so a
       // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
-      const ahead = [...this.inFlight.values()][0]
+      // A heartbeat beside the queue holds nothing: what is named is the other task on the wire, if there is one.
+      const onWire = [...this.inFlight.values()]
+      const ahead = onWire.find((t) => !besideQueue(t.type)) ?? onWire[0]
       if (ahead && !this.mayStart(type)) {
         this.agent.config.logger.info(
           `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
@@ -2252,10 +2278,14 @@ export class VtaClient {
       await this.relayConsentRequests(pending.requests)
       return { kind: 'held' }
     }
-    const cleanedUp = await this.enqueue(VTA_TASK.contextsDelete, { id, force: true }, 30000, {}).then(
-      () => true,
-      () => false
-    )
+    const cleanedUp = await this.versions
+      .ask('contextsDelete', VTA_TASK_VERSIONS.contextsDelete, (type) =>
+        this.enqueue(type, { id, force: true }, 30000, {})
+      )
+      .then(
+        () => true,
+        () => false
+      )
     return { kind: 'letThrough', cleanedUp }
   }
 
@@ -2493,7 +2523,7 @@ export class VtaClient {
    * a persona to `holdPersonaKeys` only when both its copies are recorded, which never comes here.
    */
   private async borrowAdoptedKeys(persona: VtiPersona): Promise<boolean> {
-    if (persona.vtaDid !== this.vtaDid) return false
+    if (persona.vtaDid !== this.vtaDid || isAgentsOwnPersona(persona)) return false
     const inFlightKey = `${this.vtaDid}|${persona.communityDid}`
     for (;;) {
       const running = personasInFlight.get(inFlightKey)
@@ -2525,10 +2555,15 @@ export class VtaClient {
     }
   }
 
-  /** Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. */
+  /**
+   * Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. Never a key of the agent's own DID:
+   * an identity's keys only (agentOwnIdentity).
+   */
   async borrowKey(
     vtaKeyId: string
   ): Promise<{ keyId: string; curve: 'Ed25519' | 'X25519'; publicKeyMultibase: string }> {
+    if (isAgentsOwnDid(didOfKeyId(vtaKeyId), this.vtaDid))
+      throw new Error(`${LOG_PREFIX} not borrowed: the key is the agent's own, not an identity's`)
     const exported = await this.task<VtaExportedKey>(VTA_TASK.keysExportSecret, { keyId: vtaKeyId })
     // Held in memory only (#10, plan part C), under an id that is the same every
     // session, so a persona's record keeps naming it across restarts.

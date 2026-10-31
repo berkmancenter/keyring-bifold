@@ -25,6 +25,7 @@ import {
   cancelSignIn,
   claimSignIn,
   httpsPost,
+  signInEndLine,
   SignInError,
   type ClaimedSignIn,
   type SignInDeps,
@@ -51,7 +52,10 @@ import {
   type ProvedSignIn as AgentProvedSignIn,
   type SignInAgentDeps,
 } from './oobSignInAgent'
+import { isAgentsOwnDid } from './agentOwnIdentity'
+import { classifyDid } from './classifyDid'
 import { communityNameIsStale, refreshPublishedName } from './communityNameRefresh'
+import { releaseWarn } from './releaseLog'
 import { readTrigger, triggerAction } from './triggerLink'
 import type { VtaVaultEntry } from './VtaClient'
 import { vtaAgent } from './vtaAgent'
@@ -115,7 +119,17 @@ export type SignInSteps = {
   identifyAndProve: (claimed: ClaimedSignIn, enteredNumber: string, identity?: SignInIdentity) => Promise<ProvedSignIn>
   approve: (proved: ProvedSignIn) => Promise<{ status: 'approved' }>
   cancel: (claimed: ClaimedSignIn) => Promise<{ cancelled: boolean }>
+  /**
+   * Whether the sender of a code from a community this phone has not joined is a community it can join (IN-406: a
+   * community's join page shows the same sign-in code). Asked only when the person taps "Check and join", never
+   * before: until they continue, nothing is resolved for an unknown sender (VTI-LNK-050). Undefined when it could
+   * not be checked (its DID host did not answer in time, or the phone is offline), which is not a "no".
+   */
+  joinable?: (vtcDid: string) => Promise<boolean | undefined>
 }
+
+/** How long "Check and join" waits on the sender's DID host before saying the code can't be joined here. */
+export const JOINABLE_WAIT_MS = 15000
 
 // The rule is shared with My Agent's community list (communityNameRefresh); kept exported from here as before.
 export { COMMUNITY_NAME_TTL_MS } from './communityNameRefresh'
@@ -219,7 +233,8 @@ export function signInIdentitiesFrom(
     let dropped = 0
     for (const e of forCommunity) {
       if (found.some((f) => f.vtaDid === a.vtaDid && f.did === e.principalDid)) continue
-      if (keyringMade(e)) {
+      // Another phone's persona is dropped; the agent itself, whose entry this phone made, never is (agentOwnIdentity).
+      if (keyringMade(e) && !isAgentsOwnDid(e.principalDid as string, a.vtaDid)) {
         dropped++
         continue
       }
@@ -313,9 +328,36 @@ export function agentSignInSteps(agent: Agent): SignInSteps {
     return identities.get(vtcDid) as Promise<PersonaSignInIdentity[]>
   }
   // This phone's links, read once: which Farm each agent was claimed from, and the key it signs in by (IN-388).
-  let linked: ReturnType<typeof vtaAgent.linkedAgents> | undefined
-  const linkedAgents = () => (linked ??= vtaAgent.linkedAgents(agent).catch(() => []))
-  const farmFor = async (farmDid: string) => farmIdentitiesFrom(farmDid, await linkedAgents())
+  // Undefined when they could not be read: not known, which is not the same as none.
+  type Linked = Awaited<ReturnType<typeof vtaAgent.linkedAgents>>
+  let linked: Promise<Linked | undefined> | undefined
+  const linkedAgents = () =>
+    (linked ??= vtaAgent.linkedAgents(agent).catch((e) => {
+      releaseWarn(`[SignIn] linked agents not read: ${(e instanceof Error ? e.message : String(e)).slice(0, 120)}`)
+      return undefined
+    }))
+  const farmFor = async (farmDid: string) => farmIdentitiesFrom(farmDid, (await linkedAgents()) ?? [])
+  /**
+   * For a sender this phone has not joined: may it hold an agent that kept no Farm sign-in key? From the links when
+   * they name one; when they name none or could not be read, from the agent's own state, unless that says the link was
+   * read and no agent is linked. IN-388 step D on 276.10 got no line on a phone whose only agent was linked by owner
+   * code. The line's words are conditional ("If this code is from the service that hosts one of your agents"), so
+   * saying it when unsure costs little, where leaving it out leaves the person no way forward.
+   */
+  const mayHoldOlderAgent = async (vtcDid: string): Promise<boolean> => {
+    const agents = await linkedAgents()
+    const state = vtaAgent.getState()
+    const phoneLinked = !(state.linkRestored && state.link.kind !== 'linked')
+    // What decided it, for the next report: counts only, no DIDs.
+    releaseWarn(
+      `[SignIn] not joined: ${agents ? `${agents.length} linked agent(s) read` : 'links not read'}, ` +
+        `${agents?.filter((a) => a.farmLogin).length ?? 0} with a Farm key, ` +
+        `${agents?.filter((a) => a.farmLogin?.farmDid === vtcDid).length ?? 0} for this sender; ` +
+        `link ${state.link.kind}${state.linkRestored ? '' : ' (not read yet)'}`
+    )
+    if (agents?.some((a) => !a.farmLogin)) return true
+    return !agents?.length && phoneLinked
+  }
   const community = async (vtcDid: string) => {
     // A Farm this phone claimed an agent from: its agents are who can sign in, and no community is looked up. Asked
     // after this phone's own memberships, which never wait on the agents (a Farm is never one of them).
@@ -329,7 +371,7 @@ export function agentSignInSteps(agent: Agent): SignInSteps {
     const recorded = await recordedCommunity(agent, vtcDid, async () => (await identities).length > 0)
     const found = await identities
     const member = recorded.member || found.length > 0
-    const olderAgents = !member && (await linkedAgents()).some((a) => !a.farmLogin)
+    const olderAgents = !member && (await mayHoldOlderAgent(vtcDid))
     return { ...recorded, member, identities: found, ...(olderAgents ? { olderAgents } : {}) }
   }
   const claimDeps: SignInDeps = {
@@ -397,6 +439,15 @@ export function agentSignInSteps(agent: Agent): SignInSteps {
       })
     },
     cancel: (claimed) => cancelSignIn(claimed, claimDeps),
+    // The one network touch for an unknown sender, and only once the person has tapped: its DID document, from its
+    // DID host. Nothing goes to the community itself, and the scanned request is never claimed; joining (VtiJoin)
+    // is what first asks the community anything. A host that answered decides it (a community, or not one: none
+    // found, not a DID); one that did not answer in time leaves it unchecked, so the person can try again.
+    joinable: async (vtcDid) => {
+      const kind = await classifyDid(agent, vtcDid, { timeoutMs: JOINABLE_WAIT_MS }).catch(() => undefined)
+      if (!kind || (kind.kind === 'unresolvable' && kind.reason === 'offline')) return undefined
+      return kind.kind === 'community'
+    },
   }
 }
 
@@ -415,6 +466,15 @@ export function signInCommunityOf(
   }
   const ui = action.kind === 'say' ? action.ui : 'update'
   return { reason: ui === 'pass-on' ? 'invalid' : ui }
+}
+
+/**
+ * How a sign-in that ended in an error is said: its reason for the screen, and one Release line saying which check
+ * ended it, with the versions asked (IN-390). The line names no link, key or document (signInEndLine).
+ */
+export function signInEndedBy(error: unknown): SignInEndReason | undefined {
+  releaseWarn(signInEndLine(error))
+  return signInReasonOf(error)
 }
 
 /** A thrown error's sign-in reason, when it carries one. Read by shape, so a later SignInError counts too. */

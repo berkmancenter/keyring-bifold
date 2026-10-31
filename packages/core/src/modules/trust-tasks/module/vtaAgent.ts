@@ -182,6 +182,14 @@ export interface VtaAgentState {
    */
   repliesStalled?: boolean
   /**
+   * A session to the linked agent is being opened, the quiet reopen after an unlock included (the link stays
+   * shown online then): a screen whose read failed meanwhile waits for it rather than saying the agent is
+   * unreachable (#772, 276.9: "Couldn't reach your agent" for 10–20 s after the PIN).
+   */
+  sessionOpening?: boolean
+  /** When a session to the linked agent last opened: a screen whose read failed reads again then. */
+  sessionOpenedAt?: number
+  /**
    * The devices an agent's list named when last read, by DID: what a request
    * card calls the device that asked (Alberto's iPhone, 10-06: a request from
    * his computer read "Someone asks"). Filled by every read of the list.
@@ -644,6 +652,11 @@ export class VtaAgentController {
   private resumeRetry?: { timer?: ReturnType<typeof setTimeout>; subscription?: { remove(): void } }
   private reconnecting = false
   private opening?: { client: VtaClient; done: Promise<void> }
+  /** The sign-in shared by every caller, and `sessionOpening` with it. */
+  private setOpening(opening: { client: VtaClient; done: Promise<void> } | undefined) {
+    this.opening = opening
+    if (Boolean(this.state.sessionOpening) !== Boolean(opening)) this.set({ sessionOpening: Boolean(opening) })
+  }
   /** The VTA whose client an unlock just retired; its replacement opens quietly. */
   private handedOver?: string
   /** Identities whose keys moved into memory in this run; their stored copies go at the next (plan part E). */
@@ -835,7 +848,7 @@ export class VtaAgentController {
         await client.whoAmI().catch((error: unknown) => {
           if (refusedAsNotOnAcl(error)) throw error
         })
-        this.set({ status: 'connected', managerDid: client.managerDid })
+        this.set({ status: 'connected', managerDid: client.managerDid, sessionOpenedAt: this.now() })
         this.learnAgentName(client, vtaDid)
       } catch (error) {
         this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
@@ -845,11 +858,11 @@ export class VtaAgentController {
         throw error
       }
     })()
-    this.opening = { client, done }
+    this.setOpening({ client, done })
     try {
       await done
     } finally {
-      if (this.opening?.done === done) this.opening = undefined
+      if (this.opening?.done === done) this.setOpening(undefined)
     }
   }
 
@@ -2551,16 +2564,21 @@ export class VtaAgentController {
     const client = await this.signedIn(agent, this.linkedAgent())
     const managerDid = client.managerDid
     if (!managerDid) throw new DeviceActionRefused('notLinked')
-    const [model, me] = await Promise.all([client.readApprovals(), client.whoAmI()]).catch((error: unknown) => {
+    // A rule holds only the version it names, so the rules are read against what the agent dispatches now
+    // (approvalRules.ts OLDER_VERSIONS). supportedTypes never throws: unanswered, nothing is judged against it.
+    const [model, me, served] = await Promise.all([
+      client.readApprovals(),
+      client.whoAmI(),
+      client.supportedTypes(),
+    ]).catch((error: unknown) => {
       throw this.refused(error)
     })
     const roles = me.roles ?? (me.role ? [me.role] : [])
     const scoped = (me.scopes ?? []).length > 0 || (me.contexts ?? []).length > 0
-    return {
-      model,
-      view: approvalsView(model, managerDid),
-      canChange: roles.includes('admin') && !scoped && !model.unreadable,
-    }
+    const view = approvalsView(model, managerDid, served)
+    const renew = view.offered.filter((o) => o.renew).map((o) => o.key)
+    if (renew.length) releaseWarn(`[VTI] ask me before: rules miss a version the agent serves: ${renew.join(', ')}`)
+    return { model, view, canChange: roles.includes('admin') && !scoped && !model.unreadable }
   }
 
   /**
@@ -2579,16 +2597,19 @@ export class VtaAgentController {
       const client = await this.signedIn(agent, vtaDid)
       const managerDid = client.managerDid
       if (!managerDid) throw new DeviceActionRefused('notLinked')
+      // A rule holds only the exact version it names: write one per version the agent dispatches. Unanswered
+      // (undefined), every version Keyring knows.
+      const served = await client.supportedTypes()
       for (let attempt = 0; ; attempt++) {
         try {
           const model = await client.readApprovals()
           if (model.unreadable)
             throw new DeviceActionRefused('failed', 'the approval rules hold something Keyring cannot read')
-          const next = withPhoneRule(model, taskType, on, managerDid)
+          const next = withPhoneRule(model, taskType, on, managerDid, served)
           const version = await client.writeApprovals(next, model.version)
           releaseWarn(`[VTI] ask me before: rules written, version ${model.version} → ${version}`)
           const held = { ...next, version, unreadable: false }
-          return { model: held, view: approvalsView(held, managerDid), canChange: true }
+          return { model: held, view: approvalsView(held, managerDid, served), canChange: true }
         } catch (error) {
           const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
           if (details?.reason === 'conflict' && attempt === 0) continue
@@ -3191,7 +3212,7 @@ export class VtaAgentController {
         // go, or the next attempt would wait on the same one.
         const stuck = this.opening
         if (stuck) {
-          this.opening = undefined
+          this.setOpening(undefined)
           void stuck.client.disconnect().catch(() => undefined)
         }
         reject(new Error(`the VTA did not answer: signing in took over ${SESSION_CONNECT_DEADLINE_MS / 1000} s`))

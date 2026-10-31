@@ -44,6 +44,7 @@
     "Requested": "Requested",
     "Updated": "Updated",
     "Close": "Fechar",
+    "CloseNotification": "Fechar notificação",
     "Remove": "Remover",
     "GotIt": "Got it (PT-BR)",
     "Send": "Enviar",
@@ -259,7 +260,15 @@
     "RememberChangePIN": "Altere seu PIN para assegurar sua carteira.",
     "ChangePIN": "Alterar PIN"
   },
+  "PINChangeSuccess": {
+    "InfoBox": {
+      "Title": "Seu PIN foi alterado",
+      "Description": "Agora você pode entrar com seu novo PIN."
+    },
+    "PrimaryButton": "Voltar às configurações"
+  },
   "PINEnter": {
+    "DeveloperMenuTrigger": "Informações do aplicativo",
     "EnterPIN": "Digitar PIN",
     "SubText": "Faça login para acessar sua carteira.",
     "Unlock": "Destravar",
@@ -601,6 +610,8 @@
     "ConnectionNotFound": "Conexão Não Encontrada",
     "InvalidQrCode": "QR code inválido. Favor tentar novamente.",
     "WillScanAutomatically": "Um QR code válido será escaneado automaticamente.",
+    "CameraStarting": "Iniciando a câmera…",
+    "CameraNotStarting": "A câmera não está iniciando. Feche o Keyring e tente de novo; se ainda não iniciar, reinicie o telefone.",
     "ScanQRCode": "Scanear QR code",
     "MyQRCode": "Meu QR code",
     "SwitchProfile": "Trocar de perfil",
@@ -745,6 +756,8 @@
     "MethodDevicePasscode": "código do aparelho"
   },
   "ProofRequest": {
+    "SelectCredential": "Selecionar credencial",
+    "PredicateInput": "Digite o valor de {{label}}",
     "RequestForProof": "Request for proof (PT-BR)",
     "ReceiveProofTitle": "Received an information request from(pt-br)",
     "JustAMoment": "Aguarde enquanto preparamos as coisas para você...",
@@ -1394,6 +1407,8 @@
     "Someone": "Alguém",
     "Open": "Abrir esta comunidade",
     "Leave": "Sair da comunidade",
+    "AboutSection": "Sobre",
+    "DetailsLine": "O identificador desta comunidade",
     "HowToJoin": "Escolher como entrar",
     "HeldElsewhere": "Sua identidade em {{community}} está em {{agent}}, não no agente que você usa agora.",
     "HeldElsewhereLinked": "Mude para {{agent}} para usá-la ou para sair de {{community}}.",
@@ -1586,6 +1601,7 @@
     "CommunitiesBack_other": "{{count}} comunidades recuperadas do seu agente.",
     "CommunitiesNoneSeen": "Seu agente não mostrou a este telefone nenhuma identidade além das que ele já tem.",
     "CommunitiesNoneSeenScoped": "Seu agente permite que este telefone veja apenas {{contexts}}. Uma comunidade da qual você participou a partir de outro contexto do agente não pode voltar aqui até que o administrador do agente permita que este telefone veja esse contexto.",
+    "CommunitiesAgentItself": "Um cartão de comunidade aqui é do seu próprio agente, não de uma identidade sua, então este telefone não o assume. Para participar deste telefone, entre na comunidade pelo Keyring: isso cria uma identidade sua, à qual a comunidade pode dar o mesmo papel.",
     "CommunitiesNoCards": "Seu agente não tem cartões de comunidade para as outras identidades dele. Se você entrou em uma comunidade com o pnm ou o openvtc, abra o openvtc 0.5 ou mais recente uma vez para que ele guarde sua participação no seu agente e tente de novo.",
     "CommunitiesUnreadable_one": "1 identidade de comunidade não pôde ser lida do seu agente, então não foi trazida de volta.",
     "CommunitiesUnreadable_other": "{{count}} identidades de comunidade não puderam ser lidas do seu agente, então não foram trazidas de volta.",
@@ -2259,7 +2275,8 @@
     "MembersRow": "Membros",
     "MembersRowLine": "Quem está nesta comunidade, pelos nomes que mostram",
     "CardRow": "Seu cartão",
-    "CardRowLine": "O que os membros veem sobre você aqui",
+    "CardRowNamed": "Seu cartão · {{name}}",
+    "CardRowSeen": "Nome e função vistos por todos os membros",
     "StatusNotServed": "{{community}} ainda não tem um diretório de membros.",
     "StatusNoRight": "Você não é mais membro de {{community}}, então o diretório não está aberto para você.",
     "StatusUnreachable": "{{community}} não respondeu. Tente de novo daqui a pouco.",
@@ -2459,6 +2476,7 @@
       "keysRevoke": "Excluir uma chave"
     },
     "SetElsewhereNamed": "Já definido em outro dispositivo",
+    "TurnOnAgain": "Seu agente foi atualizado e isto não pergunta mais a você. Ative de novo.",
     "SetElsewhereTitle": "Definido em outro dispositivo",
     "HoldsThisPhone": "Seu agente espera uma aprovação antes de deixar este telefone fazer isto, então notificações ou dispositivos podem parar de funcionar. Mude onde foi definido.",
     "RuleConsent_one": "Precisa de 1 aprovação",
@@ -2525,6 +2543,10 @@
     "OfferLater": "Você pode mudar isso a qualquer momento em Meus dispositivos.",
     "SiblingOne": "{{device}} também está aberto como você. Enquanto os dois estiverem abertos, as mensagens podem chegar a apenas um deles.",
     "SiblingMany": "{{count}} outros dispositivos também estão abertos como você ({{devices}}). Enquanto estiverem abertos, as mensagens podem chegar a apenas um deles.",
+    "SiblingStripOne": "Também aberto em {{device}}",
+    "SiblingStripMany": "Também aberto em {{count}} outros dispositivos",
+    "SiblingStripWhy": "Enquanto os dois estiverem abertos, as mensagens podem chegar a apenas um deles.",
+    "SiblingStripWhyMany": "Enquanto estiverem abertos, as mensagens podem chegar a apenas um deles.",
     "SiblingOpen": "Meus dispositivos",
     "SiblingDismiss": "OK",
     "DefaultName": "{{platform}} · adicionado em {{date}}",
@@ -2606,6 +2628,10 @@
     "TimedOut": "O tempo acabou, nada foi conectado. Atualize a página de login e escaneie novamente.",
     "NoCode": "Não há código de login para usar. Escaneie o código do site novamente.",
     "OlderAgents": "Se este código for do serviço que hospeda um dos seus agentes: um agente configurado antes desta versão do Keyring não pode entrar nele a partir deste telefone. Obtenha um novo agente desse serviço ou entre de outra forma.",
+    "JoinHint": "Se este código for de uma comunidade em que você gostaria de entrar, o Keyring pode verificar e entrar nela.",
+    "CheckAndJoin": "Verificar e entrar",
+    "NotJoinable": "Este código não é de uma comunidade em que você possa entrar aqui.",
+    "JoinUnchecked": "O Keyring não conseguiu verificar este código agora. Tente de novo.",
     "Service": {
       "ConfirmBody": "Um site está pedindo para você entrar com um dos seus agentes deste serviço. Nada é enviado até você continuar.",
       "Label": "Serviço",
@@ -2824,7 +2850,7 @@
     "None": "Nenhuma sala ainda. Quando uma comunidade oferecer uma sala, ela aparece aqui.",
     "Off": "As salas estão desativadas. Ative-as nas configurações de Desenvolvedor.",
     "CommunityNotKnown": "Comunidade ainda não conhecida",
-    "RoomById": "Sala {{id}}",
+    "RoomById": "{{id}} (nenhum nome publicado ainda)",
     "SoonWriteTitle": "Publicar nesta sala",
     "SoonWriteLine": "Em breve você poderá escrever para todos nesta sala.",
     "SoonFilesTitle": "Arquivos da sala",
