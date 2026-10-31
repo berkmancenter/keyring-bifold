@@ -125,6 +125,13 @@ export interface RoomsBackend {
   hideOffer(offerId: string): Promise<void>
   /** A step that went wrong without failing the operation, for the log. */
   warn(message: string): void
+  /**
+   * True for a community task refused because a step keeps this phone's community session as another identity
+   * (vtiAgent `VtiSessionHeld`): not now, rather than unreachable. Absent: no refusal is.
+   */
+  sessionKept?(error: unknown): boolean
+  /** Resolves once a task to `communityDid` would no longer be refused that way (vtiAgent `whenFree`). */
+  sessionFree?(communityDid: string): Promise<void>
 }
 
 /** What the service needs besides the backend. Tests replace the clock and the wait between retries. */
@@ -174,6 +181,12 @@ const MAX_MEMBERSHIP_PAGES = 10
  * one lost while the session reopened after an unlock left a room on "Couldn't reach your agent" (#772, 10-30).
  */
 export const SERVED_UNKNOWN_RETRY_MS = 10_000
+
+/**
+ * The least time between two "readable again" calls (`onReadable`): a vetting step's asks come in bursts, and a read
+ * refused again the moment the session was free waits this long before the next.
+ */
+export const KEPT_RETRY_FLOOR_MS = 10_000
 
 /**
  * How often an accept the community answers `admissionPending` is sent again, identically, before the refusal
@@ -289,6 +302,10 @@ export class AgentRoomsService implements RoomsService {
    * listing before their first read (+0.6–0.9 s on each open, lab sim 10-30).
    */
   private listingInFlight = new Map<string, Promise<NoteList>>()
+  /** A record's read being asked now, by room and key: every caller that reads it meanwhile waits for the same one. */
+  private readsInFlight = new Map<string, Promise<OpenedRecord>>()
+  /** How many times opened records were dropped (a lock, a leave): a read asked before the last one is not kept. */
+  private drops = 0
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
@@ -298,6 +315,11 @@ export class AgentRoomsService implements RoomsService {
   private nextToken = 1
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
+  /** Told when a community skipped because a step kept the session can be read again (`onReadable`). */
+  private readonly readable = new Set<() => void>()
+  /** The communities skipped that way and waited on, one wait each; and when the last "readable again" was said. */
+  private readonly keptWaits = new Set<string>()
+  private readableAt = -Infinity
 
   public constructor(
     private readonly backend: RoomsBackend,
@@ -348,6 +370,45 @@ export class AgentRoomsService implements RoomsService {
    * community is sent its membership list again for each, as a read (six answers at once in a tester's run, 10-30).
    * A listing that starts after one settles asks again, and so does one after an accept or a leave.
    */
+  /**
+   * `listener` is called when a community a listing skipped — because a step kept this phone's community session as
+   * another identity — can be read again, so a screen can read again without being asked. Returns the unsubscribe.
+   */
+  public onReadable(listener: () => void): () => void {
+    this.readable.add(listener)
+    return () => {
+      this.readable.delete(listener)
+    }
+  }
+
+  /**
+   * Whether `error` is a step keeping the session (not now, not unreachable). When it is, the community is waited on
+   * — once, however many listings skipped it — and `onReadable` is told when it is free, no sooner than
+   * `KEPT_RETRY_FLOOR_MS` after it was last told.
+   */
+  private sessionKept(community: RoomsCommunity, error: unknown): boolean {
+    if (!this.backend.sessionKept?.(error)) return false
+    const free = this.backend.sessionFree
+    if (free && !this.keptWaits.has(community.did)) {
+      this.keptWaits.add(community.did)
+      void (async () => {
+        try {
+          await free(community.did)
+          const wait = this.readableAt + KEPT_RETRY_FLOOR_MS - this.now()
+          if (wait > 0) await this.sleep(wait)
+        } catch {
+          // Nothing to say: the next listing asks afresh.
+          this.keptWaits.delete(community.did)
+          return
+        }
+        this.keptWaits.delete(community.did)
+        this.readableAt = this.now()
+        for (const listener of [...this.readable]) listener()
+      })()
+    }
+    return true
+  }
+
   public listMyRooms(): Promise<RoomSummary[]> {
     if (this.roomsInFlight) return this.roomsInFlight
     const listing = this.readMyRooms().finally(() => {
@@ -368,20 +429,25 @@ export class AgentRoomsService implements RoomsService {
     const communities = await this.backend.communities()
     // A community that cannot answer loses only its own details: its rooms still show from custody,
     // as `detailsNotLoaded`, and the other communities' rooms are unaffected. Why it did not answer is logged.
+    // One skipped because a step keeps the session as another identity is not unreachable: it is read again when the
+    // session is free (`onReadable`), and meanwhile its rooms show from custody too.
     const unreachable: string[] = []
+    let kept = 0
     const memberships = await Promise.all(
       communities.map(async (community) => ({
         community,
         records: await this.membershipsOf(community).catch((e: unknown): RoomMembershipRecord[] => {
           this.backend.warn(`rooms: ${community.did} did not list this member's rooms: ${message(e)}`)
-          unreachable.push(community.did)
+          if (this.sessionKept(community, e)) kept++
+          else unreachable.push(community.did)
           return []
         }),
       }))
     )
     // When none answered, custody alone is not the member's rooms: an open room holds no keys and would be
-    // missing, and every other room would show by its id. The read fails instead, and the screen says why.
-    if (communities.length > 0 && unreachable.length === communities.length)
+    // missing, and every other room would show by its id. The read fails instead, and the screen says why — unless
+    // only a kept session stopped them: that is not a failure, and the read again follows.
+    if (communities.length > 0 && unreachable.length > 0 && unreachable.length + kept === communities.length)
       throw new RoomsUnavailable(
         'listMyRooms',
         'communityUnreachable',
@@ -590,17 +656,38 @@ export class AgentRoomsService implements RoomsService {
     const room = await this.requireInRoom(roomId, 'readNote')
     const held = this.openedNow(roomId, key)
     if (held) return this.noteOf(held)
+    // One read of a record at a time, shared by every caller while it is out: opening a room reads its newest records
+    // for the chat and for its Notes tab at the same moment, so ten of an open's first twenty reads were the same
+    // records twice (a tester's run, 10-30). A read that starts after one settles asks again. Shared by the key
+    // asked for; readRecord moves the listed version by the key the agent answered with.
+    const k = listedKey(roomId, key)
+    let read = this.readsInFlight.get(k)
+    if (!read) {
+      const asked = this.readRecord(room, roomId, key).finally(() => {
+        if (this.readsInFlight.get(k) === asked) this.readsInFlight.delete(k)
+      })
+      this.readsInFlight.set(k, (read = asked))
+      // Told of a lock while its first read is still out, not only once one is kept.
+      holdingOpened.add(this)
+    }
+    return this.noteOf(await read)
+  }
+
+  private async readRecord(room: KnownRoom, roomId: string, key: string): Promise<OpenedRecord> {
+    const drops = this.drops
     const opened = parseRead(await this.backend.agentTask(ROOMS_TASK.keysRead, { roomId, host: room.host, key }), (s) =>
       this.backend.decodeBase64Url(s)
     )
     if (!opened) throw new Error(`the agent's answer for note ${key} could not be read`)
+    // An answer that arrives after the lock answers its caller, but is not kept: the lock forgot what was read.
+    if (drops !== this.drops) return opened
     this.keepOpened(roomId, opened)
     // A read can find a newer version than the listing named (an edit since): that copy is the one to reuse. Only a
     // version a listing already named moves; a read never starts one, so with no listing a read always asks.
     const k = listedKey(roomId, opened.key)
     const named = this.listed.get(k)
     if (named !== undefined && opened.version > named) this.listed.set(k, opened.version)
-    return this.noteOf(opened)
+    return opened
   }
 
   private noteOf(opened: OpenedRecord): Note {
@@ -653,12 +740,18 @@ export class AgentRoomsService implements RoomsService {
   public dropOpenedRecords(): void {
     this.opened.clear()
     this.listed.clear()
+    // A read asked before the lock is not joined after it, nor kept when it answers.
+    this.readsInFlight.clear()
+    this.drops++
   }
 
   private dropRoomReads(roomId: string): void {
     const prefix = `${roomId}\n`
     for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
     for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
+    for (const k of [...this.readsInFlight.keys()]) if (k.startsWith(prefix)) this.readsInFlight.delete(k)
+    // A read of the room still out answers its caller but is not kept, as at a lock (readRecord).
+    this.drops++
   }
 
   public async leaveViaCommunity(communityDid: string): Promise<void> {
@@ -699,7 +792,8 @@ export class AgentRoomsService implements RoomsService {
       try {
         listing = await this.offersOf(community)
       } catch (e) {
-        if (communityDid) throw e
+        // A kept session is not the community failing, even the one asked for: its offers come with the read again.
+        if (!this.sessionKept(community, e) && communityDid) throw e
         this.backend.warn(`rooms: ${community.did} did not list its offers: ${message(e)}`)
         continue
       }
