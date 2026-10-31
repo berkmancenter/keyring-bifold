@@ -5,6 +5,7 @@
  * at the next write.
  */
 import { setCurrentAgentDid } from '../module/currentAgent'
+import { putKeyed } from '../module/keyedRecords'
 import { agentScoped, GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 
 type Rec = { id: string; content: Record<string, unknown>; tags: Record<string, string>; createdAt: Date }
@@ -123,6 +124,27 @@ describe('identities kept by community alone, from before', () => {
     await store.forgetPersona(COMMUNITY, HOME)
     expect(records).toHaveLength(1)
     await store.forgetPersona(COMMUNITY, WORK)
+    expect(records).toHaveLength(0)
+  })
+})
+
+describe("the agent's own DID, as an identity", () => {
+  // Bring back before 276.12 recorded it when a community issued its cards to the agent itself (agentOwnIdentity).
+  const agentItself = { ...persona(WORK, 'x'), did: WORK }
+
+  it('a record an earlier build kept reads as none, for its community and in the list', async () => {
+    const { agent } = fakeAgent()
+    const store = new GenericRecordsIdentityStore(agent as never)
+    await putKeyed(agent as never, 'keyring/vti-identity', 'persona', agentScoped(WORK, COMMUNITY), { ...agentItself })
+    await store.setPersona(persona(HOME, 'home-one'))
+    expect(await store.getPersona(COMMUNITY, WORK)).toBeUndefined()
+    expect((await store.listPersonas()).map((p) => p.did)).toEqual(['did:webvh:home-one'])
+  })
+
+  it('is never written', async () => {
+    const { agent, records } = fakeAgent()
+    const store = new GenericRecordsIdentityStore(agent as never)
+    await expect(store.setPersona(agentItself)).rejects.toThrow("an agent's own DID")
     expect(records).toHaveLength(0)
   })
 })
