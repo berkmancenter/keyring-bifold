@@ -58,6 +58,10 @@ export interface ListenerSession {
   checkAlive(): void
 }
 
+/** Messages already said to be left on the mediator, by identity and message id; kept small. */
+const leftNoted = new Set<string>()
+const LEFT_NOTED_MAX = 500
+
 /** A message a listener leaves on the mediator for the shared session (keepFromListener). */
 export class LeftForSharedSession extends Error {
   constructor(readonly type: string) {
@@ -373,9 +377,18 @@ export async function keepFromListener(
   const who = didPrefix(persona.did)
   const message = unwrapBindingEnvelope(received)
   const kind = String(message.type ?? 'a message')
-  releaseWarn(`[VTI] listener for ${who}: received ${kind} (${via})`)
-  if (!ownedByInbox(message)) {
-    releaseWarn(`[VTI] listener for ${who}: ${kind} left on the mediator for the shared session`)
+  const owned = ownedByInbox(message)
+  // A message left on the mediator comes back at every drain until the shared session takes it: said once.
+  const noteKey = `${persona.did}|${String(message.id ?? kind)}`
+  const sayIt = owned || !leftNoted.has(noteKey)
+  if (sayIt) releaseWarn(`[VTI] listener for ${who}: received ${kind} (${via})`)
+  if (!owned) {
+    if (sayIt) {
+      if (leftNoted.size >= LEFT_NOTED_MAX) leftNoted.clear()
+      leftNoted.add(noteKey)
+      releaseWarn(`[VTI] listener for ${who}: ${kind} left on the mediator for the shared session`)
+    }
+    // Named every time: a screen that signed in as the identity may have lost the session again since.
     DeviceEventEmitter.emit(VTI_PERSONA_MESSAGE_WAITING_EVENT, {
       did: persona.did,
       communityDid: persona.communityDid,

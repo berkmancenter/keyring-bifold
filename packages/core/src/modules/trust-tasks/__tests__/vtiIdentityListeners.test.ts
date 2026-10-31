@@ -10,6 +10,8 @@ import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 
 // Spelled out, not imported: the control runs these tests on a tree that does not have it.
 const MESSAGE_WAITING = 'vti:persona-message-waiting'
+// For ids that must differ on every run, a retry included (see "said in the log once").
+let freshIds = 0
 import type { VtiPersona } from '../module/VtiIdentityStore'
 
 type Guard = (did: string) => Promise<void>
@@ -473,7 +475,14 @@ describe('what a listener keeps', () => {
     const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     const a = persona('a')
-    const request = { id: 'm5-once', type: 'https://trusttasks.org/spec/vetting/request/0.1', body: {} }
+    // A fresh id each run: what was said is remembered for the module's life (by identity and message id), so a
+    // fixed id would make this depend on what ran before it, a jest retry included (a retry runs the test again in
+    // the same module). Not Date.now(): jestSetup.js freezes it package-wide, so it is the same on every run.
+    const request = {
+      id: `m5-once-${++freshIds}-${Math.random()}`,
+      type: 'https://trusttasks.org/spec/vetting/request/0.1',
+      body: {},
+    }
     for (let drain = 0; drain < 3; drain++)
       await expect(
         keepFromListener({ config: { logger: {} } } as never, a, request as never, 'didcomm')
