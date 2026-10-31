@@ -20,6 +20,12 @@ import type { RoomsBackend, RoomsCommunity } from './agentRoomsService'
 /** A rooms listing (`vtc/rooms/memberships/list`, `vtc/rooms/offers/list`, any version): what the rooms screens poll. */
 export const isRoomsListing = (type: string): boolean => /\/vtc\/rooms\/[a-z-]+\/list\/[\d.]+$/.test(type)
 
+/**
+ * vtiAgent's `VtiSessionHeld`, read by its name as the persona inbox reads it; the literal must match the one its
+ * constructor sets (pinned in sharedSessionHolds.test.ts).
+ */
+const isSessionKept = (e: unknown): boolean => e instanceof Error && e.name === 'VtiSessionHeld'
+
 /** This phone's own rooms records: today only the offers the person hid, which no community is told of. */
 const RECORD_TYPE = 'keyring/rooms'
 
@@ -98,5 +104,11 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     hideOffer: (offerId) => putKeyed(agent, RECORD_TYPE, 'hiddenOffer', offerId, { offerId }),
 
     warn: (message) => agent.config.logger.warn(message),
+
+    sessionKept: isSessionKept,
+    sessionFree: async (communityDid) => {
+      const persona = await identityStore.getPersona(communityDid)
+      if (persona) await vtiAgent.whenFree(persona.did)
+    },
   }
 }

@@ -257,6 +257,24 @@ describe('the session claim', () => {
     expect(signIns()).toEqual([A.persona, B.persona])
   })
 
+  it('says when a refused background connect would go through: at once, or when the step lets go', async () => {
+    await expect(vtiAgent.whenFree(B.persona)).resolves.toBeUndefined()
+    const { done, release } = untilReleased()
+    const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done)
+    await new Promise((r) => realSetTimeout(r, 10))
+    let free = false
+    const waited = vtiAgent.whenFree(B.persona).then(() => (free = true))
+    await new Promise((r) => realSetTimeout(r, 20))
+    expect(free).toBe(false)
+    // The step's own claim runs out too before a poll may switch the session.
+    clock += VTI_FOREGROUND_CLAIM_MS + 1
+    release()
+    await Promise.all([held, waited])
+    expect(free).toBe(true)
+    await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(B.persona, B.community), background: true })
+    expect(vtiAgent.getState().did).toBe(B.persona)
+  })
+
   it('stops keeping others waiting once a hold runs past its time', async () => {
     const { done, release } = untilReleased()
     const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, { maxMs: 50 })

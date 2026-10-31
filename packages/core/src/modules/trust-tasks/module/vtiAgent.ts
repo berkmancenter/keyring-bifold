@@ -956,10 +956,11 @@ class VtiAgentController {
     return polling ? { wait: polling } : undefined
   }
 
-  /** Resolves when a hold or a waiter comes or goes, or when the soonest hold runs out of time. */
+  /** Resolves when a hold or a waiter comes or goes, or when the soonest hold or the claim runs out of time. */
   private holdsMoved(): Promise<void> {
     return new Promise((resolve) => {
-      const soonest = Math.min(...this.liveHolds().map((h) => h.until))
+      const claimEnds = this.claim && this.claim.until > this.now() ? [this.claim.until] : []
+      const soonest = Math.min(...this.liveHolds().map((h) => h.until), ...claimEnds)
       const done = () => {
         if (timer) clearTimeout(timer)
         this.holdWatchers.delete(done)
@@ -972,6 +973,19 @@ class VtiAgentController {
 
   private holdsChanged(): void {
     for (const done of [...this.holdWatchers]) done()
+  }
+
+  /**
+   * Resolves once a background connect as `did` would no longer be refused with `VtiSessionHeld`: no ordinary caller
+   * holds the session as another identity or waits for it, and the claim an ordinary connect left has run out. For a
+   * poll refused just now that wants to try again (the rooms screens). Nothing is timed while nobody waits.
+   */
+  async whenFree(did: string): Promise<void> {
+    for (;;) {
+      const blocker = this.blockerFor(did, true)
+      if (!blocker || !('refuse' in blocker)) return
+      await this.holdsMoved()
+    }
   }
 
   /**
