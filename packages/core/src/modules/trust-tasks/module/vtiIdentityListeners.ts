@@ -33,6 +33,7 @@ import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { useEffect } from 'react'
 import { AppState, DeviceEventEmitter } from 'react-native'
 
+import { isAgentsOwnPersona } from './agentOwnIdentity'
 import { VTI_PERSONA_KEYS_HELD_EVENT, VTI_PERSONA_MESSAGE_WAITING_EVENT } from './communityChanged'
 import { didPrefix } from './didPrefix'
 import { releaseWarn } from './releaseLog'
@@ -71,7 +72,8 @@ export type ListenerFactory = (persona: VtiPersona) => Promise<ListenerSession>
 /**
  * Which identities get a listener: every identity of this phone with a
  * borrowed key-agreement key, for the linked agent, except the one the shared
- * session is signed in as or signing in as.
+ * session is signed in as or signing in as, and never the agent's own DID
+ * (agentOwnIdentity).
  */
 export function listenerTargets(
   personas: VtiPersona[],
@@ -81,7 +83,11 @@ export function listenerTargets(
   if (!vtaDid) return []
   return personas.filter(
     (p) =>
-      p.vtaDid === vtaDid && Boolean(p.kmsKeyIds?.keyAgreement) && p.did !== shared.did && p.did !== shared.signingInAs
+      p.vtaDid === vtaDid &&
+      !isAgentsOwnPersona(p) &&
+      Boolean(p.kmsKeyIds?.keyAgreement) &&
+      p.did !== shared.did &&
+      p.did !== shared.signingInAs
   )
 }
 
