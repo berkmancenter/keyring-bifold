@@ -581,6 +581,6 @@ describe('every community kept from for now', () => {
       sessionKept: (e) => e instanceof Error && e.name === 'VtiSessionHeld',
       sessionFree: jest.fn(() => new Promise<void>(() => undefined)),
     })
-    expect((await new AgentRoomsService(b).listMyRooms()).map((r) => r.roomId)).toEqual([CUSTODY_ROOM])
+    expect((await new AgentRoomsService(b).listMyRooms()).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
   })
 })
