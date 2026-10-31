@@ -189,7 +189,10 @@ export const VTI_BACKGROUND_HOLD_MAX_MS = 2 * 60_000
  */
 export class VtiSessionHeld extends Error {
   constructor(
-    /** The DID the session is kept for. */
+    /**
+     * The DID the session is kept for — a hold may be a hidden-vetting step's persona. Never log it, nor `reason`,
+     * beside a community's DID: the pairing ties that persona to a community.
+     */
     readonly heldAs: string,
     /** What keeps it, as its holder named it. */
     readonly reason?: string
