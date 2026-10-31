@@ -141,6 +141,17 @@ describe("the agent's own DID, as an identity", () => {
     expect((await store.listPersonas()).map((p) => p.did)).toEqual(['did:webvh:home-one'])
   })
 
+  // Review of #851: a record kept by community alone, from before identities were kept per agent, is still read
+  // beside one the agent's own DID sits in; the own-DID record does not hide it.
+  it('beside a record kept by community alone for the same agent, that one is read', async () => {
+    const { agent } = fakeAgent()
+    const store = new GenericRecordsIdentityStore(agent as never)
+    const older = persona(WORK, 'older-one')
+    await putKeyed(agent as never, 'keyring/vti-identity', 'persona', COMMUNITY, { ...older })
+    await putKeyed(agent as never, 'keyring/vti-identity', 'persona', agentScoped(WORK, COMMUNITY), { ...agentItself })
+    expect((await store.getPersona(COMMUNITY, WORK))?.did).toBe(older.did)
+  })
+
   it('is never written', async () => {
     const { agent, records } = fakeAgent()
     const store = new GenericRecordsIdentityStore(agent as never)
