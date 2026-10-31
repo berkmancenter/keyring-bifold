@@ -85,6 +85,8 @@ export const SiblingNoticeStrip: React.FC = () => {
   const { t } = useTranslation()
   const navigation = useNavigation()
   const { pending, open } = useSyncExternalStore(subscribe, () => notice)
+  // Every stack header holds this strip: with no device to name it is nothing, here, whatever SiblingNotice does.
+  if (pending.length === 0) return null
 
   return (
     <SiblingNotice
