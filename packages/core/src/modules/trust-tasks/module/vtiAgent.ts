@@ -194,6 +194,7 @@ export class VtiSessionHeld extends Error {
     readonly reason?: string
   ) {
     super(`vtiAgent: the session is kept for another of this phone's identities${reason ? ` (${reason})` : ''}`)
+    // A literal, read by name in vtiPersonaInbox (a class name does not survive minifying).
     this.name = 'VtiSessionHeld'
   }
 }

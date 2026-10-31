@@ -165,7 +165,8 @@ export const PERSONA_INBOX_STUCK_MS = 60_000
 /** Start collecting; returns the function that stops it. */
 /**
  * vtiAgent's `VtiSessionHeld`: a look's background sign-in refused because a step keeps the session as another
- * identity. Read by name, so a suite that mocks vtiAgent need not carry the class.
+ * identity. Read by name, so a suite that mocks vtiAgent need not carry the class; the literal must match the one its
+ * constructor sets (pinned in sharedSessionHolds.test.ts), which a minified build keeps.
  */
 const isSessionKept = (e: unknown): boolean => e instanceof Error && e.name === 'VtiSessionHeld'
 

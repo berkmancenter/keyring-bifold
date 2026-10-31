@@ -191,6 +191,11 @@ describe("the rooms backend's polls for a phone in two communities", () => {
 })
 
 describe('the session claim', () => {
+  // vtiPersonaInbox reads the refusal by this name, not by its class (a suite that mocks vtiAgent has no class).
+  it('names its refusal VtiSessionHeld', () => {
+    expect(new VtiSessionHeld('did:webvh:p:any').name).toBe('VtiSessionHeld')
+  })
+
   it('refuses a background connect as another identity during a hold, and disconnects nothing', async () => {
     const { done, release } = untilReleased()
     const held = vtiAgent.holding(

@@ -691,7 +691,7 @@ describe('what the inbox says in the Release log', () => {
     startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000, onError })
     await flush()
     expect(connect).toHaveBeenCalledWith(agent, 'did:peer:m', expect.objectContaining({ background: true }))
-    expect(lines().at(-1)).toMatch(/listening only: another identity keeps the session/)
+    expect(lines().slice(-1)[0]).toMatch(/listening only: another identity keeps the session/)
     expect(onError).not.toHaveBeenCalled()
   })
 
