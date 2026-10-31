@@ -81,7 +81,8 @@ describe('the card', () => {
     expect(tree.getAllByText(/^Directory\.RuleShows/)).toHaveLength(5)
     firstPerson.forEach((f, i) =>
       expect(tree.getByTestId(testIdWithKey(`DirectoryDisclosureField_${i}`))).toHaveTextContent(
-        new RegExp(`^${f.label}(, )?$`)
+        // The matcher trims, so a name inside a list reads with its comma and no space.
+        new RegExp(`^${f.label},?$`)
       )
     )
     // Search is said once per rule that allows it: Name's, and Nickname's.
