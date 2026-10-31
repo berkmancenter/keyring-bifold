@@ -2288,6 +2288,7 @@
     "MatchQuestionApplicant": "Does the vetter's screen show the same code?",
     "MatchQuestionVetter": "Does their screen show the same code?",
     "CodesDifferEnded": "The last session ended without a statement. If the codes differed, tell the vetter and ask for a new ticket.",
+    "RequestEnded": "Your last request ended without a statement. To try again, ask a vetter for a new ticket.",
     "WaitingForVetter": "Waiting for the vetter to open the session…",
     "WaitingForStatement": "The vetter is checking your document…",
     "StatementRefused": "The vetter's statement arrived, but this phone could not accept it.",

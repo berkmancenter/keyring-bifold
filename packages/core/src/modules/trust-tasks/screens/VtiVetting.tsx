@@ -1403,6 +1403,10 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     ['sent', 'accepted', 'session', 'cardSent', 'statementRefused'].includes(r.status)
   )
   const ended = requests.filter((r) => r.status === 'refused' || r.status === 'declined')
+  // Codes were compared only on a session: a decline after one may be codes that differed; a refusal, or a decline
+  // before any session, compared nothing, and its card already says how it ended.
+  const lastEnded = ended[ended.length - 1]
+  const endedOnSession = lastEnded?.status === 'declined' && !!lastEnded.session
   const attestedCount = requests.filter((r) => r.status === 'attested').length
   const applicantStep: ApplicantStep = memberRole
     ? 'member'
@@ -1762,7 +1766,7 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
               {stepHeader(applicantNumber, 5, t('Vetting.AskAVetter'))}
               {ended.length ? (
                 <Text style={styles.label} testID={testIdWithKey(VtiVettingIds.sessionEnded)}>
-                  {t('Vetting.CodesDifferEnded')}
+                  {endedOnSession ? t('Vetting.CodesDifferEnded') : t('Vetting.RequestEnded')}
                 </Text>
               ) : null}
               {ticketInputs}

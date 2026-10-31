@@ -350,6 +350,40 @@ describe('Vetting — one filled button per step', () => {
     expect(filled(tree)).toEqual(['VettingRequestButton'])
   })
 
+  // After an ended request, Step 2 says why only where codes could have differed:
+  // on a session. A refusal ("not eligible") or a decline before any session
+  // compared no codes, and the request's own card says how it ended.
+  test('after an ended request, the line speaks of differing codes only when a session ended', async () => {
+    const vetterDid = 'did:webvh:example:vetter'
+    const session = {
+      documentId: 'session-1',
+      challenge: 'c',
+      domain: 'd',
+      requiredClaims: [],
+      method: 'inPerson',
+      expiresAt: '2026-09-26T00:00:00Z',
+      matchCode: '1234',
+    }
+    const ended = (request: Record<string, unknown>): Rec => ({
+      ...application,
+      content: {
+        ...application.content,
+        requests: [{ vetterDid, requestDocumentId: 'request-1', sentAt: '2026-09-25T01:00:00Z', ...request }],
+      },
+    })
+    const lineAfter = async (request: Record<string, unknown>) => {
+      const tree = await renderWith([persona, ended(request)])
+      await tree.findByTestId(testIdWithKey('VettingApplicantStep_ticket'))
+      const line = tree.getByTestId(testIdWithKey('VettingSessionEnded')).props.children
+      tree.unmount()
+      return line
+    }
+
+    expect(await lineAfter({ status: 'refused', refusalCode: 'notEligible' })).toBe('Vetting.RequestEnded')
+    expect(await lineAfter({ status: 'declined' })).toBe('Vetting.RequestEnded')
+    expect(await lineAfter({ status: 'declined', session })).toBe('Vetting.CodesDifferEnded')
+  })
+
   // TestFlight 236: a ticket scanned with the Camera app lived only in the
   // screen, so leaving it after "Start my application" lost the ticket.
   test('a ticket kept with the application is back in Step 2 when the screen opens again', async () => {

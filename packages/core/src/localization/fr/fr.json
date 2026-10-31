@@ -2228,6 +2228,7 @@
     "MatchQuestionApplicant": "L'écran du vérificateur affiche-t-il le même code ?",
     "MatchQuestionVetter": "Son écran affiche-t-il le même code ?",
     "CodesDifferEnded": "La dernière session s'est terminée sans attestation. Si les codes différaient, prévenez le vérificateur et demandez un nouveau ticket.",
+    "RequestEnded": "Votre dernière demande s'est terminée sans attestation. Pour réessayer, demandez un nouveau ticket à un vérificateur.",
     "WaitingForVetter": "En attente de l'ouverture de la session par le vérificateur…",
     "WaitingForStatement": "Le vérificateur examine votre document…",
     "StatementRefused": "La déclaration du vérificateur est arrivée, mais ce téléphone n'a pas pu l'accepter.",

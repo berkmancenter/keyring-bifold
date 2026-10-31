@@ -2138,6 +2138,7 @@
     "MatchQuestionApplicant": "A tela do verificador mostra o mesmo código?",
     "MatchQuestionVetter": "A tela da pessoa mostra o mesmo código?",
     "CodesDifferEnded": "A última sessão terminou sem declaração. Se os códigos eram diferentes, avise o verificador e peça um novo tíquete.",
+    "RequestEnded": "Seu último pedido terminou sem declaração. Para tentar de novo, peça um novo tíquete a um verificador.",
     "WaitingForVetter": "Aguardando o verificador abrir a sessão…",
     "WaitingForStatement": "O verificador está conferindo seu documento…",
     "StatementRefused": "A declaração do verificador chegou, mas este telefone não pôde aceitá-la.",
