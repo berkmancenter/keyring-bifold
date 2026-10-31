@@ -132,7 +132,10 @@ describe('AgentRoomsService', () => {
     }))
     const rooms = await new AgentRoomsService(b).listMyRooms()
     expect(agentTask).toHaveBeenCalledWith(ROOMS_TASK.keysList01, {})
-    expect(rooms.find((r) => r.roomId === CUSTODY_ROOM)).toMatchObject({ nameFrom: 'roomId', source: 'custody' })
+    const custody = rooms.find((r) => r.roomId === CUSTODY_ROOM)
+    expect(custody).toMatchObject({ nameFrom: 'roomId', source: 'custody' })
+    // What tells it apart (roomRef): this ID has no path, so the end of its SCID, said to be cut; never its last 10.
+    expect(String(custody?.name)).toBe('…room')
   })
 
   it('keeps the other rooms when one community cannot answer, and logs why it did not', async () => {
@@ -381,5 +384,140 @@ describe('the agent’s key list, read by several screens at once', () => {
     await expect(service.listMyRooms()).rejects.toThrow('no answer')
     expect((await service.listMyRooms()).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
     expect(keyListAsks(agentTask)).toHaveLength(2)
+  })
+})
+
+describe("the member's rooms, listed by several surfaces at once", () => {
+  // A community's membership list is a read, sent again for each caller that asks (vtiAgent VTI_READ_TASKS): six
+  // answers landed at once in a tester's run (276.10, 10-30). Counted by first page: a listing reads two here.
+  const listAsks = (communityTask: jest.Mock) =>
+    communityTask.mock.calls.filter(([, type, payload]) => type === ROOMS_TASK.membershipsList && !payload.cursor)
+  const keyListAsks = (agentTask: jest.Mock) => agentTask.mock.calls.filter(([type]) => type === ROOMS_TASK.keysList02)
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  /** The community answers each first page only when its gate is opened, in the order asked. */
+  function gatedCommunity() {
+    const { b, agentTask, communityTask } = backend()
+    const answer = communityTask.getMockImplementation()!
+    const gates: (() => void)[] = []
+    communityTask.mockImplementation(async (did: string, type: string, payload: Record<string, unknown>) => {
+      if (!payload.cursor) await new Promise<void>((resolve) => gates.push(resolve))
+      return answer(did, type, payload)
+    })
+    return { b, agentTask, communityTask, open: (n: number) => gates[n]() }
+  }
+
+  it('is one listing while one is out: the community is asked once, and every caller gets the rooms', async () => {
+    const { b, communityTask, open } = gatedCommunity()
+    const service = new AgentRoomsService(b)
+    const all = Promise.all([service.listMyRooms(), service.listMyRooms(), service.listMyRooms()])
+    await tick()
+    open(0)
+    const lists = await all
+    expect(listAsks(communityTask)).toHaveLength(1)
+    for (const list of lists) expect(list.map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
+  })
+
+  it('is listed again by a caller that asks after the last listing answered (control)', async () => {
+    const { b, communityTask } = backend()
+    const service = new AgentRoomsService(b)
+    await service.listMyRooms()
+    await service.listMyRooms()
+    expect(listAsks(communityTask)).toHaveLength(2)
+  })
+
+  it("asks the agent's key list beside the community's list, not after its answer", async () => {
+    const { b, agentTask, communityTask, open } = gatedCommunity()
+    const service = new AgentRoomsService(b)
+    const listing = service.listMyRooms()
+    await tick()
+    // The community has not answered, and the key list is already asked.
+    expect(listAsks(communityTask)).toHaveLength(1)
+    expect(keyListAsks(agentTask)).toHaveLength(1)
+    open(0)
+    expect((await listing).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
+  })
+
+  it('is listed afresh after a leave, and a listing asked before the leave does not bring its rooms back', async () => {
+    const { b, communityTask, open } = gatedCommunity()
+    const service = new AgentRoomsService(b)
+    const before = service.listMyRooms()
+    await tick()
+    await service.leaveViaCommunity(COMMUNITY.did)
+    const after = service.listMyRooms()
+    await tick()
+    expect(listAsks(communityTask)).toHaveLength(2)
+    open(0)
+    // Its caller is answered, as asked; what the service knows is not set back to before the leave.
+    expect((await before).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
+    expect((service as unknown as { rooms: Map<string, unknown> }).rooms.has(ROOM)).toBe(false)
+    open(1)
+    await after
+    expect((service as unknown as { rooms: Map<string, unknown> }).rooms.has(ROOM)).toBe(true)
+  })
+
+  it("fails on the community when none answers, even when the agent's key list fails too", async () => {
+    const { b, agentTask } = backend({
+      communityTask: jest.fn(async () => {
+        throw new Error('socket closed while the message was packed')
+      }),
+    })
+    agentTask.mockImplementation(async () => {
+      throw new Error('the VTA did not answer within 30 s')
+    })
+    await expect(new AgentRoomsService(b).listMyRooms()).rejects.toMatchObject({
+      name: 'RoomsUnavailable',
+      reason: 'communityUnreachable',
+    })
+  })
+
+  it('a listing that failed is not shared with the next caller', async () => {
+    const { b, communityTask } = backend()
+    const answer = communityTask.getMockImplementation()!
+    communityTask.mockImplementationOnce(async () => {
+      throw new Error('socket closed while the message was packed')
+    })
+    communityTask.mockImplementation(answer)
+    const service = new AgentRoomsService(b)
+    await expect(service.listMyRooms()).rejects.toMatchObject({ reason: 'communityUnreachable' })
+    expect((await service.listMyRooms()).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
+    expect(listAsks(communityTask)).toHaveLength(2)
+  })
+})
+
+// 10-31: a step kept the community session as an identity of none of the listed communities (a join under way). That
+// is not every community failing: the rooms show from custody for now, and are read again when the session is free.
+describe('every community kept from for now', () => {
+  const kept = () => Object.assign(new Error('vtiAgent: the session is kept'), { name: 'VtiSessionHeld' })
+
+  it('lists the rooms custody holds instead of failing, and is told when to read again', async () => {
+    let free!: () => void
+    const { b } = backend({
+      communityTask: jest.fn(async () => {
+        throw kept()
+      }),
+      sessionKept: (e) => e instanceof Error && e.name === 'VtiSessionHeld',
+      sessionFree: jest.fn(() => new Promise<void>((resolve) => (free = resolve))),
+    })
+    const service = new AgentRoomsService(b, undefined, { sleep: async () => undefined })
+    const readable = jest.fn()
+    service.onReadable(readable)
+    expect((await service.listMyRooms()).map((r) => r.roomId)).toEqual([ROOM, CUSTODY_ROOM])
+    free()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(readable).toHaveBeenCalledTimes(1)
+  })
+
+  it('still fails when a community that could not be reached is among them', async () => {
+    const other: RoomsCommunity = { did: 'did:webvh:community:b', personaDid: 'did:key:persona-b' }
+    const { b } = backend({
+      communities: async () => [COMMUNITY, other],
+      communityTask: jest.fn(async (did: string) => {
+        throw did === other.did ? new Error('community unreachable') : kept()
+      }),
+      sessionKept: (e) => e instanceof Error && e.name === 'VtiSessionHeld',
+      sessionFree: jest.fn(() => new Promise<void>(() => undefined)),
+    })
+    await expect(new AgentRoomsService(b).listMyRooms()).rejects.toMatchObject({ reason: 'communityUnreachable' })
   })
 })

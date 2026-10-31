@@ -272,7 +272,15 @@
     "RememberChangePIN": "Change your PIN to secure your wallet.",
     "ChangePIN": "Change PIN"
   },
+  "PINChangeSuccess": {
+    "InfoBox": {
+      "Title": "Your PIN has been changed",
+      "Description": "You can now log in with your new PIN."
+    },
+    "PrimaryButton": "Go back to settings"
+  },
   "PINEnter": {
+    "DeveloperMenuTrigger": "App information",
     "Title": "Welcome back",
     "SubText": "Sign-in to access your wallet.",
     "EnterPIN": "Enter your wallet PIN",
@@ -693,6 +701,8 @@
     "ConnectionNotFound": "Connection not found",
     "InvalidQrCode": "Invalid QR code. Please try again.",
     "WillScanAutomatically": "A valid QR code will scan automatically.",
+    "CameraStarting": "Starting the camera…",
+    "CameraNotStarting": "The camera isn't starting. Close Keyring and try again; if it still doesn't start, restart your phone.",
     "ScanQRCode": "Scan QR code",
     "MyQRCode": "My QR code",
     "SwitchProfile": "Switch profile",
@@ -838,6 +848,8 @@
     "DeleteOfferDescription": "Don't recognize the organization? Check your Contacts list. You only receive notifications from Contacts you've initiated"
   },
   "ProofRequest": {
+    "SelectCredential": "Select credential",
+    "PredicateInput": "Enter value for {{label}}",
     "RequestForProof": "Request for proof",
     "ReceiveProofTitle": "Received an information request from",
     "JustAMoment": "Just a moment while we prepare things for you...",
@@ -1540,6 +1552,8 @@
     "Someone": "Someone",
     "Open": "Open this community",
     "Leave": "Leave community",
+    "AboutSection": "About",
+    "DetailsLine": "This community's ID",
     "HowToJoin": "Choose how to join",
     "HeldElsewhere": "Your identity in {{community}} is on {{agent}}, not on the agent you're using now.",
     "HeldElsewhereLinked": "Switch to {{agent}} to use it or to leave {{community}}.",
@@ -1732,6 +1746,7 @@
     "CommunitiesBack_other": "Brought back {{count}} communities from your agent.",
     "CommunitiesNoneSeen": "Your agent showed this phone no identities other than the ones it already holds.",
     "CommunitiesNoneSeenScoped": "Your agent lets this phone see only {{contexts}}. A community joined from another of the agent's contexts can't come back here until the agent's administrator lets this phone see that context.",
+    "CommunitiesAgentItself": "A community card here is for your agent itself, not for an identity of yours, so this phone does not take it on. To take part from this phone, join the community from Keyring: that makes an identity of your own, which the community can then give the same role.",
     "CommunitiesNoCards": "Your agent holds no community cards for its other identities. If you joined a community with pnm or openvtc, open openvtc 0.5 or later once so it keeps your membership in your agent, then try again.",
     "CommunitiesUnreadable_one": "1 community identity couldn't be read from your agent, so it wasn't brought back.",
     "CommunitiesUnreadable_other": "{{count}} community identities couldn't be read from your agent, so they weren't brought back.",
@@ -2410,7 +2425,8 @@
     "MembersRow": "Members",
     "MembersRowLine": "Who is in this community, by the names they show",
     "CardRow": "Your card",
-    "CardRowLine": "What members see about you here",
+    "CardRowNamed": "Your card · {{name}}",
+    "CardRowSeen": "Name and role seen by all members",
     "StatusNotServed": "{{community}} doesn't have a member directory yet.",
     "StatusNoRight": "You're no longer a member of {{community}}, so its directory isn't open to you.",
     "StatusUnreachable": "{{community}} didn't answer. Try again in a moment.",
@@ -2677,6 +2693,10 @@
     "OfferLater": "You can change this any time in My devices.",
     "SiblingOne": "{{device}} is also open as you. While both are open, messages may reach only one of them.",
     "SiblingMany": "{{count}} other devices are also open as you ({{devices}}). While they're open, messages may reach only one of them.",
+    "SiblingStripOne": "Also open on {{device}}",
+    "SiblingStripMany": "Also open on {{count}} other devices",
+    "SiblingStripWhy": "While both are open, messages may reach only one of them.",
+    "SiblingStripWhyMany": "While they're open, messages may reach only one of them.",
     "SiblingOpen": "My devices",
     "SiblingDismiss": "OK",
     "DefaultName": "{{platform}} · added {{date}}",
@@ -2758,6 +2778,10 @@
     "TimedOut": "Time ran out, so nothing was signed in. Refresh the sign-in page and scan again.",
     "NoCode": "There's no sign-in code to use. Scan the code on the website again.",
     "OlderAgents": "If this code is from the service that hosts one of your agents: an agent set up before this version of Keyring can't sign in there from this phone. Get a new agent from that service, or sign in another way.",
+    "JoinHint": "If this code is from a community you'd like to join, Keyring can check and join it.",
+    "CheckAndJoin": "Check and join",
+    "NotJoinable": "This code isn't from a community you can join here.",
+    "JoinUnchecked": "Keyring couldn't check this code just now. Try again.",
     "Service": {
       "ConfirmBody": "A website is asking to sign you in with one of your agents from this service. Nothing is sent until you continue.",
       "Label": "Service",
@@ -2976,7 +3000,7 @@
     "None": "No rooms yet. When a community offers you a room, it appears here.",
     "Off": "Rooms are off. Turn them on in Developer settings.",
     "CommunityNotKnown": "Community not known yet",
-    "RoomById": "Room {{id}}",
+    "RoomById": "{{id}} (no name published yet)",
     "SoonWriteTitle": "Posting in this room",
     "SoonWriteLine": "Soon you can write to everyone in this room.",
     "SoonFilesTitle": "Room files",

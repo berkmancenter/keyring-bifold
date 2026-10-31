@@ -36,6 +36,7 @@
  */
 import { useAgent } from '@bifold/react-hooks'
 import { useNavigation } from '@react-navigation/native'
+import type { StackNavigationProp } from '@react-navigation/stack'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
@@ -46,6 +47,7 @@ import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { registerOtaApplyBlocker } from '../../../utils/otaApply'
+import { Screens, type MyAgentStackParams } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import type { ClaimedSignIn } from '../module/oobSignIn'
 import { GRANT_LIFETIME_SECONDS } from '../module/oobSignInAgent'
@@ -58,6 +60,7 @@ import {
   type SignInIdentity,
   type SignInSteps,
 } from '../module/signInSteps'
+import { communityTarget } from '../module/vtiCommunityLink'
 
 import { didDomainPath, unnamedCommunityLabel } from './communityName'
 import { DidDetails } from './DidDetails'
@@ -82,7 +85,8 @@ type Step =
    */
   | { kind: 'confirm'; vtcDid: string; host?: string; name?: string; identities?: SignInIdentity[] }
   /** `olderAgents`: the phone holds an agent that kept no sign-in key for its host, which cannot sign in there yet. */
-  | { kind: 'notMember'; name: string; vtcDid: string; olderAgents?: boolean }
+  /** `name`: only a name on record. A sender with none is shown by its address: nothing was looked up (VTI-LNK-050). */
+  | { kind: 'notMember'; name?: string; vtcDid: string; olderAgents?: boolean }
   | { kind: 'choose'; identities: SignInIdentity[] }
   | { kind: 'claiming' }
   | { kind: 'number'; claimed: ClaimedSignIn }
@@ -125,6 +129,8 @@ export interface SignInFlowProps {
   now?: () => number
   /** Leave the screen. */
   onClose: () => void
+  /** Go to Join for this community, in place of this screen (IN-406). Without it, an unjoined code offers no join. */
+  onJoin?: (vtcDid: string) => void
 }
 
 const nowSeconds = () => Math.floor(Date.now() / 1000)
@@ -143,7 +149,7 @@ function firstStep(link: string | undefined, at: number): Step {
   return { kind: 'confirm', vtcDid: read.vtcDid, host: didDomainPath(read.vtcDid) }
 }
 
-export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSeconds, onClose }) => {
+export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSeconds, onClose, onJoin }) => {
   const { t } = useTranslation()
   const { ColorPalette, TextTheme } = useTheme()
   const headerHeight = useSafeHeaderHeight()
@@ -159,6 +165,9 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
   const [service, setService] = useState(false)
   const word = (key: string) => (service ? `SignIn.Service.${key}` : `SignIn.${key}`)
   const [deadline, setDeadline] = useState<number | undefined>()
+  // "Check and join" on a code from a community this phone has not joined (IN-406): idle, checking, not one, or
+  // not checked (no answer in time: the offer stays, to try again).
+  const [joinCheck, setJoinCheck] = useState<'idle' | 'checking' | 'notJoinable' | 'unchecked'>('idle')
 
   // What the unmount and the deadline need without re-running effects.
   const claimedRef = useRef<ClaimedSignIn | undefined>(undefined)
@@ -209,7 +218,12 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
             ? current
             : member
               ? { ...current, name: label, identities }
-              : { kind: 'notMember', name: label, vtcDid, ...(olderAgents ? { olderAgents } : {}) }
+              : {
+                  kind: 'notMember',
+                  ...(name?.trim() ? { name: name.trim() } : {}),
+                  vtcDid,
+                  ...(olderAgents ? { olderAgents } : {}),
+                }
         )
       })
       .catch((e) => {
@@ -427,8 +441,47 @@ export const SignInFlow: React.FC<SignInFlowProps> = ({ link, steps, now = nowSe
             {step.olderAgents ? (
               <ThemedText testID={id(SignInIds.olderAgents)}>{t('SignIn.OlderAgents')}</ThemedText>
             ) : null}
-            {row(t('SignIn.CommunityLabel'), step.name, SignInIds.community)}
+            {/* A name on record, else the sender's address: whether it published a name, or is a community at all (a
+                Farm's code reads the same), is not known before anything is looked up (IN-388 step D). One row either
+                way, naming the sender (the wallet e2e reads it). */}
+            {step.name
+              ? row(t('SignIn.CommunityLabel'), step.name, SignInIds.community)
+              : row(t('SignIn.HostLabel'), didDomainPath(step.vtcDid) ?? t('SignIn.NoDomain'), SignInIds.community)}
             <DidDetails did={step.vtcDid} testIdStem={SignInIds.communityDid} />
+            {/* A community's join page shows this same code (IN-406). Nothing is resolved until the tap
+                (VTI-LNK-050), and nothing is sent to the community: Join asks it first. */}
+            {onJoin && steps.joinable ? (
+              joinCheck === 'notJoinable' ? (
+                <ThemedText testID={id(SignInIds.notJoinable)}>{t('SignIn.NotJoinable')}</ThemedText>
+              ) : (
+                <>
+                  {joinCheck === 'unchecked' ? (
+                    <ThemedText testID={id(SignInIds.joinUnchecked)}>{t('SignIn.JoinUnchecked')}</ThemedText>
+                  ) : (
+                    <ThemedText>{t('SignIn.JoinHint')}</ThemedText>
+                  )}
+                  <Button
+                    title={t('SignIn.CheckAndJoin')}
+                    buttonType={ButtonType.Secondary}
+                    disabled={joinCheck === 'checking'}
+                    onPress={() => {
+                      const vtcDid = step.vtcDid
+                      setJoinCheck('checking')
+                      stepsRef.current
+                        .joinable?.(vtcDid)
+                        .catch(() => undefined)
+                        .then((yes) => {
+                          if (yes) onJoin(vtcDid)
+                          else setJoinCheck(yes === false ? 'notJoinable' : 'unchecked')
+                        })
+                    }}
+                    testID={id(SignInIds.checkAndJoin)}
+                  >
+                    {joinCheck === 'checking' ? <ActivityIndicator color={ColorPalette.brand.primary} /> : null}
+                  </Button>
+                </>
+              )
+            ) : null}
             <Button
               title={t('SignIn.Done')}
               buttonType={ButtonType.Primary}
@@ -665,11 +718,16 @@ const SignIn: React.FC<{ steps?: SignInSteps; link?: string; route?: { params?: 
   route,
 }) => {
   const { agent } = useAgent()
-  const navigation = useNavigation()
+  const navigation = useNavigation<StackNavigationProp<MyAgentStackParams>>()
   const [code] = useState(() => link ?? route?.params?.link)
   const agentSteps = useMemo(() => steps ?? (agent ? agentSignInSteps(agent) : undefined), [steps, agent])
   if (!agentSteps) return null
-  return <SignInFlow link={code} steps={agentSteps} onClose={() => navigation.goBack()} />
+  // Join in place of this screen, as a scanned community DID opens it (vtiLinks routeBareDid).
+  const onJoin = (communityDid: string) => {
+    communityTarget.set({ communityDid })
+    navigation.replace(Screens.VtiJoin)
+  }
+  return <SignInFlow link={code} steps={agentSteps} onClose={() => navigation.goBack()} onJoin={onJoin} />
 }
 
 export default SignIn
