@@ -292,7 +292,7 @@ const VtiCommunity: React.FC = () => {
             {called.name ?? unnamedRef(communityDid)}
           </Text>
           {!called.name ? (
-            <Text style={styles.pill}>{t('Community.NoNamePublished')}</Text>
+            <Text style={styles.pill}>{t('Community.PassNoName')}</Text>
           ) : called.claimed ? (
             <Text style={styles.label} testID={testIdWithKey(VtiCommunityIds.nameClaimed)}>
               {t('Join.NameFromLink')}

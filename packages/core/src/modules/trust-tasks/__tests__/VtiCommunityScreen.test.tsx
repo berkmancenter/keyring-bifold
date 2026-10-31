@@ -129,7 +129,7 @@ describe('the community screen', () => {
   it('says a community published no name rather than showing its host as one: its handle, and a pill saying so', () => {
     const tree = show()
     expect(tree.getByTestId(testIdWithKey('CommunityName'))).toHaveTextContent(unnamedRef(communityDid))
-    expect(tree.getByText('Community.NoNamePublished')).toBeTruthy()
+    expect(tree.getByText('Community.PassNoName')).toBeTruthy()
     expect(tree.queryByTestId(testIdWithKey('CommunityNameClaimed'))).toBeNull()
   })
 
@@ -137,7 +137,7 @@ describe('the community screen', () => {
     communityTarget.set({ communityDid, name: 'Keyring Lab', published: true })
     const tree = show()
     expect(tree.getByTestId(testIdWithKey('CommunityName'))).toHaveTextContent('Keyring Lab')
-    expect(tree.queryByText('Community.NoNamePublished')).toBeNull()
+    expect(tree.queryByText('Community.PassNoName')).toBeNull()
   })
 
   it('a name only a link claimed says where it came from', () => {

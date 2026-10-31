@@ -34,12 +34,12 @@ const RoomRowsReading: React.FC = () => {
   const block = { backgroundColor: ColorPalette.grayscale.lightGrey, borderRadius: 6 }
   return (
     <View accessible accessibilityLabel={t('Rooms.Reading')} testID={testIdWithKey('RoomsReading')}>
-      {[60, 45].map((width) => (
+      {[70, 55].map((width) => (
         <View key={width} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56 }}>
           <View style={{ ...block, width: 40, height: 40, borderRadius: 10 }} />
           <View style={{ flex: 1, gap: 8 }}>
             <View style={{ ...block, width: `${width}%` as `${number}%`, height: 12 }} />
-            <View style={{ ...block, width: `${width + 20}%` as `${number}%`, height: 10, opacity: 0.6 }} />
+            <View style={{ ...block, width: `${width - 25}%` as `${number}%`, height: 10, opacity: 0.6 }} />
           </View>
         </View>
       ))}
