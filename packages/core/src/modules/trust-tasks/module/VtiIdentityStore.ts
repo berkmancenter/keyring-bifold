@@ -188,12 +188,12 @@ export class GenericRecordsIdentityStore implements VtiIdentityStore {
 
   /**
    * A record that is its agent's own DID, which Bring back took on before 276.12, reads as none (agentOwnIdentity):
-   * left in the store, never used.
+   * left in the store, never used, and passed over, so a record kept by community alone is still read after it.
    */
   async getPersona(communityDid: string, vtaDid: string | undefined = currentAgentDid()) {
     if (vtaDid) {
       const own = await this.find<VtiPersona>('persona', agentScoped(vtaDid, communityDid))
-      if (own) return isAgentsOwnPersona(own) ? undefined : own
+      if (own && !isAgentsOwnPersona(own)) return own
     }
     // Kept by community alone, before identities were kept per agent: this
     // agent's, or any one when no agent is known. Moved under its agent at the
