@@ -1,4 +1,10 @@
-import { AgentRoomsService, offerIdOf, type RoomsBackend, type RoomsCommunity } from '../real/agentRoomsService'
+import {
+  AgentRoomsService,
+  KEPT_RETRY_FLOOR_MS,
+  offerIdOf,
+  type RoomsBackend,
+  type RoomsCommunity,
+} from '../real/agentRoomsService'
 import { OFFERS_LIST_TYPES, ROOMS_TASK } from '../real/wire'
 import { PREVIEW_TOKEN_TTL_MS, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
 
@@ -212,6 +218,43 @@ describe('AgentRoomsService offers', () => {
     expect(String(offers[0].description)).toBe('Seeds <b>and</b> soil') // inert: kept as text
     expect(offers[0]).not.toHaveProperty('credentials')
     expect(sent(communityTask, ROOMS_TASK.offersAccept)).toHaveLength(0)
+  })
+
+  it('carries the community\'s name only when it has one, never a cut of its DID (276.9: "nity-a-vtc")', async () => {
+    const { service, b } = setup({ offers: [offer(OPEN_ROOM, 'open', 'open')] })
+    const [unnamed] = await service.listOffers()
+    expect(unnamed.communityName).toBeUndefined()
+
+    b.communities = async () => [{ ...COMMUNITY, name: 'Keyring Lab' }]
+    const [named] = await service.listOffers()
+    expect(String(named.communityName)).toBe('Keyring Lab')
+  })
+
+  it("leaves out an accepted sealed offer while the agent can't say which rooms it holds: never offered as new (276.9)", async () => {
+    const s = setup({ offers: [offer(OPEN_ROOM, 'open', 'open'), offer(SEALED_ROOM, 'attributed', 'accepted')] })
+    const answer = s.agentTask.getMockImplementation()!
+    s.agentTask.mockImplementation(async (type: string, payload: Record<string, unknown>) => {
+      if (type === ROOMS_TASK.keysList02) throw new Error('the agent did not answer')
+      return answer(type, payload)
+    })
+    expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM])
+    expect(s.b.warn).toHaveBeenCalledWith(expect.stringContaining(`whether ${SEALED_ROOM} was joined is unknown`))
+
+    // Control: the agent answers, and holds none: accepted elsewhere, not joined, so it is offered.
+    s.agentTask.mockImplementation(answer)
+    expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM, SEALED_ROOM])
+  })
+
+  it('an offered room the community named none is what tells it apart, said to be that, never a cut of its ID (276.9)', async () => {
+    const unnamed = 'did:webvh:QmScid123456:rooms.example:community-a-vtc'
+    const { service } = setup({
+      offers: [offer(unnamed, 'open', 'open', { label: undefined }), offer(OPEN_ROOM, 'open', 'open')],
+    })
+    const [byId, named] = await service.listOffers()
+    expect(String(byId.roomName)).toBe('community-a-vtc')
+    expect(byId.roomNameFrom).toBe('roomId')
+    expect(String(named.roomName)).toBe(`Room ${OPEN_ROOM.slice(-7)}`)
+    expect(named).not.toHaveProperty('roomNameFrom')
   })
 
   it('reads a community without renewals at 0.2', async () => {
@@ -660,5 +703,79 @@ describe('the shared key-list read across an accept', () => {
     release()
     expect(await accepting).toEqual({ roomId: SEALED_ROOM })
     await listing
+  })
+})
+
+// 10-31, a phone in two communities: a vetting step keeps the community session as the other community's persona,
+// and a rooms listing is refused for now (vtiAgent VtiSessionHeld). The community screen asked for its own community's
+// offers, and the refusal failed the whole section ("Couldn't read your rooms"), with nothing to read it again.
+describe('a community the session is kept from for now', () => {
+  const kept = () =>
+    Object.assign(new Error("vtiAgent: the session is kept for another of this phone's identities"), {
+      name: 'VtiSessionHeld',
+    })
+  const keptSetup = () => {
+    const s = setup()
+    let free!: () => void
+    const sessionFree = jest.fn(() => new Promise<void>((resolve) => (free = resolve)))
+    s.b.sessionKept = (e) => e instanceof Error && e.name === 'VtiSessionHeld'
+    s.b.sessionFree = sessionFree
+    s.communityTask.mockImplementation(async () => {
+      throw kept()
+    })
+    const readable = jest.fn()
+    s.service.onReadable(readable)
+    return { ...s, sessionFree, readable, free: () => free() }
+  }
+  const settle = () => new Promise((r) => setTimeout(r, 0))
+
+  it("lists the asked community's offers as none for now, and says once when it can be read again", async () => {
+    const s = keptSetup()
+    await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
+    // A second listing skipped meanwhile waits on the same wait.
+    await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
+    expect(s.sessionFree).toHaveBeenCalledTimes(1)
+    expect(s.sessionFree).toHaveBeenCalledWith(COMMUNITY.did)
+    expect(s.readable).not.toHaveBeenCalled()
+    s.free()
+    await settle()
+    expect(s.readable).toHaveBeenCalledTimes(1)
+  })
+
+  it('still fails the asked community on any other refusal', async () => {
+    const s = keptSetup()
+    s.communityTask.mockImplementation(async () => {
+      throw new Error('community unreachable')
+    })
+    await expect(s.service.listOffers(COMMUNITY.did)).rejects.toThrow('community unreachable')
+    expect(s.sessionFree).not.toHaveBeenCalled()
+  })
+
+  // A step's asks come in bursts: the read again, refused at once, does not come straight back.
+  it('says "readable again" no sooner than the floor after it last said so', async () => {
+    const s = keptSetup()
+    await s.service.listOffers(COMMUNITY.did)
+    s.free()
+    await settle()
+    expect(s.readable).toHaveBeenCalledTimes(1)
+    expect(s.sleeps).toEqual([])
+    await s.service.listOffers(COMMUNITY.did)
+    s.advance(3_000)
+    s.free()
+    await settle()
+    expect(s.sleeps).toEqual([KEPT_RETRY_FLOOR_MS - 3_000])
+    expect(s.readable).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops telling a listener that unsubscribed', async () => {
+    const s = keptSetup()
+    const later = jest.fn()
+    const stop = s.service.onReadable(later)
+    stop()
+    await s.service.listOffers(COMMUNITY.did)
+    s.free()
+    await settle()
+    expect(s.readable).toHaveBeenCalledTimes(1)
+    expect(later).not.toHaveBeenCalled()
   })
 })

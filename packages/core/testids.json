@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "2465361331b83dabdb753b405d7f9edfcb780ef9",
+  "generatedFrom": "230e1d2c2ce0720c249f356328af1f717226ddf3",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1131,7 +1131,10 @@
       "src/modules/rooms/screens/RoomsHome.tsx"
     ],
     "RoomsReadFailed": ["src/modules/rooms/components/RoomsListBody.tsx"],
-    "RoomsReading": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomsReading": [
+      "src/modules/rooms/components/CommunityRoomsSection.tsx",
+      "src/modules/rooms/components/RoomsListBody.tsx"
+    ],
     "RoomsSampleDataBanner": ["src/modules/rooms/components/SampleDataBanner.tsx"],
     "RoomsStale": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomsTryAgain": ["src/modules/rooms/components/RoomsListBody.tsx"],
@@ -1142,7 +1145,9 @@
       "src/modules/history/ui/HistorySettings.tsx",
       "src/screens/RenameContact.tsx"
     ],
+    "ScanCameraNotStarting": ["src/components/misc/ScanCamera.tsx"],
     "ScanCameraTapArea": ["src/components/misc/ScanCamera.tsx"],
+    "ScanCameraWaiting": ["src/components/misc/ScanCamera.tsx"],
     "ScanHelp": ["src/components/misc/QRScanner.tsx"],
     "ScanMyQR": ["src/screens/Settings.tsx"],
     "ScanNow": ["src/components/misc/QRScanner.tsx"],
