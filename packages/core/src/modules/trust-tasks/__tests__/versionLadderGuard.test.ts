@@ -299,7 +299,7 @@ const FIXTURES = new Map<string, string>([
   // A coverage set: newest first passes, an old one fails, and a send inside one is not in a ladder.
   [
     fixture('coverage'),
-    `\${SEND}const C = { c1: \`\${SPEC}guard/cover/0.1\`, c2: \`\${SPEC}guard/cover/0.2\` }\nconst O = { o1: \`\${SPEC}guard/coverold/0.1\`, o2: \`\${SPEC}guard/coverold/0.2\`, o3: \`\${SPEC}guard/coverold/0.3\` }\n/** @versionCoverage guard/cover */\nexport const HELD = new Set([C.c2, C.c1])\n/** @versionCoverage guard/coverold */\nexport const STALE = new Set([O.o2, O.o1])\n/** @versionCoverage guard/cover */\nexport const notALadder = () => send(C.c2)\nexport const reaches = () => send(O.o3) // version-pinned: shows 0.3 is known\n`,
+    `${SEND}const C = { c1: \`\${SPEC}guard/cover/0.1\`, c2: \`\${SPEC}guard/cover/0.2\` }\nconst O = { o1: \`\${SPEC}guard/coverold/0.1\`, o2: \`\${SPEC}guard/coverold/0.2\`, o3: \`\${SPEC}guard/coverold/0.3\` }\n/** @versionCoverage guard/cover */\nexport const HELD = new Set([C.c2, C.c1])\n/** @versionCoverage guard/coverold */\nexport const STALE = new Set([O.o2, O.o1])\n/** @versionCoverage guard/cover */\nexport const notALadder = () => send(C.c2)\nexport const reaches = () => send(O.o3) // version-pinned: shows 0.3 is known\n`,
   ],
   // Two versions known, neither ever sent or listed: this cannot see how the family is sent.
   [
