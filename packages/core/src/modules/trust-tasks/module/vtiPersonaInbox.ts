@@ -34,7 +34,7 @@ import { receiveRequestVmc, reciprocateIfOwed } from './vtiReciprocate'
 import { invitationOfferOfMessage, redeemInvitationOffer, VtiInvitationOfferError } from './vtiInvitationOffer'
 import { didPrefix } from './didPrefix'
 import { releaseWarn } from './releaseLog'
-import { vtiAgent } from './vtiAgent'
+import { VtiSessionHeld, vtiAgent } from './vtiAgent'
 import { vtaAgent } from './vtaAgent'
 import { refusedAsNotOnAcl } from './VtaClient'
 import { KeyCopyUnavailable } from './EphemeralKeyManagementService'
@@ -284,11 +284,13 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
         return said('waiting for a sign-in already running')
       }
       said('signing in as the persona')
+      // A look is a poll: it never takes the session from a step holding it as another identity (VtiSessionHeld).
       const signIn = (who: VtiPersona) =>
-        vtiAgent.connect(agent, options.mediatorDid, { persona: who, peerRevisionStore })
+        vtiAgent.connect(agent, options.mediatorDid, { persona: who, peerRevisionStore, background: true })
       try {
         await signIn(persona)
       } catch (e) {
+        if (e instanceof VtiSessionHeld) return said('listening only: another identity keeps the session')
         if (!isMissingKeyCopy(e)) throw e
         // The persona's borrowed key is not in memory (an install, a restart,
         // a lock). Borrow it again through its agent and sign in once more; if
@@ -304,6 +306,8 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
       setAgentState(persona, undefined)
       said('signed in')
     } catch (e) {
+      // Kept by a step after the key was borrowed again: not a failure.
+      if (e instanceof VtiSessionHeld) return said('listening only: another identity keeps the session')
       if (e instanceof PersonaAgentUnreachable && persona) setAgentState(persona, e)
       said(`sign-in failed: ${e instanceof Error ? e.message : String(e)}`)
       options.onError?.(e)
