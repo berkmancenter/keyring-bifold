@@ -24,7 +24,9 @@ export const VTA_READ_LANE_SIZE = 3
  * The tasks that may share the lane: reads only, by exact type and version. Every browse version the ladder may send
  * is here, newest first, so a newer one added to the ladder fails the version guard until it is added here too.
  *
- * @versionLadder rooms/keys/browse
+ * What may share the lane, not what is sent: browse 0.2 is held here, and the ladder (`browseType`) sends 0.3 or 0.1.
+ *
+ * @versionCoverage rooms/keys/browse
  */
 export const VTA_READ_LANE_TYPES: ReadonlySet<string> = new Set([
   'https://trusttasks.org/spec/rooms/keys/read/0.1',
@@ -50,10 +52,10 @@ export function inReadLane(type: string): boolean {
 export const VTA_HEARTBEAT_BESIDE = true
 /**
  * Every heartbeat version Keyring sends (vtaDevices' ladder), newest first. One added to the ladder and missed here
- * would put the heartbeat back in the queue with nothing else failing, so the version guard reads this as a ladder,
+ * would put the heartbeat back in the queue with nothing else failing, so the version guard holds this to the newest,
  * and vtaClientHeartbeatBeside.test.ts holds it to each `device/heartbeat` in AGENT_DEVICE_TASK.
  *
- * @versionLadder device/heartbeat
+ * @versionCoverage device/heartbeat
  */
 export const VTA_BESIDE_TYPES: ReadonlySet<string> = new Set([
   'https://trusttasks.org/spec/device/heartbeat/0.3',

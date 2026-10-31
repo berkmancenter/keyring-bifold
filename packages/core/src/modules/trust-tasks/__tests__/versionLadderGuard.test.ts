@@ -14,8 +14,10 @@
  *   list of versions that are read, never sent (the requests the phone parses), carries `// version-set: <reason>`.
  *   A bare marker does not count.
  * - A set that must hold every version a ladder may send (the read lane, a rule's coverage, what a capability accepts)
- *   is a ladder too: tagged, newest first. A version added to the ladder then fails here until the set holds it, where
- *   a set that silently missed it would only change what happens to that one task (bifold #837's heartbeat).
+ *   carries `@versionCoverage`: newest first, like a ladder, so a version added to the ladder fails here until the set
+ *   holds it, where a set that silently missed it would only change what happens to that one task (bifold #837's
+ *   heartbeat). It is not a ladder and does not say what is sent: it may hold more than the ladder (the read lane holds
+ *   rooms/keys/browse 0.2, which nothing sends), a send inside one is outside a ladder, and it never meets the FLOOR.
  * - Every such family is seen at least once. One sent in a shape this cannot see fails rather than passing unseen.
  *
  * "Newest" is the newest version named anywhere in core's src, so a version added for one call site is the one
@@ -34,6 +36,7 @@ const URI = /^https:\/\/trusttasks\.org\/spec\/(.+)\/(\d+\.\d+)$/
 const PINNED = /\/\/[ \t]*version-pinned:[ \t]*\S/
 const SET = /\/\/[ \t]*version-set:[ \t]*\S/
 const TAG = 'versionLadder'
+const COVERAGE = 'versionCoverage'
 
 /**
  * The families the 276.11 fixes ladder, and the file each one's ladder is in: held whatever else changes, so a
@@ -45,6 +48,8 @@ const FLOOR: Record<string, string | null> = {
   'device/register': null,
   'rooms/keys/browse': 'modules/rooms/real/agentRoomsService.ts',
   'rooms/keys/act': 'modules/rooms/real/wire.ts',
+  'rooms/records/put': 'modules/rooms/real/agentRoomsService.ts',
+  'vtc/rooms/offers/list': 'modules/rooms/real/wire.ts',
   'vta/contexts/delete': 'modules/trust-tasks/module/VtaClient.ts',
   'auth/step-up/approve-response': 'modules/trust-tasks/module/stepUp.ts',
 }
@@ -183,17 +188,18 @@ function survey(extra: Map<string, string> = new Map()): Survey {
     const lines = sf.text.split('\n')
     return marker.test(lines[line]) || (line > 0 && /^\s*\/\//.test(lines[line - 1]) && marker.test(lines[line - 1]))
   }
-  /** The nearest construct around `node` whose `@versionLadder` covers `family`. */
-  const ladderOf = (node: ts.Node, family: string): ts.Node | undefined => {
+  /** The nearest construct around `node` carrying one of `tags` that covers `family`. */
+  const taggedFor = (node: ts.Node, family: string, tags: string[]): ts.Node | undefined => {
     for (let at: ts.Node | undefined = node; at; at = at.parent) {
       for (const tag of ts.getJSDocTags(at)) {
-        if (tag.tagName.text !== TAG) continue
+        if (!tags.includes(tag.tagName.text)) continue
         const named = (ts.getTextOfJSDocComment(tag.comment) ?? '').split(/[\s,]+/).filter(Boolean)
         if (named.length === 0 || named.includes(family)) return at
       }
     }
     return undefined
   }
+  const ladderOf = (node: ts.Node, family: string) => taggedFor(node, family, [TAG])
 
   const seen = new Set<string>()
   const ladderNodes = new Map<ts.Node, Set<string>>()
@@ -226,17 +232,17 @@ function survey(extra: Map<string, string> = new Map()): Survey {
           seen.add(family)
           if (versions.length < 2 || markedBy(n, SET)) continue
           const ladder = ladderOf(n, family)
-          if (!ladder) {
+          if (!ladder && !taggedFor(n, family, [COVERAGE])) {
             report(n, family, 'listed outside a ladder', versions)
             continue
           }
-          noteLadder(ladder, family)
+          if (ladder) noteLadder(ladder, family)
           const descending = versions.every((v, i) => i === 0 || byVersion(versions[i - 1], v) > 0)
           if (!descending || versions[0] !== newest(family)) report(n, family, 'not newest first', versions)
         }
       }
       for (const tag of ts.getJSDocTags(n)) {
-        if (tag.tagName.text !== TAG) continue
+        if (tag.tagName.text !== TAG && tag.tagName.text !== COVERAGE) continue
         for (const family of (ts.getTextOfJSDocComment(tag.comment) ?? '').split(/[\s,]+/).filter(Boolean))
           if (!known.has(family)) report(n, family, 'names a family Keyring does not know', [])
       }
@@ -290,6 +296,11 @@ const FIXTURES = new Map<string, string>([
     fixture('markers'),
     `${SEND}const P = { p1: \`\${SPEC}guard/pin/0.1\`, p2: \`\${SPEC}guard/pin/0.2\` }\nexport const why = () => send(P.p1) // version-pinned: the fixture's host serves 0.1 only\nexport const bare = () => send(P.p1) // version-pinned:\n// version-set: the versions this fixture reads\nexport const READS = [P.p1, P.p2]\nexport const UNSAID = [P.p2, P.p1]\nexport const doc = { type: P.p1 }\n`,
   ],
+  // A coverage set: newest first passes, an old one fails, and a send inside one is not in a ladder.
+  [
+    fixture('coverage'),
+    `\${SEND}const C = { c1: \`\${SPEC}guard/cover/0.1\`, c2: \`\${SPEC}guard/cover/0.2\` }\nconst O = { o1: \`\${SPEC}guard/coverold/0.1\`, o2: \`\${SPEC}guard/coverold/0.2\`, o3: \`\${SPEC}guard/coverold/0.3\` }\n/** @versionCoverage guard/cover */\nexport const HELD = new Set([C.c2, C.c1])\n/** @versionCoverage guard/coverold */\nexport const STALE = new Set([O.o2, O.o1])\n/** @versionCoverage guard/cover */\nexport const notALadder = () => send(C.c2)\nexport const reaches = () => send(O.o3) // version-pinned: shows 0.3 is known\n`,
+  ],
   // Two versions known, neither ever sent or listed: this cannot see how the family is sent.
   [
     fixture('unseen'),
@@ -319,6 +330,12 @@ describe('every family Keyring knows at more than one version is sent from a lad
     }
   })
 
+  it('a coverage set is not a ladder: nothing it holds counts as a family laddered in its file', () => {
+    expect(found.ladders.has('guard/cover')).toBe(false)
+    expect(found.ladders.get('rooms/keys/browse')).not.toContain('modules/trust-tasks/module/vtaReadLane.ts')
+    expect(found.ladders.get('device/heartbeat')).not.toContain('modules/trust-tasks/module/vtaReadLane.ts')
+  })
+
   it('reports each rule broken in the fixtures, and nothing they keep', () => {
     // One line per fixture, family and rule: a rule broken at two sites is one line here (the lines are checked below).
     const got = [
@@ -333,6 +350,8 @@ describe('every family Keyring knows at more than one version is sent from a lad
         'tagged guard/order not newest first',
         'tagged guard/stale never reaches the newest',
         'tagged guard/typo names a family Keyring does not know',
+        'coverage guard/cover sent outside a ladder',
+        'coverage guard/coverold not newest first',
         'markers guard/pin sent outside a ladder', // the bare marker, and the document's type
         'markers guard/pin listed outside a ladder',
         '- guard/hidden never seen',
