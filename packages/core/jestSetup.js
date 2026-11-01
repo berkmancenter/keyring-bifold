@@ -149,6 +149,9 @@ afterAll(() => {
 
 // Mock @bifold/react-native-attestation native module
 jest.mock('@bifold/react-native-attestation', () => ({
+  approvalKeyWrap: jest.fn().mockResolvedValue(true),
+  approvalKeyUnwrap: jest.fn().mockRejectedValue(Object.assign(new Error('no approval key'), { code: 'lost' })),
+  approvalKeyForget: jest.fn().mockResolvedValue(true),
   isHardwareAttestationAvailable: jest.fn().mockResolvedValue(false),
   hasHardwareSigningKey: jest.fn().mockResolvedValue(false),
   createHardwareSigningKey: jest.fn().mockResolvedValue({

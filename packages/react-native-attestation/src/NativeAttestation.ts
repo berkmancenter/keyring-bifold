@@ -59,7 +59,7 @@ type NativeVerificationResult = {
  * On new architecture, each platform should ideally stub missing methods with a rejection.
  *
  * iOS-only: generateKey, sha256, appleKeyAttestation, attestHardwareSigningKey
- * Android-only: isPlayIntegrityAvailable, googleAttestation, getKeyAttestation
+ * Android-only: isPlayIntegrityAvailable, googleAttestation, getKeyAttestation, approvalKey*
  * Cross-platform: all others
  */
 export interface Spec extends TurboModule {
@@ -104,6 +104,15 @@ export interface Spec extends TurboModule {
     /** Epoch ms to check the certificate chain at; 0 checks it at the current time. */
     verifyAtMs: number
   ): Promise<NativeVerificationResult>;
+
+  // Android-only: the sign-in approval key (ApprovalKey.kt). Rejects with code lost | cancelled | unavailable.
+  approvalKeyWrap(
+    secretHex: string,
+    prompt: string,
+    cancel: string
+  ): Promise<boolean>;
+  approvalKeyUnwrap(prompt: string, cancel: string): Promise<string>;
+  approvalKeyForget(): Promise<boolean>;
 }
 
 export default TurboModuleRegistry.getEnforcing<Spec>('Attestation');

@@ -35,4 +35,7 @@ abstract class AttestationSpec internal constructor(context: ReactApplicationCon
   abstract fun getKeyAttestation(promise: Promise)
   abstract fun getCachedHardwareKeyAttestation(promise: Promise)
   abstract fun isHardwareAttestationAvailable(promise: Promise)
+  abstract fun approvalKeyWrap(secretHex: String, prompt: String, cancel: String, promise: Promise)
+  abstract fun approvalKeyUnwrap(prompt: String, cancel: String, promise: Promise)
+  abstract fun approvalKeyForget(promise: Promise)
 }

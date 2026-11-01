@@ -576,6 +576,140 @@ class AttestationModule : AttestationSpec {
   }
 
   @ReactMethod
+  // region Sign-in approval key (ApprovalKey)
+
+  private fun approvalPrefs() = reactContext.getSharedPreferences(ApprovalKey.PREFS, android.content.Context.MODE_PRIVATE)
+
+  /** A strong-biometric-only prompt for one operation of `cipher`; `done` gets the authenticated cipher. */
+  private fun promptForCipher(
+    activity: FragmentActivity,
+    cipher: javax.crypto.Cipher,
+    prompt: String,
+    cancel: String,
+    promise: Promise,
+    done: (javax.crypto.Cipher) -> Unit
+  ) {
+    val callback = object : BiometricPrompt.AuthenticationCallback() {
+      override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+        val authed = result.cryptoObject?.cipher
+        if (authed == null) {
+          promise.reject(ApprovalKey.UNAVAILABLE, "no cipher came back from the prompt")
+          return
+        }
+        try {
+          done(authed)
+        } catch (e: Exception) {
+          promise.reject(ApprovalKey.reasonFor(e), "the approval key could not be used: ${e.message}", e)
+        }
+      }
+
+      override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+        promise.reject(ApprovalKey.reasonForPromptError(errorCode), "$errString")
+      }
+
+      override fun onAuthenticationFailed() {
+        // Not recognised: the prompt stays for another try.
+      }
+    }
+    val info = BiometricPrompt.PromptInfo.Builder()
+      .setTitle(prompt)
+      .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+      .setNegativeButtonText(cancel)
+      .setConfirmationRequired(false)
+      .build()
+    activity.runOnUiThread {
+      try {
+        BiometricPrompt(activity, ContextCompat.getMainExecutor(reactContext), callback)
+          .authenticate(info, BiometricPrompt.CryptoObject(cipher))
+      } catch (e: Exception) {
+        promise.reject(ApprovalKey.UNAVAILABLE, "the prompt could not be shown: ${e.message}", e)
+      }
+    }
+  }
+
+  /** Make the approval key and keep `secretHex` under it (one prompt). Refuses a key that is not biometric-only. */
+  @ReactMethod
+  override fun approvalKeyWrap(secretHex: String, prompt: String, cancel: String, promise: Promise) {
+    val activity = currentActivity as? FragmentActivity
+    if (activity == null) {
+      promise.reject(ApprovalKey.UNAVAILABLE, "no activity for the prompt")
+      return
+    }
+    if (BiometricManager.from(reactContext).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) !=
+      BiometricManager.BIOMETRIC_SUCCESS
+    ) {
+      promise.reject(ApprovalKey.UNAVAILABLE, "no strong biometric is enrolled")
+      return
+    }
+    val prefs = approvalPrefs()
+    try {
+      ApprovalKey.forget(prefs)
+      val key = ApprovalKey.create()
+      val failed = ApprovalKey.check(key)
+      if (failed.isNotEmpty()) {
+        ApprovalKey.forget(prefs)
+        Log.w(TAG, "✗ Approval key refused: ${failed.joinToString("; ")}")
+        promise.reject(ApprovalKey.UNAVAILABLE, "this phone cannot keep a biometric-only approval key: ${failed.joinToString("; ")}")
+        return
+      }
+      promptForCipher(activity, ApprovalKey.encryptCipher(key), prompt, cancel, promise) { authed ->
+        val plain = ApprovalKey.unhex(secretHex)
+        try {
+          ApprovalKey.keep(prefs, authed, authed.doFinal(plain))
+        } finally {
+          plain.fill(0)
+        }
+        Log.i(TAG, "✓ Approval key made [per use, strong biometrics only]")
+        promise.resolve(true)
+      }
+    } catch (e: Exception) {
+      ApprovalKey.forget(prefs)
+      promise.reject(ApprovalKey.reasonFor(e), "the approval key could not be made: ${e.message}", e)
+    }
+  }
+
+  /** The kept secret, after a strong biometric for this one use. `lost` when there is none or a new enrolment ended it. */
+  @ReactMethod
+  override fun approvalKeyUnwrap(prompt: String, cancel: String, promise: Promise) {
+    val activity = currentActivity as? FragmentActivity
+    if (activity == null) {
+      promise.reject(ApprovalKey.UNAVAILABLE, "no activity for the prompt")
+      return
+    }
+    val prefs = approvalPrefs()
+    val cipher = try {
+      ApprovalKey.decryptCipher(prefs)
+    } catch (e: KeyPermanentlyInvalidatedException) {
+      Log.w(TAG, "Approval key invalidated by a new enrolment — forgetting it")
+      ApprovalKey.forget(prefs)
+      promise.reject(ApprovalKey.LOST, "a new enrolment ended the approval key", e)
+      return
+    } catch (e: Exception) {
+      promise.reject(ApprovalKey.reasonFor(e), "the approval key could not be opened: ${e.message}", e)
+      return
+    }
+    if (cipher == null) {
+      promise.reject(ApprovalKey.LOST, "this phone keeps no approval key")
+      return
+    }
+    promptForCipher(activity, cipher, prompt, cancel, promise) { authed ->
+      val plain = authed.doFinal(ApprovalKey.sealed(prefs))
+      try {
+        promise.resolve(ApprovalKey.hex(plain))
+      } finally {
+        plain.fill(0)
+      }
+    }
+  }
+
+  @ReactMethod
+  override fun approvalKeyForget(promise: Promise) {
+    ApprovalKey.forget(approvalPrefs())
+    promise.resolve(true)
+  }
+
+  // endregion
+
   override fun deleteHardwareSigningKey(promise: Promise) {
     try {
       val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE)

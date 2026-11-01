@@ -3,7 +3,9 @@
  * without a prompt, readable only through the biometric prompt (current
  * biometrics, no passcode fallback), and refused when the item is gone.
  */
+import * as Attestation from '@bifold/react-native-attestation'
 import { ed25519 } from '@noble/curves/ed25519.js'
+import { Platform } from 'react-native'
 import * as Keychain from 'react-native-keychain'
 
 import { didKeyVerificationMethod, getUvDid, resetUvKey, uvSign, UvKeyError } from '../module/uvKey'
@@ -33,6 +35,34 @@ jest.mock('react-native-keychain', () => {
   }
 })
 
+// The Android approval key (ApprovalKey.kt): what it was given to keep, released once the prompt is answered.
+jest.mock('@bifold/react-native-attestation', () => {
+  const kept: { secretHex?: string } = {}
+  return {
+    __kept: kept,
+    approvalKeyWrap: jest.fn(async (secretHex: string) => {
+      kept.secretHex = secretHex
+      return true
+    }),
+    approvalKeyUnwrap: jest.fn(async () => {
+      if (!kept.secretHex) throw Object.assign(new Error('this phone keeps no approval key'), { code: 'lost' })
+      return kept.secretHex
+    }),
+    approvalKeyForget: jest.fn(async () => {
+      delete kept.secretHex
+      return true
+    }),
+  }
+})
+const approval = Attestation as unknown as {
+  __kept: { secretHex?: string }
+  approvalKeyWrap: jest.Mock
+  approvalKeyUnwrap: jest.Mock
+  approvalKeyForget: jest.Mock
+}
+let os = 'ios'
+Object.defineProperty(Platform, 'OS', { configurable: true, get: () => os })
+
 const mock = Keychain as unknown as {
   __items: Map<string, { username: string; password: string; options: Record<string, unknown> }>
   setGenericPassword: jest.Mock
@@ -49,6 +79,8 @@ const verifyWith = (did: string, bytes: Uint8Array, signature: Uint8Array) => {
 const readItem = mock.getGenericPassword.getMockImplementation()!
 
 beforeEach(async () => {
+  os = 'ios'
+  delete approval.__kept.secretHex
   mock.__items.clear()
   jest.clearAllMocks()
   mock.getGenericPassword.mockImplementation(readItem)
@@ -119,5 +151,68 @@ describe('the UV key', () => {
     await resetUvKey()
     const second = await getUvDid()
     expect(second).not.toBe(first)
+  })
+})
+
+// Android kept the secret with react-native-keychain, whose Keystore key opens for a few seconds after any unlock,
+// the device PIN's too, and outlives a new enrolment. It is kept by the approval key now: one strong biometric per use.
+describe('the UV key on Android', () => {
+  beforeEach(() => {
+    os = 'android'
+  })
+
+  it('is kept by the approval key, not the keychain: only its DID is in the keychain', async () => {
+    const did = await getUvDid('Set up approving')
+    expect(approval.approvalKeyWrap).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+      'Set up approving',
+      'Cancel'
+    )
+    expect(mock.__items.has('keyring.signin-uv-key')).toBe(false)
+    expect(mock.__items.get('keyring.signin-uv-key.did')?.password).toBe(did)
+  })
+
+  it('signs with the secret the approval key releases for this one use', async () => {
+    const did = await getUvDid()
+    const bytes = new TextEncoder().encode('grant digest')
+    const signature = await uvSign(bytes, 'Approve signing in')
+    expect(approval.approvalKeyUnwrap).toHaveBeenCalledWith('Approve signing in', 'Cancel')
+    expect(verifyWith(did, bytes, signature)).toBe(true)
+  })
+
+  it.each([
+    ['lost', 'lost'],
+    ['cancelled', 'cancelled'],
+    ['unavailable', 'unavailable'],
+    [undefined, 'unavailable'],
+  ])('a release refused with code %s says %s', async (code, reason) => {
+    await getUvDid()
+    approval.approvalKeyUnwrap.mockRejectedValueOnce(Object.assign(new Error('refused'), { code }))
+    await expect(uvSign(new Uint8Array(64), 'Approve')).rejects.toMatchObject({ reason })
+  })
+
+  it('a phone that cannot hold a biometric-only key is refused when the key is made', async () => {
+    approval.approvalKeyWrap.mockRejectedValueOnce(
+      Object.assign(new Error('this phone cannot keep a biometric-only approval key: usable for 5s'), {
+        code: 'unavailable',
+      })
+    )
+    await expect(getUvDid()).rejects.toMatchObject({ reason: 'unavailable' })
+    // Nothing names a key that was never made.
+    expect(mock.__items.has('keyring.signin-uv-key.did')).toBe(false)
+  })
+
+  it('a key kept the earlier way reads as lost, and a reset forgets both, so a new one is made', async () => {
+    // As an earlier build left it: the secret in the keychain, the approval key empty.
+    os = 'ios'
+    const earlier = await getUvDid()
+    os = 'android'
+    await expect(uvSign(new Uint8Array(64), 'Approve')).rejects.toMatchObject({ reason: 'lost' })
+    await resetUvKey()
+    expect(approval.approvalKeyForget).toHaveBeenCalled()
+    expect(mock.__items.size).toBe(0)
+    const fresh = await getUvDid()
+    expect(fresh).not.toBe(earlier)
+    expect(approval.approvalKeyWrap).toHaveBeenCalledTimes(1)
   })
 })
