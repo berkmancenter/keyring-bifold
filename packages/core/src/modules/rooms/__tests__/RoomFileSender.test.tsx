@@ -50,6 +50,7 @@ describe('who shared a file, as the screens say it', () => {
     const tree = sheet(f)
     expect(tree.getByTestId(id('RoomFileShared'))).toHaveTextContent(/Rooms\.FileSharedBy/)
     expect(tree.getByTestId(id('RoomFileDownload'))).toBeTruthy()
+    expect(tree.getByTestId(id('RoomFileCaution'))).toBeTruthy()
     expect(tree.queryByTestId(id('RoomFileNotConfirmed'))).toBeNull()
   })
 
@@ -61,6 +62,7 @@ describe('who shared a file, as the screens say it', () => {
     const tree = sheet(f)
     expect(tree.getByTestId(id('RoomFileShared'))).toHaveTextContent(/Rooms\.FileSenderNotConfirmed/)
     expect(tree.getByTestId(id('RoomFileDownload'))).toBeTruthy()
+    expect(tree.getByTestId(id('RoomFileCaution'))).toBeTruthy()
   })
 
   test('a name passed with an unconfirmed sender is still not shown', () => {
@@ -69,7 +71,7 @@ describe('who shared a file, as the screens say it', () => {
     expect(sheet(f).getByTestId(id('RoomFileShared'))).not.toHaveTextContent(/Rooms\.FileSharedBy/)
   })
 
-  test('refused: the file can’t be opened, and there is nothing to download', () => {
+  test('refused: the file can’t be opened, there is nothing to download, and no caution asks to trust who shared it', () => {
     const f = file({ sender: 'refused', sharedBy: ALICE })
     const r = row(f)
     expect(r).toHaveTextContent(/Rooms\.FileNotConfirmed/)
@@ -78,5 +80,7 @@ describe('who shared a file, as the screens say it', () => {
     expect(tree.getByTestId(id('RoomFileNotConfirmed'))).toHaveTextContent('Rooms.FileNotConfirmed')
     expect(tree.queryByTestId(id('RoomFileDownload'))).toBeNull()
     expect(tree.queryByTestId(id('RoomFileShared'))).toBeNull()
+    expect(tree.queryByTestId(id('RoomFileCaution'))).toBeNull()
+    expect(tree.queryByText('Rooms.FileCaution')).toBeNull()
   })
 })

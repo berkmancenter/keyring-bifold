@@ -131,9 +131,12 @@ const SheetBody: React.FC<
             {shared}
           </ThemedText>
         ) : null}
-        <ThemedText variant="caption" style={styles.muted}>
-          {t('Rooms.FileCaution')}
-        </ThemedText>
+        {/* Asks the member to judge who shared it: not on a file that is refused, which names no one and can't be opened. */}
+        {refused ? null : (
+          <ThemedText variant="caption" style={styles.muted} testID={testIdWithKey('RoomFileCaution')}>
+            {t('Rooms.FileCaution')}
+          </ThemedText>
+        )}
 
         {refused ? (
           // As upstream: a record whose signature does not hold is not opened, so there is nothing to download.
