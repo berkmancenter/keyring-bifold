@@ -77,6 +77,8 @@ export const PhotoConsentSheet: React.FC<PhotoConsentSheetProps> = ({
     choices: { borderRadius: 10, borderWidth: 1, borderColor: ColorPalette.grayscale.lightGrey },
     choice: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingHorizontal: 12 },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: ColorPalette.grayscale.lightGrey },
+    // Wraps inside the row at large text, rather than running past the box's edge.
+    choiceLabel: { flex: 1 },
   })
   const label = (audience: PhotoAudience) =>
     t(audience === 'members' ? 'Directory.PhotoAudienceMembers' : 'Directory.PhotoAudienceAdmins')
@@ -126,7 +128,9 @@ export const PhotoConsentSheet: React.FC<PhotoConsentSheetProps> = ({
                     size={24}
                     color={audience === chosen ? ColorPalette.brand.primary : ColorPalette.grayscale.mediumGrey}
                   />
-                  <ThemedText variant={audience === chosen ? 'bold' : 'normal'}>{label(audience)}</ThemedText>
+                  <ThemedText variant={audience === chosen ? 'bold' : 'normal'} style={styles.choiceLabel}>
+                    {label(audience)}
+                  </ThemedText>
                 </Pressable>
               </React.Fragment>
             ))}
