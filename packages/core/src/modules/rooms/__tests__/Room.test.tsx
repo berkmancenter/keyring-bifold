@@ -243,7 +243,9 @@ describe('posts', () => {
       return readNote(roomId, key)
     })
     const tree = open(service)
-    await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(POSTS_PAGE))
+    // On the tenth post itself, as the page above: a count can run out on a busy runner (FLAKY-ROOM-10-POSTS).
+    await tree.findByTestId(id(`RoomPost_${roomHandle(`p${POSTS_PAGE - 1}`)}`), {}, { timeout: PAGE_DRAWN_MS })
+    expect(tree.getAllByTestId(/RoomPost_/)).toHaveLength(POSTS_PAGE)
     expect(tree.queryByText(`post ${POSTS_PAGE}`)).toBeNull()
     expect(tree.queryByText('Rooms.LoadOlder')).toBeNull()
     // Drawn bottom up, the list's end is its top: reaching it reads the next page.
