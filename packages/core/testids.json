@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "90091b8b8e0d6c391ef0440185b64b0fd72615fb",
+  "generatedFrom": "b72171eb61d85954a3df99152bac78fa1862fe68",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1024,13 +1024,16 @@
     "RoomComposerUnavailable": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomDetailsOpen": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomFileCancel": ["src/modules/rooms/components/RoomFileSheet.tsx"],
+    "RoomFileCaution": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileDownload": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileFacts": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileFailed": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileName": ["src/modules/rooms/components/RoomFileSheet.tsx"],
+    "RoomFileNotConfirmed": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileProgress": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileShare": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileShareUnavailable": ["src/modules/rooms/components/RoomFileSheet.tsx"],
+    "RoomFileShared": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheet": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFileSheetClose": ["src/modules/rooms/components/RoomFileSheet.tsx"],
     "RoomFiles": ["src/modules/rooms/components/RoomFilesTab.tsx"],
