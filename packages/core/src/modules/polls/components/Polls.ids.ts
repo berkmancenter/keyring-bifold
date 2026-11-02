@@ -40,6 +40,7 @@ export const PollsIds = {
   cast: 'PollBallotCast',
   check: 'PollBallotCheck',
   back: 'PollBallotBack',
+  beforeItGoes: 'PollBallotBeforeItGoes',
   casting: 'PollBallotCasting',
   castFailed: 'PollBallotCastFailed',
 } as const

@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "4c0c3f5f5aeb71f5ac87704a05ab522009aa5799",
+  "generatedFrom": "90091b8b8e0d6c391ef0440185b64b0fd72615fb",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -882,6 +882,7 @@
     "PersonaAgentNoticeLine": ["src/modules/trust-tasks/screens/PersonaAgentNotice.tsx"],
     "PersonaAgentNoticeOpen": ["src/modules/trust-tasks/screens/PersonaAgentNotice.tsx"],
     "PollBallotBack": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollBallotBeforeItGoes": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotBoardLine": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotCantShow": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotCast": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1820,6 +1821,9 @@
     },
     {
       "src/modules/polls/screens/PollBallot.tsx": "PollsIds.ballotScreen"
+    },
+    {
+      "src/modules/polls/screens/PollBallot.tsx": "PollsIds.beforeItGoes"
     },
     {
       "src/modules/polls/screens/PollBallot.tsx": "PollsIds.boardLine"

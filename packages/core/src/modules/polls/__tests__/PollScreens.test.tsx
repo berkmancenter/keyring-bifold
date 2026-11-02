@@ -5,8 +5,9 @@
  * than abstaining it; and no screen after the vote says what the member chose.
  */
 import { useRoute } from '@react-navigation/native'
-import { fireEvent, render } from '@testing-library/react-native'
+import { fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
+import { ScrollView } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
@@ -18,6 +19,13 @@ import PollBallot from '../screens/PollBallot'
 
 const COMMUNITY = 'did:webvh:QmCommunity:vtc.example.org'
 const CHOICE = 'option-yes'
+
+// React Native's jest setup reports a font scale of 2, which these screens read as large text. Default text is 1.
+let mockFontScale = 1
+jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({
+  __esModule: true,
+  default: () => ({ width: 390, height: 844, scale: 3, fontScale: mockFontScale }),
+}))
 
 const mockState: { shown?: PollShown; record?: PollRecord; readiness?: string; failed: boolean } = { failed: false }
 const mockService = { takeTicket: jest.fn(), vote: jest.fn() }
@@ -92,6 +100,7 @@ const renderIn = (screen: React.ReactElement) => render(<BasicAppContext>{screen
 beforeEach(() => {
   ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid: COMMUNITY, electionId: 'charter' } })
   Object.assign(mockState, { shown: shownWith(), record: undefined, readiness: 'ready', failed: false })
+  mockFontScale = 1
   mockService.takeTicket.mockReset()
   mockService.vote.mockReset()
 })
@@ -129,6 +138,15 @@ describe('before the ticket', () => {
     const tree = renderIn(<Poll />)
     fireEvent.press(tree.getByTestId(id(PollsIds.getTicket)))
     expect(mockService.takeTicket).toHaveBeenCalledWith(COMMUNITY, 'charter')
+  })
+
+  // A render at large text showed the ticket's screen opened scrolled past "You have your ticket".
+  test('after the ticket the screen goes back to its top', async () => {
+    const toTop = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => undefined)
+    const tree = renderIn(<Poll />)
+    fireEvent.press(tree.getByTestId(id(PollsIds.getTicket)))
+    await waitFor(() => expect(toTop).toHaveBeenCalledWith({ y: 0, animated: false }))
+    toTop.mockRestore()
   })
 })
 
@@ -184,6 +202,42 @@ describe('the ballot', () => {
     expect(tree.getByText('Polls.SeesAgent')).toBeTruthy()
   })
 
+  // A render showed the open details filling a fixed bar until the choices were a sliver above it.
+  test('with Details open the bar goes to the end of the scroll, after the questions', () => {
+    const tree = renderIn(<PollBallot />)
+    const scroll = () => within(tree.getByTestId(id(PollsIds.ballotScreen)))
+    expect(scroll().queryByTestId(id(PollsIds.cast))).toBeNull()
+    fireEvent.press(tree.getByTestId(id(PollsIds.details)))
+    expect(scroll().getByText('Polls.SeesAgent')).toBeTruthy()
+    expect(scroll().getByTestId(id(PollsIds.cast))).toBeTruthy()
+  })
+
+  // A render showed the check step opened scrolled past the choice it exists to show, with Details left open.
+  test('opening Details scrolls to the lines once; the check step never scrolls past the choice', () => {
+    const toEnd = jest.spyOn(ScrollView.prototype, 'scrollToEnd').mockImplementation(() => undefined)
+    const toTop = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => undefined)
+    mockState.shown = shownWith({ binding: true })
+    const tree = renderIn(<PollBallot />)
+    const grow = () => fireEvent(tree.getByTestId(id(PollsIds.ballotScreen)), 'contentSizeChange', 390, 2000)
+    fireEvent.press(tree.getByTestId(id(PollsIds.details)))
+    grow()
+    expect(toEnd).toHaveBeenCalledTimes(1)
+    fireEvent.press(tree.getAllByTestId(id(PollsIds.option))[0])
+    fireEvent.press(tree.getByTestId(id(PollsIds.cast)))
+    expect(tree.getByTestId(id(PollsIds.check))).toBeTruthy()
+    expect(toTop).toHaveBeenCalledWith({ y: 0, animated: false })
+    grow()
+    expect(toEnd).toHaveBeenCalledTimes(1)
+    toEnd.mockRestore()
+    toTop.mockRestore()
+  })
+
+  test('at large text the bar is at the end of the scroll, details closed', () => {
+    mockFontScale = 1.35
+    const tree = renderIn(<PollBallot />)
+    expect(within(tree.getByTestId(id(PollsIds.ballotScreen))).getByTestId(id(PollsIds.cast))).toBeTruthy()
+  })
+
   test('within the hour after the ticket, the ballot says a vote this soon could be paired', () => {
     mockState.record = record({ ticketAt: Date.now() - 10 * 60_000 })
     expect(renderIn(<PollBallot />).getByTestId(id(PollsIds.firstHour))).toBeTruthy()
@@ -202,6 +256,10 @@ describe('the ballot', () => {
     fireEvent.press(binding.getByTestId(id(PollsIds.cast)))
     expect(mockService.vote).not.toHaveBeenCalled()
     expect(binding.getByTestId(id(PollsIds.check))).toBeTruthy()
+    // "Before it goes" heads the lines it introduces, in the bar, not the scroll above it (a render showed it alone).
+    const scrolled = within(binding.getByTestId(id(PollsIds.ballotScreen)))
+    expect(binding.getByTestId(id(PollsIds.beforeItGoes))).toBeTruthy()
+    expect(scrolled.queryByTestId(id(PollsIds.beforeItGoes))).toBeNull()
     fireEvent.press(binding.getByTestId(id(PollsIds.cast)))
     expect(mockService.vote).toHaveBeenCalled()
   })

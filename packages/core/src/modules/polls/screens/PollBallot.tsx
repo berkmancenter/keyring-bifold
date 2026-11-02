@@ -1,8 +1,9 @@
 /**
  * The ballot (Community Polls mock, ballot A; ballot B's check step for a binding poll only).
  *
- * What's seen sits in a fixed bar right above Cast my vote, so nothing can scroll it away; at large text the bar's
- * lines and button move to the end of the scroll, reached only past the choices. The bar says who can read the vote
+ * What's seen sits in a fixed bar right above Cast my vote, so nothing can scroll it away; at large text, or with
+ * Details open, the bar's lines and button move to the end of the scroll, reached only past the choices, so the bar
+ * never covers the questions. The bar says who can read the vote
  * on the poll's record, that the member's agent sees the choice and whoever collects votes sees this phone's address,
  * and, behind Details, that whoever hosts the agent can see the choice too. Within the hour after the ticket it also
  * says a vote this soon could be paired with the member by the timing.
@@ -13,7 +14,7 @@
  * @module polls/screens/PollBallot
  */
 import { useNavigation, useRoute } from '@react-navigation/native'
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   ActivityIndicator,
@@ -62,6 +63,10 @@ const PollBallot: React.FC = () => {
   const [checking, setChecking] = useState(false)
   const [casting, setCasting] = useState(false)
   const [failure, setFailure] = useState<string>()
+  const scroll = useRef<ScrollView>(null)
+  // Set when Details is opened, so the screen scrolls to the lines once; never on other changes, or the check step
+  // would open scrolled past the choice it shows.
+  const scrollToDetails = useRef(false)
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
     content: { flexGrow: 1, padding: 20, gap: 14 },
@@ -239,7 +244,10 @@ const PollBallot: React.FC = () => {
         <ThemedText
           style={styles.link}
           accessibilityRole="button"
-          onPress={() => setDetails((d) => !d)}
+          onPress={() => {
+            scrollToDetails.current = !details
+            setDetails(!details)
+          }}
           testID={testIdWithKey(PollsIds.details)}
         >
           {details ? t('Polls.HideDetails') : t('Polls.Details')}
@@ -264,7 +272,15 @@ const PollBallot: React.FC = () => {
     <Button
       title={t('Polls.CastMyVote')}
       buttonType={ButtonType.Primary}
-      onPress={shown.manifest.binding && !checking ? () => setChecking(true) : cast}
+      onPress={
+        shown.manifest.binding && !checking
+          ? () => {
+              // The check step opens at its top, on the choice it shows, not where the ballot was scrolled to.
+              scroll.current?.scrollTo({ y: 0, animated: false })
+              setChecking(true)
+            }
+          : cast
+      }
       disabled={!castable}
       testID={testIdWithKey(PollsIds.cast)}
     >
@@ -303,11 +319,13 @@ const PollBallot: React.FC = () => {
             </View>
           )
         })}
-        <ThemedText variant="bold">{t('Polls.BeforeItGoes')}</ThemedText>
       </>
     )
     bar = (
       <>
+        <ThemedText variant="bold" testID={testIdWithKey(PollsIds.beforeItGoes)}>
+          {t('Polls.BeforeItGoes')}
+        </ThemedText>
         {lines}
         <View style={styles.buttons}>
           <View style={styles.flex}>
@@ -344,10 +362,21 @@ const PollBallot: React.FC = () => {
     )
   }
 
-  const barInScroll = bar && fontScale >= LARGE_TEXT
+  // Open details make the bar too tall to stay fixed: it would cover the questions, so it goes to the end of the
+  // scroll, as at large text, and the screen scrolls down to it.
+  const barInScroll = bar && (fontScale >= LARGE_TEXT || details)
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey(PollsIds.ballotScreen)}>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={styles.content}
+        onContentSizeChange={() => {
+          if (!scrollToDetails.current) return
+          scrollToDetails.current = false
+          scroll.current?.scrollToEnd()
+        }}
+        testID={testIdWithKey(PollsIds.ballotScreen)}
+      >
         {body}
         {barInScroll ? <View style={{ gap: 10 }}>{bar}</View> : null}
       </ScrollView>

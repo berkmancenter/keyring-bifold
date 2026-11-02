@@ -11,7 +11,7 @@
  * @module polls/screens/Poll
  */
 import { useNavigation, useRoute } from '@react-navigation/native'
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -44,6 +44,7 @@ const Poll: React.FC = () => {
   const service = usePollService()
   const poll = usePoll(communityDid, electionId)
   const [taking, setTaking] = useState(false)
+  const scroll = useRef<ScrollView>(null)
   const [refusal, setRefusal] = useState<PollRefusal>()
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -79,6 +80,8 @@ const Poll: React.FC = () => {
     } finally {
       setTaking(false)
       await poll.reload()
+      // The ticket's screen opens at its top, not where the disclosure above Get my ticket was scrolled to.
+      scroll.current?.scrollTo({ y: 0, animated: false })
     }
   }
 
@@ -86,7 +89,7 @@ const Poll: React.FC = () => {
     const barInScroll = bar && fontScale >= LARGE_TEXT
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-        <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey(PollsIds.screen)}>
+        <ScrollView ref={scroll} contentContainerStyle={styles.content} testID={testIdWithKey(PollsIds.screen)}>
           {shown ? (
             <ThemedText variant="headingFour" accessibilityRole="header" testID={testIdWithKey(PollsIds.title)}>
               {pollTitle(t, shown.manifest.title)}
