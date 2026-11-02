@@ -232,10 +232,29 @@ describe('the ballot', () => {
     toTop.mockRestore()
   })
 
-  test('at large text the bar is at the end of the scroll, details closed', () => {
-    mockFontScale = 1.35
+  // At Android's largest font (1.3) a fixed bar covered the second and third choices while Cast showed.
+  test('at 1.3 the ballot is one page: choices, then the lines, then Cast; just below 1.3 the bar stays fixed', () => {
+    mockFontScale = 1.3
     const tree = renderIn(<PollBallot />)
-    expect(within(tree.getByTestId(id(PollsIds.ballotScreen))).getByTestId(id(PollsIds.cast))).toBeTruthy()
+    const order: string[] = []
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return
+      if (Array.isArray(node)) return node.forEach(walk)
+      const { props, children } = node as { props?: { testID?: string }; children?: unknown }
+      if (props?.testID && !order.includes(props.testID)) order.push(props.testID)
+      walk(children)
+    }
+    walk(tree.getByTestId(id(PollsIds.ballotScreen)))
+    const at = (key: string) => order.indexOf(id(key))
+    expect(at(PollsIds.cast)).toBeGreaterThan(-1)
+    expect(at(PollsIds.option)).toBeLessThan(at(PollsIds.boardLine))
+    expect(at(PollsIds.boardLine)).toBeLessThan(at(PollsIds.seenLine))
+    expect(order.slice(at(PollsIds.seenLine) + 1, at(PollsIds.cast))).not.toContain(id(PollsIds.option))
+    expect(at(PollsIds.cast)).toBe(order.length - 1)
+
+    mockFontScale = 1.29
+    const fixed = renderIn(<PollBallot />)
+    expect(within(fixed.getByTestId(id(PollsIds.ballotScreen))).queryByTestId(id(PollsIds.cast))).toBeNull()
   })
 
   test('within the hour after the ticket, the ballot says a vote this soon could be paired', () => {

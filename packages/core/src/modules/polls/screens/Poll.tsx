@@ -30,8 +30,11 @@ import { PollRefusal } from '../pollService'
 import { castFailureText, lessLikelyFrom, minutesSinceTicket, pollPhase, pollTitle, refusalText } from '../pollWords'
 import { usePoll, usePollService } from '../usePolls'
 
-/** At this text size the bar's lines and button move to the end of the scroll, so nothing fixed covers the screen. */
-export const LARGE_TEXT = 1.35
+/**
+ * At this text size the bar's lines and button move to the end of the scroll, so nothing fixed covers the screen.
+ * 1.3 is Android's largest font setting: a fixed bar there covered a ballot's second and third choices.
+ */
+export const LARGE_TEXT = 1.3
 
 const Poll: React.FC = () => {
   const { t } = useTranslation()
