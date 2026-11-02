@@ -36,6 +36,12 @@ import { usePoll, usePollService } from '../usePolls'
  */
 export const LARGE_TEXT = 1.3
 
+/**
+ * Whether text is large enough to move the bar into the scroll. Android reports its 1.3 setting as a 32-bit float
+ * (1.2999999523…), just under 1.3, so the scale is compared to two decimals.
+ */
+export const isLargeText = (fontScale: number) => Math.round(fontScale * 100) >= Math.round(LARGE_TEXT * 100)
+
 const Poll: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
@@ -89,7 +95,7 @@ const Poll: React.FC = () => {
   }
 
   const screen = (body: React.ReactNode, bar?: React.ReactNode) => {
-    const barInScroll = bar && fontScale >= LARGE_TEXT
+    const barInScroll = bar && isLargeText(fontScale)
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
         <ScrollView ref={scroll} contentContainerStyle={styles.content} testID={testIdWithKey(PollsIds.screen)}>

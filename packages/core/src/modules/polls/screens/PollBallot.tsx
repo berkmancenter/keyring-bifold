@@ -40,7 +40,7 @@ import type { Question } from '../pollTasks'
 import { boardLine, castFailureText, minutesSinceTicket, pollTitle, refusalText } from '../pollWords'
 import { usePoll, usePollService } from '../usePolls'
 
-import { LARGE_TEXT } from './Poll'
+import { isLargeText } from './Poll'
 
 /** The kinds of question this screen can show. */
 const SHOWN = new Set(['choice', 'text'])
@@ -364,7 +364,7 @@ const PollBallot: React.FC = () => {
 
   // Open details make the bar too tall to stay fixed: it would cover the questions, so it goes to the end of the
   // scroll, as at large text, and the screen scrolls down to it.
-  const barInScroll = bar && (fontScale >= LARGE_TEXT || details)
+  const barInScroll = bar && (isLargeText(fontScale) || details)
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       <ScrollView

@@ -234,7 +234,8 @@ describe('the ballot', () => {
 
   // At Android's largest font (1.3) a fixed bar covered the second and third choices while Cast showed.
   test('at 1.3 the ballot is one page: choices, then the lines, then Cast; just below 1.3 the bar stays fixed', () => {
-    mockFontScale = 1.3
+    // What Android reports for its 1.3 setting: a 32-bit float just under 1.3 (a render showed the bar still fixed).
+    mockFontScale = Math.fround(1.3)
     const tree = renderIn(<PollBallot />)
     const order: string[] = []
     const walk = (node: unknown): void => {
