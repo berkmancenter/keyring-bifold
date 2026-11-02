@@ -34,7 +34,7 @@ import { audienceText, directoryRetryable, directoryStatusText, saveFailureText 
 import { MemberPicture } from '../components/MemberPicture'
 import { PhotoConsentSheet } from '../components/PhotoConsentSheet'
 import { PhotoRemoveSheet } from '../components/PhotoRemoveSheet'
-import type { PhotoAudience } from '../types'
+import { PICTURE_FIELD, type PhotoAudience } from '../types'
 import { useDirectoryService, useMyCommunityCard } from '../useDirectory'
 
 type Step =
@@ -98,9 +98,10 @@ const CommunityCard: React.FC = () => {
   }
 
   const askPhoto = () => {
-    // An update keeps who sees the photo now; a first photo starts at members where the community allows it.
-    const now = mine.photoChoices.find((a) => !!mine.card?.picture && a === mine.photoAudience)
-    setChosen(now ?? mine.photoChoices[0] ?? 'admins')
+    // Starts at administrators only: showing a face more widely is chosen, never accepted by default. Where the member
+    // already chose who sees their photo (on this card or elsewhere, e.g. the portal), that choice is kept.
+    const own = mine.card?.visibility[PICTURE_FIELD]
+    setChosen(mine.photoChoices.find((a) => a === own) ?? 'admins')
     setPhotoStep({ kind: 'asking' })
   }
 

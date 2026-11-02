@@ -346,12 +346,18 @@ describe('your photo on your card', () => {
     expect(withField.getByTestId(id('DirectoryCardPhotoSeen'))).toHaveTextContent('Directory.CardPhotoNone')
   })
 
-  it('sends nothing until Send; all members is picked first, and the lines say so, beside Send', async () => {
+  it('sends nothing until Send; administrators only is picked first, all members is chosen and says so, beside Send', async () => {
     mockService = createFakeDirectoryService({ cardName: 'Ana Lopez', pictureCeiling: 'public' })
     const tree = show(<CommunityCard />)
     await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoUse')))
     await press(tree, 'DirectoryCardPhotoUse')
     expect(mockService.calls.some((c) => c.startsWith('setMyPicture'))).toBe(false)
+    expect(tree.getByTestId(id('PhotoConsentChoice_admins')).props.accessibilityState).toMatchObject({ checked: true })
+    expect(tree.getByTestId(id('PhotoConsentChoice_members')).props.accessibilityState).toMatchObject({
+      checked: false,
+    })
+    expect(tree.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent('Directory.PhotoSeenByAdmins')
+    await press(tree, 'PhotoConsentChoice_members')
     expect(tree.getByTestId(id('PhotoConsentChoice_members')).props.accessibilityState).toMatchObject({ checked: true })
     expect(tree.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent(
       'Directory.PhotoSeenByMembers Directory.PhotoWidens'
@@ -379,6 +385,7 @@ describe('your photo on your card', () => {
     const tree = show(<CommunityCard />)
     await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoUse')))
     await press(tree, 'DirectoryCardPhotoUse')
+    await press(tree, 'PhotoConsentChoice_members')
     await press(tree, 'PhotoConsentChoice_admins')
     expect(tree.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent('Directory.PhotoSeenByAdmins')
     expect(tree.getByTestId(id('PhotoConsentSeen'))).not.toHaveTextContent('Directory.PhotoWidens')
@@ -429,7 +436,7 @@ describe('your photo on your card', () => {
     await press(tree, 'DirectoryCardPhotoUse')
     await press(tree, 'PhotoConsentSend')
     await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoSaved')))
-    expect(mockService.calls).toContain('setMyPicture members @1')
+    expect(mockService.calls).toContain('setMyPicture admins @1')
     expect(mockSent).toEqual({ profile: photoDigest(PHOTO), card: `02${'e'.repeat(62)}` })
   })
 
@@ -454,6 +461,7 @@ describe('your photo on your card', () => {
     const narrower = show(<CommunityCard />)
     await waitFor(() => narrower.getByTestId(id('DirectoryCardPhotoUse')))
     await press(narrower, 'DirectoryCardPhotoUse')
+    await press(narrower, 'PhotoConsentChoice_members')
     expect(narrower.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent(
       'Directory.PhotoSeenByMembers Directory.PhotoWidens'
     )
@@ -466,8 +474,24 @@ describe('your photo on your card', () => {
     const wider = show(<CommunityCard />)
     await waitFor(() => wider.getByTestId(id('DirectoryCardPhotoUse')))
     await press(wider, 'DirectoryCardPhotoUse')
+    await press(wider, 'PhotoConsentChoice_members')
     expect(wider.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent('Directory.PhotoSeenByMembers')
     expect(wider.getByTestId(id('PhotoConsentSeen'))).not.toHaveTextContent('Directory.PhotoWidens')
+  })
+
+  it('opens on who the member already chose for their photo: all members stays all members (control for the default)', async () => {
+    mockService = createFakeDirectoryService({
+      cardName: 'Ana Lopez',
+      pictureCeiling: 'public',
+      cardVisibility: { avatar: 'members' },
+    })
+    const tree = show(<CommunityCard />)
+    await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoUse')))
+    await press(tree, 'DirectoryCardPhotoUse')
+    expect(tree.getByTestId(id('PhotoConsentChoice_members')).props.accessibilityState).toMatchObject({ checked: true })
+    await press(tree, 'PhotoConsentSend')
+    await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoSaved')))
+    expect(mockService.calls).toContain('setMyPicture members @0')
   })
 
   it('without a profile photo, offers to open the profile instead', async () => {
