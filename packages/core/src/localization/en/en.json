@@ -2365,6 +2365,7 @@
     "Meets": "meets the published requirements",
     "Member": "You're a member of {{community}}.",
     "GoToMyAgent": "Go to My Agent",
+    "MemberTicketNotNeeded": "You scanned a vetter's ticket, but you don't need one here. There's nothing more to do.",
     "MemberAs": "You're a member of {{community}}, as {{role}}.",
     "Status": {
       "sent": "Request sent",
@@ -2767,6 +2768,10 @@
     "SessionOnly": "This signs in that browser for up to {{hours}} hours, or until you sign out.",
     "SigningScope": "For that time it also lets that browser act as you in: {{areas}}.",
     "ScopeDirectory": "the member directory (reading it, and editing your own card)",
+    "ScopeGroups": "the community's groups (such as seeing them, joining and leaving)",
+    "ScopeRepositories": "the community's code repositories (your own view of them)",
+    "ScopeAccountLink": "the link to your code-hosting account (seeing how it stands)",
+    "ScopeOther": "other parts of the community that Keyring can't name yet",
     "Approve": "Approve",
     "Decline": "Decline",
     "Approving": "Approving…",
