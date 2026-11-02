@@ -91,9 +91,7 @@
     "revote": "replace",
     "board": {
       "visibility": "private",
-      "auditors": [
-        "did:webvh:QmAudit:audit.example.com"
-      ]
+      "auditors": ["did:webvh:QmAudit:audit.example.com"]
     },
     "ballotBox": "did:webvh:QmVote:vote.example.net",
     "binding": true,
@@ -105,24 +103,15 @@
   "fullAnswers": [
     {
       "question": "budget",
-      "choice": [
-        "yes"
-      ]
+      "choice": ["yes"]
     },
     {
       "question": "workshop",
-      "choice": [
-        "kiln",
-        "textile"
-      ]
+      "choice": ["kiln", "textile"]
     },
     {
       "question": "formats",
-      "ranking": [
-        "evenings",
-        "weekends",
-        "online"
-      ]
+      "ranking": ["evenings", "weekends", "online"]
     },
     {
       "question": "venue",
@@ -141,10 +130,7 @@
       "index": 0,
       "answer": {
         "question": "budget",
-        "choice": [
-          "yes",
-          "no"
-        ]
+        "choice": ["yes", "no"]
       }
     },
     {
@@ -158,28 +144,21 @@
       "index": 1,
       "answer": {
         "question": "workshop",
-        "choice": [
-          "kiln",
-          "kiln"
-        ]
+        "choice": ["kiln", "kiln"]
       }
     },
     {
       "index": 1,
       "answer": {
         "question": "workshop",
-        "choice": [
-          "pottery"
-        ]
+        "choice": ["pottery"]
       }
     },
     {
       "index": 2,
       "answer": {
         "question": "formats",
-        "ranking": [
-          "evenings"
-        ]
+        "ranking": ["evenings"]
       }
     },
     {
@@ -212,18 +191,14 @@
       "index": 4,
       "answer": {
         "question": "budget",
-        "choice": [
-          "no"
-        ]
+        "choice": ["no"]
       }
     },
     {
       "index": 0,
       "answer": {
         "question": "budget",
-        "choice": [
-          "yes"
-        ],
+        "choice": ["yes"],
         "abstain": true
       }
     }

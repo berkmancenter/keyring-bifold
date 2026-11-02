@@ -34,12 +34,12 @@ describe("the ballot rules, on upstream's cases", () => {
     })
   })
 
-  test.each(v.refused.map((c: { index: number; answer: unknown }, i: number) => [i, c.index, c.answer]))(
-    'case %i is refused',
-    (_i, index, answer) => {
-      expect(ballotRefusal(v.manifest, v.manifestDigest, mutate(index as number, answer))).toBeDefined()
-    }
+  const refusedCases: [number, number, unknown][] = v.refused.map(
+    (c: { index: number; answer: unknown }, i: number) => [i, c.index, c.answer]
   )
+  test.each(refusedCases)('case %i is refused', (_i, index, answer) => {
+    expect(ballotRefusal(v.manifest, v.manifestDigest, mutate(index, answer))).toBeDefined()
+  })
 
   test('an optional question is answered with abstain, never left out', () => {
     expect(ballotRefusal(v.manifest, v.manifestDigest, ballot(v.fullAnswers.slice(0, -1)))).toEqual({

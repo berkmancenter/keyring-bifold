@@ -230,6 +230,19 @@ describe('taking a ticket', () => {
     await expect(w.service.takeTicket(COMMUNITY, POLL)).resolves.toMatchObject({ agent: OTHER_AGENT })
   })
 
+  test('a poll reached through another community is the same poll: a second ticket is refused once voted', async () => {
+    const w = world()
+    await w.service.takeTicket(COMMUNITY, POLL)
+    await vote(w)
+    expect(w.record()?.via).toBe(COMMUNITY)
+    await expect(w.service.takeTicket('did:webvh:QmOtherCommunity:vtc.example.net', POLL)).rejects.toMatchObject({
+      reason: 'voted',
+    })
+    expect(await w.service.record('did:webvh:QmOtherCommunity:vtc.example.net', POLL, COMMUNITY)).toMatchObject({
+      votedAt: expect.any(Number),
+    })
+  })
+
   test('with no agent linked, nothing is asked', async () => {
     const w = world()
     w.setCurrent(undefined)

@@ -52,10 +52,16 @@ export type PendingVote =
   | { stage: 'cast'; cast: Record<string, unknown>; ballotBox: string; sendAfter: number }
   | { stage: 'receipt'; receipt: Record<string, unknown> }
 
-/** This phone's record of one poll. */
+/**
+ * This phone's record of one poll, keyed by the community its manifest names and the poll's id: a poll id is unique
+ * only within that community, and the member may reach the poll through another (`via`).
+ */
 export interface PollRecord {
+  /** The community the poll's manifest names. */
   community: string
   electionId: string
+  /** The community the member reached the poll through: whose session, and whose identity, the ticket was asked as. */
+  via: string
   /** The identity the ticket was asked for. */
   member: string
   /** The agent that holds the ticket. */
@@ -101,6 +107,7 @@ export interface PollsBackend {
 export type PollRefusalReason =
   | 'noAgent'
   | 'agentTooOld'
+  | 'limited'
   | 'noIdentity'
   | 'unreadable'
   | 'voted'
@@ -133,7 +140,8 @@ export function codeOf(error: unknown): string | undefined {
 /** How many list pages are read: a community with more polls than this shows the newest pages' worth. */
 const LIST_PAGES = 5
 
-const recordKey = (community: string, electionId: string) => `${community} ${electionId}`
+/** One poll's work runs one piece at a time, keyed as the member reaches it. */
+const workKey = (via: string, electionId: string) => `${via} ${electionId}`
 
 export function createPollService(b: PollsBackend) {
   const target = async (community: string): Promise<VoterTarget> => {
@@ -183,18 +191,19 @@ export function createPollService(b: PollsBackend) {
    * Take a ticket for a poll the member has been shown (its disclosure first, VTI-VOT-090): the agent's blinded
    * request, signed as the member, to the community; the community's blind answer back to the agent.
    */
-  const takeTicket = (community: string, electionId: string): Promise<PollRecord> =>
-    b.serially(recordKey(community, electionId), async () => {
-      const t = await target(community)
+  const takeTicket = (via: string, electionId: string): Promise<PollRecord> =>
+    b.serially(workKey(via, electionId), async () => {
+      const t = await target(via)
       const agent = b.currentAgent() as string
+      await agentServesVoting()
+      const shown = await readPoll(via, electionId)
+      const community = shown.manifest.community
       const earlier = await b.records.get(community, electionId)
       mayTakeTicket(earlier, agent)
       if (earlier?.agent === agent && earlier.member === t.member && earlier.ticketAt !== undefined) return earlier
-      await agentServesVoting()
-      const shown = await readPoll(community, electionId)
       // Written before anything is asked: a crash from here on finds the record, and both parties answer a resend
       // from their own.
-      const record: PollRecord = { community, electionId, member: t.member, agent, ticketRequestedAt: b.now() }
+      const record: PollRecord = { community, electionId, via, member: t.member, agent, ticketRequestedAt: b.now() }
       await b.records.put(record)
       let registered: ReturnType<typeof parseRegistered>
       try {
@@ -206,7 +215,7 @@ export function createPollService(b: PollsBackend) {
       if (!registered) throw new PollRefusal('unreadable')
       if (registered.manifestDigest !== shown.manifestDigest) throw new PollRefusal('pollChanged')
       try {
-        const issued = await b.sendCompleted(community, registered.ticketDocument)
+        const issued = await b.sendCompleted(via, registered.ticketDocument)
         await b.agentTask(POLL_TASK.accept, acceptPayload(t, electionId, shown.parameters, issued))
       } catch (e) {
         throw refused(e)
@@ -220,22 +229,28 @@ export function createPollService(b: PollsBackend) {
     return next
   }
 
-  const refused = (e: unknown) => (e instanceof PollRefusal ? e : new PollRefusal('refused', codeOf(e)))
+  // An agent refuses a phone whose role carries no voter capability (`pcsVoter`: admin and initiator only) as
+  // `permissionDenied`: the phone's access, not the agent, is what stops it.
+  const refused = (e: unknown) => {
+    if (e instanceof PollRefusal) return e
+    const code = codeOf(e)
+    return new PollRefusal(refusalName(code) === 'permissionDenied' ? 'limited' : 'refused', code)
+  }
 
   /**
    * Vote: the ballot checked here, the cast built by the agent, stored, and sent after its pause. Returns once the
    * receipt is kept, or throws: a `CastFailure` of kind `unreachable` leaves the cast stored, and `resumePending` (or
    * voting again) sends the same one.
    */
-  const vote = (community: string, electionId: string, given: Record<string, GivenAnswer>): Promise<PollRecord> =>
-    b.serially(recordKey(community, electionId), async () => {
-      const record = await b.records.get(community, electionId)
+  const vote = (via: string, electionId: string, given: Record<string, GivenAnswer>): Promise<PollRecord> =>
+    b.serially(workKey(via, electionId), async () => {
+      const shown = await readPoll(via, electionId)
+      const record = await b.records.get(shown.manifest.community, electionId)
       if (record?.pending) return carryOn(record)
       if (record?.votedAt !== undefined) throw new PollRefusal('voted')
       if (record?.ticketAt === undefined) throw new PollRefusal('noTicket')
-      const t = await target(community)
+      const t = await target(via)
       if (t.member !== record.member || b.currentAgent() !== record.agent) throw new PollRefusal('heldByAnotherAgent')
-      const shown = await readPoll(community, electionId)
       if (shown.manifest.secrecy !== 'open') throw new PollRefusal('unsupportedSecrecy')
       if (shown.state !== 'voting') throw new PollRefusal('notOpen')
       const ballot = ballotOf(shown.manifest, shown.manifestDigest, given)
@@ -294,7 +309,7 @@ export function createPollService(b: PollsBackend) {
     }
     if (current.pending?.stage === 'receipt') {
       // The receipt goes to the agent that built the cast, in the context its voter key is in.
-      const voter = await b.voterTarget(current.community)
+      const voter = await b.voterTarget(current.via)
       if (!voter || voter.member !== current.member || b.currentAgent() !== current.agent)
         throw new PollRefusal('heldByAnotherAgent')
       try {
@@ -315,7 +330,7 @@ export function createPollService(b: PollsBackend) {
       // A stored cast goes whichever agent is current: it needs none. Its receipt waits for the agent that built it.
       if (!record.pending) continue
       await b
-        .serially(recordKey(record.community, record.electionId), async () => {
+        .serially(workKey(record.via, record.electionId), async () => {
           const now = await b.records.get(record.community, record.electionId)
           return now?.pending ? carryOn(now) : now
         })
@@ -323,7 +338,36 @@ export function createPollService(b: PollsBackend) {
     }
   }
 
-  return { readPolls, readPoll, takeTicket, vote, resumePending, record: b.records.get }
+  /**
+   * This phone's record of a poll as reached through `via`: by the manifest's community when it is known, else by the
+   * community reached through, which names it for every poll that community runs itself.
+   */
+  const recordOf = async (via: string, electionId: string, pollCommunity?: string): Promise<PollRecord | undefined> => {
+    const own = await b.records.get(pollCommunity ?? via, electionId)
+    if (own || pollCommunity) return own
+    return (await b.records.list()).find((r) => r.via === via && r.electionId === electionId)
+  }
+
+  /** Whether this phone can vote at all, read before any ballot from what the agent serves: never from a failed vote. */
+  const agentReadiness = async (): Promise<'ready' | 'noAgent' | 'tooOld'> => {
+    if (!b.currentAgent()) return 'noAgent'
+    try {
+      await agentServesVoting()
+      return 'ready'
+    } catch {
+      return 'tooOld'
+    }
+  }
+
+  return {
+    readPolls,
+    readPoll,
+    takeTicket,
+    vote,
+    resumePending,
+    agentReadiness,
+    record: recordOf,
+  }
 }
 
 export type PollService = ReturnType<typeof createPollService>
