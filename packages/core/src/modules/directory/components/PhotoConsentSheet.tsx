@@ -1,7 +1,7 @@
 /**
  * What putting the profile photo on the member's card means, asked before anything is sent: the photo, who will see
  * it (a choice, bounded by the most the community allows for pictures), and three lines that stay right above Send:
- * who sees it now and whether that widens what the card showed, that the community's host keeps its own smaller copy
+ * who sees it now and, where the choice reaches further than who saw a photo here until now, who that was, that the community's host keeps its own smaller copy
  * without the photo's hidden details (`images/upload` re-encodes it, VTI-DIR-051), and that administrators always see
  * it. Send uploads it and puts it on the card; Not now closes the sheet and sends nothing.
  *
@@ -24,7 +24,9 @@ import SafeAreaModal from '../../../components/modals/SafeAreaModal'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
-import type { PhotoAudience } from '../types'
+import { DIRECTORY_AUDIENCES, type DirectoryAudience, type PhotoAudience } from '../types'
+
+import { audienceText } from './directoryWords'
 
 export interface PhotoConsentSheetProps {
   visible: boolean
@@ -35,8 +37,9 @@ export interface PhotoConsentSheetProps {
   /** Who may see it, as the community allows: members first where allowed. */
   choices: readonly PhotoAudience[]
   chosen: PhotoAudience
-  /** Who sees a photo on this card now: the member's choice, else the community's default. */
-  current: PhotoAudience | 'other'
+  /** Who sees a photo on this card now: the member's choice, else the community's default. Any audience: one set
+   * elsewhere (the portal) may be groups or connections, narrower than all members. */
+  current?: DirectoryAudience
   saving: boolean
   onChoose: (audience: PhotoAudience) => void
   onSend: () => void
@@ -77,12 +80,14 @@ export const PhotoConsentSheet: React.FC<PhotoConsentSheetProps> = ({
   })
   const label = (audience: PhotoAudience) =>
     t(audience === 'members' ? 'Directory.PhotoAudienceMembers' : 'Directory.PhotoAudienceAdmins')
-  const seen =
-    chosen === 'members'
-      ? [t('Directory.PhotoSeenByMembers', opts), current === 'admins' ? t('Directory.PhotoWidens') : '']
-          .filter(Boolean)
-          .join(' ')
-      : t('Directory.PhotoSeenByAdmins')
+  // Widens by the audiences' order (admins … public), not by name: groups and connections are narrower than members.
+  const widens = !!current && DIRECTORY_AUDIENCES.indexOf(chosen) > DIRECTORY_AUDIENCES.indexOf(current)
+  const seen = [
+    t(chosen === 'members' ? 'Directory.PhotoSeenByMembers' : 'Directory.PhotoSeenByAdmins', opts),
+    widens && current ? t('Directory.PhotoWidens', { ...opts, who: audienceText(t, current, community) }) : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <SafeAreaModal visible={visible} transparent animationType="slide" onRequestClose={onClose}>

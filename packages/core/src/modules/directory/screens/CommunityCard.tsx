@@ -324,7 +324,7 @@ const CommunityCard: React.FC = () => {
             photo={mine.photo}
             choices={mine.photoChoices}
             chosen={chosen}
-            current={mine.photoAudience === 'members' || mine.photoAudience === 'admins' ? mine.photoAudience : 'other'}
+            current={mine.photoAudience}
             saving={photoStep.kind === 'saving'}
             onChoose={setChosen}
             onSend={() => void onSendPhoto()}

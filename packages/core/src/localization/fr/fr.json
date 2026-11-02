@@ -2410,7 +2410,7 @@
     "PhotoAudienceMembers": "Tous les membres",
     "PhotoAudienceAdmins": "Les administrateurs seulement",
     "PhotoSeenByMembers": "Tous les membres de {{community}} verront votre photo.",
-    "PhotoWidens": "Jusqu’ici, une photo ici n’était visible que des administrateurs.",
+    "PhotoWidens": "Jusqu’ici, une photo ici était visible {{who}}.",
     "PhotoSeenByAdmins": "Seuls les administrateurs verront votre photo.",
     "PhotoOnlyAdminsAllowed": "{{community}} ne montre les photos qu’aux administrateurs.",
     "PhotoHostCopy": "L’hébergeur de la communauté garde sa propre copie, plus petite, sans les détails cachés comme le lieu où la photo a été prise.",

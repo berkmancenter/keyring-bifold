@@ -39,6 +39,8 @@ export interface FakeDirectoryOptions {
   pictureUris?: Record<string, string>
   /** The community defines the picture field, allowing at most this audience (default: no picture field). */
   pictureCeiling?: DirectoryAudience
+  /** Who sees each field on your card, where you chose (e.g. set from the portal). */
+  cardVisibility?: Record<string, DirectoryAudience>
   /** Make a photo upload or removal fail as the community would refuse it, by the task's code. */
   refusePhoto?: string
 }
@@ -72,7 +74,7 @@ export function createFakeDirectoryService(options: FakeDirectoryOptions = {}): 
     revision: 0,
     name: options.cardName !== undefined ? toInertText(options.cardName) : undefined,
     picture: options.cardPicture,
-    visibility: {},
+    visibility: { ...options.cardVisibility },
     missingRequired: [],
     updatedAt: '2026-10-30T00:00:00Z',
   }

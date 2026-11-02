@@ -424,6 +424,50 @@ describe('your photo on your card', () => {
     await press(tree, 'PhotoRemoveConfirm')
     await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoRemoved')))
     expect(mockService.calls).toContain('removeMyPicture @0')
+    // Off the card, the phone forgets what it sent; a photo can go on again.
+    expect(mockSent).toBeUndefined()
+    await press(tree, 'DirectoryCardPhotoUse')
+    await press(tree, 'PhotoConsentSend')
+    await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoSaved')))
+    expect(mockService.calls).toContain('setMyPicture members @1')
+    expect(mockSent).toEqual({ profile: photoDigest(PHOTO), card: `02${'e'.repeat(62)}` })
+  })
+
+  it('taking off the photo this phone put there forgets what it sent', async () => {
+    const onCard = { sha256: 'a'.repeat(64), mediaType: 'image/jpeg' as const }
+    mockSent = { profile: photoDigest(PHOTO), card: onCard.sha256 }
+    mockService = createFakeDirectoryService({ cardName: 'Ana Lopez', pictureCeiling: 'public', cardPicture: onCard })
+    const tree = show(<CommunityCard />)
+    await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoRemove')))
+    await press(tree, 'DirectoryCardPhotoRemove')
+    await press(tree, 'PhotoRemoveConfirm')
+    await waitFor(() => tree.getByTestId(id('DirectoryCardPhotoRemoved')))
+    expect(mockSent).toBeUndefined()
+  })
+
+  it('says who saw a photo here until now whenever the choice reaches further, connections too (control: public)', async () => {
+    mockService = createFakeDirectoryService({
+      cardName: 'Ana Lopez',
+      pictureCeiling: 'public',
+      cardVisibility: { avatar: 'connections' },
+    })
+    const narrower = show(<CommunityCard />)
+    await waitFor(() => narrower.getByTestId(id('DirectoryCardPhotoUse')))
+    await press(narrower, 'DirectoryCardPhotoUse')
+    expect(narrower.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent(
+      'Directory.PhotoSeenByMembers Directory.PhotoWidens'
+    )
+    narrower.unmount()
+    mockService = createFakeDirectoryService({
+      cardName: 'Ana Lopez',
+      pictureCeiling: 'public',
+      cardVisibility: { avatar: 'public' },
+    })
+    const wider = show(<CommunityCard />)
+    await waitFor(() => wider.getByTestId(id('DirectoryCardPhotoUse')))
+    await press(wider, 'DirectoryCardPhotoUse')
+    expect(wider.getByTestId(id('PhotoConsentSeen'))).toHaveTextContent('Directory.PhotoSeenByMembers')
+    expect(wider.getByTestId(id('PhotoConsentSeen'))).not.toHaveTextContent('Directory.PhotoWidens')
   })
 
   it('without a profile photo, offers to open the profile instead', async () => {
