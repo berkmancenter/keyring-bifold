@@ -924,6 +924,7 @@
     "PollBallotSeenLine": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotTextAnswer": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosed": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollClosedEarly": ["src/modules/polls/components/Polls.ids.ts"],
     "PollGetTicket": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHostedAgent": ["src/modules/polls/components/Polls.ids.ts"],
     "PollLimited": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1787,6 +1788,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.closed"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.closedEarly"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.getTicket"
