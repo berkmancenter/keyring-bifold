@@ -141,6 +141,18 @@ describe('before the ticket', () => {
     expect(tree.queryByTestId(id(PollsIds.sameOperator))).toBeNull()
   })
 
+  // A render at the largest text broke "Runs the community" inside a word in the side-by-side boxes.
+  test('at 1.3 the two parties stack; just below, they sit side by side (control)', () => {
+    const direction = () => {
+      const style = renderIn(<Poll />).getByTestId(id(PollsIds.parties)).props.style
+      return (Array.isArray(style) ? Object.assign({}, ...style) : style).flexDirection ?? 'column'
+    }
+    mockFontScale = Math.fround(1.3)
+    expect(direction()).toBe('column')
+    mockFontScale = 1.29
+    expect(direction()).toBe('row')
+  })
+
   test('one operator running both is warned of, with no tap', () => {
     mockState.shown = shownWith({}, { sameOperator: true })
     const tree = renderIn(<Poll />)

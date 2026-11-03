@@ -59,4 +59,5 @@ export const PollsIds = {
   certifiedLine: 'PollCertifiedLine',
   castStep: 'PollBallotCastStep',
   pauseBar: 'PollBallotPauseBar',
+  parties: 'PollParties',
 } as const

@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "64dda2f28584b939978d9c2f8492530ded0fc0b9",
+  "generatedFrom": "43ff7ff69406a4f002eed71b13fd306c161faa28",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -937,6 +937,7 @@
     "PollNeedsUpdate": ["src/modules/polls/components/Polls.ids.ts"],
     "PollNoAgent": ["src/modules/polls/components/Polls.ids.ts"],
     "PollNotOpenYet": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollParties": ["src/modules/polls/components/Polls.ids.ts"],
     "PollReadFailed": ["src/modules/polls/components/Polls.ids.ts"],
     "PollReading": ["src/modules/polls/components/Polls.ids.ts"],
     "PollRefused": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1847,6 +1848,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.notOpenYet"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.parties"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.readFailed"

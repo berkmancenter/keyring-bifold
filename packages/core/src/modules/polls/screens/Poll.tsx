@@ -392,7 +392,7 @@ const Poll: React.FC = () => {
                   backgroundColor: ColorPalette.brand.text,
                 }}
               />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: 8 }}>
                 <ThemedText variant="labelSubtitle" style={styles.muted}>
                   {t('Polls.TicketAtNow', { time: clockTime(ticketAt) })}
                 </ThemedText>
@@ -440,8 +440,9 @@ const Poll: React.FC = () => {
 
   // Who runs it, and who sees what, before the ticket (VTI-VOT-090).
   const separate = !disclosure.sameOperator
+  const large = isLargeText(fontScale)
   const party = (label: string, name: string, icon: string) => (
-    <View style={styles.party}>
+    <View style={[styles.party, large ? { flex: 0 } : null]}>
       <Icon name={icon} size={26} color={ColorPalette.brand.primary} />
       <ThemedText variant="labelSubtitle" style={[styles.muted, styles.center]}>
         {label}
@@ -462,11 +463,13 @@ const Poll: React.FC = () => {
         <ThemedText variant="bold" accessibilityRole="header">
           {t('Polls.WhoRunsIt')}
         </ThemedText>
-        <View style={styles.row}>
+        {/* Side by side; at large text, one above the other, so neither label breaks inside a word. */}
+        <View style={large ? { gap: 6, alignItems: 'stretch' } : styles.row} testID={testIdWithKey(PollsIds.parties)}>
           {separate
             ? party(t('Polls.Community'), community, 'account-group-outline')
             : party(t('Polls.RunsCommunity'), disclosure.ballotBoxOperator, 'account-group-outline')}
           <Icon
+            style={large ? { alignSelf: 'center', transform: [{ rotate: '90deg' }] } : undefined}
             name={separate ? 'arrow-left-right' : 'link-variant'}
             size={22}
             color={separate ? ColorPalette.grayscale.mediumGrey : ColorPalette.semantic.error}
