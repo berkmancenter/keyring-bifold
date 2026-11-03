@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "daeae8eb816022f68fefd948022cffaebf712a84",
+  "generatedFrom": "6c0f591dcb1b57b7a709d50f076a473d482e43a2",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1588,6 +1588,7 @@
     "AgentCard_": ["src/modules/trust-tasks/screens/CardKeptRow.tsx"],
     "AgentCommunityCard_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
     "AgentCommunityCheck_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
+    "AgentCommunityHistory_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
     "AgentCommunityName_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
     "AgentCommunityOpen_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
     "AgentCommunityPrimary_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
