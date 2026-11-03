@@ -520,7 +520,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     void (async () => {
       const p = await stores.identity.getPersona(communityDid)
       if (cancelled) return
-      // The same persona read again keeps its object. A new one re-ran every effect keyed on it, and the desk's
+      // The same persona read again keeps its object (an optimisation: the comparison is by serialised value, so
+      // it is only as good as one store path's key order; the early re-listen in the desk effect is the guarantee). A new one re-ran every effect keyed on it, and the desk's
       // cleanup unhooked the desk each time this connect ran again: the MESSAGE_WAITING bump below brought a
       // vetting request back exactly while the desk was unhooked (277.7, 0.69 gate kk, 2026-11-03).
       setPersona((was) => (was && p && JSON.stringify(was) === JSON.stringify(p) ? was : p))
@@ -627,6 +628,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!deskRef.current)
           deskRef.current = new VtiVetterDesk(agent, persona, stores.vetting, stores.community, bump)
         deskRef.current.listen()
+        // One side listens: a seat that changed side must not leave the other taking deliveries it cannot serve.
+        applicantRef.current?.stopListening()
         seated.current = { did: persona.did, side: 'vetter' }
         const p = await stores.vetting.getProfile(persona.communityDid)
         setProfile(p)
@@ -640,6 +643,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!applicantRef.current)
           applicantRef.current = new VtiApplicant(agent, persona, stores.vetting, stores.community, bump)
         applicantRef.current.listen()
+        // A desk left listening after its grant went would take a vetting request, have it acknowledged, and be
+        // unable to serve it: the loss this seat's early re-listen exists to prevent.
+        deskRef.current?.stopListening()
         seated.current = { did: persona.did, side: 'applicant' }
         const a = await stores.vetting.getApplication(persona.communityDid)
         setApplication(a)

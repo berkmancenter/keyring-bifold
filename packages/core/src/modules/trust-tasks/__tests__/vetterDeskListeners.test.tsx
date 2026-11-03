@@ -18,7 +18,7 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import VtiVetting from '../screens/VtiVetting'
 import { vtaAgent } from '../module/vtaAgent'
 import { vtiAgent } from '../module/vtiAgent'
-import { VETTING, VtiVetterDesk } from '../module/vtiVetting'
+import { VETTING, VtiApplicant, VtiVetterDesk } from '../module/vtiVetting'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
@@ -198,5 +198,29 @@ describe('the Vetting screen and its desk', () => {
         connect.mockRestore()
       }
     })
+  })
+
+  // A seat that changes side: the grant record is gone, so the next read seats the applicant. The desk must stop,
+  // or it takes a vetting request it cannot serve and the mediator counts it delivered.
+  it('a desk whose grant is gone stops listening when the applicant is seated', async () => {
+    const connect = jest.spyOn(vtiAgent, 'connect').mockResolvedValue(undefined)
+    const applicantListens = jest.spyOn(VtiApplicant.prototype, 'listen')
+    const tree = await mount()
+    applicantListens.mockClear()
+    const grant = records.splice(1, 1)
+    try {
+      await act(async () => {
+        jest.advanceTimersByTime(3000)
+      })
+      await waitFor(() => expect(applicantListens).toHaveBeenCalled())
+      await act(async () => undefined)
+      await deliver(request)
+      expect(heard).not.toHaveBeenCalled()
+    } finally {
+      records.splice(1, 0, ...grant)
+      tree.unmount()
+      connect.mockRestore()
+      applicantListens.mockRestore()
+    }
   })
 })
