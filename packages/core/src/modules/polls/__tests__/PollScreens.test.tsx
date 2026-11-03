@@ -5,6 +5,7 @@
  * than abstaining it; and no screen after the vote says what the member chose.
  */
 import { useRoute } from '@react-navigation/native'
+import type { TFunction } from 'i18next'
 import { fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
 import { ScrollView } from 'react-native'
@@ -14,6 +15,7 @@ import { testIdWithKey } from '../../../utils/testable'
 import { PollsIds } from '../components/Polls.ids'
 import type { PollRecord } from '../pollService'
 import type { PollShown } from '../pollTasks'
+import { pollRowStatus } from '../pollWords'
 import Poll from '../screens/Poll'
 import PollBallot from '../screens/PollBallot'
 
@@ -95,6 +97,31 @@ const record = (over: Partial<PollRecord> = {}): PollRecord => ({
 })
 
 const id = (key: string) => testIdWithKey(key)
+
+/** The testIDs under `node`, in the order they render. */
+const idsIn = (node: unknown): string[] => {
+  const order: string[] = []
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== 'object') return
+    if (Array.isArray(n)) return n.forEach(walk)
+    const { props, children } = n as { props?: { testID?: string }; children?: unknown }
+    if (props?.testID && !order.includes(props.testID)) order.push(props.testID)
+    walk(children)
+  }
+  walk(node)
+  return order
+}
+
+const certification = (over: Partial<NonNullable<PollShown['certified']>> = {}) => ({
+  certifiedAt: '2099-11-09T10:14:00Z',
+  result: {
+    electionId: 'charter',
+    manifestDigest: 'zQmDigest',
+    ballotsCounted: 26,
+    questions: [{ question: 'motion', abstained: 1, choice: { [CHOICE]: 12, 'option-no': 13 } }],
+  },
+  ...over,
+})
 const renderIn = (screen: React.ReactElement) => render(<BasicAppContext>{screen}</BasicAppContext>)
 
 beforeEach(() => {
@@ -114,6 +141,18 @@ describe('before the ticket', () => {
     expect(tree.getByText('Polls.TicketLine')).toBeTruthy()
     expect(tree.getByTestId(id(PollsIds.getTicket))).toBeTruthy()
     expect(tree.queryByTestId(id(PollsIds.sameOperator))).toBeNull()
+  })
+
+  // A render at the largest text broke "Runs the community" inside a word in the side-by-side boxes.
+  test('at 1.3 the two parties stack; just below, they sit side by side (control)', () => {
+    const direction = () => {
+      const style = renderIn(<Poll />).getByTestId(id(PollsIds.parties)).props.style
+      return (Array.isArray(style) ? Object.assign({}, ...style) : style).flexDirection ?? 'column'
+    }
+    mockFontScale = Math.fround(1.3)
+    expect(direction()).toBe('column')
+    mockFontScale = 1.29
+    expect(direction()).toBe('row')
   })
 
   test('one operator running both is warned of, with no tap', () => {
@@ -164,6 +203,19 @@ describe('after the ticket', () => {
     const tree = renderIn(<Poll />)
     expect(tree.queryByTestId(id(PollsIds.voteLaterAdvice))).toBeNull()
     expect(tree.queryByTestId(id(PollsIds.voteLater))).toBeNull()
+    expect(tree.queryByTestId(id(PollsIds.ticketTimeline))).toBeNull()
+  })
+
+  // Alberto's call on the V2 mock: Vote later is the main button, above Vote now.
+  test('within the hour: Vote later comes first, then Vote now; the timeline and what Vote later keeps are shown', () => {
+    mockState.record = record({ ticketAt: Date.now() - 5 * 60_000 })
+    const tree = renderIn(<Poll />)
+    const order = idsIn(tree.toJSON())
+    expect(order.indexOf(id(PollsIds.voteLater))).toBeGreaterThan(-1)
+    expect(order.indexOf(id(PollsIds.voteLater))).toBeLessThan(order.indexOf(id(PollsIds.voteNow)))
+    expect(tree.getByTestId(id(PollsIds.ticketTimeline))).toBeTruthy()
+    expect(tree.getByTestId(id(PollsIds.voteLaterKeeps))).toBeTruthy()
+    expect(tree.getByText('Polls.SaferAfter')).toBeTruthy()
   })
 
   test('voted: the vote is in, and nothing says what was chosen', () => {
@@ -177,6 +229,69 @@ describe('after the ticket', () => {
   test('a vote on its way says so', () => {
     mockState.record = record({ ticketAt: 1, pending: { stage: 'receipt', receipt: {} } })
     expect(renderIn(<Poll />).getByTestId(id(PollsIds.sending))).toBeTruthy()
+  })
+})
+
+describe('results', () => {
+  test('once certified, the result shows first, and the member who voted reads only that they did', () => {
+    mockState.shown = { ...shownWith(), state: 'tallied', certified: certification() } as PollShown
+    mockState.record = record({ ticketAt: 1, votedAt: Date.now() - 3600_000 })
+    const tree = renderIn(<Poll />)
+    expect(tree.getByTestId(id(PollsIds.results))).toBeTruthy()
+    expect(tree.queryByTestId(id(PollsIds.voteIn))).toBeNull()
+    expect(within(tree.getByTestId(id(PollsIds.yourPart))).getByText('Polls.VotedOn')).toBeTruthy()
+    expect(tree.getByText('Polls.CantShowYours')).toBeTruthy()
+    // Most votes first; the counts carry it, not the member's choice.
+    expect(within(tree.getAllByTestId(id(PollsIds.resultOption))[0]).getByText('No')).toBeTruthy()
+    expect(tree.getByTestId(id(PollsIds.certifiedLine))).toBeTruthy()
+  })
+
+  test('voted, not yet certified: the vote is in, and no result (control for the result above)', () => {
+    mockState.shown = { ...shownWith(), state: 'closed' } as PollShown
+    mockState.record = record({ ticketAt: 1, votedAt: Date.now() - 3600_000 })
+    const tree = renderIn(<Poll />)
+    expect(tree.getByTestId(id(PollsIds.voteIn))).toBeTruthy()
+    expect(tree.getByTestId(id(PollsIds.resultsNotReady))).toBeTruthy()
+    expect(tree.queryByTestId(id(PollsIds.results))).toBeNull()
+  })
+
+  test('a later read that carries the certification switches the screen to the result, with nothing to tap', () => {
+    mockState.shown = { ...shownWith(), state: 'closed' } as PollShown
+    mockState.record = record({ ticketAt: 1, votedAt: Date.now() - 3600_000 })
+    const tree = renderIn(<Poll />)
+    expect(tree.queryByTestId(id(PollsIds.results))).toBeNull()
+    mockState.shown = { ...shownWith(), state: 'tallied', certified: certification() } as PollShown
+    tree.rerender(
+      <BasicAppContext>
+        <Poll />
+      </BasicAppContext>
+    )
+    expect(tree.getByTestId(id(PollsIds.results))).toBeTruthy()
+  })
+
+  test("certified and the member didn't vote: the result, and that they didn't", () => {
+    mockState.shown = { ...shownWith(), state: 'tallied', certified: certification() } as PollShown
+    const tree = renderIn(<Poll />)
+    expect(within(tree.getByTestId(id(PollsIds.yourPart))).getByText('Polls.DidntVote')).toBeTruthy()
+    expect(tree.queryByText('Polls.CantShowYours')).toBeNull()
+  })
+})
+
+describe('closed', () => {
+  test('closed before its set time: Closed early, with no date', () => {
+    mockState.shown = { ...shownWith(), state: 'closed' } as PollShown
+    const tree = renderIn(<Poll />)
+    expect(tree.getByTestId(id(PollsIds.closedEarly))).toBeTruthy()
+    expect(tree.getByText('Polls.ClosedEarly')).toBeTruthy()
+    expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
+  })
+
+  test('closed past its set time: Closed, with no date and not Closed early (control)', () => {
+    mockState.shown = { ...shownWith({ votingClosesAt: '2023-12-20T00:00:00Z' }), state: 'closed' } as PollShown
+    const tree = renderIn(<Poll />)
+    expect(tree.queryByTestId(id(PollsIds.closedEarly))).toBeNull()
+    expect(tree.getByText('Polls.ClosedNoDate')).toBeTruthy()
+    expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
   })
 })
 
@@ -267,7 +382,12 @@ describe('the ballot', () => {
     const tree = renderIn(<PollBallot />)
     fireEvent.press(tree.getAllByTestId(id(PollsIds.option))[0])
     fireEvent.press(tree.getByTestId(id(PollsIds.cast)))
-    expect(mockService.vote).toHaveBeenCalledWith(COMMUNITY, 'charter', { motion: { choice: [CHOICE] } })
+    expect(mockService.vote).toHaveBeenCalledWith(
+      COMMUNITY,
+      'charter',
+      { motion: { choice: [CHOICE] } },
+      expect.any(Function)
+    )
 
     mockService.vote.mockReset()
     mockState.shown = shownWith({ binding: true })
@@ -284,6 +404,35 @@ describe('the ballot', () => {
     expect(mockService.vote).toHaveBeenCalled()
   })
 
+  test('casting shows each step as the vote reaches it: in the pause, ready is done and the pause shows its progress', async () => {
+    mockService.vote.mockImplementation((_c: string, _e: string, _g: unknown, onStep: (s: unknown) => void) => {
+      onStep({ step: 'ready' })
+      onStep({ step: 'pause', from: Date.now(), until: Date.now() + 10_000 })
+      return new Promise(() => undefined)
+    })
+    const tree = renderIn(<PollBallot />)
+    fireEvent.press(tree.getAllByTestId(id(PollsIds.option))[0])
+    fireEvent.press(tree.getByTestId(id(PollsIds.cast)))
+    await waitFor(() => expect(tree.getByTestId(id(PollsIds.pauseBar))).toBeTruthy())
+    expect(tree.getAllByTestId(id(`${PollsIds.castStep}_done`))).toHaveLength(1)
+    expect(tree.getAllByTestId(id(`${PollsIds.castStep}_now`))).toHaveLength(1)
+    expect(tree.getAllByTestId(id(`${PollsIds.castStep}_later`))).toHaveLength(2)
+    tree.unmount()
+  })
+
+  test('once sending, the pause is done and its bar gone (control for the step above)', async () => {
+    mockService.vote.mockImplementation((_c: string, _e: string, _g: unknown, onStep: (s: unknown) => void) => {
+      onStep({ step: 'sending' })
+      return new Promise(() => undefined)
+    })
+    const tree = renderIn(<PollBallot />)
+    fireEvent.press(tree.getAllByTestId(id(PollsIds.option))[0])
+    fireEvent.press(tree.getByTestId(id(PollsIds.cast)))
+    await waitFor(() => expect(tree.getAllByTestId(id(`${PollsIds.castStep}_done`))).toHaveLength(2))
+    expect(tree.queryByTestId(id(PollsIds.pauseBar))).toBeNull()
+    tree.unmount()
+  })
+
   test("a question this screen can't show stops the cast, never abstains it", () => {
     mockState.shown = shownWith({
       questions: [
@@ -293,5 +442,55 @@ describe('the ballot', () => {
     const tree = renderIn(<PollBallot />)
     expect(tree.getByTestId(id(PollsIds.cantShow))).toBeTruthy()
     expect(tree.getByTestId(id(PollsIds.cast)).props.accessibilityState?.disabled).toBe(true)
+  })
+})
+
+// A community closed a poll before its scheduled close, and the row said "Closed on <the scheduled date>", still ahead.
+describe('a poll closed early', () => {
+  const t = ((key: string) => key) as unknown as TFunction
+  const listed = (votingClosesAt: string) => ({
+    electionId: 'charter',
+    state: 'closed' as const,
+    votingOpensAt: '2023-12-01T00:00:00Z',
+    votingClosesAt,
+    binding: false,
+    ticketHeld: false,
+  })
+
+  test('the row says closed early while that can be told, and never the date it was due to close', () => {
+    expect(pollRowStatus(t, listed('2099-11-08T17:00:00Z'), undefined, Date.now())).toBe('Polls.ClosedEarly')
+    // Past its set time an early close reads like an on-time one, so neither gets a date.
+    expect(pollRowStatus(t, listed('2023-12-08T17:00:00Z'), undefined, Date.now())).toBe('Polls.ClosedNoDate')
+  })
+
+  // "Closed early" says how the community ran its poll; a phone clock a little slow must not say it.
+  test('a close within a minute of the set time is not called early', () => {
+    const inThirtySeconds = new Date(Date.now() + 30_000).toISOString()
+    expect(pollRowStatus(t, listed(inThirtySeconds), undefined, Date.now())).toBe('Polls.ClosedNoDate')
+  })
+
+  test('the poll screen says closed early, with no date', () => {
+    mockState.shown = { ...shownWith(), state: 'closed' }
+    const tree = renderIn(<Poll />)
+    expect(tree.getByTestId(id(PollsIds.closedEarly))).toBeTruthy()
+    expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
+  })
+
+  // Results are certified after the close, often after the date it was due to close: compare the certification, not now.
+  test('the results say closed early when they were certified before the set close, even once that date has passed', () => {
+    const manifest = shownWith({ votingClosesAt: '2023-12-20T00:00:00Z' }).manifest
+    const certified = (certifiedAt: string) => ({
+      certifiedAt,
+      result: { electionId: 'charter', manifestDigest: 'zQmDigest', ballotsCounted: 3, questions: [] },
+    })
+    // In V2 the close line heads the poll, above its result (it was in the result's card).
+    const head = (certifiedAt: string) => {
+      mockState.shown = { ...shownWith(), manifest, state: 'tallied', certified: certified(certifiedAt) } as PollShown
+      return within(renderIn(<Poll />).getByTestId(id(PollsIds.head)))
+    }
+    expect(head('2023-12-15T00:00:00Z').getByText(/Polls\.ClosedEarly/)).toBeTruthy()
+    const onTime = head('2023-12-21T00:00:00Z')
+    expect(onTime.queryByText(/Polls\.ClosedEarly/)).toBeNull()
+    expect(onTime.getByText(/Polls\.ClosedNoDate/)).toBeTruthy()
   })
 })
