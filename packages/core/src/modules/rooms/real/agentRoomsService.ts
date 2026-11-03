@@ -35,7 +35,7 @@ import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
-import { holdsTwoAuthorities } from '../postRefusal'
+import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
@@ -1342,8 +1342,9 @@ export class AgentRoomsService implements RoomsService {
     try {
       return await this.prepareWriteHere(roomId, draft)
     } catch (e) {
-      // Refused before anything was sent, on every retry alike: said once per try, by kind alone (roomsLogWords).
-      this.backend.warn(`rooms: a write to ${logRef(roomId)} was refused on this phone: ${failureCategory(e)}`)
+      // Before anything was sent, by kind alone (roomsLogWords): refused for good here, or not prepared this time.
+      const outcome = permanentRefusal(e) ? 'was refused on this phone' : 'could not be prepared'
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} ${outcome}: ${failureCategory(e)}`)
       throw e
     }
   }
@@ -1393,6 +1394,8 @@ export class AgentRoomsService implements RoomsService {
     try {
       return await this.confirmWriteNow(token, options)
     } catch (e) {
+      // A preview gone stale is prepared again by the sender (useRoomSend): not a write that failed.
+      if (e instanceof RoomsPreviewExpired) throw e
       // By kind alone; the agent refusing for two of the room's authority credentials is named, since no retry passes it.
       const twoAuthorities = e instanceof Error && holdsTwoAuthorities(e.message) ? ', two authority credentials' : ''
       this.backend.warn(`rooms: a write to ${logRef(roomId)} was not written: ${failureCategory(e)}${twoAuthorities}`)

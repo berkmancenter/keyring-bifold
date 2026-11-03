@@ -50,6 +50,8 @@ interface Setup {
   head?: number
   /** The agent's answer to `rooms/keys/seal/0.2`. */
   seal?: (payload: Record<string, unknown>) => unknown
+  /** The agent cannot be asked what it serves. */
+  servedFails?: boolean
 }
 
 function setup(o: Setup = {}) {
@@ -126,7 +128,10 @@ function setup(o: Setup = {}) {
   let ids = 0
   const b: RoomsBackend = {
     agentLinked: () => true,
-    agentServedTypes: async () => o.served ?? SERVED,
+    agentServedTypes: async () => {
+      if (o.servedFails) throw new Error('no answer')
+      return o.served ?? SERVED
+    },
     agentTask,
     communities: async () => [COMMUNITY],
     communityTask,
@@ -793,6 +798,12 @@ describe('a write refused, said in the log by kind alone', () => {
     expect(line).toBe(`rooms: a write to ${SEALED_ROOM} was not written: refused (conflict), two authority credentials`)
     // The agent's words name the room's whole DID; the line carries the kind only.
     expect(line).not.toContain('QmRoomScid')
+  })
+
+  it('a failure that may pass is not called refused: it could not be prepared this time', async () => {
+    const { service, warn } = setup({ servedFails: true })
+    await expect(service.prepareWrite(OPEN_ROOM, { title: '', body: 'Hi' })).rejects.toThrow('no answer')
+    expect(lines(warn)).toEqual([`rooms: a write to ${OPEN_ROOM} could not be prepared: failed`])
   })
 
   it('a write that goes says nothing (control)', async () => {

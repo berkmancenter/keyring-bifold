@@ -199,7 +199,7 @@ describe('posting to a room', () => {
     const service = mockService as RoomsService
     const prepareWrite = jest
       .spyOn(service, 'prepareWrite')
-      .mockRejectedValueOnce(new RoomsUnavailable('write', 'detailsNotLoaded', 'no host is known for this room'))
+      .mockRejectedValueOnce(new RoomsUnavailable('write', 'noRight', "this member's rights do not include write"))
     const tree = show(PLANNING)
     await type(tree, 'Hello')
     await send(tree)

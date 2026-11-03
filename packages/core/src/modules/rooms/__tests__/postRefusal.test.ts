@@ -17,15 +17,17 @@ const t = ((key: string, o?: { why?: string }) => (o?.why ? `${key}[${o.why}]` :
 
 describe('which refusals no retry passes', () => {
   test('a reason found on this phone that will not pass', () => {
-    expect(permanentRefusal(new RoomsUnavailable('write', 'detailsNotLoaded', 'no host'))).toEqual({
-      reason: 'detailsNotLoaded',
-    })
     expect(permanentRefusal(new RoomsUnavailable('write', 'noRight', 'no write'))).toEqual({ reason: 'noRight' })
+    expect(permanentRefusal(new RoomsUnavailable('write', 'tierNotYet', 'sealed'))).toEqual({ reason: 'tierNotYet' })
   })
 
   test('the agent or the community not reached may pass: offered again (control)', () => {
     expect(permanentRefusal(new RoomsUnavailable('write', 'agentUnknown', 'not asked'))).toBeUndefined()
     expect(permanentRefusal(new RoomsUnavailable('write', 'communityUnreachable', 'no answer'))).toBeUndefined()
+  })
+
+  test('a room whose details went missing since it was opened is offered again: its community did not answer, or the session was held', () => {
+    expect(permanentRefusal(new RoomsUnavailable('write', 'detailsNotLoaded', 'no host'))).toBeUndefined()
   })
 
   test('an agent or host refusing as not retryable, with two authority credentials named', () => {
@@ -51,10 +53,6 @@ describe('which refusals no retry passes', () => {
 })
 
 describe('what the post says', () => {
-  test('no details from the community: its own plain line', () => {
-    expect(postRefusalText(t, { reason: 'detailsNotLoaded' })).toBe('Rooms.PostNotSentWhy[Rooms.PostNoDetails]')
-  })
-
   test('no right to write: the room’s own words for it', () => {
     expect(postRefusalText(t, { reason: 'noRight' })).toBe('Rooms.PostNotSentWhy[Rooms.NoRightWrite]')
   })

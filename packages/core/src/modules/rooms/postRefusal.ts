@@ -1,11 +1,13 @@
 /**
  * A post that cannot go however often it is sent again: refused on this phone for a reason that will not pass (no
- * host known for the room, no right to write, a kind of room Keyring does not write to yet), or refused by the agent
- * or the room's host as not worth retrying. Its bubble and notice say why, and offer no "Tap to try again": a tester
- * tapped one for an hour, each tap failing the same way before anything was sent (11-03).
+ * right to write, a kind of room Keyring does not write to yet), or refused by the agent or the room's host as not
+ * worth retrying. Its bubble and notice say why, and offer no "Tap to try again": a tester tapped one for an hour on
+ * 277.8, each tap refused the same way (11-03).
  *
  * A refusal that may pass (the agent or the community not reached, a host's rate limit) is not one of these: the post
- * is offered again as before.
+ * is offered again as before. Nor is a room's details not loaded: a room's write is offered only while it has them,
+ * so at send time it means its community did not answer this listing, or the session was held for another identity,
+ * and a later listing reads them again (agentRoomsService `readMyRooms`).
  *
  * @module rooms/postRefusal
  */
@@ -18,7 +20,13 @@ import { RoomsRefused, RoomsUnavailable, type RoomsReason } from './types'
 export type PostRefusal = { reason: RoomsReason } | { code: string; twoAuthorities: boolean }
 
 /** Reasons that may pass by themselves: a post refused for one of these is offered again. */
-const PASSING: ReadonlySet<RoomsReason> = new Set(['ok', 'sample', 'agentUnknown', 'communityUnreachable'])
+const PASSING: ReadonlySet<RoomsReason> = new Set([
+  'ok',
+  'sample',
+  'agentUnknown',
+  'communityUnreachable',
+  'detailsNotLoaded',
+])
 
 /**
  * The agent holds two of the room's authority credentials for one persona and will not choose between them
@@ -37,10 +45,8 @@ export function permanentRefusal(e: unknown): PostRefusal | undefined {
 export function postRefusalText(t: TFunction, refusal: PostRefusal): string {
   const why =
     'reason' in refusal
-      ? refusal.reason === 'detailsNotLoaded'
-        ? (t('Rooms.PostNoDetails') as string)
-        : (roomsStatusText(t, { status: 'unavailable', reason: refusal.reason, detail: '' }, 'write') ??
-          (t('Rooms.PostNotTaken') as string))
+      ? (roomsStatusText(t, { status: 'unavailable', reason: refusal.reason, detail: '' }, 'write') ??
+        (t('Rooms.PostNotTaken') as string))
       : (t(refusal.twoAuthorities ? 'Rooms.PostTwoAuthorities' : 'Rooms.PostNotTaken') as string)
   return t('Rooms.PostNotSentWhy', { why, interpolation: { escapeValue: false } }) as string
 }

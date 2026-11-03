@@ -3019,7 +3019,6 @@
     "PostSending": "Enviando…",
     "PostNotSent": "Não enviado. Toque para tentar de novo.",
     "PostNotSentWhy": "Não enviado. {{why}}",
-    "PostNoDetails": "Este telefone ainda não tem os detalhes desta sala vindos da comunidade, então ainda não pode publicar aqui.",
     "PostNotTaken": "A sala não aceitou.",
     "PostTwoAuthorities": "Seu agente tem duas associações para esta sala e não escolhe uma. Isso precisa ser resolvido no seu agente, não aqui.",
     "PostFileNotSent": "Não enviado. Toque para limpar e adicione o arquivo de novo.",
