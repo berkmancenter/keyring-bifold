@@ -3148,7 +3148,13 @@ export class VtaAgentController {
     const quiet =
       quietUntil !== undefined ? `, found while away: shown only if not back in ${QUIET_DROP_MS / 1000} s` : ''
     releaseWarn(`[VTA] ${what}${quiet}: ${words}`)
-    this.dispatch({ type: 'sessionDropped', reason, now, quietUntil })
+    this.dispatch({
+      type: 'sessionDropped',
+      reason,
+      now,
+      quietUntil,
+      ...(quietUntil !== undefined && this.suspended ? { untilReturn: true as const } : {}),
+    })
   }
 
   /**

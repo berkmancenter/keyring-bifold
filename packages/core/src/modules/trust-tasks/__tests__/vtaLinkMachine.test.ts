@@ -181,11 +181,39 @@ describe('a quiet drop', () => {
   })
 
   it('found while the app was away, its wait counts from the return', () => {
-    let state = reduceLink(linked, { type: 'sessionDropped', now: 1000, quietUntil: 6000 })
+    let state = reduceLink(linked, { type: 'sessionDropped', now: 1000, quietUntil: 6000, untilReturn: true })
+    state = reduceLink(state, { type: 'retryScheduled', attempt: 1, nextRetryAt: 2000 })
     state = reduceLink(state, { type: 'returned', now: 600_000 })
     if (state.kind !== 'linked') throw new Error('not linked')
     expect(connectionShown(state.connection, 600_000 + QUIET_DROP_MS - 1)).toEqual({ kind: 'online' })
-    expect(connectionShown(state.connection, 600_000 + QUIET_DROP_MS)).toMatchObject({ kind: 'offline', since: 1000 })
+    expect(connectionShown(state.connection, 600_000 + QUIET_DROP_MS)).toMatchObject({
+      kind: 'reconnecting',
+      since: 1000,
+    })
+  })
+
+  // Review of #886: a second return must not hide a drop the person has already seen.
+  it('once shown, stays shown through later returns', () => {
+    const t = 600_000
+    let state = reduceLink(linked, { type: 'sessionDropped', now: 1000, quietUntil: 6000, untilReturn: true })
+    state = reduceLink(state, { type: 'returned', now: t })
+    if (state.kind !== 'linked') throw new Error('not linked')
+    // The first return does hide it (the control: this test fails if returns never hide anything)...
+    expect(connectionShown(state.connection, t + 1)).toEqual({ kind: 'online' })
+    // ...it shows once its 5 s are up...
+    expect(connectionShown(state.connection, t + QUIET_DROP_MS)).toMatchObject({ kind: 'offline', since: 1000 })
+    // ...and switching away and back again does not hide it a second time.
+    const again = t + QUIET_DROP_MS + 30_000
+    state = reduceLink(state, { type: 'returned', now: again })
+    if (state.kind !== 'linked') throw new Error('not linked')
+    expect(connectionShown(state.connection, again + 1)).toMatchObject({ kind: 'offline', since: 1000 })
+  })
+
+  it('a drop found just after a return keeps its own 5 s: a later return does not extend it', () => {
+    let state = reduceLink(linked, { type: 'sessionDropped', now: 70_000, quietUntil: 75_000 })
+    state = reduceLink(state, { type: 'returned', now: 74_000 })
+    if (state.kind !== 'linked') throw new Error('not linked')
+    expect(connectionShown(state.connection, 75_000)).toMatchObject({ kind: 'offline', since: 70_000 })
   })
 
   it('a return leaves an ordinary drop, and an online link, as they are', () => {

@@ -47,14 +47,25 @@ export type VtaConnection =
    * `STARTUP_GRACE_MS` has passed.
    */
   | { kind: 'connecting'; since: number; reason?: string }
-  | { kind: 'reconnecting'; attempt: number; nextRetryAt: number; since: number; quietUntil?: number }
+  | {
+      kind: 'reconnecting'
+      attempt: number
+      nextRetryAt: number
+      since: number
+      quietUntil?: number
+      untilReturn?: true
+    }
   /**
    * `quietUntil`: a drop found while the app was suspended, or just after it
    * came back (iOS ends a suspended app's sockets). It is shown as online
    * until then, so a return that reconnects within {@link QUIET_DROP_MS} shows
    * nothing, and it is kept out of the activity list.
+   *
+   * `untilReturn`: found while suspended, so not seen yet; the next return
+   * starts its {@link QUIET_DROP_MS}, once. A later return never hides it again:
+   * a drop the person has seen stays shown.
    */
-  | { kind: 'offline'; since: number; reason?: string; quietUntil?: number }
+  | { kind: 'offline'; since: number; reason?: string; quietUntil?: number; untilReturn?: true }
   /**
    * The agent is gone for good (agentGone.ts): its address does not exist, or
    * it has not been reached for days. Retrying stops; reaching it again (a
@@ -176,7 +187,7 @@ export type VtaLinkEvent =
   | { type: 'failed'; failure: VtaLinkFailure }
   | { type: 'sessionOpened' }
   /** `quietUntil`: found while suspended or just back (see the offline connection). */
-  | { type: 'sessionDropped'; reason?: string; now: number; quietUntil?: number }
+  | { type: 'sessionDropped'; reason?: string; now: number; quietUntil?: number; untilReturn?: true }
   /** The app came back to the foreground: a quiet drop's wait counts from now. */
   | { type: 'returned'; now: number }
   | { type: 'retryScheduled'; attempt: number; nextRetryAt: number }
@@ -368,16 +379,19 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
           since: event.now,
           reason: event.reason,
           ...(event.quietUntil !== undefined ? { quietUntil: event.quietUntil } : {}),
+          ...(event.quietUntil !== undefined && event.untilReturn ? { untilReturn: true as const } : {}),
         },
       }
 
-    case 'returned':
-      // Found while suspended, the drop has not been seen yet: its wait starts at the return.
-      return state.kind === 'linked' &&
-        (state.connection.kind === 'offline' || state.connection.kind === 'reconnecting') &&
-        state.connection.quietUntil !== undefined
-        ? { ...state, connection: { ...state.connection, quietUntil: event.now + QUIET_DROP_MS } }
-        : state
+    case 'returned': {
+      // Found while suspended, the drop has not been seen yet: its wait starts at this return, and only this one.
+      if (state.kind !== 'linked') return state
+      const connection = state.connection
+      if ((connection.kind !== 'offline' && connection.kind !== 'reconnecting') || !connection.untilReturn) return state
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { untilReturn: _seen, ...rest } = connection
+      return { ...state, connection: { ...rest, quietUntil: event.now + QUIET_DROP_MS } }
+    }
 
     case 'retryScheduled':
       return state.kind === 'linked' &&
@@ -393,6 +407,9 @@ export function reduceLink(state: VtaLinkState, event: VtaLinkEvent): VtaLinkSta
               since: state.connection.since,
               ...('quietUntil' in state.connection && state.connection.quietUntil !== undefined
                 ? { quietUntil: state.connection.quietUntil }
+                : {}),
+              ...('untilReturn' in state.connection && state.connection.untilReturn
+                ? { untilReturn: true as const }
                 : {}),
             },
           }

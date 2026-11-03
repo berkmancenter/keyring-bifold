@@ -110,6 +110,7 @@ describe('a drop found because the app was away', () => {
     c.at(T0 + 60_000)
     c.drop()
     expect(c.connection()).toMatchObject({ kind: 'reconnecting', since: T0 + 60_000 })
+    expect(c.connection()).toMatchObject({ untilReturn: true })
     // Ten minutes away, then back: the wait counts from the return.
     c.at(T0 + 660_000)
     mockClient.connect.mockImplementation(async () => {
@@ -154,6 +155,12 @@ describe('a drop found because the app was away', () => {
       since: T0 + 70_000,
     })
     expect(c.activity()).not.toContain('wentOffline')
+    // Found after the return, it waits for no other: the controller does not mark it, and the next return leaves it.
+    expect(shown).not.toHaveProperty('untilReturn')
+    c.vta.backgrounded()
+    c.at(T0 + 120_000)
+    void c.vta.foregrounded({} as never)
+    expect(connectionShown(c.connection(), T0 + 120_001)).toMatchObject({ kind: 'reconnecting', since: T0 + 70_000 })
   })
 
   // Control: the same drop with the app in use is a real one, said at once and listed, as before.
