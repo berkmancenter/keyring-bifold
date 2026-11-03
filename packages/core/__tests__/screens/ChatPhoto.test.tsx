@@ -1,6 +1,6 @@
 import { useConnectionById, useBasicMessagesByConnectionId } from '@bifold/react-hooks'
 import { DidCommConnectionRecord, DidCommDidExchangeRole, DidCommDidExchangeState } from '@credo-ts/didcomm'
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
 import { Alert } from 'react-native'
 import { Actions } from 'react-native-gifted-chat'
@@ -274,6 +274,11 @@ describe('a photo while it goes', () => {
     expect(Toast.show).not.toHaveBeenCalled()
     await act(async () => fireEvent.press(tree.getByTestId(id('ChatPendingPhotoFailed'))))
     expect(tree.getByTestId(id('ChatPendingPhotoSheet'))).toBeTruthy()
+    // A render at the largest text showed the sheet reaching under the status bar: its words and buttons scroll, the
+    // buttons last, so they are reached only past the words.
+    const scrolled = within(tree.getByTestId(id('ChatPendingPhotoSheetScroll')))
+    expect(scrolled.getByText('Chat.PhotoFailedBody')).toBeTruthy()
+    expect(scrolled.getByTestId(id('ChatPendingPhotoNotNow'))).toBeTruthy()
     await act(async () => fireEvent.press(tree.getByTestId(id('ChatPendingPhotoRetry'))))
     expect(retry).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(tree.queryByTestId(id('ChatPendingPhoto'))).toBeNull())

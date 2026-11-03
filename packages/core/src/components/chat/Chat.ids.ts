@@ -45,6 +45,8 @@ export const ChatIds = {
   // A photo that wasn't sent: tapping it opens the sheet below.
   pendingPhotoFailed: 'ChatPendingPhotoFailed',
   pendingPhotoSheet: 'ChatPendingPhotoSheet',
+  // The sheet's words and buttons scroll, the buttons last.
+  pendingPhotoSheetScroll: 'ChatPendingPhotoSheetScroll',
   pendingPhotoRetry: 'ChatPendingPhotoRetry',
   pendingPhotoDelete: 'ChatPendingPhotoDelete',
   pendingPhotoNotNow: 'ChatPendingPhotoNotNow',

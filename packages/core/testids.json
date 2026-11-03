@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "c31dbca01e3794f91572fabb5d327a083e426d5e",
+  "generatedFrom": "daeae8eb816022f68fefd948022cffaebf712a84",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -285,6 +285,7 @@
     "ChatPendingPhotoNotNow": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhotoRetry": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhotoSheet": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoSheetScroll": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhotoStatus": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhotoStop": ["src/components/chat/Chat.ids.ts"],
     "ChatPhotoSent": ["src/components/chat/Chat.ids.ts"],
@@ -1759,6 +1760,9 @@
     },
     {
       "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoSheet"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoSheetScroll"
     },
     {
       "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoStatus"

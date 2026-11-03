@@ -8,7 +8,7 @@
  */
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, Image, Modal, Pressable, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
@@ -63,13 +63,15 @@ export const PendingPhotoBubble: React.FC<{
       justifyContent: 'center',
     },
     status: { textAlign: 'right', marginTop: 4 },
+    // At most most of the screen, its words scrolling with the buttons last: at the largest text the sheet reached
+    // under the status bar.
     sheet: {
+      maxHeight: '92%',
       backgroundColor: ColorPalette.brand.primaryBackground,
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
-      padding: 20,
-      gap: 12,
     },
+    sheetContent: { padding: 20, gap: 12 },
   })
 
   const bubble = (
@@ -138,34 +140,39 @@ export const PendingPhotoBubble: React.FC<{
           testID={testIdWithKey(ChatIds.pendingPhotoBackdrop)}
         />
         <SafeAreaView edges={['bottom']} style={styles.sheet} testID={testIdWithKey(ChatIds.pendingPhotoSheet)}>
-          <ThemedText variant="headingFour" accessibilityRole="header">
-            {t('Chat.PhotoFailedTitle')}
-          </ThemedText>
-          <ThemedText>{t('Chat.PhotoFailedBody')}</ThemedText>
-          <Button
-            title={t('Chat.PhotoTryAgain')}
-            buttonType={ButtonType.Primary}
-            onPress={() => {
-              setAsking(false)
-              sending.onRetry?.()
-            }}
-            testID={testIdWithKey(ChatIds.pendingPhotoRetry)}
-          />
-          <Button
-            title={t('Chat.PhotoDelete')}
-            buttonType={ButtonType.Secondary}
-            onPress={() => {
-              setAsking(false)
-              sending.onDelete?.()
-            }}
-            testID={testIdWithKey(ChatIds.pendingPhotoDelete)}
-          />
-          <Button
-            title={t('Global.NotNow')}
-            buttonType={ButtonType.Tertiary}
-            onPress={() => setAsking(false)}
-            testID={testIdWithKey(ChatIds.pendingPhotoNotNow)}
-          />
+          <ScrollView
+            contentContainerStyle={styles.sheetContent}
+            testID={testIdWithKey(ChatIds.pendingPhotoSheetScroll)}
+          >
+            <ThemedText variant="headingFour" accessibilityRole="header">
+              {t('Chat.PhotoFailedTitle')}
+            </ThemedText>
+            <ThemedText>{t('Chat.PhotoFailedBody')}</ThemedText>
+            <Button
+              title={t('Chat.PhotoTryAgain')}
+              buttonType={ButtonType.Primary}
+              onPress={() => {
+                setAsking(false)
+                sending.onRetry?.()
+              }}
+              testID={testIdWithKey(ChatIds.pendingPhotoRetry)}
+            />
+            <Button
+              title={t('Chat.PhotoDelete')}
+              buttonType={ButtonType.Secondary}
+              onPress={() => {
+                setAsking(false)
+                sending.onDelete?.()
+              }}
+              testID={testIdWithKey(ChatIds.pendingPhotoDelete)}
+            />
+            <Button
+              title={t('Global.NotNow')}
+              buttonType={ButtonType.Tertiary}
+              onPress={() => setAsking(false)}
+              testID={testIdWithKey(ChatIds.pendingPhotoNotNow)}
+            />
+          </ScrollView>
         </SafeAreaView>
       </Modal>
     </View>
