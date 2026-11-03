@@ -805,6 +805,8 @@
     "MessagesEmptyNewMessage": ["src/screens/Messages.tsx"],
     "MessagesFetchingNew": ["src/screens/Messages.tsx"],
     "MessagesGestureRoot": ["src/screens/Messages.tsx"],
+    "MessagesHiddenRooms": ["src/screens/Messages.tsx"],
+    "MessagesHiddenRoomsShow": ["src/screens/Messages.tsx"],
     "MessagesListDelete": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListTimer": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListUnread": [
@@ -922,6 +924,7 @@
     "PollBallotSeenLine": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotTextAnswer": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosed": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollClosedEarly": ["src/modules/polls/components/Polls.ids.ts"],
     "PollGetTicket": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHostedAgent": ["src/modules/polls/components/Polls.ids.ts"],
     "PollLimited": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1095,6 +1098,7 @@
     "RoomInfoHide": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoMembers": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoNotes": ["src/modules/rooms/screens/RoomInfo.tsx"],
+    "RoomInfoShow": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoYou": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomLoadingOlder": ["src/modules/rooms/screens/Room.tsx"],
     "RoomMembers": ["src/modules/rooms/components/RoomMembersTab.tsx"],
@@ -1787,6 +1791,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.closed"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.closedEarly"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.getTicket"
