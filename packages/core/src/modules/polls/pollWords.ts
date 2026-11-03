@@ -28,6 +28,14 @@ export function pollPhase(
   return 'open'
 }
 
+/**
+ * Whether a closed poll closed before its scheduled time. The community says when it closed a poll only on the board,
+ * which a member can't always read, so an early close is said as such, with no date: `votingClosesAt` is the time it
+ * was due to close, not when it did.
+ */
+export const closedEarly = (poll: Pick<PollListItem, 'votingClosesAt'>, now: number): boolean =>
+  now < Date.parse(poll.votingClosesAt)
+
 export const pollTitle = (t: TFunction, title: string | undefined): string =>
   title?.trim() || (t('Polls.Untitled') as string)
 
@@ -45,7 +53,7 @@ export function pollRowStatus(t: TFunction, poll: PollListItem, record: PollReco
     case 'open':
       return t('Polls.OpenUntil', date(poll.votingClosesAt))
     case 'closed':
-      return t('Polls.ClosedOn', date(poll.votingClosesAt))
+      return closedEarly(poll, now) ? t('Polls.ClosedEarly') : t('Polls.ClosedOn', date(poll.votingClosesAt))
     case 'cancelled':
       return t('Polls.Cancelled')
   }
