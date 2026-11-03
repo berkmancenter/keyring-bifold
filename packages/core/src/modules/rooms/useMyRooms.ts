@@ -13,6 +13,9 @@
  * @module rooms/useMyRooms
  */
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { DeviceEventEmitter } from 'react-native'
+
+import { WALLET_LOCKED_EVENT } from '../../utils/walletLocked'
 
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
@@ -49,8 +52,13 @@ export const MY_ROOMS_RETRY_MS = 30_000
 
 type Listing = Pick<MyRooms, 'capabilities' | 'rooms' | 'offers'>
 // The last listing each screen read, by service and community, so that opening it again shows it at once while it
-// is read again (in memory only; another service, another agent, starts with none).
+// is read again (in memory only; another service, another agent, starts with none). Forgotten when the wallet locks,
+// as the service forgets the records it opened (agentRoomsService, dropOpenedRecords): room names and offers don't
+// outlive a lock either.
 let remembered = new WeakMap<RoomsService, Map<string, Listing>>()
+DeviceEventEmitter.addListener(WALLET_LOCKED_EVENT, () => {
+  remembered = new WeakMap()
+})
 const rememberedOf = (service: RoomsService | undefined, communityDid?: string): Listing | undefined =>
   service ? remembered.get(service)?.get(communityDid ?? '') : undefined
 const remember = (service: RoomsService, communityDid: string | undefined, listing: Listing) => {
@@ -58,7 +66,7 @@ const remember = (service: RoomsService, communityDid: string | undefined, listi
   byCommunity.set(communityDid ?? '', { ...rememberedOf(service, communityDid), ...listing })
   remembered.set(service, byCommunity)
 }
-/** For tests: forget every listing remembered. */
+/** Forget every listing remembered (the wallet locked; tests). */
 export const forgetMyRooms = (): void => {
   remembered = new WeakMap()
 }

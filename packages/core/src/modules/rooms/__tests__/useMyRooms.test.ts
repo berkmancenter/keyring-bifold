@@ -5,6 +5,9 @@
  * its services afresh (A, then B, then A must not read B's). Nothing changing reads nothing.
  */
 import { act, renderHook, waitFor } from '@testing-library/react-native'
+import { DeviceEventEmitter } from 'react-native'
+
+import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 
 import { deriveCapabilities, ROOMS_OPERATIONS, ROOMS_REQUIREMENTS } from '../capabilities'
 import { toInertText } from '../inertText'
@@ -226,6 +229,19 @@ describe('the rooms never wait on the offers, and a failed read says so and trie
     expect(again.result.current.capabilities).toBeDefined()
     // Control: another community's screen remembers nothing of this one.
     expect(renderHook(() => useMyRooms(s, 'did:webvh:QmOther:x')).result.current.rooms).toBeUndefined()
+  })
+
+  test('a lock forgets what was remembered: reopened after it, the screen shows nothing until it reads (control above)', async () => {
+    const s = service()
+    ;(s.listMyRooms as jest.Mock).mockResolvedValue([room])
+    const first = renderHook(() => useMyRooms(s, LAB))
+    await waitFor(() => expect(first.result.current.rooms).toEqual([room]))
+    first.unmount()
+    act(() => void DeviceEventEmitter.emit(WALLET_LOCKED_EVENT))
+    ;(s.listMyRooms as jest.Mock).mockReturnValue(never())
+    const again = renderHook(() => useMyRooms(s, LAB))
+    expect(again.result.current.rooms).toBeUndefined()
+    expect(again.result.current.capabilities).toBeUndefined()
   })
 
   test('a failed read is tried once more after MY_ROOMS_RETRY_MS, as "trying again", and logged; a second failure waits', async () => {
