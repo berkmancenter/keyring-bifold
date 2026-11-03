@@ -2154,7 +2154,7 @@
       "NoTokensError": "You have no vouching tokens right now. Keyring draws them for you when you open your vetting desk — open it, give it a moment, and try again.",
       "RequirementsChanged": "{{community}} has changed what it asks of new members since this person applied, so vouching now wouldn't count. Ask them to apply again.",
       "NotEnrolledError": "You're not enrolled for this period. Enrol, then try again.",
-      "RequestNotPrivate": "This request didn't ask for private vetting, but {{community}} only vets privately. Nothing was signed. Ask them to send a new request with a new ticket.",
+      "RequestNotPrivate": "Nothing was signed: {{community}} only vets privately, and this request didn't ask to. Give them a new ticket.",
       "PeriodClosed": "This vetting period has ended. Enrol for the new one, then try again.",
       "MemberMismatch": "This agent can't vouch privately in this community. An earlier Keyring build enrolled it for private vetting under a different identity from the one you vet with here, and an agent can't change that, so the community would refuse every vouching token it draws. Its enrolment here is stuck and won't clear by reopening the desk, and any tokens it holds for this community can't be used. To vouch privately here, connect a different agent.",
       "ErrorGeneric": "Something went wrong. Try again in a moment.",
