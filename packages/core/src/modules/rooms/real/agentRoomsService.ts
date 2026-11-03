@@ -928,7 +928,8 @@ export class AgentRoomsService implements RoomsService {
     let held: Promise<HeldRoom[] | undefined> | undefined
     const heldNow = () =>
       (held ??= this.heldRooms().catch((e): undefined => {
-        this.backend.warn(`rooms: the agent did not list the rooms it holds: ${message(e)}`)
+        // Why by kind alone, in every rooms line (roomsLogWords): an error's words can name an identity.
+        this.backend.warn(`rooms: the agent did not list the rooms it holds: ${failureCategory(e)}`)
         return undefined
       }))
     const out: RoomOffer[] = []
@@ -1026,7 +1027,7 @@ export class AgentRoomsService implements RoomsService {
         }
         this.renewed.add(`${renewal.roomId}|${renewal.issuedAt}`)
       } catch (e) {
-        this.backend.warn(`rooms: the renewal of ${renewal.roomId} was not stored: ${message(e)}`)
+        this.backend.warn(`rooms: the renewal of ${logRef(renewal.roomId)} was not stored: ${failureCategory(e)}`)
       }
     }
   }
@@ -1176,7 +1177,9 @@ export class AgentRoomsService implements RoomsService {
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {
       await this.backend
         .agentTask(ROOMS_TASK.keysBackfill, { roomId, host: offer.host })
-        .catch((e) => this.backend.warn(`rooms: backfill of ${roomId} after joining failed: ${message(e)}`))
+        .catch((e) =>
+          this.backend.warn(`rooms: backfill of ${logRef(roomId)} after joining failed: ${failureCategory(e)}`)
+        )
     }
     return done()
   }
@@ -1755,7 +1758,7 @@ export class AgentRoomsService implements RoomsService {
         ...(isShowableImage(head) ? { image: true } : {}),
       }
     } catch (e) {
-      if ((e as Error)?.name !== 'AbortError') this.backend.warn(`opening a room file failed: ${message(e)}`)
+      if ((e as Error)?.name !== 'AbortError') this.backend.warn(`opening a room file failed: ${failureCategory(e)}`)
       throw e
     } finally {
       letGo()
