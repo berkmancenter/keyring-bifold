@@ -246,7 +246,7 @@ describe("a vetter's attestation arriving", () => {
     const log = logger()
     const onChange = jest.fn()
     // No named application: the hidden one is kept apart and is enough.
-    await deliver(applicantWith(memoryStore(), log, onChange), attestationMessage(ATTESTATION))
+    await deliver(applicantWith(memoryStore({}), log, onChange), attestationMessage(ATTESTATION))
     expect(mockConnect).toHaveBeenCalled()
     expect(mockTake).toHaveBeenCalledTimes(1)
     const [, client, community, attestation] = mockTake.mock.calls[0]
@@ -260,7 +260,7 @@ describe("a vetter's attestation arriving", () => {
     mockLoadRecord.mockResolvedValue(HIDDEN_RECORD)
     mockTake.mockResolvedValue({ ...HIDDEN_RECORD, held: 1 })
     const log = logger()
-    await deliver(applicantWith(memoryStore(), log), attestationMessage(ATTESTATION))
+    await deliver(applicantWith(memoryStore({}), log), attestationMessage(ATTESTATION))
     const everything = JSON.stringify([
       log.debug.mock.calls,
       log.info.mock.calls,
@@ -285,7 +285,7 @@ describe("a vetter's attestation arriving", () => {
     mockLoadRecord.mockResolvedValue(HIDDEN_RECORD)
     mockTake.mockRejectedValue({ document: { payload: { code: 'vta/pcs/verify-attestation:wrongCommunity' } } })
     const log = logger()
-    await expect(deliver(applicantWith(memoryStore(), log), attestationMessage(ATTESTATION))).resolves.toBeUndefined()
+    await expect(deliver(applicantWith(memoryStore({}), log), attestationMessage(ATTESTATION))).resolves.toBeUndefined()
     expect(JSON.stringify(log.warn.mock.calls)).toContain('wrongCommunity')
   })
 
@@ -344,7 +344,7 @@ describe("a vetter's attestation arriving", () => {
   it('is left for redelivery when the agent cannot be reached', async () => {
     mockLoadRecord.mockResolvedValue(HIDDEN_RECORD)
     mockTake.mockRejectedValue(new Error('socket closed'))
-    await expect(deliver(applicantWith(memoryStore()), attestationMessage(ATTESTATION))).rejects.toThrow(
+    await expect(deliver(applicantWith(memoryStore({})), attestationMessage(ATTESTATION))).rejects.toThrow(
       'socket closed'
     )
   })
@@ -669,6 +669,10 @@ describe('a private record left by an earlier identity', () => {
           minStatements: 1,
           acceptedMethods: ['inPerson', 'video'],
           requiredClaims: ['name.legal'],
+          maxStatementAge: 'P120D',
+          eligibleVetters: { role: 'vetter' },
+          independence: { requireConsistentIdentityCommitment: true },
+          invitation: 'none',
           ext: { 'org.openvtc.hidden-vetting': { suite: 'ps-ddh-bls12381' } },
         },
       },
@@ -784,7 +788,13 @@ describe('a private record left by an earlier identity', () => {
 
   it('is not counted on the checklist', async () => {
     mockLoadRecord.mockResolvedValue({ ...STALE, held: 1, minimum: 1 })
-    const list = await applicantWith(memoryStore({})).checklist()
+    const community = { listHeldCredentials: async () => [] }
+    const list = await new VtiApplicant(
+      { config: { logger: logger() } } as never,
+      PERSONA as never,
+      memoryStore({}),
+      community as never
+    ).checklist()
     expect(list.mode).toBeUndefined()
   })
 
