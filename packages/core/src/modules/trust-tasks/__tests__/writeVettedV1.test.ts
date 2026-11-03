@@ -460,6 +460,51 @@ describe('the desk in mode auto', () => {
     expect(logger.warn.mock.calls.some((c) => String(c[0]).includes('statement shape'))).toBe(true)
   })
 
+  // 2026-11-03 (277.7): an applicant's Keyring holding an earlier identity's
+  // private record sent a request without the private mark to a community that
+  // vets only privately; the vetter signed a statement naming them, which could
+  // not count there and was refused on arrival.
+  describe('a request without the private mark, for a community that vets privately', () => {
+    const PRIVATE_EXT = { ext: { 'org.openvtc.hidden-vetting': { suite: 'ps-ddh-bls12381' } } }
+    const privateOnly = { criteria: [{ id: 'vetted-member', vetting: { statementType: VETTED, ...PRIVATE_EXT } }] }
+
+    it('signs and sends nothing, and says why in a code the screen words', async () => {
+      setDtgV1WritingMode('auto')
+      mockFetchManifest.mockResolvedValue(privateOnly)
+      const code = await deskWith(digest())
+        .attest('r', decision)
+        .then(() => undefined)
+        .catch((e: unknown) => (e as { code?: string }).code)
+      expect(code).toBe('keyring/hidden-vetter/attest:requestNotPrivate')
+      expect(sent).toHaveLength(0)
+    })
+
+    it('control: the same community with a named way in as well still gets the statement', async () => {
+      setDtgV1WritingMode('auto')
+      mockFetchManifest.mockResolvedValue({
+        criteria: [...privateOnly.criteria, { id: 'named-member', vetting: { statementType: VETTED } }],
+      })
+      await deskWith(digest()).attest('r', decision)
+      expect(sent).toHaveLength(1)
+    })
+
+    it('control: a community that vets by name gets the statement as before', async () => {
+      setDtgV1WritingMode('auto')
+      mockFetchManifest.mockResolvedValue(manifestNaming(VETTED))
+      await deskWith(digest()).attest('r', decision)
+      expect(sent).toHaveLength(1)
+    })
+
+    it('a manifest that cannot be read leaves it to the shape, as before', async () => {
+      setDtgV1WritingMode('auto')
+      mockFetchManifest.mockRejectedValue(new Error('offline'))
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+      await deskWith(digest()).attest('r', decision)
+      expect(sent).toHaveLength(1)
+      warn.mockRestore()
+    })
+  })
+
   it('in mode off, writes the old shape even for a moved community, and reads nothing', async () => {
     setDtgV1WritingMode('off')
     mockFetchManifest.mockResolvedValue(manifestNaming(VETTED))

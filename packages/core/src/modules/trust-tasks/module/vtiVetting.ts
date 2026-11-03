@@ -1594,7 +1594,9 @@ export class VtiVetterDesk {
       declaredRelationship: decision.declaredRelationship ?? 'none',
     }
     let statement: Record<string, unknown>
-    const read = await this.readManifest(desk.communityDid)
+    // Read in `auto`, the release mode, as the shape has always been; `off`
+    // and `force` are for development and read nothing.
+    const read: ManifestRead = getDtgV1WritingMode() === 'auto' ? await this.readManifest(desk.communityDid) : {}
     // A request that did not ask to be vetted privately, for a community whose
     // every way in is private: a statement naming this vetter cannot count
     // there (the community counts only the agent's proof), so nothing is signed
