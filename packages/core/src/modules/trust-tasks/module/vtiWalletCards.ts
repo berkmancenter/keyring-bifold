@@ -122,7 +122,7 @@ export async function roleShownWithMembershipCard(
  * The agents linked to this phone, once they have been read; undefined
  * before, when nothing is to be hidden yet.
  */
-function linkedAgentsNow(): string[] | undefined {
+export function linkedAgentsNow(): string[] | undefined {
   const state = vtaAgent.getState()
   if (!state.linkRestored || !state.agents) return undefined
   return state.agents.map((a) => a.vtaDid)

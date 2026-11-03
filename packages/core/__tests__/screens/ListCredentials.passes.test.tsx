@@ -13,6 +13,8 @@ import { useCredentials } from '@bifold/react-hooks'
 
 import ListCredentials from '../../src/screens/ListCredentials'
 import { credentialRegistry } from '../../src/modules/openid/refresh/registry'
+import { walletCardKey } from '../../src/modules/trust-tasks/module/vtiWalletCards'
+import { toRawCredential } from '../../src/modules/vrc/utils/rcardDisplayUtils'
 import { testIdWithKey } from '../../src/utils/testable'
 import { COMMUNITY, membershipCard, roleCard } from '../helpers/cardVault'
 import { BasicAppContext } from '../helpers/app'
@@ -29,6 +31,11 @@ jest.mock('../../src/modules/trust-tasks/module/useCommunityBrand', () => ({
     known: true,
     value: { color: '#265373', pattern: 'waves', monogram: 'HT', fromAccent: false },
   }),
+}))
+
+let mockHiddenCards: ReadonlySet<string> | undefined = new Set()
+jest.mock('../../src/modules/trust-tasks/module/walletCardHolders', () => ({
+  useCardsNoLinkedAgentHolds: () => mockHiddenCards,
 }))
 
 const mockCredentials = useCredentials as jest.Mock
@@ -187,6 +194,38 @@ describe('the Wallet’s community cards', () => {
     const tree = wallet([cardRecord(1)])
     await tree.findAllByTestId(testIdWithKey('CommunityPass'))
     expect(tree.queryByText(/EmptyList/)).toBeNull()
+  })
+})
+
+describe('a card no linked agent holds', () => {
+  afterEach(() => {
+    mockHiddenCards = new Set()
+  })
+  const keyOf = (record: W3cCredentialRecord) =>
+    walletCardKey(toRawCredential(record) as Record<string, unknown>) as string
+
+  it('is left out, and the cards a linked agent holds stay', () => {
+    const records = [cardRecord(1), cardRecord(2)]
+    mockHiddenCards = new Set([keyOf(records[0])])
+    const { queryAllByTestId } = wallet(records)
+    expect(queryAllByTestId(testIdWithKey('CommunityPass'))).toHaveLength(1)
+  })
+
+  it('with none hidden, every card shows', () => {
+    const { queryAllByTestId } = wallet([cardRecord(1), cardRecord(2)])
+    expect(queryAllByTestId(testIdWithKey('CommunityPass'))).toHaveLength(2)
+  })
+
+  it('never shows before the holders are read: the wait comes first, and the card only after', () => {
+    const records = [cardRecord(1)]
+    mockHiddenCards = undefined
+    const { queryAllByTestId, getByTestId, rerender } = wallet(records)
+    expect(queryAllByTestId(testIdWithKey('CommunityPass'))).toHaveLength(0)
+    expect(getByTestId('ListCredentialsLoading')).toBeTruthy()
+
+    mockHiddenCards = new Set([keyOf(records[0])])
+    rerender(screen())
+    expect(queryAllByTestId(testIdWithKey('CommunityPass'))).toHaveLength(0)
   })
 })
 

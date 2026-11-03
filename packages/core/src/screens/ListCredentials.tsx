@@ -1,5 +1,5 @@
 import { AnonCredsCredentialMetadataKey } from '@credo-ts/anoncreds'
-import { useCredentialByState, useCredentials } from '@bifold/react-hooks'
+import { useAgent, useCredentialByState, useCredentials } from '@bifold/react-hooks'
 import { MdocRecord, SdJwtVcRecord, W3cCredentialRecord } from '@credo-ts/core'
 
 import { isVrcModuleCredential } from '../modules/vrc/credentialTypes'
@@ -27,6 +27,7 @@ import { liftFrom } from '../modules/trust-tasks/components/passGeometry'
 import { isCommunityCard, walletCardKey } from '../modules/trust-tasks/module/vtiWalletCards'
 import { openCommunityFrom } from '../modules/trust-tasks/screens/CommunityCardDetails'
 import CommunityPassDetails from '../modules/trust-tasks/screens/CommunityPassDetails'
+import { useCardsNoLinkedAgentHolds } from '../modules/trust-tasks/module/walletCardHolders'
 import { toRawCredential } from '../modules/vrc/utils/rcardDisplayUtils'
 
 const ListCredentials: React.FC = () => {
@@ -51,8 +52,10 @@ const ListCredentials: React.FC = () => {
     openIdState: { w3cCredentialRecords, sdJwtVcRecords, mdocVcRecords, isLoading: openIdLoading },
   } = useOpenIDCredentials()
   const { loading: didcommLoading } = useCredentials()
-  // Until both stores have been read, the list is not known to be empty: a neutral wait, never "no credentials".
-  const loading = openIdLoading || didcommLoading
+  const { agent } = useAgent()
+  const cardsLeftOut = useCardsNoLinkedAgentHolds(agent)
+  // Until the stores have been read, the list is not known to be empty: a neutral wait, never "no credentials".
+  const loading = openIdLoading || didcommLoading || !cardsLeftOut
 
   let credentials: GenericCredentialExchangeRecord[] = [
     ...useCredentialByState(DidCommCredentialState.CredentialReceived),
@@ -211,6 +214,16 @@ const ListCredentials: React.FC = () => {
 
   // Filter out credentials that should be hidden from wallet view
   credentials = credentials.filter((r) => !shouldHideFromWallet(r))
+
+  // A community card shows only while the agent holding it is linked (walletCardHolders). Until that is read, none is
+  // drawn, so a card about to be left out never shows first. Only the drawing: the copy stays stored.
+  credentials = credentials.filter((r) => {
+    if (!(r instanceof W3cCredentialRecord)) return true
+    const card = (toRawCredential(r) ?? {}) as Record<string, unknown>
+    if (!isCommunityCard(card)) return true
+    const key = walletCardKey(card)
+    return !!cardsLeftOut && !(key && cardsLeftOut.has(key))
+  })
 
   // Filter out hidden credentials when not in dev mode
   if (!store.preferences.developerModeEnabled) {
