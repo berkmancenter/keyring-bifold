@@ -1602,7 +1602,16 @@ export class VtiVetterDesk {
     // there (the community counts only the agent's proof), so nothing is signed
     // and the vetter is told to have the person ask again. The applicant's
     // Keyring sent such a request from a stale private record (2026-11-03,
-    // 277.7). A manifest that cannot be read leaves this to the shape below.
+    // 277.7).
+    //
+    // A manifest that cannot be read leaves this to the shape below, on
+    // purpose. The guard that matters is the applicant's: a Keyring that holds
+    // a current private application never sends this request (`requestVetter`).
+    // This check is the second line, for an older or other app. Refusing on an
+    // unread manifest would block a named community's vetting whenever its
+    // manifest read fails, to guard a case the applicant already prevents; and
+    // the cost of letting one through is a statement that does not count and is
+    // refused on arrival, not a disclosure the applicant did not already have.
     if (read.manifest && everyWayInIsPrivate(read.manifest)) {
       throw Object.assign(
         new Error('vtiVetting: this request did not ask to be vetted privately, and this community vets privately'),
