@@ -53,18 +53,20 @@ export const RoomNotesWaiting: React.FC<RoomNotesWaitingProps> = ({ count, newes
       testID={testIdWithKey('RoomNotesWaiting')}
     >
       <Icon name="note-text-outline" size={24} color={ColorPalette.brand.primary} />
+      {/* "See notes" under the words, not beside them: beside, at the largest text it left the words a third of the
+          row, and the note's title read "Hell…" (render, 11-03). */}
       <View style={styles.words}>
         <ThemedText variant="bold">{counted}</ThemedText>
         {newest ? (
-          <ThemedText style={styles.newest} numberOfLines={1} testID={testIdWithKey('RoomNotesWaitingNewest')}>
+          <ThemedText style={styles.newest} numberOfLines={2} testID={testIdWithKey('RoomNotesWaitingNewest')}>
             {newest}
           </ThemedText>
         ) : null}
+        <ThemedText variant="bold" style={styles.open}>
+          {t('Rooms.NotesWaitingOpen')}
+        </ThemedText>
       </View>
-      <ThemedText variant="bold" style={styles.open}>
-        {t('Rooms.NotesWaitingOpen')}
-      </ThemedText>
-      <Icon name="chevron-right" size={20} color={ColorPalette.brand.primary} />
+      <Icon name="chevron-right" size={22} color={ColorPalette.brand.primary} />
     </Pressable>
   )
 }
