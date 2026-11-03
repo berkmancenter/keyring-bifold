@@ -13,7 +13,9 @@ describe("a mediator endpoint's host, for the log", () => {
   })
 
   it("does not lean on URL, whose React Native build finds no host in a wss:// address (control: Node's does)", () => {
-    const NodeURL = global.URL
+    // The global as the app sees it; this project's types don't declare it (no DOM lib), so it is typed here.
+    const scope = globalThis as unknown as { URL: new (url: string) => { host: string } }
+    const NodeURL = scope.URL
     // React Native 0.81's URL (Libraries/Blob/URL.js): a host only for http(s).
     class NativeURL {
       host: string
@@ -22,12 +24,12 @@ describe("a mediator endpoint's host, for the log", () => {
       }
     }
     expect(new NodeURL('wss://m.example/ws').host).toBe('m.example')
-    global.URL = NativeURL as unknown as typeof URL
+    scope.URL = NativeURL
     try {
-      expect(new URL('wss://m.example/ws').host).toBe('')
+      expect(new scope.URL('wss://m.example/ws').host).toBe('')
       expect(endpointHost('wss://m.example/ws')).toBe('m.example')
     } finally {
-      global.URL = NodeURL
+      scope.URL = NodeURL
     }
   })
 
