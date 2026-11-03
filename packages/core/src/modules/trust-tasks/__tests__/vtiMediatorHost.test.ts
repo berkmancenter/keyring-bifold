@@ -13,7 +13,8 @@ describe("a mediator endpoint's host, for the log", () => {
   })
 
   it("does not lean on URL, whose React Native build finds no host in a wss:// address (control: Node's does)", () => {
-    // The global as the app sees it; this project's types don't declare it (no DOM lib), so it is typed here.
+    // The global as the app sees it; this project's types don't declare it (no DOM lib), so it is typed here. Not
+    // imported from node:url: this test is about the global that endpointHost must not lean on.
     const scope = globalThis as unknown as { URL: new (url: string) => { host: string } }
     const NodeURL = scope.URL
     // React Native 0.81's URL (Libraries/Blob/URL.js): a host only for http(s).
