@@ -83,10 +83,15 @@ export async function afterLeavingCommunity(agent: Agent, communityDid: string, 
   // Every rooms list drops its rooms, and what was remembered of them (useMyRooms).
   DeviceEventEmitter.emit(ROOMS_LEFT_EVENT, communityDid)
   refreshRoomRows()
+  // Neither clear fails the leave, which is done; one that fails is said, so a name or photo still kept is explained.
+  const notCleared = (what: string) => (e: unknown) =>
+    agent.config?.logger?.warn?.(
+      `[Rooms:leave] ${what} for ${shortId(communityDid)} not cleared: ${e instanceof Error ? e.message : String(e)}`
+    )
   // The names its members wrote on their cards, kept for the rooms, go with it.
-  await dropDirectoryNames(agent, communityDid).catch(() => undefined)
+  await dropDirectoryNames(agent, communityDid).catch(notCleared('member names'))
   // And what this phone remembers of the photo it put on the member's card there.
-  await keepSentPhoto(agent, communityDid, undefined).catch(() => undefined)
+  await keepSentPhoto(agent, communityDid, undefined).catch(notCleared('sent photo'))
   // Never fails the leave, which is done: a line that cannot be read or written is only missing.
   await logWhatStays(agent, communityDid).catch((e: unknown) =>
     agent.config?.logger?.warn?.(
