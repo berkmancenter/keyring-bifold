@@ -732,6 +732,10 @@ describe('a community the session is kept from for now', () => {
   it("lists the asked community's offers as none for now, and says once when it can be read again", async () => {
     const s = keptSetup()
     await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
+    // Said by kind alone: never the hold's reason beside the community (34VR-Y58H, 11-03).
+    expect(s.b.warn).toHaveBeenCalledWith(
+      `rooms: ${COMMUNITY.did} did not list its offers: the session is kept for another identity`
+    )
     // A second listing skipped meanwhile waits on the same wait.
     await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
     expect(s.sessionFree).toHaveBeenCalledTimes(1)

@@ -603,6 +603,33 @@ describe('every community kept from for now', () => {
     expect(readable).toHaveBeenCalledTimes(1)
   })
 
+  // 34VR-Y58H (277.8, 11-03): the warn put the hold's reason beside the community's whole DID, every 30 s. The hold's
+  // own rule: never its reason, nor the DID it is kept for, beside a community's DID.
+  it("logs a kept community by short id and says only that the session is kept: never the step's reason", async () => {
+    const LONG = 'did:webvh:QmcSLGfx8V7PJNheJJSXN6HxihM6NNLUXw8TWx8bBDbhz3:dids.oma.ic3.dev:vtc'
+    const held = Object.assign(
+      new Error("vtiAgent: the session is kept for another of this phone's identities (signed in for a step just now)"),
+      { name: 'VtiSessionHeld', heldAs: 'did:webvh:QmHidden:ids.example:step-persona' }
+    )
+    const { b } = backend({
+      communities: async () => [{ did: LONG, personaDid: 'did:key:persona-a' }],
+      communityTask: jest.fn(async () => {
+        throw held
+      }),
+      sessionKept: (e) => e instanceof Error && e.name === 'VtiSessionHeld',
+      sessionFree: jest.fn(() => new Promise<void>(() => undefined)),
+    })
+    await new AgentRoomsService(b).listMyRooms()
+    const lines = (b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(lines).toEqual([
+      "rooms: did:webvh:QmcSLG…3.dev:vtc did not list this member's rooms: the session is kept for another identity",
+    ])
+    for (const line of lines) {
+      expect(line).not.toContain(LONG)
+      expect(line).not.toMatch(/signed in for a step|step-persona/)
+    }
+  })
+
   it('still fails when a community that could not be reached is among them', async () => {
     const other: RoomsCommunity = { did: 'did:webvh:community:b', personaDid: 'did:key:persona-b' }
     const { b } = backend({

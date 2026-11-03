@@ -720,7 +720,12 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     const lines: string[] = []
     renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
     await flush()
-    expect(lines).toEqual([expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/)])
+    // Why the room did not read, by kind: a row "reading" for a whole report said nothing of why (34VR-Y58H, 11-03).
+    expect(lines).toEqual([
+      expect.stringMatching(/^\[Rooms:rows\] .+ of .+ not read: failed$/),
+      expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/),
+    ])
+    expect(lines[0]).not.toContain('agent not ready')
 
     s.listMyRooms.mockRejectedValueOnce(new Error('community unreachable'))
     await step(ROWS_RETRY_MS[0])
