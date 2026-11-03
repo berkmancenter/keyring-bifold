@@ -81,6 +81,20 @@ describe("a persona's key copies, asked for twice at the same moment", () => {
     expect(held.size).toBe(2)
   })
 
+  it('a caller that joined a fetch made for another agent (one that locked) fetches its own copy', async () => {
+    // Before a lock: the sweep starts on the agent that is about to lock. After the unlock: a new agent, the same ids.
+    const before = phone()
+    const after = phone()
+    const exports: string[] = []
+    const sweep = client(before.held, before.agent, exports)
+    const signIn = client(after.held, after.agent, exports)
+    await Promise.all([sweep.holdPersonaKeys(persona), signIn.holdPersonaKeys(persona)])
+    // The joined fetch landed in the locked agent's store, so the new agent fetched its own: held in both.
+    expect(after.held.size).toBe(2)
+    expect(before.held.size).toBe(2)
+    expect(exports).toHaveLength(4)
+  })
+
   it('once held, a later ask fetches nothing (control: the copies are kept for the session, as before)', async () => {
     const { held, agent } = phone()
     const exports: string[] = []

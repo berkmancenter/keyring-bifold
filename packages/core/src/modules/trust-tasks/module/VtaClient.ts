@@ -765,7 +765,8 @@ const personasInFlight = new Map<string, Promise<VtiPersona>>()
 
 /**
  * Key copies being fetched now, by the in-memory key id they go to (see `holdPersonaKeys`): only that a fetch is
- * running, never the key. Each entry goes when its fetch ends, so nothing outlives it to be cleared on a lock.
+ * running, never the key. Each entry goes when its fetch ends, so nothing outlives it to be cleared on a lock. The id
+ * names the agent and its key (`inMemoryKeyId(vtaDid, vtaKeyId)`), so two agents never share an entry.
  */
 const keysInFlight = new Map<string, Promise<void>>()
 
@@ -2612,21 +2613,31 @@ export class VtaClient {
           .then(() => true)
           .catch(() => false))
       if (held) continue
-      let fetch = keysInFlight.get(kmsKeyId)
-      if (!fetch) {
-        const running = (async () => {
-          await this.connect()
-          await this.borrowKey(vtaKeyId)
-        })().finally(() => {
-          if (keysInFlight.get(kmsKeyId) === running) keysInFlight.delete(kmsKeyId)
-        })
-        keysInFlight.set(kmsKeyId, running)
-        fetch = running
+      const joined = keysInFlight.get(kmsKeyId)
+      if (joined) {
+        await joined
+        // Someone else's fetch: the copy is this agent's only if it is held now. A fetch started before a lock lands
+        // in the agent that locked, and a caller after the unlock (a new agent, the same id) would otherwise take it as
+        // held. Not held: this caller fetches it itself.
+        if ((await heldInMemory(this.agent, kmsKeyId)) === false) await this.fetchKeyCopy(kmsKeyId, vtaKeyId)
+      } else {
+        await this.fetchKeyCopy(kmsKeyId, vtaKeyId)
       }
-      await fetch
       fetched = true
     }
     return fetched
+  }
+
+  /** One fetch of a key copy, shared with whoever asks for the same copy while it runs (`keysInFlight`). */
+  private fetchKeyCopy(kmsKeyId: string, vtaKeyId: string): Promise<void> {
+    const running = (async () => {
+      await this.connect()
+      await this.borrowKey(vtaKeyId)
+    })().finally(() => {
+      if (keysInFlight.get(kmsKeyId) === running) keysInFlight.delete(kmsKeyId)
+    })
+    keysInFlight.set(kmsKeyId, running)
+    return running
   }
 
   // ---------------------------------------------------------------------------
