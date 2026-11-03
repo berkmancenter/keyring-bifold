@@ -195,9 +195,9 @@ const Poll: React.FC = () => {
       <>
         <View style={styles.card} testID={testIdWithKey(PollsIds.closed)}>
           <ThemedText variant="bold">{phase === 'cancelled' ? t('Polls.Cancelled') : t('Polls.Closed')}</ThemedText>
-          {!closedEarly(manifest, now) ? (
-            <ThemedText style={styles.muted}>{t('Polls.ClosedOn', date(manifest.votingClosesAt))}</ThemedText>
-          ) : phase === 'closed' ? (
+          {/* Never the set date: an early close makes it untrue, and once it has passed one can't be told apart. */}
+          {phase === 'closed' &&
+          (closedEarly(manifest, now) || (certified && closedEarly(manifest, Date.parse(certified.certifiedAt)))) ? (
             <ThemedText style={styles.muted} testID={testIdWithKey(PollsIds.closedEarly)}>
               {t('Polls.ClosedEarly')}
             </ThemedText>

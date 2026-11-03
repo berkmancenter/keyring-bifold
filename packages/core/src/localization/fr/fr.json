@@ -3182,6 +3182,7 @@
     "OpensOn": "Le vote ouvre le {{date}}",
     "ClosedOn": "Clos le {{date}}",
     "ClosedEarly": "Clos plus tôt que prévu",
+    "ClosedNoDate": "Clos",
     "Cancelled": "Annulé",
     "YouVoted": "Vous avez voté",
     "Sending": "Envoi de votre vote",

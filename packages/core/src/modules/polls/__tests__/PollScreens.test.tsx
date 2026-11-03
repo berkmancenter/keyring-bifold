@@ -12,6 +12,7 @@ import { ScrollView } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
+import PollResults from '../components/PollResults'
 import { PollsIds } from '../components/Polls.ids'
 import type { PollRecord } from '../pollService'
 import type { PollShown } from '../pollTasks'
@@ -310,9 +311,16 @@ describe('a poll closed early', () => {
     ticketHeld: false,
   })
 
-  test('the row says closed early, not the date it was due to close', () => {
+  test('the row says closed early while that can be told, and never the date it was due to close', () => {
     expect(pollRowStatus(t, listed('2099-11-08T17:00:00Z'), undefined, Date.now())).toBe('Polls.ClosedEarly')
-    expect(pollRowStatus(t, listed('2023-12-08T17:00:00Z'), undefined, Date.now())).toBe('Polls.ClosedOn')
+    // Past its set time an early close reads like an on-time one, so neither gets a date.
+    expect(pollRowStatus(t, listed('2023-12-08T17:00:00Z'), undefined, Date.now())).toBe('Polls.ClosedNoDate')
+  })
+
+  // "Closed early" says how the community ran its poll; a phone clock a little slow must not say it.
+  test('a close within a minute of the set time is not called early', () => {
+    const inThirtySeconds = new Date(Date.now() + 30_000).toISOString()
+    expect(pollRowStatus(t, listed(inThirtySeconds), undefined, Date.now())).toBe('Polls.ClosedNoDate')
   })
 
   test('the poll screen says closed early, with no date', () => {
@@ -320,5 +328,19 @@ describe('a poll closed early', () => {
     const tree = renderIn(<Poll />)
     expect(tree.getByTestId(id(PollsIds.closedEarly))).toBeTruthy()
     expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
+  })
+
+  // Results are certified after the close, often after the date it was due to close: compare the certification, not now.
+  test('the results say closed early when they were certified before the set close, even once that date has passed', () => {
+    const manifest = shownWith({ votingClosesAt: '2023-12-20T00:00:00Z' }).manifest
+    const certified = (certifiedAt: string) => ({
+      certifiedAt,
+      result: { electionId: 'charter', manifestDigest: 'zQmDigest', ballotsCounted: 3, questions: [] },
+    })
+    const early = renderIn(<PollResults manifest={manifest} certification={certified('2023-12-15T00:00:00Z')} voted />)
+    expect(early.getByText(/Polls\.ClosedEarly/)).toBeTruthy()
+    const onTime = renderIn(<PollResults manifest={manifest} certification={certified('2023-12-21T00:00:00Z')} voted />)
+    expect(onTime.queryByText(/Polls\.ClosedEarly/)).toBeNull()
+    expect(onTime.getByText(/Polls\.ClosedNoDate/)).toBeTruthy()
   })
 })
