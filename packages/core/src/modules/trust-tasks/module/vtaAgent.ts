@@ -224,7 +224,11 @@ export interface VtaAgentState {
    * as last seen by a look at each (several agents, step 3), with whether the
    * look reached it. Carried into `approvals` when the person switches to it.
    */
-  otherRequests?: Readonly<Record<string, { approvals: VtiApproval[]; reachable: boolean; at: number }>>
+  /**
+   * What a look at each other agent found. `gone`: its address no longer exists (a deleted agent), so it is said so
+   * and not looked at again for {@link GONE_OTHER_RECHECK_MS}.
+   */
+  otherRequests?: Readonly<Record<string, { approvals: VtiApproval[]; reachable: boolean; at: number; gone?: true }>>
   /**
    * Whether the saved link has been read at start-up (`restore`). Until then
    * `link` reads "not linked" on every phone, linked or not, so a screen that
@@ -440,6 +444,13 @@ export const APPROVE_REASON = 'Approve a request from your agent'
 export const DEVICE_LIST_DEADLINE_MS = 15000
 /** Reconnect tries in a row (1 s, 2 s, 4 s, 8 s, 16 s apart) before the agent screen says it didn't answer. */
 export const MAX_RECONNECT_TRIES = 5
+
+/**
+ * How long an other agent found gone (its address answers "not found") is left before one more address check.
+ * Until then it is not looked at: a look's sign-in resolves the address four times, and the look runs on every
+ * return to the foreground (a deleted agent cost ~6 s of 404s per return on 277.8, DEAD-AGENT-LOOK).
+ */
+export const GONE_OTHER_RECHECK_MS = 24 * 60 * 60_000
 
 /**
  * How long after a return a drop still counts as found because the app was
@@ -1111,6 +1122,23 @@ export class VtaAgentController {
       for (const { vtaDid } of links) {
         // Asked again before each look: a look takes seconds, and the current agent can change under it.
         if (vtaDid === current()) continue
+        const known = this.state.otherRequests?.[vtaDid]
+        if (known?.gone && this.now() - known.at < GONE_OTHER_RECHECK_MS) continue
+        // One address check first (bounded, one try): an agent whose address no longer exists is gone. Said so, and
+        // left alone, rather than signed in to, which resolves the address four times on every return.
+        const address = await (this.deps.agentAddress ?? agentAddressOf)(agent, vtaDid).catch(() => 'unknown' as const)
+        if (address === 'notFound') {
+          releaseWarn(
+            `[VTA] another agent, ${didPrefix(vtaDid)}, no longer exists (its address is not found): not looked at`
+          )
+          this.set({
+            otherRequests: {
+              ...(this.state.otherRequests ?? {}),
+              [vtaDid]: { approvals: [], reachable: false, at: this.now(), gone: true },
+            },
+          })
+          continue
+        }
         const seen = await this.lookAt(agent, vtaDid)
         const now = this.now()
         const before = this.state.otherRequests?.[vtaDid]?.approvals ?? []

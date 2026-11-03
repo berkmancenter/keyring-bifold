@@ -2,6 +2,7 @@ import { DeviceEventEmitter } from 'react-native'
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
 import {
+  GONE_OTHER_RECHECK_MS,
   GRANT_HOLD_MS,
   MAX_RECONNECT_TRIES,
   SESSION_CONNECT_DEADLINE_MS,
@@ -1257,7 +1258,7 @@ describe('several agents', () => {
     const vta = new VtaAgentController()
     vta.configure({
       ...extra,
-      now: () => 1_000,
+      now: (extra.now as () => number) ?? (() => 1_000),
       linkStore: () => ({
         get: async () => links.find((l) => l.vtaDid === current) as never,
         set: async (l) => {
@@ -1593,6 +1594,61 @@ describe('several agents', () => {
     await vta.lookAtOtherAgents({} as never)
     expect(looked).toEqual([])
     expect(vta.getState().otherRequests).toBeUndefined()
+  })
+
+  // DEAD-AGENT-LOOK (277.8, a report from 11-03): an agent deleted on its host stayed linked on the phone, and the
+  // look resolved its address four times (~6 s of 404s) at start-up and on every return.
+  describe('an other agent whose address no longer exists', () => {
+    const answering = (answers: Record<string, 'notFound' | 'found' | 'unknown'>) => {
+      const asked: string[] = []
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => {
+        asked.push(did)
+        return answers[did] ?? 'found'
+      })
+      return { asked, agentAddress }
+    }
+
+    it('is said gone after one address check, never looked at, and the current agent is never checked', async () => {
+      const { looked, deps } = lookDelivering([])
+      const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
+      const { vta } = twoAgents({ ...deps, agentAddress })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(looked).toEqual([])
+      expect(asked).toEqual([WORK.vtaDid])
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, reachable: false, approvals: [] })
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: HOME.vtaDid })
+    })
+
+    it('is left alone on the next returns: no address check, no look, within a day', async () => {
+      const { looked, deps } = lookDelivering([])
+      const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      clock += GONE_OTHER_RECHECK_MS - 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toEqual([WORK.vtaDid])
+      expect(looked).toEqual([])
+      // A day on, one more address check (and still no look while it answers "not found").
+      clock += 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toEqual([WORK.vtaDid, WORK.vtaDid])
+      expect(looked).toEqual([])
+    })
+
+    // Control: an address that answers, or that cannot be told, is looked at as before.
+    it.each(['found', 'unknown'] as const)('an address that is %s: looked at as before', async (answer) => {
+      const { looked, deps } = lookDelivering([request('r1')])
+      const { agentAddress } = answering({ [WORK.vtaDid]: answer })
+      const { vta } = twoAgents({ ...deps, agentAddress })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(looked).toEqual([WORK.vtaDid])
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ reachable: true, approvals: [{ id: 'r1' }] })
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
+    })
   })
 
   it('an agent the look cannot reach is said unreachable, not "nothing waits"', async () => {
