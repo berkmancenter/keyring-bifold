@@ -45,14 +45,24 @@ import { renderDayPill } from '../components/chat/DayPill'
 import { useNetwork } from '../contexts/network'
 import { useStore } from '../contexts/store'
 import { useTheme } from '../contexts/theme'
-import { useChatMessagesByConnection, useVrcFlowInProgress, PROGRESS_MILESTONES } from '../hooks/chat-messages'
+import {
+  isPeerWaitStatus,
+  useChatMessagesByConnection,
+  useVrcFlowInProgress,
+  PROGRESS_MILESTONES,
+} from '../hooks/chat-messages'
 import { useConnectionDisplayName } from '../hooks/connections'
 import ContinuityRequestCard from '../modules/vrc/components/ContinuityRequestCard'
+import { LateStepHeldCard, WaitingSinceCard } from '../modules/vrc/components/LateStepCards'
+import { useHeldStep, useTickingNow } from '../modules/vrc/hooks/useLateStep'
+import { askPeerReady, lateStepStore, stopExchange } from '../modules/vrc/lateStep'
+import { vrcFlowStore } from '../modules/vrc/witnessStatusStore'
 import { useWitnessConnection } from '../modules/vrc/context/WitnessConnectionProvider'
 import { Role } from '../types/chat'
 import { markChatEventsSeen } from '../modules/chat/seen'
 import { BasicMessageMetadata, basicMessageCustomMetadata } from '../types/metadata'
 import { getActiveChatConnectionId, setActiveChatConnectionId } from '../utils/activeChatTracker'
+import { testIdWithKey } from '../utils/testable'
 import { sendCapabilityNoticeIfNeeded } from '../modules/chat/notice'
 import { counterpartySpeaksChat } from '../modules/chat/capability'
 import { useChatEvents } from '../modules/chat/chatEventsStore'
@@ -172,6 +182,29 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     onDismissConfirmation,
     onDismissWaiting,
   } = useVrcFlowInProgress(connectionId)
+
+  // A step that arrived late waits for both people (lateStep.ts, IN-448): asked here, or offered again from the bar.
+  const heldStep = useHeldStep(connectionId)
+  const lateNow = useTickingNow(Boolean(heldStep && !heldStep.dismissed) || vrcWaitingOnPeer)
+  const waitingSince = vrcWaitingOnPeer ? vrcFlowStore.getStatusSince(connectionId) : undefined
+  const [lateBusy, setLateBusy] = useState(false)
+  const onCheckReady = useCallback(async () => {
+    if (!agent || lateBusy) return
+    setLateBusy(true)
+    try {
+      await askPeerReady(agent, connectionId)
+    } catch (e) {
+      agent.config.logger.warn(`[VRC:LateStep] ready-check not sent: ${(e as Error).message}`)
+    } finally {
+      setLateBusy(false)
+    }
+  }, [agent, connectionId, lateBusy])
+  const onStopExchange = useCallback(() => {
+    if (!agent) return
+    void stopExchange(agent, connectionId).catch((e: Error) =>
+      agent.config.logger.warn(`[VRC:LateStep] stop not sent: ${e.message}`)
+    )
+  }, [agent, connectionId])
 
   // Check if this connection is a witness connection by matching connectionId
   const _isWitnessConnection = connectedWitness?.connectionId === connectionId
@@ -672,8 +705,40 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           onClosed={onPickerClosed}
         />
 
-        {/* VRC exchange flow loading overlay */}
-        {vrcFlowInProgress && (
+        {/* A remote step that arrived late: asked before anything is sent or signed (lateStep.ts) */}
+        {heldStep && !heldStep.dismissed && (
+          <View style={styles.flowOverlay} pointerEvents="auto">
+            <View style={styles.flowOverlayContent}>
+              <LateStepHeldCard
+                name={theirLabel}
+                held={heldStep}
+                now={lateNow}
+                onCheck={() => void onCheckReady()}
+                onNotNow={() => lateStepStore.dismiss(connectionId)}
+                onStop={() => lateStepStore.dismiss(connectionId, true)}
+                busy={lateBusy}
+                textColor="#333"
+              />
+            </View>
+          </View>
+        )}
+        {heldStep?.dismissed && (
+          <TouchableOpacity
+            style={[styles.lateStepBar, { backgroundColor: ColorPalette.brand.primary }]}
+            onPress={() => lateStepStore.reopen(connectionId)}
+            testID={testIdWithKey('LateStepFinishBar')}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('LateStep.WaitingBar', { name: theirLabel })}. ${t('LateStep.Finish')}`}
+          >
+            <Text style={styles.lateStepBarText}>
+              {t('LateStep.WaitingBar', { name: theirLabel, interpolation: { escapeValue: false } })} ·{' '}
+              {t('LateStep.Finish')}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* VRC exchange flow loading overlay (a held step's card takes its place until both people are here) */}
+        {vrcFlowInProgress && !heldStep && (
           <View style={styles.flowOverlay} pointerEvents="auto">
             <View style={styles.flowOverlayContent}>
               {vrcConfirmed ? (
@@ -714,20 +779,22 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
                   </TouchableOpacity>
                 </>
               ) : vrcWaitingOnPeer ? (
-                <>
-                  <Text style={styles.flowOverlayText}>{t('Relationship.WaitingForAnswer', { name: theirLabel })}</Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={onDismissWaiting}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Global.Dismiss')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
-                  </TouchableOpacity>
-                </>
+                <WaitingSinceCard
+                  name={theirLabel}
+                  since={waitingSince}
+                  now={lateNow}
+                  onWait={onDismissWaiting}
+                  onStop={onStopExchange}
+                  textColor="#333"
+                />
               ) : (
                 <>
                   <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
+                  {isPeerWaitStatus(vrcFlowStore.getStatus(connectionId)) && (
+                    <Text style={styles.flowOverlayNote} testID={testIdWithKey('VrcFlowKeepOpen')}>
+                      {t('LateStep.KeepOpen', { name: theirLabel, interpolation: { escapeValue: false } })}
+                    </Text>
+                  )}
                   {progressFraction > 0 && (
                     <FlowProgressBar
                       fraction={progressFraction}
@@ -785,6 +852,26 @@ const styles = StyleSheet.create({
   flowOverlayDismissText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  flowOverlayNote: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#555',
+    textAlign: 'center',
+  },
+  lateStepBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    zIndex: 900,
+  },
+  lateStepBarText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '600',
   },
 })
