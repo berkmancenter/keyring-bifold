@@ -1,6 +1,7 @@
 import { DeviceEventEmitter } from 'react-native'
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
+import { AGENT_NOT_FOUND_CONFIRM_MS } from '../module/agentGone'
 import {
   GONE_OTHER_RECHECK_MS,
   GRANT_HOLD_MS,
@@ -1608,7 +1609,9 @@ describe('several agents', () => {
       return { asked, agentAddress }
     }
 
-    it('is said gone after one address check, never looked at, and the current agent is never checked', async () => {
+    // One 404 is not a verdict: a host mid-deploy or a moved path answers 404 too (classifyDid reads any 404 as
+    // notFound). The first miss only skips the costly sign-in; gone takes a second miss an hour or more later.
+    it('a first "not found" skips the look and is noted, not a verdict; the current agent is never checked', async () => {
       const { looked, deps } = lookDelivering([])
       const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
       const { vta } = twoAgents({ ...deps, agentAddress })
@@ -1616,26 +1619,59 @@ describe('several agents', () => {
       await vta.lookAtOtherAgents({} as never)
       expect(looked).toEqual([])
       expect(asked).toEqual([WORK.vtaDid])
-      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, reachable: false, approvals: [] })
+      const seen = vta.getState().otherRequests?.[WORK.vtaDid]
+      expect(seen).toMatchObject({ reachable: false, approvals: [], notFoundAt: 1_000 })
+      expect(seen).not.toHaveProperty('gone')
       expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: HOME.vtaDid })
     })
 
-    it('is left alone on the next returns: no address check, no look, within a day', async () => {
+    it('"not found" again within the hour is still no verdict; an hour on it is gone, and left alone for a day', async () => {
       const { looked, deps } = lookDelivering([])
       const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
       let clock = 1_000
       const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
       await vta.restore({} as never)
       await vta.lookAtOtherAgents({} as never)
-      clock += GONE_OTHER_RECHECK_MS - 1
+      clock += AGENT_NOT_FOUND_CONFIRM_MS - 1
       await vta.lookAtOtherAgents({} as never)
-      expect(asked).toEqual([WORK.vtaDid])
-      expect(looked).toEqual([])
-      // A day on, one more address check (and still no look while it answers "not found").
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
       clock += 1
       await vta.lookAtOtherAgents({} as never)
-      expect(asked).toEqual([WORK.vtaDid, WORK.vtaDid])
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, notFoundAt: 1_000 })
+      expect(asked).toHaveLength(3)
+      // Gone: no check and no look within a day, then one check.
+      const goneAt = clock
+      clock = goneAt + GONE_OTHER_RECHECK_MS - 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toHaveLength(3)
+      clock = goneAt + GONE_OTHER_RECHECK_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toHaveLength(4)
       expect(looked).toEqual([])
+    })
+
+    it('an address found in between forgets the earlier "not found"; one that cannot be told keeps it, unconfirmed', async () => {
+      const answers: Record<string, 'notFound' | 'found' | 'unknown'> = { [WORK.vtaDid]: 'notFound' }
+      const { looked, deps } = lookDelivering([])
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => answers[did])
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      answers[WORK.vtaDid] = 'unknown'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ notFoundAt: 1_000, reachable: true })
+      answers[WORK.vtaDid] = 'found'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('notFoundAt')
+      // A "not found" an hour after the first, with a "found" between, is a first again: no verdict.
+      answers[WORK.vtaDid] = 'notFound'
+      clock = 1_000 + AGENT_NOT_FOUND_CONFIRM_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
+      expect(looked).toEqual([WORK.vtaDid, WORK.vtaDid])
     })
 
     // Control: an address that answers, or that cannot be told, is looked at as before.
