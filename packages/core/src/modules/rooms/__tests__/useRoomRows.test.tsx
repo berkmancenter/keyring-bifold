@@ -729,8 +729,10 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
 
     s.listMyRooms.mockRejectedValueOnce(new Error('community unreachable'))
     await step(ROWS_RETRY_MS[0])
-    expect(lines[2]).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
+    // Found by what it says, not where it sits: a line added before it must not move this test.
+    const notListed = lines.find((line) => line.includes('the rooms were not listed'))
+    expect(notListed).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
     // The cause is the service's own line; this one never repeats the error's words.
-    expect(lines[2]).not.toContain('unreachable')
+    expect(notListed).not.toContain('unreachable')
   })
 })
