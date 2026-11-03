@@ -32,14 +32,21 @@ import { EPHEMERAL_KMS_BACKEND, inMemoryKeyId } from '../module/vtaKeys'
 const VTA = 'did:webvh:QmVta:dids.example:keyring-al-vta'
 const PERSONA = 'did:webvh:QmPersona:dids.example:al-first'
 
-/** This phone's in-memory backend: which copies it holds now. */
-function phone() {
+/**
+ * This phone's in-memory backend: which copies it holds now. `canSay: false` is a backend that can't answer whether
+ * it holds one (heldInMemory gives undefined), so only getPublicKey can tell.
+ */
+function phone({ canSay = true } = {}) {
   const held = new Set<string>()
+  const backend = canSay
+    ? { backend: EPHEMERAL_KMS_BACKEND, isHeld: async (id: string) => held.has(id) }
+    : { backend: EPHEMERAL_KMS_BACKEND }
   const agent = {
-    dependencyManager: {
-      resolve: () => ({ backends: [{ backend: EPHEMERAL_KMS_BACKEND, isHeld: async (id: string) => held.has(id) }] }),
+    dependencyManager: { resolve: () => ({ backends: [backend] }) },
+    kms: {
+      getPublicKey: async ({ keyId }: { keyId: string }) =>
+        held.has(keyId) ? { publicJwk: {} } : Promise.reject(new Error('not held')),
     },
-    kms: { getPublicKey: async () => Promise.reject(new Error('not held')) },
   }
   return { held, agent }
 }
@@ -92,6 +99,18 @@ describe("a persona's key copies, asked for twice at the same moment", () => {
     // The joined fetch landed in the locked agent's store, so the new agent fetched its own: held in both.
     expect(after.held.size).toBe(2)
     expect(before.held.size).toBe(2)
+    expect(exports).toHaveLength(4)
+  })
+
+  it("the same, when the new agent's backend can't say whether it holds the copy: can't tell is never held", async () => {
+    const before = phone()
+    const after = phone({ canSay: false })
+    const exports: string[] = []
+    await Promise.all([
+      client(before.held, before.agent, exports).holdPersonaKeys(persona),
+      client(after.held, after.agent, exports).holdPersonaKeys(persona),
+    ])
+    expect(after.held.size).toBe(2)
     expect(exports).toHaveLength(4)
   })
 
