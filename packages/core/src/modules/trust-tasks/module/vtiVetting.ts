@@ -1504,6 +1504,24 @@ export class VtiVetterDesk {
     }))
   }
 
+  /**
+   * The community's manifest, read twice before giving up: the requirements
+   * decide the shape, and the fallback is a guess (a guess of the old shape
+   * made a vetting not count).
+   */
+  private async readManifest(communityDid: string): Promise<ManifestRead> {
+    let unread: string | undefined
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return { manifest: await vtiAgent.fetchManifest(communityDid, this.agent) }
+      } catch (e) {
+        unread = (e as Error)?.message ?? String(e)
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
+      }
+    }
+    return { unread }
+  }
+
   /** The human check, then the statement — never automatic, signed as the member persona. */
   /**
    * The statement shape to write for `communityDid` (228; `chooseStatementShape`).
@@ -1511,23 +1529,11 @@ export class VtiVetterDesk {
    * vetter's own grant from it (B); a manifest that cannot be read now leaves
    * the grant to decide. `off` and `force` read nothing.
    */
-  private async statementShapeFor(communityDid: string): Promise<StatementShapeChoice> {
+  private async statementShapeFor(communityDid: string, read: ManifestRead): Promise<StatementShapeChoice> {
     const mode = getDtgV1WritingMode()
     if (mode !== 'auto') return chooseStatementShape({ mode })
-    let statementType: string | undefined
-    let unread: string | undefined
-    // Read twice before giving up: the requirements decide the shape, and the
-    // fallback is a guess (a guess of the old shape made a vetting not count).
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        statementType = publishedStatementType(await vtiAgent.fetchManifest(communityDid, this.agent))
-        unread = undefined
-        break
-      } catch (e) {
-        unread = (e as Error)?.message ?? String(e)
-        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
-      }
-    }
+    const statementType = read.manifest ? publishedStatementType(read.manifest) : undefined
+    const unread = read.unread
     const grants =
       (await this.communityStore?.listHeldCredentials?.('vetter-grant', communityDid).catch(() => [])) ?? []
     const own = grants
@@ -1588,7 +1594,20 @@ export class VtiVetterDesk {
       declaredRelationship: decision.declaredRelationship ?? 'none',
     }
     let statement: Record<string, unknown>
-    const shape = await this.statementShapeFor(desk.communityDid)
+    const read = await this.readManifest(desk.communityDid)
+    // A request that did not ask to be vetted privately, for a community whose
+    // every way in is private: a statement naming this vetter cannot count
+    // there (the community counts only the agent's proof), so nothing is signed
+    // and the vetter is told to have the person ask again. The applicant's
+    // Keyring sent such a request from a stale private record (2026-11-03,
+    // 277.7). A manifest that cannot be read leaves this to the shape below.
+    if (read.manifest && everyWayInIsPrivate(read.manifest)) {
+      throw Object.assign(
+        new Error('vtiVetting: this request did not ask to be vetted privately, and this community vets privately'),
+        { code: 'keyring/hidden-vetter/attest:requestNotPrivate' }
+      )
+    }
+    const shape = await this.statementShapeFor(desk.communityDid, read)
     // Which shape went out, and what decided it: a device run cannot see it
     // otherwise (the Farm 0.47 gate reads it from a Release build's log).
     releaseWarn(`[VTI] statement shape: writing ${shape.shape} (by ${shape.by})`)
@@ -1962,8 +1981,15 @@ export class VtiApplicant {
     // kept whatever happens here: a phone whose agent cannot carry private
     // vetting has still started applying, and the refusal belongs where the
     // person acts, not at the start of a flow they were offered.
+    //
+    // Keyed on whether the way in is private, never on whether its digest
+    // matches the one gathered for, the rule `submit` already follows: the
+    // digest is the proof's business. Gating on the match skipped this without
+    // a word, the phone kept a private record from an earlier identity, and
+    // every request it sent went out named (2026-11-03, 277.7). A record this
+    // application already has is kept: making another would drop what it holds.
     const privateCriterion = manifest.criteria.find((c) => hiddenParametersOf(c) !== undefined)
-    if (privateCriterion && (!digest || privateCriterion.requirementsDigest === digest)) {
+    if (privateCriterion && !(await this.hiddenApplicationForDisplay())) {
       try {
         await beginHiddenApplication(
           this.agent,
@@ -2074,7 +2100,8 @@ export class VtiApplicant {
       logger?.warn?.('[hidden-vetting] an attestation was not in the published shape; dropped')
       return
     }
-    if (!(await loadHiddenVettingRecord(this.agent, community))) {
+    // This application's own, not one an earlier identity left behind.
+    if (!(await this.hiddenApplication())) {
       logger?.warn?.('[hidden-vetting] an attestation arrived for a community with no hidden application; dropped')
       return
     }
@@ -2131,12 +2158,20 @@ export class VtiApplicant {
    * private application" means (Alberto, 2026-10-15 — the same flow, with the
    * zero-knowledge part on the agent, detected from state).
    *
-   * Note its `joinDid` is the phone's identity at its **agent**, not this
-   * persona: the agent mints the application key against the identity it
-   * knows. So it is never compared with `persona.did`.
+   * Only a record made for **this** application's join DID counts. The record
+   * is kept per community, so it outlives a removal and a join as another
+   * identity; one made for an earlier identity holds a proof bound to that
+   * identity and attestations about it. `requestVetter` already read it this
+   * way and every other reader did not, so a phone holding an old record sent
+   * named requests and then refused the named statements they brought, as
+   * meant for a private application (2026-11-03, 277.7). One answer, here.
    */
-  private hiddenApplication(): Promise<HiddenVettingRecord | undefined> {
-    return loadHiddenVettingRecord(this.agent, this.persona.communityDid)
+  private async hiddenApplication(): Promise<HiddenVettingRecord | undefined> {
+    const [hidden, application] = await Promise.all([
+      loadHiddenVettingRecord(this.agent, this.persona.communityDid),
+      this.store.getApplication(this.persona.communityDid),
+    ])
+    return hidden && application && hidden.joinDid === application.joinDid ? hidden : undefined
   }
 
   /**
@@ -2197,6 +2232,8 @@ export class VtiApplicant {
     code?: string
     method?: VettingMethod
     message?: string
+    /** The community's manifest, when the caller has just read it: whether the way in is private. */
+    manifest?: VtiManifest
   }): Promise<VettingApplicationRequest> {
     const application = await this.app()
     let vetterDid = input.vetterDid
@@ -2222,7 +2259,7 @@ export class VtiApplicant {
       preferredMethod: input.method ?? 'inPerson',
       languages: ['en'],
       ...(input.message ? { message: input.message } : {}),
-      ...(await this.hiddenRequestExt(application)),
+      ...(await this.hiddenRequestExt(application, input.manifest)),
     })
     await vtiAgent.send(vetterDid, VETTING.request, doc)
     const request: VettingApplicationRequest = {
@@ -2250,10 +2287,42 @@ export class VtiApplicant {
    * A hidden application whose identifier is not known yet cannot be vetted:
    * the request is refused here rather than sent to a vetter who could only
    * answer with a statement that names them.
+   *
+   * Nor is a request sent named into a private way in. With no application
+   * at the agent for this join DID (`start` could not make one, or this phone
+   * holds only an earlier identity's), one is made now, so a phone left in
+   * that state mends on its next request; if that fails the request is not
+   * sent, as `submit` refuses for #405 (2026-11-03, 277.7). Whether the way
+   * in is private is the manifest's answer: the one the caller read, or read
+   * here.
    */
-  private async hiddenRequestExt(application: VettingApplication): Promise<{ ext?: Record<string, unknown> }> {
-    const hidden = await loadHiddenVettingRecord(this.agent, application.communityDid)
-    if (!hidden || hidden.joinDid !== application.joinDid) return {}
+  private async hiddenRequestExt(
+    application: VettingApplication,
+    manifest?: VtiManifest
+  ): Promise<{ ext?: Record<string, unknown> }> {
+    let hidden = await this.hiddenApplication()
+    if (!hidden) {
+      const way = manifest ?? (await vtiAgent.fetchManifest(application.communityDid, this.agent))
+      const privateCriterion = way.criteria.find((c) => hiddenParametersOf(c) !== undefined)
+      if (!privateCriterion) return {}
+      try {
+        hidden = await beginHiddenApplication(
+          this.agent,
+          await this.pcsClient(),
+          application.communityDid,
+          privateCriterion,
+          application.joinDid
+        )
+      } catch (error) {
+        this.agent.config?.logger?.info?.(
+          `[hidden-vetting] a request for a private way in was not sent: no agent-side application (${String(error)})`
+        )
+        throw Object.assign(
+          new Error('this way in is vetted privately, and this phone could not make a private application'),
+          { code: 'keyring/hidden-vetting/request:noApplication' }
+        )
+      }
+    }
     if (!hidden.id) {
       throw new Error(
         'vtiVetting: the hidden-vetting application has no identifier yet; refresh it before asking a vetter'
@@ -3131,6 +3200,19 @@ export interface HiddenAttestMeta {
   cardDigestMultibase: string
   validFrom: string
   validUntil: string
+}
+
+/** A community's manifest as a vetter read it: the manifest, or why it could not be read. */
+type ManifestRead = { manifest?: VtiManifest; unread?: string }
+
+/**
+ * Whether every criterion that vets in this manifest vets privately (publishes
+ * hidden-vetting parameters). False when none vets at all, so a manifest with
+ * no vetting is never read as private.
+ */
+export function everyWayInIsPrivate(manifest: VtiManifest): boolean {
+  const vetting = manifest.criteria.filter((c) => (c as { vetting?: unknown }).vetting !== undefined)
+  return vetting.length > 0 && vetting.every((c) => hiddenParametersOf(c) !== undefined)
 }
 
 /**

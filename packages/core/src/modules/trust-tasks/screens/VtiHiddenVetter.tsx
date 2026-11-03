@@ -76,6 +76,9 @@ export function hiddenVetterErrorKey(code: string | undefined): string {
   // The agent's engine draws for another DID than this phone signs with, so
   // every draw would be refused: only a reset at the agent mends it.
   if (code.endsWith(':memberMismatch')) return 'Vetting.Vouch.MemberMismatch'
+  // A request that did not ask to be vetted privately, for a community that
+  // vets only privately: nothing was signed.
+  if (code.endsWith(':requestNotPrivate')) return 'Vetting.Vouch.RequestNotPrivate'
   return 'Vetting.Vouch.ErrorGeneric'
 }
 
