@@ -85,7 +85,11 @@ describe("the rooms backend's leave", () => {
     expect(await createAgentRoomsBackend(agent).departedPersonas?.()).toEqual(['did:key:removed'])
   })
 
-  it('not one still a member of another community, nor a current member (controls)', async () => {
+  // A known limit, not a judgement: the agent's key list names the identity a room's keys are held as, never its
+  // community, so an identity removed from one community and a member of another keeps the rooms of both. Keyring
+  // never makes such an identity: it mints one per community (VtaClient `ensurePersona`). One made by another client
+  // on the same agent and adopted here could be one.
+  it('not one still a member of another community (a known limit), nor a current member (control)', async () => {
     mockHeld = [{ did: 'did:key:both' }, { did: 'did:key:member' }]
     mockMemberships = [
       { communityDid: COMMUNITY, personaDid: 'did:key:both', removal: { code: 'adminRemoved' } },

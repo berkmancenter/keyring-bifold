@@ -118,8 +118,9 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
         typeof d.personaDid === 'string' && !held.has(d.personaDid) ? [d.personaDid] : []
       )
       // A removal keeps the identity, and the rooms listing skips its community (`communities`), so its rooms came
-      // back from the agent's keys: "Rooms · 3 rooms" after First VTC removed the member (277.7, 11-03). An identity
-      // still a member of another community keeps its rooms.
+      // back from the agent's keys: "Rooms · 3 rooms" after First VTC removed the member (277.7, 11-03). The keys name
+      // the identity, not the community, so an identity still a member of another community keeps all its rooms: never
+      // one Keyring makes (one per community, VtaClient `ensurePersona`), possibly one another client made and adopted.
       const memberships = await communityStore.listMemberships()
       const member = new Set(memberships.filter((m) => !m.removal).map((m) => m.personaDid))
       const removed = memberships.filter((m) => m.removal && !member.has(m.personaDid)).map((m) => m.personaDid)
