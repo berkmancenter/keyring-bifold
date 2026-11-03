@@ -3294,7 +3294,7 @@
     "CastAlreadyVoted": "Un vote sous votre ticket est déjà compté, et ce sondage ne permet pas de le remplacer.",
     "CastRefused": "Qui recueille les votes n'a pas accepté ce vote.",
     "Binding": "Ce sondage décide de quelque chose pour la communauté.",
-    "CardWaiting": "En attente de vous",
+    "CardWaiting": "En attente",
     "CardTitle": "Un sondage dans {{community}}",
     "CardCloses": "Se termine le {{date}}",
     "CardOpen": "Ouvrir",
