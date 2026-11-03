@@ -703,7 +703,7 @@ describe('a private record left by an earlier identity', () => {
     await applicantWith(memoryStore({})).requestVetter({ link: ticket, manifest: PRIVATE_WAY })
     expect(mockBegin).toHaveBeenCalledTimes(1)
     // Bound to this application's join DID, never the earlier one.
-    expect(mockBegin.mock.calls[0]?.[4]).toBe(PERSONA.did)
+    expect((mockBegin.mock.calls[0] as unknown[] | undefined)?.[4]).toBe(PERSONA.did)
     expect(sentPayload().ext).toEqual({
       [HIDDEN_VETTING_NS]: { suite: 'ps-ddh-bls12381', id: 'zApplicantPcsIdentifier' },
     })
@@ -746,7 +746,7 @@ describe('a private record left by an earlier identity', () => {
     mockLoadRecord.mockResolvedValue(STALE)
     await applicantWith(memoryStore()).start(PRIVATE_WAY, { 'name.legal': 'A Person' })
     expect(mockBegin).toHaveBeenCalledTimes(1)
-    expect(mockBegin.mock.calls[0]?.[4]).toBe(PERSONA.did)
+    expect((mockBegin.mock.calls[0] as unknown[] | undefined)?.[4]).toBe(PERSONA.did)
   })
 
   it('start makes one when the vetting digest differs from the private criterion’s (it skipped silently)', async () => {
