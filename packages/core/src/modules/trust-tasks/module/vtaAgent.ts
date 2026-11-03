@@ -1147,7 +1147,9 @@ export class VtaAgentController {
             otherRequests: {
               ...(this.state.otherRequests ?? {}),
               [vtaDid]: {
-                approvals: [],
+                // Kept, as a failed look keeps them: one miss is not a verdict, and the waiting count is what the
+                // screen is for. Gone, the address can act on none of them.
+                approvals: gone ? [] : stillWaiting(known?.approvals ?? [], at),
                 reachable: false,
                 at,
                 notFoundAt: firstAt,

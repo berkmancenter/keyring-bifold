@@ -1674,6 +1674,31 @@ describe('several agents', () => {
       expect(looked).toEqual([WORK.vtaDid, WORK.vtaDid])
     })
 
+    // Review of #908: one 404 (a host mid-deploy) must not hide requests a look already found waiting.
+    it('a first "not found" keeps the requests already seen waiting; the verdict an hour on clears them', async () => {
+      const answers: Record<string, 'notFound' | 'found' | 'unknown'> = { [WORK.vtaDid]: 'found' }
+      const { deps } = lookDelivering([request('r1'), request('r2')])
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => answers[did])
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      answers[WORK.vtaDid] = 'notFound'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ reachable: false, notFoundAt: 1_010 })
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      // Another miss inside the hour keeps them still.
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      // Control: the verdict an hour after the first miss marks it gone, and its requests with it.
+      clock = 1_010 + AGENT_NOT_FOUND_CONFIRM_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, approvals: [] })
+    })
+
     // Control: an address that answers, or that cannot be told, is looked at as before.
     it.each(['found', 'unknown'] as const)('an address that is %s: looked at as before', async (answer) => {
       const { looked, deps } = lookDelivering([request('r1')])
