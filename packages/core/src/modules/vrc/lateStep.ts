@@ -27,7 +27,11 @@ import { vrcFlowStore } from './witnessStatusStore'
 
 /** A step found this long after it was sent is held (10 minutes, as approved on the IN-448 mock). */
 export const LATE_STEP_MS = 10 * 60_000
-/** A ready-check and its answer must both happen within this, or it counts as nobody there. */
+/**
+ * A ready-check and its answer must both happen within this, or it counts as nobody there. It gates the RELEASE,
+ * not the signing: once released, the held steps run as an ordinary ceremony with no clock on them, so a slow
+ * Face ID after release finishes as it does today.
+ */
 export const READY_WINDOW_MS = 2 * 60_000
 /** A pickup status older than this says nothing about the message being processed now. */
 const STATUS_FRESH_MS = 60_000

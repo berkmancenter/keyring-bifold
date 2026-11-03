@@ -112,6 +112,15 @@ describe('a held step', () => {
     expect(lateStepStore.get('conn-1')?.check).toBeUndefined()
   })
 
+  // One guard covers three cases today; pinned apart so a split of it cannot change one of them silently.
+  it('a "ready" with no check outstanding changes nothing, held or not', () => {
+    expect(lateStepStore.answered('conn-1', 'c1', true, T0)).toBe('stale')
+    lateStepStore.hold({ connectionId: 'conn-1', reason: 'connected', waitedMs: LATE_STEP_MS })
+    expect(lateStepStore.answered('conn-1', 'c1', true, T0)).toBe('stale')
+    expect(lateStepStore.get('conn-1')).toMatchObject({ phase: 'held' })
+    expect(lateStepStore.isHeld('conn-1')).toBe(true)
+  })
+
   it('"not now" leaves it held with that said; an answer to another check changes nothing', () => {
     lateStepStore.hold({ connectionId: 'conn-1', reason: 'connected', waitedMs: LATE_STEP_MS })
     lateStepStore.asked('conn-1', 'c1', T0)
