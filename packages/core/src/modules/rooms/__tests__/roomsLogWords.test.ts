@@ -3,7 +3,7 @@
  * another identity by its kind alone. The hold's reason names a step, possibly a hidden-vetting persona's; beside a
  * community's DID that pairs the two, which vtiAgent `VtiSessionHeld` forbids.
  */
-import { failureCategory, failureWords, logRef } from '../roomsLogWords'
+import { failureCategory, logRef } from '../roomsLogWords'
 import { RoomsRefused, RoomsUnavailable } from '../types'
 
 const held = Object.assign(
@@ -20,14 +20,8 @@ describe('rooms log words', () => {
   })
 
   test('a kept session says only that it is kept: no reason, no identity', () => {
-    for (const words of [failureWords(held), failureCategory(held)]) {
-      expect(words).toBe('the session is kept for another identity')
-      expect(words).not.toMatch(/step|Hidden/)
-    }
-  })
-
-  test('any other failure keeps its words where a line names a community (control: they say what went wrong)', () => {
-    expect(failureWords(new Error('community unreachable'))).toBe('community unreachable')
+    expect(failureCategory(held)).toBe('the session is kept for another identity')
+    expect(failureCategory(held)).not.toMatch(/step|Hidden/)
   })
 
   test('by kind only: unavailable, refused, unanswered, else its name or "failed"', () => {

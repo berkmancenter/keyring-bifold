@@ -155,7 +155,7 @@ describe('AgentRoomsService', () => {
       [CUSTODY_ROOM, 'custody'],
     ])
     expect(b.warn).toHaveBeenCalledTimes(1)
-    expect(b.warn).toHaveBeenCalledWith(`rooms: ${other.did} did not list this member's rooms: community unreachable`)
+    expect(b.warn).toHaveBeenCalledWith(`rooms: ${other.did} did not list this member's rooms: failed`)
   })
 
   // A member whose community session could not open (an identity brought back from the agent, before its keys
@@ -171,9 +171,8 @@ describe('AgentRoomsService', () => {
       operation: 'listMyRooms',
       reason: 'communityUnreachable',
     })
-    expect(b.warn).toHaveBeenCalledWith(
-      `rooms: ${COMMUNITY.did} did not list this member's rooms: vtiAgent: the persona has no borrowed key-agreement key`
-    )
+    // By kind: the error's words can name an identity, and this line names the community (roomsLogWords).
+    expect(b.warn).toHaveBeenCalledWith(`rooms: ${COMMUNITY.did} did not list this member's rooms: failed`)
   })
 
   // An older community answers, and the answer is that it has no such task (277, on a VTC before rooms): "Couldn't
@@ -628,6 +627,33 @@ describe('every community kept from for now', () => {
       expect(line).not.toContain(LONG)
       expect(line).not.toMatch(/signed in for a step|step-persona/)
     }
+  })
+
+  // ac's review of #903: any error's words may name an identity, not only a hold's reason. Each of these went into the
+  // line whole before; only its kind may.
+  it.each([
+    [
+      'unavailable',
+      new RoomsUnavailable('listMyRooms', 'communityUnreachable', 'did:webvh:x said no'),
+      'unavailable (communityUnreachable)',
+    ],
+    [
+      'refused',
+      Object.assign(new Error('did:key:persona-a is not one'), { name: 'VtiRefusal', code: 'notMember' }),
+      'VtiRefusal',
+    ],
+    ['a TypeError', new TypeError("did:key:persona-a's agent is gone"), 'TypeError'],
+    ['a plain error naming an identity', new Error("did:key:persona-a's agent is no longer linked"), 'failed'],
+  ])('logs %s by its kind alone, never its words', async (_label, error, kind) => {
+    const { b } = backend({
+      communityTask: jest.fn(async () => {
+        throw error
+      }),
+    })
+    await new AgentRoomsService(b).listMyRooms().catch(() => undefined)
+    const lines = (b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(lines).toEqual([`rooms: ${COMMUNITY.did} did not list this member's rooms: ${kind}`])
+    expect(lines.join('\n')).not.toMatch(/persona-a|said no/)
   })
 
   it('still fails when a community that could not be reached is among them', async () => {

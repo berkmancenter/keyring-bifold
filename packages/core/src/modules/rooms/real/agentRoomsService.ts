@@ -35,7 +35,7 @@ import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
-import { failureWords, logRef } from '../roomsLogWords'
+import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
   CommunityRoomMember,
@@ -510,8 +510,8 @@ export class AgentRoomsService implements RoomsService {
       communities.map(async (community) => ({
         community,
         records: await this.membershipsOf(community).catch((e: unknown): RoomMembershipRecord[] => {
-          // By short id, and a held session by its kind alone: never a step's reason beside a community (roomsLogWords).
-          this.backend.warn(`rooms: ${logRef(community.did)} did not list this member's rooms: ${failureWords(e)}`)
+          // By short id, and why by kind alone: no error's words beside a community (roomsLogWords).
+          this.backend.warn(`rooms: ${logRef(community.did)} did not list this member's rooms: ${failureCategory(e)}`)
           if (this.sessionKept(community, e)) kept++
           else if (refusalCode(e) === 'unsupportedType') tooOld.push(community.did)
           else unreachable.push(community.did)
@@ -939,7 +939,7 @@ export class AgentRoomsService implements RoomsService {
       } catch (e) {
         // A kept session is not the community failing, even the one asked for: its offers come with the read again.
         if (!this.sessionKept(community, e) && communityDid) throw e
-        this.backend.warn(`rooms: ${logRef(community.did)} did not list its offers: ${failureWords(e)}`)
+        this.backend.warn(`rooms: ${logRef(community.did)} did not list its offers: ${failureCategory(e)}`)
         continue
       }
       await this.takeRenewals(community, listing.renewals)

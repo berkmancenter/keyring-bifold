@@ -19,7 +19,7 @@ import { WALLET_LOCKED_EVENT } from '../../utils/walletLocked'
 
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
-import { failureWords, logRef } from './roomsLogWords'
+import { failureCategory, logRef } from './roomsLogWords'
 import { RoomsUnavailable } from './types'
 import type { OperationStatus, RoomOffer, RoomsCapabilities, RoomsService, RoomSummary } from './types'
 import { useRoomOfferIds } from './useRoomOffersCount'
@@ -141,7 +141,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
           },
           (e: unknown) => {
             service.note?.(
-              `[Rooms:list] the offers for the ${where} were not read (${Date.now() - began} ms): ${failureWords(e)}`
+              `[Rooms:list] the offers for the ${where} were not read (${Date.now() - began} ms): ${failureCategory(e)}`
             )
             if (live) setState((s) => ({ ...s, offersFailed: true }))
           }
@@ -162,7 +162,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
       } catch (e) {
         const failure: OperationStatus | undefined =
           e instanceof RoomsUnavailable ? { status: 'unavailable', reason: e.reason, detail: e.message } : undefined
-        service.note?.(`[Rooms:list] the ${where} were not read (${Date.now() - began} ms): ${failureWords(e)}`)
+        service.note?.(`[Rooms:list] the ${where} were not read (${Date.now() - began} ms): ${failureCategory(e)}`)
         if (live) setState((s) => ({ ...s, failed: true, failure, failures: s.failures + 1, refreshing: false }))
       }
     })()
