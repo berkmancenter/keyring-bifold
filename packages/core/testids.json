@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "8071589355de4c0ee55be6e1b1055a7e3068ee45",
+  "generatedFrom": "64dda2f28584b939978d9c2f8492530ded0fc0b9",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -805,6 +805,8 @@
     "MessagesEmptyNewMessage": ["src/screens/Messages.tsx"],
     "MessagesFetchingNew": ["src/screens/Messages.tsx"],
     "MessagesGestureRoot": ["src/screens/Messages.tsx"],
+    "MessagesHiddenRooms": ["src/screens/Messages.tsx"],
+    "MessagesHiddenRoomsShow": ["src/screens/Messages.tsx"],
     "MessagesListDelete": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListTimer": ["src/components/listItems/ContactListItem.tsx"],
     "MessagesListUnread": [
@@ -1095,6 +1097,7 @@
     "RoomInfoHide": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoMembers": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoNotes": ["src/modules/rooms/screens/RoomInfo.tsx"],
+    "RoomInfoShow": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomInfoYou": ["src/modules/rooms/screens/RoomInfo.tsx"],
     "RoomLoadingOlder": ["src/modules/rooms/screens/Room.tsx"],
     "RoomMembers": ["src/modules/rooms/components/RoomMembersTab.tsx"],
