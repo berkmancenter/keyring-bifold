@@ -30,7 +30,7 @@ describe('pickAndSendPhoto', () => {
   it('sends the prepared photo with the fallback text, and asks nothing for a photo', async () => {
     const o = options()
     await expect(pickAndSendPhoto(agent, 'conn-1', 'library', o)).resolves.toBe('sent')
-    expect(send).toHaveBeenCalledWith(agent, 'conn-1', jpeg, { fallbackText: 'FALLBACK' })
+    expect(send).toHaveBeenCalledWith(agent, 'conn-1', jpeg, { fallbackText: 'FALLBACK', eventId: expect.any(String) })
     expect(o.confirmGif).not.toHaveBeenCalled()
   })
 
@@ -42,7 +42,7 @@ describe('pickAndSendPhoto', () => {
     expect(no.confirmGif).toHaveBeenCalled()
     expect(send).not.toHaveBeenCalled()
     await expect(pickAndSendPhoto(agent, 'conn-1', 'library', options(true))).resolves.toBe('sent')
-    expect(send).toHaveBeenCalledWith(agent, 'conn-1', gif, { fallbackText: 'FALLBACK' })
+    expect(send).toHaveBeenCalledWith(agent, 'conn-1', gif, { fallbackText: 'FALLBACK', eventId: expect.any(String) })
   })
 
   it.each([
@@ -149,8 +149,17 @@ describe('what the screen hears while a photo goes', () => {
     await expect(h.retry()?.()).resolves.toBe(true)
     expect(send).toHaveBeenCalledTimes(3)
     for (const call of send.mock.calls) expect(call[2]).toBe(jpeg)
+    // Every attempt names the same event, so a receiver that got the first drops the retry instead of showing it twice.
+    const ids = send.mock.calls.map((call) => call[3].eventId)
+    expect(new Set(ids).size).toBe(1)
     expect(pick).toHaveBeenCalledTimes(1)
     expect(prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it('two photos are two events (control for the retry above)', async () => {
+    await pickAndSendPhoto(agent, 'conn-1', 'camera', options())
+    await pickAndSendPhoto(agent, 'conn-1', 'camera', options())
+    expect(send.mock.calls[0][3].eventId).not.toBe(send.mock.calls[1][3].eventId)
   })
 
   it('a pick that ends in nothing is never shown (control: no picked)', async () => {

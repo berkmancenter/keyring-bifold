@@ -25,6 +25,7 @@ import type { Action as ExpoImageManipulatorAction } from 'expo-image-manipulato
 import RNFS from 'react-native-fs'
 
 import type { ManipulateAsyncFn } from '../../vrc/utils/rcardPhoto'
+import { newEventId } from '../eventId'
 import { sendChatPhoto } from '../send'
 import { ChatPhotoPermissionError, pickChatPhoto } from './pick'
 import type { PhotoSource } from './pick'
@@ -109,8 +110,11 @@ export async function pickAndSendPhoto(
   if (prepared.mediaType === 'image/gif' && !(await options.confirmGif())) return 'cancelled'
 
   const ready = prepared
+  // One event for every attempt: a send can fail after the photo arrived, and a retry naming the same event is dropped
+  // by a receiver that already has it, rather than shown twice.
+  const eventId = newEventId()
   const send = async () => {
-    await sendChatPhoto(agent, connectionId, ready, { fallbackText: options.fallbackText })
+    await sendChatPhoto(agent, connectionId, ready, { fallbackText: options.fallbackText, eventId })
   }
   hooks.sending?.()
   try {
