@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "8071589355de4c0ee55be6e1b1055a7e3068ee45",
+  "generatedFrom": "64dda2f28584b939978d9c2f8492530ded0fc0b9",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1154,6 +1154,7 @@
     "RoomOfferUnavailable": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferUntil": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOffers": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomOffersFailed": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomPart": ["src/modules/rooms/screens/RoomPart.tsx"],
     "RoomPollFailed": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPollTryAgain": ["src/modules/rooms/screens/Room.tsx"],
@@ -1204,6 +1205,7 @@
       "src/modules/rooms/screens/RoomsHome.tsx"
     ],
     "RoomsReadFailed": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomsReadFailedCard": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomsReading": [
       "src/modules/rooms/components/CommunityRoomsSection.tsx",
       "src/modules/rooms/components/RoomsListBody.tsx"
@@ -1211,6 +1213,7 @@
     "RoomsSampleDataBanner": ["src/modules/rooms/components/SampleDataBanner.tsx"],
     "RoomsStale": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomsTryAgain": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomsTryingAgain": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "RoomsUnavailable": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "Save": [
       "src/components/forms/WalletNameForm.tsx",
