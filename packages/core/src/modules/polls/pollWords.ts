@@ -29,6 +29,32 @@ export function pollPhase(
   return 'open'
 }
 
+/** How far before its set close a closed poll must be read to count as closed early: a slow phone clock isn't it. */
+export const EARLY_CLOSE_MARGIN_MS = 60_000
+
+/**
+ * Whether a closed poll was already closed at `at`, more than a minute before its set time. `at` is when the phone
+ * read it closed, or when its results were certified. The community says when it closed a poll only on the board,
+ * which a member can't always read, so this is inferred, and approximate by the phone's clock.
+ */
+export const closedEarly = (poll: Pick<PollListItem, 'votingClosesAt'>, at: number): boolean =>
+  at < Date.parse(poll.votingClosesAt) - EARLY_CLOSE_MARGIN_MS
+
+/**
+ * What to say of a closed poll's close. An early close can be shown (read closed, or certified, before the set time);
+ * an on-time one never can, since a poll closed early reads the same once its set time has passed. So it's "Closed
+ * early" when shown, else just "Closed": never the set date, which an early close makes untrue.
+ */
+export function closeLine(
+  t: TFunction,
+  poll: Pick<PollListItem, 'votingClosesAt'>,
+  now: number,
+  certifiedAt?: string
+): string {
+  const early = closedEarly(poll, now) || (certifiedAt !== undefined && closedEarly(poll, Date.parse(certifiedAt)))
+  return early ? t('Polls.ClosedEarly') : t('Polls.ClosedNoDate')
+}
+
 export const pollTitle = (t: TFunction, title: string | undefined): string =>
   title?.trim() || (t('Polls.Untitled') as string)
 
@@ -46,18 +72,11 @@ export function pollRowStatus(t: TFunction, poll: PollListItem, record: PollReco
     case 'open':
       return t('Polls.OpenUntil', date(poll.votingClosesAt))
     case 'closed':
-      return t('Polls.ClosedOn', date(poll.votingClosesAt))
+      return closeLine(t, poll, now)
     case 'cancelled':
       return t('Polls.Cancelled')
   }
 }
-
-/**
- * Closed before its set time: the community (or the ballot box) closed it early. `vtc/elections/show` carries no time
- * for that, and `votingClosesAt` stays the set time, so an early close is shown with no date.
- */
-export const closedEarly = (poll: Pick<PollListItem, 'votingClosesAt'>, now: number): boolean =>
-  now < Date.parse(poll.votingClosesAt)
 
 /**
  * Whether the community has certified the result. A community records `tallied` only when it certifies
@@ -120,7 +139,7 @@ export function pollRowLook(
   if (phase === 'closed')
     return {
       featured: false,
-      chip: { label: closedEarly(poll, now) ? t('Polls.ClosedEarly') : t('Polls.ClosedChip'), tone: 'quiet' },
+      chip: { label: closeLine(t, poll, now), tone: 'quiet' },
       status: t('Polls.Counting'),
     }
   if (phase === 'notOpenYet') return { featured: false, status: t('Polls.OpensOn', date(poll.votingOpensAt)) }

@@ -90,10 +90,11 @@ describe('the list', () => {
     expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
   })
 
-  test('closed at its set time: Closed, not Closed early (control)', () => {
+  test('closed past its set time: Closed, not Closed early, and no date (control)', () => {
     mockPolls.polls = [{ poll: poll({ state: 'closed', votingClosesAt: '2023-12-20T00:00:00Z' }) }]
     const tree = show()
-    expect(within(tree.getByTestId(id(PollsIds.rowChip))).getByText('Polls.ClosedChip')).toBeTruthy()
+    expect(within(tree.getByTestId(id(PollsIds.rowChip))).getByText('Polls.ClosedNoDate')).toBeTruthy()
+    expect(tree.queryByText('Polls.ClosedOn')).toBeNull()
   })
 
   test('a later read that finds the poll certified shows Results, voted or not, with nothing to tap', () => {

@@ -36,6 +36,7 @@ import {
   castFailureText,
   clockTime,
   closedEarly,
+  closeLine,
   lessLikelyFrom,
   minutesSinceTicket,
   PAIRING_WINDOW_MS,
@@ -222,9 +223,8 @@ const Poll: React.FC = () => {
       <>
         {head(
           { label: t('Polls.Results'), tone: 'results' },
-          closedEarly(manifest, Date.parse(certified.certifiedAt))
-            ? t('Polls.ClosedEarly')
-            : t('Polls.ClosedOn', date(manifest.votingClosesAt))
+          // "Closed early" where the certification proves it, else "Closed": never the set date (bifold #887).
+          closeLine(t, manifest, now, certified.certifiedAt)
         )}
         <PollResults manifest={manifest} certification={certified} voted={voted} />
         <View style={styles.card} testID={testIdWithKey(PollsIds.yourPart)}>
@@ -292,26 +292,20 @@ const Poll: React.FC = () => {
     )
 
   if (phase === 'closed' || phase === 'cancelled') {
+    // Early only where it is proven (bifold #887); a poll past its set time shows no date either way.
     const early = phase === 'closed' && closedEarly(manifest, now)
     return screen(
       <>
         <View style={styles.card} testID={testIdWithKey(PollsIds.closed)}>
-          <PollChip
-            label={
-              phase === 'cancelled' ? t('Polls.Cancelled') : early ? t('Polls.ClosedEarly') : t('Polls.ClosedChip')
-            }
-            tone="quiet"
-          />
+          <PollChip label={phase === 'cancelled' ? t('Polls.Cancelled') : closeLine(t, manifest, now)} tone="quiet" />
           <ThemedText variant="headingFour" accessibilityRole="header" testID={testIdWithKey(PollsIds.title)}>
             {title}
           </ThemedText>
-          {phase === 'cancelled' ? null : early ? (
+          {early ? (
             <ThemedText style={styles.muted} testID={testIdWithKey(PollsIds.closedEarly)}>
               {t('Polls.ClosedEarlyBody')}
             </ThemedText>
-          ) : (
-            <ThemedText style={styles.muted}>{t('Polls.ClosedOn', date(manifest.votingClosesAt))}</ThemedText>
-          )}
+          ) : null}
         </View>
         {phase === 'closed' ? resultsNotReady : null}
         <View style={styles.card}>
