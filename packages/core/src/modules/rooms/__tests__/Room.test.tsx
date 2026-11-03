@@ -372,3 +372,45 @@ describe('reaching a room', () => {
     expect(navigate).toHaveBeenCalledWith(Screens.Room, { roomId: PLANNING })
   })
 })
+
+// 34VR-Y58H (277.8, 11-03): re-invited to the community, not to the room. Its posts, notes and files said "Couldn't
+// read… Try again later" for ever; the room now says he is not in it yet, and how to get in.
+describe('a room not joined yet', () => {
+  const notJoined = (offers: { offerId: string; roomId: string }[]) => {
+    const service = withPosts([])
+    const getRoom = service.getRoom.bind(service)
+    service.getRoom = async (roomId: string) => ({ ...(await getRoom(roomId)), tier: 'attributed', joined: false })
+    ;(service as unknown as { listOffers: jest.Mock }).listOffers = jest.fn(async () => offers)
+    return service
+  }
+
+  test('says so in place of the posts and the composer, with no Try again', async () => {
+    const tree = open(notJoined([]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotJoined'))).toHaveTextContent(/Rooms\.NotJoinedTitle/))
+    expect(tree.getByTestId(id('RoomNotJoined'))).toHaveTextContent(/Rooms\.NotJoinedBody/)
+    expect(tree.queryByTestId(id('RoomComposerInput'))).toBeNull()
+    expect(tree.queryByTestId(id('RoomPostsFailed'))).toBeNull()
+    expect(tree.queryByText('Rooms.TryAgain')).toBeNull()
+    expect(tree.queryByTestId(id('RoomNotJoinedOffer'))).toBeNull()
+  })
+
+  test('offers the way to an offer for the room when one is waiting, and only then', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const tree = open(
+      notJoined([
+        { offerId: 'offer-1', roomId: 'did:webvh:r:one' },
+        { offerId: 'other', roomId: 'x' },
+      ])
+    )
+    const button = await waitFor(() => tree.getByTestId(id('RoomNotJoinedOffer')))
+    fireEvent.press(button)
+    expect(navigate).toHaveBeenCalledWith(Screens.RoomOffer, { offerRef: 'offer-1' })
+  })
+
+  test('a joined room has its composer and no such card (control)', async () => {
+    const tree = open(withPosts([]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsNone'))).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomNotJoined'))).toBeNull()
+  })
+})
