@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "8071589355de4c0ee55be6e1b1055a7e3068ee45",
+  "generatedFrom": "64dda2f28584b939978d9c2f8492530ded0fc0b9",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -278,6 +278,16 @@
     "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageImage": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhoto": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoDelete": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoFailed": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoNotNow": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoRetry": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoSheet": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoStatus": ["src/components/chat/Chat.ids.ts"],
+    "ChatPendingPhotoStop": ["src/components/chat/Chat.ids.ts"],
+    "ChatPhotoSent": ["src/components/chat/Chat.ids.ts"],
     "ChatReaction": ["src/components/chat/Chat.ids.ts"],
     "ChatReactionBar": ["src/components/chat/Chat.ids.ts"],
     "ChatReactionBarMore": ["src/components/chat/Chat.ids.ts"],
@@ -1669,6 +1679,9 @@
       "src/components/chat/ChatMessage.tsx": "ChatIds.image"
     },
     {
+      "src/components/chat/ChatMessage.tsx": "ChatIds.photoSent"
+    },
+    {
       "src/components/chat/ChatMessage.tsx": "ChatIds.reactions"
     },
     {
@@ -1706,6 +1719,33 @@
     },
     {
       "src/components/chat/MessageInput.tsx": "ChatIds.composerField"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhoto"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoBackdrop"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoDelete"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoFailed"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoNotNow"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoRetry"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoSheet"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoStatus"
+    },
+    {
+      "src/components/chat/PendingPhotoBubble.tsx": "ChatIds.pendingPhotoStop"
     },
     {
       "src/components/chat/ReactionBar.tsx": "ChatIds.reactionBar"

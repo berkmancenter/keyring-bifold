@@ -11,6 +11,11 @@
  * A pick that ends in nothing is logged, since the screen shows nothing for a
  * cancel: an iOS picker refused access, or never presented, reports one too.
  *
+ * `hooks` let the screen show the photo while it goes: as soon as it is picked,
+ * then while it is sent, and, when it isn't sent, with a way to send the same
+ * prepared photo again. Nothing is stored until a send succeeds (send.ts), so a
+ * photo that failed lives only as long as the screen keeps it.
+ *
  * @module chat/media/compose
  */
 
@@ -48,12 +53,25 @@ export const deviceTools: PrepareTools = {
   readBase64: (uri) => RNFS.readFile(uri, 'base64'),
 }
 
+/** What a screen hears while a photo goes (see the module notes). */
+export interface PhotoSendHooks {
+  /** Picked: what to show while it is prepared and sent. */
+  picked?: (photo: { uri: string; width: number; height: number }) => void
+  /** Asked once it is prepared, before anything is sent: false stops it (the person stopped it while it was prepared). */
+  goOn?: () => boolean
+  /** It is being sent: it can't be stopped from here on. */
+  sending?: () => void
+  /** It wasn't sent. `retry` sends the same prepared photo again and resolves to whether it went this time. */
+  failed?: (retry: () => Promise<boolean>) => void
+}
+
 export interface PhotoSendOptions {
   /** "📷 Photo — update Keyring to see it", in this phone's language, for a contact without chat. */
   fallbackText: string
   /** Asked before a GIF goes, since it is sent as it is; resolves true to send it. */
   confirmGif: () => Promise<boolean>
   tools?: PrepareTools
+  hooks?: PhotoSendHooks
 }
 
 /** Pick a photo from `source` and send it on `connectionId`; resolves to what came of it, never throws. */
@@ -78,6 +96,8 @@ export async function pickAndSendPhoto(
     agent.config?.logger?.info(`[Chat:photo] the ${source} picker closed without a photo`)
     return 'cancelled'
   }
+  const hooks = options.hooks ?? {}
+  hooks.picked?.({ uri: picked.uri, width: picked.width, height: picked.height })
 
   let prepared
   try {
@@ -85,11 +105,23 @@ export async function pickAndSendPhoto(
   } catch (error) {
     return error instanceof ChatPhotoError ? error.problem : 'unreadable'
   }
+  if (hooks.goOn && !hooks.goOn()) return 'cancelled'
   if (prepared.mediaType === 'image/gif' && !(await options.confirmGif())) return 'cancelled'
 
+  const ready = prepared
+  const send = async () => {
+    await sendChatPhoto(agent, connectionId, ready, { fallbackText: options.fallbackText })
+  }
+  hooks.sending?.()
   try {
-    await sendChatPhoto(agent, connectionId, prepared, { fallbackText: options.fallbackText })
+    await send()
   } catch {
+    hooks.failed?.(() =>
+      send().then(
+        () => true,
+        () => false
+      )
+    )
     return 'not-sent'
   }
   return 'sent'
