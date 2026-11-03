@@ -3,7 +3,7 @@
  * appear"): an open poll in a community they belong to, that they haven't voted in and haven't hidden.
  *
  * **When it asks.** Only while the app is in the foreground: when the app opens, when it comes back to the foreground,
- * and once an hour while it stays open. Never in the background, and never on a screen's focus (Alberto, 11-03): each
+ * and once an hour while it stays open. Never in the background, and never on a screen's focus: each
  * check is one signed list read per community, and the community sees each one. Messages coming into focus re-reads
  * only this phone's own records, so a poll voted in leaves the stack at once, with nothing asked of anyone.
  *
@@ -36,7 +36,7 @@ export interface PollWaiting {
   votingClosesAt: string
 }
 
-/** Once an hour while the app is open (Alberto, 11-03). */
+/** Once an hour while the app is open. */
 export const POLLS_CHECK_MS = 60 * 60 * 1000
 
 /** The shortest gap between two checks: the app opening and coming to the foreground often arrive together. */
