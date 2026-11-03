@@ -35,6 +35,7 @@ import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
+import { holdsTwoAuthorities } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
@@ -1338,6 +1339,16 @@ export class AgentRoomsService implements RoomsService {
    * if it changes before the confirmation, the host refuses and `confirmWrite` reports `RoomsConflict`.
    */
   public async prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview> {
+    try {
+      return await this.prepareWriteHere(roomId, draft)
+    } catch (e) {
+      // Refused before anything was sent, on every retry alike: said once per try, by kind alone (roomsLogWords).
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} was refused on this phone: ${failureCategory(e)}`)
+      throw e
+    }
+  }
+
+  private async prepareWriteHere(roomId: string, draft: WriteDraft): Promise<WritePreview> {
     const room = await this.requireInRoom(roomId, 'write')
     // A post's file is refused here, never sent without it, where the room or its host cannot take it.
     if (draft.attachment) await this.requireUpload(room, draft.attachment.size)
@@ -1378,6 +1389,21 @@ export class AgentRoomsService implements RoomsService {
    * replacement must still be at the version the preview read.
    */
   public async confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }> {
+    const roomId = this.writes.get(token)?.roomId
+    try {
+      return await this.confirmWriteNow(token, options)
+    } catch (e) {
+      // By kind alone; the agent refusing for two of the room's authority credentials is named, since no retry passes it.
+      const twoAuthorities = e instanceof Error && holdsTwoAuthorities(e.message) ? ', two authority credentials' : ''
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} was not written: ${failureCategory(e)}${twoAuthorities}`)
+      throw e
+    }
+  }
+
+  private async confirmWriteNow(
+    token: string,
+    options?: RoomsTransferOptions
+  ): Promise<{ key: string; version: number }> {
     const pending = this.writes.get(token)
     this.writes.delete(token)
     if (!pending || this.now() - pending.at > PREVIEW_TOKEN_TTL_MS) throw new RoomsPreviewExpired(token)
