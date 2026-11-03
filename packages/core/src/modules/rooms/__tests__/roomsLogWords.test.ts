@@ -14,7 +14,7 @@ const held = Object.assign(
 describe('rooms log words', () => {
   test('a DID by its short form, never whole; a short one as it is', () => {
     const long = 'did:webvh:QmcSLGfx8V7PJNheJJSXN6HxihM6NNLUXw8TWx8bBDbhz3:dids.oma.ic3.dev:vtc'
-    expect(logRef(long)).toBe('did:webvh:QmcSLG…3.dev:vtc')
+    expect(logRef(long)).toBe('did:webvh:QmcSLG….dev:vtc')
     expect(logRef('did:webvh:community:a')).toBe('did:webvh:community:a')
     expect(logRef(undefined)).toBe('none')
   })

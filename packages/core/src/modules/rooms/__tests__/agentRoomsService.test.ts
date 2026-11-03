@@ -621,7 +621,7 @@ describe('every community kept from for now', () => {
     await new AgentRoomsService(b).listMyRooms()
     const lines = (b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
     expect(lines).toEqual([
-      "rooms: did:webvh:QmcSLG…3.dev:vtc did not list this member's rooms: the session is kept for another identity",
+      "rooms: did:webvh:QmcSLG….dev:vtc did not list this member's rooms: the session is kept for another identity",
     ])
     for (const line of lines) {
       expect(line).not.toContain(LONG)

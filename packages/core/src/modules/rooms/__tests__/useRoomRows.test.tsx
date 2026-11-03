@@ -729,8 +729,8 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
 
     s.listMyRooms.mockRejectedValueOnce(new Error('community unreachable'))
     await step(ROWS_RETRY_MS[0])
-    expect(lines[1]).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
+    expect(lines[2]).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
     // The cause is the service's own line; this one never repeats the error's words.
-    expect(lines[1]).not.toContain('unreachable')
+    expect(lines[2]).not.toContain('unreachable')
   })
 })
