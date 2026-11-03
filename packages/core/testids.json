@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "daeae8eb816022f68fefd948022cffaebf712a84",
+  "generatedFrom": "46d53d84560ce1c517938a767f7d9cc3344500bc",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1043,6 +1043,9 @@
     "RelationshipUpgradeSend": ["src/modules/vrc/components/RelationshipUpgradeSection.tsx"],
     "RelationshipUpgradeWaiting": ["src/modules/vrc/components/RelationshipUpgradeSection.tsx"],
     "RelationshipUpgradeWitness": ["src/modules/vrc/components/RelationshipUpgradeSection.tsx"],
+    "RemoteVrcNotificationsAsk": ["src/modules/vrc/components/RemoteVrcNotificationsAsk.tsx"],
+    "RemoteVrcNotificationsNotNow": ["src/modules/vrc/components/RemoteVrcNotificationsAsk.tsx"],
+    "RemoteVrcNotificationsTurnOn": ["src/modules/vrc/components/RemoteVrcNotificationsAsk.tsx"],
     "RemoveFromWallet": ["src/components/record/RecordRemove.tsx"],
     "RemovedPhone": ["src/modules/trust-tasks/screens/RemovedPhoneCard.tsx"],
     "RequestAsks": ["src/modules/trust-tasks/screens/RequestCard.tsx"],

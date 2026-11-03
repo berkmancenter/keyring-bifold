@@ -45,6 +45,7 @@ import QRScannerTorch from './QRScannerTorch'
 import ScanCamera from './ScanCamera'
 import ScanTab from './ScanTab'
 import SVGOverlay, { MaskType } from './SVGOverlay'
+import RemoteVrcNotificationsAsk from '../../modules/vrc/components/RemoteVrcNotificationsAsk'
 
 type ConnectProps = StackScreenProps<ConnectStackParams>
 interface Props extends ConnectProps {
@@ -533,6 +534,8 @@ const QRScanner: React.FC<Props> = ({
             </View>
             {/* E2E-only: expose invitation URL to the accessibility tree so Appium can
                 read it and paste it into the peer wallet (avoids camera-based QR scan). */}
+            {/* Before a remote exchange: notifications, where turning them on makes this phone wakeable (IN-448). */}
+            {!identityShown && invitation ? <RemoteVrcNotificationsAsk /> : null}
             {__DEV__ && invitation && (
               <ThemedText
                 testID={testIdWithKey('InvitationUrl')}
