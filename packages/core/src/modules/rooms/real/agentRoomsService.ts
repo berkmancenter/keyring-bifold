@@ -1163,8 +1163,10 @@ export class AgentRoomsService implements RoomsService {
         invitation: offer.credentials.invitation,
         ...(accepted.ratchetTree ? { ratchetTree: accepted.ratchetTree } : {}),
       })
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: joined`)
     } catch (e) {
-      // Another surface handed the same Welcome over first.
+      // Another surface handed the same Welcome over first, or the agent still holds the group from before a removal:
+      // both answer the same. Said apart from a real join, by kind alone, since they don't read the same afterwards.
       if (refusalCode(e) !== 'alreadyJoined')
         throw new RoomsRefused(
           'acceptOffer',
@@ -1172,6 +1174,7 @@ export class AgentRoomsService implements RoomsService {
           true,
           `the agent did not join from the Welcome: ${message(e)}`
         )
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: not used, the agent already holds a group for this room`)
     }
     // The epoch keys the member may read, so the room opens at once. A failure here leaves reads to repair it.
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {

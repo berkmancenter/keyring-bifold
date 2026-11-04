@@ -7,6 +7,7 @@ import {
 } from '../real/agentRoomsService'
 import { OFFERS_LIST_TYPES, ROOMS_TASK } from '../real/wire'
 import { PREVIEW_TOKEN_TTL_MS, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
+import { logRef } from '../roomsLogWords'
 
 const COMMUNITY: RoomsCommunity = { did: 'did:webvh:community:a', personaDid: 'did:key:persona-a' }
 const OPEN_ROOM = 'did:webvh:room:open1'
@@ -552,6 +553,35 @@ describe('AgentRoomsService offers', () => {
     )
     expect(await s.service.acceptOffer(preview.token)).toEqual({ roomId: SEALED_ROOM })
     expect(s.calls).not.toContain(ROOMS_TASK.keysWelcome)
+  })
+
+  // The agent answers alreadyJoined for a repeat of the same Welcome and for a group kept from before a removal, and
+  // only the second leaves the member unable to read what came after. The accept goes on either way, so only this line
+  // tells a report which it was.
+  it('logs whether the Welcome was used, by kind alone: a group already held is not a join', async () => {
+    const used = setup({ offers: [offer(SEALED_ROOM, 'attributed', 'open')] })
+    await used.service.acceptOffer((await used.service.previewOffer(offerIdOf(COMMUNITY.did, SEALED_ROOM))).token)
+    const usedLines = (used.b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(used.calls).toContain(ROOMS_TASK.keysWelcome)
+    expect(usedLines.filter((line) => line.includes('Welcome:'))).toEqual([
+      `rooms: ${logRef(SEALED_ROOM)} Welcome: joined`,
+    ])
+
+    const held = setup({
+      offers: [offer(SEALED_ROOM, 'attributed', 'open')],
+      welcome: () => {
+        throw new FakeRefusal('taskFailed', {
+          code: 'rooms/keys/welcome:alreadyJoined',
+          message: 'this VTA already holds group state for did:key:persona-a',
+        })
+      },
+    })
+    await held.service.acceptOffer((await held.service.previewOffer(offerIdOf(COMMUNITY.did, SEALED_ROOM))).token)
+    const heldLines = (held.b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(heldLines.filter((line) => line.includes('Welcome:'))).toEqual([
+      `rooms: ${logRef(SEALED_ROOM)} Welcome: not used, the agent already holds a group for this room`,
+    ])
+    expect(heldLines.join('\n')).not.toMatch(/persona-a|group state/)
   })
 
   it('finishes a join another surface handed the Welcome to first, and reports any other join failure', async () => {
