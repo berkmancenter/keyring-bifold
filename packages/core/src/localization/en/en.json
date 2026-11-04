@@ -1330,6 +1330,7 @@
     "GifTooLarge": "This GIF is too large to send",
     "PhotoTooLarge": "This photo is too large to send",
     "PhotoUnreadable": "This photo can't be sent",
+    "MessageNotSent": "The message wasn't sent. Try again.",
     "PhotoNotSent": "The photo wasn't sent. Try again.",
     "UnsupportedAttachment": "Unsupported attachment",
     "PhotoPreparing": "Getting it ready…",

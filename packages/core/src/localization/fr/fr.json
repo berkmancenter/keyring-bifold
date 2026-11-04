@@ -1259,6 +1259,7 @@
     "GifTooLarge": "Ce GIF est trop volumineux pour être envoyé",
     "PhotoTooLarge": "Cette photo est trop volumineuse pour être envoyée",
     "PhotoUnreadable": "Cette photo ne peut pas être envoyée",
+    "MessageNotSent": "Le message n'a pas été envoyé. Réessayez.",
     "PhotoNotSent": "La photo n'a pas été envoyée. Réessayez.",
     "UnsupportedAttachment": "Pièce jointe non prise en charge",
     "PhotoPreparing": "Préparation…",
