@@ -350,10 +350,13 @@ const Poll: React.FC = () => {
 
   if (record?.ticketAt === undefined && manifest.roll?.rule === 'credential')
     return screen(
-      <View style={styles.card} testID={testIdWithKey(PollsIds.credentialRoll)}>
-        <ThemedText variant="bold">{t('Polls.CredentialRoll')}</ThemedText>
-        <ThemedText>{t('Polls.CredentialRollBody')}</ThemedText>
-      </View>
+      <>
+        {head(undefined, undefined)}
+        <View style={styles.card} testID={testIdWithKey(PollsIds.credentialRoll)}>
+          <ThemedText variant="bold">{t('Polls.CredentialRoll')}</ThemedText>
+          <ThemedText>{t('Polls.CredentialRollBody')}</ThemedText>
+        </View>
+      </>
     )
 
   if (record?.ticketAt !== undefined) {
@@ -515,12 +518,6 @@ const Poll: React.FC = () => {
           {t('Polls.SeesAgent')}
         </PollLine>
         {separate ? <ThemedText>{t('Polls.BothTogether')}</ThemedText> : null}
-        {/* VTI-VOT-065: below 10, a member is told before taking a ticket (VTI-VOT-090). */}
-        {manifest.textReleaseThreshold < 10 ? (
-          <PollLine icon="alert-outline" testID={testIdWithKey(PollsIds.textReleaseEarly)}>
-            {t('Polls.TextReleaseEarly', { count: manifest.textReleaseThreshold })}
-          </PollLine>
-        ) : null}
         {manifest.binding ? (
           <>
             <ThemedText>{t('Polls.CountsMemberships')}</ThemedText>
@@ -539,6 +536,12 @@ const Poll: React.FC = () => {
         <ThemedText style={styles.error} accessibilityLiveRegion="polite" testID={testIdWithKey(PollsIds.refused)}>
           {refusalText(t, refusal)}
         </ThemedText>
+      ) : null}
+      {/* VTI-VOT-065: below 10, a member is told before taking a ticket (VTI-VOT-090), so it stays with the button. */}
+      {manifest.textReleaseThreshold < 10 ? (
+        <PollLine icon="alert-outline" testID={testIdWithKey(PollsIds.textReleaseEarly)}>
+          {t('Polls.TextReleaseEarly', { count: manifest.textReleaseThreshold })}
+        </PollLine>
       ) : null}
       <ThemedText>{t('Polls.TicketLine')}</ThemedText>
       <Button

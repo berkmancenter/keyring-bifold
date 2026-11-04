@@ -529,6 +529,8 @@ describe('a poll this phone or its agent cannot carry', () => {
     const tree = renderIn(<Poll />)
     expect(tree.getByTestId(id(PollsIds.credentialRoll))).toBeTruthy()
     expect(tree.queryByTestId(id(PollsIds.getTicket))).toBeNull()
+    // A render showed the card with nothing saying which poll it meant.
+    expect(tree.getByText('Adopt the community charter?')).toBeTruthy()
   })
 
   test('a ticket already held under a credential roll can still be voted with', () => {
@@ -547,6 +549,13 @@ describe('written answers released after few ballots', () => {
     const tree = renderIn(<Poll />)
     expect(tree.getByTestId(id(PollsIds.textReleaseEarly))).toBeTruthy()
     expect(tree.getByTestId(id(PollsIds.getTicket))).toBeTruthy()
+  })
+
+  // A render showed it below the fold with Get my ticket already there to press.
+  test('it stays with the button: in the fixed bar, not the scroll above it', () => {
+    mockState.shown = shownWith({ textReleaseThreshold: 9 })
+    const tree = renderIn(<Poll />)
+    expect(within(tree.getByTestId(id(PollsIds.screen))).queryByTestId(id(PollsIds.textReleaseEarly))).toBeNull()
   })
 
   test('at 10 or more nothing is added', () => {
