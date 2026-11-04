@@ -11,7 +11,7 @@ import { StackNavigationOptions } from '@react-navigation/stack'
  * - `later`: nothing to do yet (no agent linked): recorded, and done when one is.
  * - `held`: an approval rule on the agent holds the change.
  * - `failed`: turning on did not make the phone wakeable.
- * An app whose `toggle` returns nothing has said nothing: read that as not knowing, not as a failure.
+ * `undefined` from `toggle` means not known: not that nothing happened, and not a failure. The two must never collapse.
  */
 export type PushToggleOutcome = 'on' | 'off' | 'later' | 'held' | 'failed'
 
@@ -21,7 +21,7 @@ interface PushNotificationConfiguration {
   // function to request permission for push notifications
   setup: () => Promise<'denied' | 'granted' | 'unknown'>
   // function to call when the user changes the push notification setting; what came of it, where the app knows
-  toggle: (state: boolean, agent: Agent<any>) => Promise<PushToggleOutcome | void>
+  toggle: (state: boolean, agent: Agent<any>) => Promise<PushToggleOutcome | undefined>
 }
 
 interface AppUpdateConfig {
