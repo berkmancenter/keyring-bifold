@@ -144,6 +144,12 @@ describe('LocalityPreflightModal', () => {
 
     expect(resolveLocalityPreflight).not.toHaveBeenCalled()
     expect(getByText('Gated Summit requires in-person confirmation')).toBeTruthy()
+    // One sentence, with no gap from a line break inside its text.
+    expect(
+      getByText(
+        /You can allow it in Settings, or continue without it and this exchange won't carry that confirmation\.$/
+      )
+    ).toBeTruthy()
   })
 
   it('the refusal state\'s "Continue without it" resolves allow:false', () => {

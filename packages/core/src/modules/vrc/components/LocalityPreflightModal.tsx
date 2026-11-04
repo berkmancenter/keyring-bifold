@@ -165,8 +165,9 @@ const LocalityPreflightModal: React.FC = () => {
                   {`${eventLabel} requires in-person confirmation`}
                 </ThemedText>
                 <ThemedText style={styles.body}>
-                  {`Exchanges here need Bluetooth confirmation that you're at the venue. You can allow it in
-                  Settings, or continue without it and this exchange won't carry that confirmation.`}
+                  {
+                    "Exchanges here need Bluetooth confirmation that you're at the venue. You can allow it in Settings, or continue without it and this exchange won't carry that confirmation."
+                  }
                 </ThemedText>
                 <Button
                   title="Open settings"
