@@ -41,8 +41,14 @@ import {
   type TicketPresentation,
 } from '@bifold/trust-tasks'
 
-import type { VtiCommunityStore, VtiHeldCredential } from './VtiCommunityStore'
-import type { VtiPersona } from './VtiIdentityStore'
+import {
+  GenericRecordsCommunityStore,
+  type JoinSubmission,
+  type VtiCommunityStore,
+  type VtiHeldCredential,
+  type VtiMembership,
+} from './VtiCommunityStore'
+import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import { IDENTITY_VETTING_ENDORSEMENT_TYPE, CREDENTIAL_EXCHANGE_ISSUE } from './vtiInbox'
 import {
   chooseStatementShape,
@@ -69,9 +75,14 @@ import {
   beginHiddenApplication,
   hiddenParametersOf,
   hiddenSubmissionExtensions,
+  closeHiddenApplication,
+  listHiddenVettingRecords,
+  loadClosedHiddenApplication,
   loadHiddenVettingRecord,
   NOT_ENOUGH_YET,
   takeHiddenAttestation,
+  type ClosedHiddenApplication,
+  type HiddenApplicationEnd,
   type HiddenVettingRecord,
 } from './hiddenVetting'
 import { HIDDEN_VETTING_SUITE, pcsErrorCode, type HiddenAttestation } from './pcsVtaPayloads'
@@ -994,6 +1005,129 @@ export const MAX_PARKED_PER_TICKET = 10
 
 /** The largest request kept, in characters: a real one is a few thousand, and the sender decides. */
 export const MAX_PARKED_REQUEST_CHARS = 64 * 1024
+
+/** What is known about an application's identity, read by `closeEndedHiddenApplications`. */
+export interface HiddenApplicationFacts {
+  membership?: Pick<VtiMembership, 'personaDid' | 'grantedAt' | 'removal'>
+  application?: Pick<VettingApplication, 'joinDid' | 'submission'>
+  submission?: Pick<JoinSubmission, 'status' | 'sentAt' | 'privateVetting'>
+  /** Whether this phone still holds the identity the application is for. */
+  identityHeld: boolean
+}
+
+/**
+ * Whether an application has ended, and how. Deleting one can't be undone, and early
+ * costs a person a trip back to their vetters, so only an ending counts:
+ *
+ * - A request deferred, referred or pending is open, and a new proof needs the
+ *   application. `allow` isn't enough either: it ends with the membership card, which
+ *   also covers a referred request approved later, since that only arrives as a card.
+ * - A decision ends only an application older than it. Someone turned down can ask a
+ *   vetter again on the same identity, and the old refusal must not end the new one.
+ */
+export function hiddenApplicationEnd(
+  record: Pick<HiddenVettingRecord, 'joinDid' | 'createdAt'>,
+  facts: HiddenApplicationFacts
+): HiddenApplicationEnd | undefined {
+  const since = (at?: string) => at !== undefined && at >= record.createdAt
+  const { membership, application, submission } = facts
+  if (membership?.personaDid === record.joinDid && since(membership.grantedAt))
+    return membership.removal ? 'removed' : 'joined'
+  if (application?.joinDid === record.joinDid && application.submission && since(application.submission.at)) {
+    const { state, effect } = application.submission
+    if (state === 'withdrawn') return 'withdrawn'
+    if (state === 'decided' && (effect === 'deny' || effect === 'reject')) return 'denied'
+  }
+  // Only a request that carried a proof: an invited request's answer lands in this same record, and has no bearing on a
+  // private application being gathered alongside it.
+  if (submission?.privateVetting && since(submission.sentAt)) {
+    if (submission.status === 'rejected') return 'denied'
+    if (submission.status === 'withdrawn') return 'withdrawn'
+  }
+  return facts.identityHeld ? undefined : 'left'
+}
+
+async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecord, personas: VtiPersona[]) {
+  const community = new GenericRecordsCommunityStore(agent)
+  const vetting = new GenericRecordsVettingStore(agent)
+  const submission = await community.getSubmission(record.community, record.joinDid)
+  const end = hiddenApplicationEnd(record, {
+    membership: await community.getMembership(record.community, record.joinDid),
+    application: await vetting.getApplication(record.community),
+    submission: submission?.personaDid === record.joinDid ? submission : undefined,
+    identityHeld: personas.some((p) => p.did === record.joinDid),
+  })
+  if (!end) return
+  const vtaDid = record.vtaDid ?? vtaAgent.agentAddress()
+  if (!vtaDid) return
+  await vtaAgent.connect(agent, vtaDid)
+  await closeHiddenApplication(agent, vtaAgent.client(agent, vtaDid), record, end)
+}
+
+/**
+ * How long one close may take. An agent task has its own limit only once it has left
+ * the phone, and a sign-in that hangs would otherwise hold the sweep for as long as
+ * the app runs, which can outlast many unlocks.
+ */
+export const CLOSE_APPLICATION_DEADLINE_MS = 60_000
+
+function withinDeadline(work: Promise<void>, deadlineMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('the agent did not answer in time')), deadlineMs)
+    work.then(
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      }
+    )
+  })
+}
+
+/** The sweep running now, and whether something ended while it ran. */
+let closingEnded: Promise<void> | undefined
+let closeAgain = false
+
+/**
+ * End at the agent every private application that has ended (`hiddenApplicationEnd`):
+ * `vta/pcs/applications/delete/0.1` says a client MUST. Read from what is stored rather
+ * than hooked to each way a decision arrives, so a card from any route counts, and what
+ * fails is tried again at the next unlock. Never throws, and logs by kind only: it runs
+ * beside message handling and at unlock, and nothing here should stop either.
+ */
+export function closeEndedHiddenApplications(
+  agent: Agent,
+  deadlineMs: number = CLOSE_APPLICATION_DEADLINE_MS
+): Promise<void> {
+  if (closingEnded) {
+    closeAgain = true
+    return closingEnded
+  }
+  const sweep = async () => {
+    const records = await listHiddenVettingRecords(agent)
+    if (records.length === 0) return
+    // Read once and first: a failure here must not read as "the identity is gone".
+    const personas = await new GenericRecordsIdentityStore(agent).listPersonas()
+    for (const record of records) {
+      await withinDeadline(closeOneEndedApplication(agent, record, personas), deadlineMs).catch(() =>
+        releaseWarn('[hidden-vetting] an ended application was not closed at the agent; tried again at the next unlock')
+      )
+    }
+  }
+  closingEnded = sweep()
+    .catch(() => undefined)
+    .finally(() => {
+      closingEnded = undefined
+      if (closeAgain) {
+        closeAgain = false
+        void closeEndedHiddenApplications(agent, deadlineMs)
+      }
+    })
+  return closingEnded
+}
 
 /** Whether a message is an applicant's vetting request. */
 export const isVettingRequest = (m: DidCommV2PlaintextMessage): boolean => typeOf(m) === VETTING.request
@@ -2379,6 +2513,19 @@ export class VtiApplicant {
     return hidden && application && hidden.joinDid === application.joinDid ? hidden : undefined
   }
 
+  /** The note this application's own private application left when it ended. */
+  private async closedApplicationHere(): Promise<ClosedHiddenApplication | undefined> {
+    try {
+      const [closed, application] = await Promise.all([
+        loadClosedHiddenApplication(this.agent, this.persona.communityDid),
+        this.store.getApplication(this.persona.communityDid),
+      ])
+      return closed && application && closed.joinDid === application.joinDid ? closed : undefined
+    } catch {
+      return undefined
+    }
+  }
+
   /**
    * The same record, for a reader that must not fail because of it.
    *
@@ -3206,6 +3353,9 @@ export class VtiApplicant {
     const application = await this.app()
     await this.store.saveApplication({ ...application, submission })
     this.onChange?.()
+    // Turned down or withdrawn: over now. Not waited for: an answer on screen doesn't depend on the agent's.
+    if (submission?.state === 'decided' || submission?.state === 'withdrawn')
+      void closeEndedHiddenApplications(this.agent)
   }
 
   // The checklist shows only how many grants could not be checked; the reason
@@ -3281,7 +3431,8 @@ export class VtiApplicant {
     // and the rows are empty: statements invented from attestations would
     // claim more than we know, and naming anyone would undo the privacy the
     // exchange exists for.
-    const hidden = await this.hiddenApplicationForDisplay()
+    // An application that has ended was still a private one: this doesn't fall back to the named numbers.
+    const hidden = (await this.hiddenApplicationForDisplay()) ?? (await this.closedApplicationHere())
     if (hidden) {
       const needed = hidden.minimum
       const counted = hidden.held

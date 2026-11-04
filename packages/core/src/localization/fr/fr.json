@@ -2351,6 +2351,7 @@
     "SubmissionDeferred": "La communauté demande davantage : {{needs}}. Votre demande reste ouverte — rassemblez ce qui manque et renvoyez-la, ou retirez-la.",
     "SubmissionPending": "Vous avez postulé — la communauté doit maintenant décider. Vous pouvez encore retirer votre candidature.",
     "SubmissionWithdrawn": "Vous avez retiré votre demande. Vous pouvez postuler à nouveau.",
+    "SubmissionWithdrawnPrivate": "Vous avez retiré votre demande. Pour postuler à nouveau, vous devrez redemander à un garant.",
     "SubmissionDecided": "La communauté a statué sur votre demande ({{effect}}).",
     "SendAgain": "Renvoyer mes attestations",
     "Withdraw": "Retirer ma demande",

@@ -2037,7 +2037,11 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
                         : application.submission.state === 'pending'
                           ? t('Vetting.SubmissionPending')
                           : application.submission.state === 'withdrawn'
-                            ? t('Vetting.SubmissionWithdrawn')
+                            ? t(
+                                checklist?.mode === 'private'
+                                  ? 'Vetting.SubmissionWithdrawnPrivate'
+                                  : 'Vetting.SubmissionWithdrawn'
+                              )
                             : tp('Vetting.SubmissionDecided', { effect: application.submission.effect ?? '—' })}
                     </Text>
                     {application.submission.state === 'deferred' || application.submission.state === 'pending' ? (

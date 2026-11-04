@@ -12,6 +12,7 @@
  * @module trust-tasks/module/vtiJoin
  */
 
+import { closeEndedHiddenApplications } from './vtiVetting'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import type { Agent } from '@credo-ts/core'
 import { DeviceEventEmitter } from 'react-native'
@@ -483,6 +484,8 @@ export async function leaveCommunity(
   await deps.communityStore.forgetCommunity(communityDid, persona.did).catch(() => undefined)
   await deps.vettingStore?.forget(communityDid).catch(() => undefined)
   await deps.identityStore.forgetPersona(communityDid).catch(() => undefined)
+  // Not waited for: leaving is done, whatever the agent answers.
+  void closeEndedHiddenApplications(deps.agent)
   await deps.communityStore
     .saveDeparture?.({ communityDid, personaDid: persona.did, disposition, at: new Date().toISOString() })
     .catch(() => undefined)

@@ -29,7 +29,7 @@ import type { Agent } from '@credo-ts/core'
 
 import { HIDDEN_VETTING_EXT, type VtiCriterion } from './joinManifest'
 import type { VtaClient } from './VtaClient'
-import { getKeyed, putKeyed, withKeyLock } from './keyedRecords'
+import { getKeyed, listKeyed, putKeyed, withKeyLock } from './keyedRecords'
 import {
   HIDDEN_VETTING_SUITE,
   PCS_ERROR,
@@ -202,6 +202,8 @@ export async function hiddenVettingUsable(client: VtaClient, published: unknown)
  * nothing that cannot be re-read.
  */
 export interface HiddenVettingRecord {
+  /** The agent that holds the application, which only that agent can delete. Absent on a record from before 11-2026. */
+  vtaDid?: string
   community: string
   /** The DID the join submission will be signed with; the proof is bound to it. */
   joinDid: string
@@ -273,8 +275,89 @@ function heldOf(application: PcsApplication | undefined): number {
   return Array.isArray(application?.attestations) ? application.attestations.length : 0
 }
 
-export function loadHiddenVettingRecord(agent: Agent, community: string): Promise<HiddenVettingRecord | undefined> {
-  return getKeyed<HiddenVettingRecord>(agent, RECORD_TYPE, KIND, community)
+/** Why an application ended: what makes it safe to destroy at the agent. */
+export type HiddenApplicationEnd = 'joined' | 'removed' | 'denied' | 'withdrawn' | 'left'
+
+/**
+ * What stays of an application once its end is confirmed. No handle, identifier
+ * or parameters: only what a screen needs to go on saying the way in was private.
+ */
+export interface ClosedHiddenApplication {
+  community: string
+  joinDid: string
+  minimum: number
+  /** What the agent held at the end, for a join that went through. 0 for one that didn't: it is gone. */
+  held: number
+  closed: HiddenApplicationEnd
+  closedAt: string
+}
+
+type StoredApplication = HiddenVettingRecord | ClosedHiddenApplication
+const isClosed = (stored: StoredApplication): stored is ClosedHiddenApplication => 'closed' in stored
+
+/** The application in progress for a community. One that has ended is not one. */
+export async function loadHiddenVettingRecord(
+  agent: Agent,
+  community: string
+): Promise<HiddenVettingRecord | undefined> {
+  const stored = await getKeyed<StoredApplication>(agent, RECORD_TYPE, KIND, community)
+  return stored && !isClosed(stored) ? stored : undefined
+}
+
+/** The note an ended application left for a community, if that is what is stored. */
+export async function loadClosedHiddenApplication(
+  agent: Agent,
+  community: string
+): Promise<ClosedHiddenApplication | undefined> {
+  const stored = await getKeyed<StoredApplication>(agent, RECORD_TYPE, KIND, community)
+  return stored && isClosed(stored) ? stored : undefined
+}
+
+/** Every application in progress on this phone, whichever identity and agent it belongs to. */
+export async function listHiddenVettingRecords(agent: Agent): Promise<HiddenVettingRecord[]> {
+  const stored = await listKeyed<StoredApplication>(agent, RECORD_TYPE, KIND)
+  return stored.filter((one): one is HiddenVettingRecord => !isClosed(one))
+}
+
+/**
+ * Tell the agent to destroy an application. `notFound` is done: the agent says that
+ * for one already deleted. It also says it to an agent that never held it, which is
+ * why a record names its agent.
+ */
+async function deleteAtAgent(client: VtaClient, applicationId: string): Promise<void> {
+  try {
+    await client.deletePcsApplication(applicationId)
+  } catch (error) {
+    const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    if (code !== 'vta/pcs/applications/delete:notFound') throw error
+  }
+}
+
+/**
+ * Step 8 for an application that has ended: destroy it at the agent, then replace the
+ * record with a note. Throws if the agent can't confirm, and the record stays: its
+ * `applicationId` is the only handle there is, since the agent doesn't list
+ * applications, so losing it would leave the key and attestations there for good.
+ */
+export async function closeHiddenApplication(
+  agent: Agent,
+  client: VtaClient,
+  record: HiddenVettingRecord,
+  end: HiddenApplicationEnd
+): Promise<void> {
+  await deleteAtAgent(client, record.applicationId)
+  // A newer application may have replaced it while the agent answered: that one stays.
+  const current = await loadHiddenVettingRecord(agent, record.community)
+  if (current?.applicationId !== record.applicationId) return
+  const note: ClosedHiddenApplication = {
+    community: record.community,
+    joinDid: record.joinDid,
+    minimum: record.minimum,
+    held: end === 'joined' || end === 'removed' ? record.held : 0,
+    closed: end,
+    closedAt: new Date().toISOString(),
+  }
+  await putKeyed(agent, RECORD_TYPE, KIND, record.community, note as unknown as Record<string, unknown>)
 }
 
 function saveHiddenVettingRecord(agent: Agent, record: HiddenVettingRecord): Promise<void> {
@@ -307,6 +390,7 @@ export async function startHiddenApplication(
     parameters: what.parameters,
   })
   const record: HiddenVettingRecord = {
+    ...(client.vtaDid ? { vtaDid: client.vtaDid } : {}),
     community: what.community,
     joinDid: what.joinDid,
     applicationId: application.applicationId,
@@ -434,6 +518,14 @@ export async function beginHiddenApplication(
     })
   }
   if (!joinDid) throw new Error('no persona to join this community as')
+  // The new record replaces this one, and with it the only handle to what it left at
+  // the agent. Not being able to delete it doesn't stop the person applying.
+  const earlier = await loadHiddenVettingRecord(agent, communityDid)
+  if (earlier) {
+    await deleteAtAgent(client, earlier.applicationId).catch(() =>
+      agent.config?.logger?.warn?.('[hidden-vetting] an earlier application could not be deleted at the agent')
+    )
+  }
   return startHiddenApplication(agent, client, {
     contextId: (await client.listContexts().catch(() => []))[0]?.id ?? 'vta',
     community: communityDid,
@@ -502,13 +594,13 @@ export async function hiddenSubmissionExtensions(
 }
 
 /**
- * Step 8 — `vta/pcs/applications/delete`, once the join is decided, either way
- * it went. The agent drops the application's key path and its attestations.
+ * `vta/pcs/applications/delete`, for the person starting again on the private vetting
+ * screen. The agent drops the application's key path and its attestations.
  *
- * The local record goes whether or not the agent could be told, because keeping
- * it would offer the person a "resume" that cannot work; the agent's own copy
- * expires on its side. A delete that fails is logged, not thrown: a join that
- * has already been decided must not be left undismissable by a network error.
+ * The local record goes whether or not the agent could be told, and the agent keeps
+ * its copy until it is deleted, with no way left to name it. So this is for that
+ * screen alone: an application that has ended goes through `closeHiddenApplication`,
+ * which keeps the handle until the agent confirms.
  */
 export async function forgetHiddenApplication(
   agent: Agent,

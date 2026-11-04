@@ -2411,6 +2411,7 @@
     "SubmissionDeferred": "The community asked for more: {{needs}}. Your application stays open — gather what is missing and send it again, or withdraw it.",
     "SubmissionPending": "You've applied — it's with the community, waiting on their decision. You can still withdraw it.",
     "SubmissionWithdrawn": "You withdrew your application. You can apply again.",
+    "SubmissionWithdrawnPrivate": "You withdrew your application. To apply again, you'll need to ask a vetter again.",
     "SubmissionDecided": "The community has decided your application ({{effect}}).",
     "SendAgain": "Send my statements again",
     "Withdraw": "Withdraw my application",
