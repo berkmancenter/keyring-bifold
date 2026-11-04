@@ -9,7 +9,7 @@
 import { useNavigation } from '@react-navigation/native'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet, View } from 'react-native'
+import { ScrollView, StyleSheet, View } from 'react-native'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
@@ -46,6 +46,7 @@ export const RoomNotJoined: React.FC<{ room: Pick<RoomSummary, 'roomId' | 'commu
       ? communityLabelOf(room.communityDid, t)
       : (t('Rooms.CommunityNotKnown') as string)
   const styles = StyleSheet.create({
+    scroll: { flex: 1 },
     card: {
       margin: 16,
       padding: 16,
@@ -54,21 +55,24 @@ export const RoomNotJoined: React.FC<{ room: Pick<RoomSummary, 'roomId' | 'commu
       backgroundColor: ColorPalette.brand.secondaryBackground,
     },
   })
+  // It scrolls: at the largest text the words and the button run past the screen, and the button is the way back in.
   return (
-    <View style={styles.card} testID={testIdWithKey('RoomNotJoined')}>
-      <ThemedText variant="bold" accessibilityRole="header">
-        {t('Rooms.NotJoinedTitle')}
-      </ThemedText>
-      <ThemedText>{t('Rooms.NotJoinedBody', { community, interpolation: { escapeValue: false } })}</ThemedText>
-      {offerId ? (
-        <Button
-          title={t('Rooms.NotJoinedOffer')}
-          buttonType={ButtonType.Primary}
-          onPress={() => navigation.navigate(Screens.RoomOffer, { offerRef: offerId })}
-          testID={testIdWithKey('RoomNotJoinedOffer')}
-        />
-      ) : null}
-    </View>
+    <ScrollView style={styles.scroll}>
+      <View style={styles.card} testID={testIdWithKey('RoomNotJoined')}>
+        <ThemedText variant="bold" accessibilityRole="header">
+          {t('Rooms.NotJoinedTitle')}
+        </ThemedText>
+        <ThemedText>{t('Rooms.NotJoinedBody', { community, interpolation: { escapeValue: false } })}</ThemedText>
+        {offerId ? (
+          <Button
+            title={t('Rooms.NotJoinedOffer')}
+            buttonType={ButtonType.Primary}
+            onPress={() => navigation.navigate(Screens.RoomOffer, { offerRef: offerId })}
+            testID={testIdWithKey('RoomNotJoinedOffer')}
+          />
+        ) : null}
+      </View>
+    </ScrollView>
   )
 }
 

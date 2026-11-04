@@ -6,7 +6,7 @@
 import { useNavigation } from '@react-navigation/native'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
-import { FlatList } from 'react-native'
+import { FlatList, ScrollView } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
@@ -392,6 +392,13 @@ describe('a room not joined yet', () => {
     expect(tree.queryByTestId(id('RoomPostsFailed'))).toBeNull()
     expect(tree.queryByText('Rooms.TryAgain')).toBeNull()
     expect(tree.queryByTestId(id('RoomNotJoinedOffer'))).toBeNull()
+  })
+
+  // At the largest text the words and the button run past the screen. A render found it: nothing asserted that it fits.
+  test('its words and its button scroll, at any text size', async () => {
+    const tree = open(notJoined([]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotJoined'))).toBeTruthy())
+    expect(within(tree.UNSAFE_getByType(ScrollView)).getByTestId(id('RoomNotJoined'))).toBeTruthy()
   })
 
   test('offers the way to an offer for the room when one is waiting, and only then', async () => {
