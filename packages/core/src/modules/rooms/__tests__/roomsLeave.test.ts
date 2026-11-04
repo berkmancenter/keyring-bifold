@@ -85,15 +85,19 @@ describe('after leaving a community', () => {
     expect(mockKeepPhoto).toHaveBeenCalled()
   })
 
-  it('says a clear that failed, by the community’s short id, and still does the other', async () => {
+  it('says a clear that failed, by the community’s short id and the kind alone, and still does the other', async () => {
     mockDropNames.mockRejectedValueOnce(new Error('locked'))
     mockKeepPhoto.mockRejectedValueOnce(new Error('store closed'))
     const agent = fakeAgent({}, [])
     await afterLeavingCommunity(agent as never, COMMUNITY)
     const lines = agent.config.logger.warn.mock.calls.map(([line]) => String(line))
-    expect(lines).toContain('[Rooms:leave] member names for …irst-vtc not cleared: locked')
-    expect(lines).toContain('[Rooms:leave] sent photo for …irst-vtc not cleared: store closed')
-    for (const line of lines) expect(line).not.toContain(COMMUNITY)
+    expect(lines).toContain('[Rooms:leave] member names for did:webvh:QmComm…irst-vtc not cleared: failed')
+    expect(lines).toContain('[Rooms:leave] sent photo for did:webvh:QmComm…irst-vtc not cleared: failed')
+    for (const line of lines) {
+      expect(line).not.toContain(COMMUNITY)
+      // An error's own words can name an identity (roomsLogWords).
+      for (const words of ['locked', 'store closed']) expect(line).not.toContain(words)
+    }
   })
 
   it('says nothing about the clears when both are done (control)', async () => {
