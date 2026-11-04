@@ -35,9 +35,11 @@ import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
+import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
   CommunityRoomMember,
+  HeldBackCommunity,
   Identity,
   Note,
   NoteList,
@@ -339,6 +341,12 @@ export class AgentRoomsService implements RoomsService {
   public note(line: string): void {
     this.backend.warn(line)
   }
+
+  /** The communities the last rooms listing skipped because the session was kept for another identity. */
+  private keptBack: HeldBackCommunity[] = []
+  public heldBack(): HeldBackCommunity[] {
+    return this.keptBack
+  }
   public readonly label = 'rooms: the person’s own agent and communities'
   public get runsOn(): object | undefined {
     return this.backend.runsOn
@@ -504,13 +512,14 @@ export class AgentRoomsService implements RoomsService {
     // task was reached, and is too old for rooms; `unsupportedVersion` is not read so, as Keyring may be the one behind.
     const unreachable: string[] = []
     const tooOld: string[] = []
-    let kept = 0
+    const kept: RoomsCommunity[] = []
     const memberships = await Promise.all(
       communities.map(async (community) => ({
         community,
         records: await this.membershipsOf(community).catch((e: unknown): RoomMembershipRecord[] => {
-          this.backend.warn(`rooms: ${community.did} did not list this member's rooms: ${message(e)}`)
-          if (this.sessionKept(community, e)) kept++
+          // By short id, and why by kind alone: no error's words beside a community (roomsLogWords).
+          this.backend.warn(`rooms: ${logRef(community.did)} did not list this member's rooms: ${failureCategory(e)}`)
+          if (this.sessionKept(community, e)) kept.push(community)
           else if (refusalCode(e) === 'unsupportedType') tooOld.push(community.did)
           else unreachable.push(community.did)
           return []
@@ -520,7 +529,7 @@ export class AgentRoomsService implements RoomsService {
     // When none answered, custody alone is not the member's rooms: an open room holds no keys and would be
     // missing, and every other room would show by its id. The read fails instead, and the screen says why — unless
     // only a kept session stopped them: that is not a failure, and the read again follows.
-    if (unreachable.length > 0 && unreachable.length + tooOld.length + kept === communities.length)
+    if (unreachable.length > 0 && unreachable.length + tooOld.length + kept.length === communities.length)
       throw new RoomsUnavailable(
         'listMyRooms',
         'communityUnreachable',
@@ -540,10 +549,12 @@ export class AgentRoomsService implements RoomsService {
         if (record.state === 'offered') continue // an offer, not a room yet: listOffers shows it
         next.set(
           record.roomId,
+          // Held as this identity, not as any: keys an old, removed identity of the same community still has are
+          // not this member's (34VR-Y58H, 11-03).
           this.fromMembership(
             community,
             record,
-            held.find((h) => h.roomId === record.roomId)
+            held.find((h) => holdsAs(h, record.roomId, community.personaDid))
           )
         )
       }
@@ -557,6 +568,10 @@ export class AgentRoomsService implements RoomsService {
     // callers may see a room just left once more: the next listing, asked afresh after the leave, drops it. Answering
     // them from this.rooms instead would show no rooms at all after an accept, which empties it.
     if (changes === this.roomsChanged) this.rooms = next
+    this.keptBack = kept.map((c) => ({
+      communityDid: c.did,
+      ...(c.name !== undefined ? { communityName: toInertText(c.name) } : {}),
+    }))
     return [...next.values()].map(({ community: _community, actingAs: _actingAs, ...summary }) => summary)
   }
 
@@ -611,6 +626,8 @@ export class AgentRoomsService implements RoomsService {
       validUntil: record.validUntil,
       host: record.host,
       standing: record.state === 'removed' ? 'removed' : 'member',
+      // A sealed room is read with the keys the agent holds: none as this identity, and it is not joined yet.
+      ...(isSealed(record.tier) && record.state !== 'removed' && !held ? { joined: false as const } : {}),
       actingAs: { did: community.personaDid, identityWords: community.identityWords },
       community,
     }
@@ -926,7 +943,8 @@ export class AgentRoomsService implements RoomsService {
     let held: Promise<HeldRoom[] | undefined> | undefined
     const heldNow = () =>
       (held ??= this.heldRooms().catch((e): undefined => {
-        this.backend.warn(`rooms: the agent did not list the rooms it holds: ${message(e)}`)
+        // Why by kind alone, in every rooms line (roomsLogWords): an error's words can name an identity.
+        this.backend.warn(`rooms: the agent did not list the rooms it holds: ${failureCategory(e)}`)
         return undefined
       }))
     const out: RoomOffer[] = []
@@ -937,7 +955,7 @@ export class AgentRoomsService implements RoomsService {
       } catch (e) {
         // A kept session is not the community failing, even the one asked for: its offers come with the read again.
         if (!this.sessionKept(community, e) && communityDid) throw e
-        this.backend.warn(`rooms: ${community.did} did not list its offers: ${message(e)}`)
+        this.backend.warn(`rooms: ${logRef(community.did)} did not list its offers: ${failureCategory(e)}`)
         continue
       }
       await this.takeRenewals(community, listing.renewals)
@@ -1024,7 +1042,7 @@ export class AgentRoomsService implements RoomsService {
         }
         this.renewed.add(`${renewal.roomId}|${renewal.issuedAt}`)
       } catch (e) {
-        this.backend.warn(`rooms: the renewal of ${renewal.roomId} was not stored: ${message(e)}`)
+        this.backend.warn(`rooms: the renewal of ${logRef(renewal.roomId)} was not stored: ${failureCategory(e)}`)
       }
     }
   }
@@ -1174,7 +1192,9 @@ export class AgentRoomsService implements RoomsService {
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {
       await this.backend
         .agentTask(ROOMS_TASK.keysBackfill, { roomId, host: offer.host })
-        .catch((e) => this.backend.warn(`rooms: backfill of ${roomId} after joining failed: ${message(e)}`))
+        .catch((e) =>
+          this.backend.warn(`rooms: backfill of ${logRef(roomId)} after joining failed: ${failureCategory(e)}`)
+        )
     }
     return done()
   }
@@ -1753,7 +1773,7 @@ export class AgentRoomsService implements RoomsService {
         ...(isShowableImage(head) ? { image: true } : {}),
       }
     } catch (e) {
-      if ((e as Error)?.name !== 'AbortError') this.backend.warn(`opening a room file failed: ${message(e)}`)
+      if ((e as Error)?.name !== 'AbortError') this.backend.warn(`opening a room file failed: ${failureCategory(e)}`)
       throw e
     } finally {
       letGo()

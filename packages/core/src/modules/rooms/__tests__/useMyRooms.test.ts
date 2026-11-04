@@ -255,7 +255,7 @@ describe('the rooms never wait on the offers, and a failed read says so and trie
       await act(async () => undefined)
       expect(result.current).toMatchObject({ failed: true, failures: 1, failure: { reason: 'communityUnreachable' } })
       expect(s.note).toHaveBeenCalledWith(
-        expect.stringMatching(/the rooms of .* were not read \(\d+ ms\): .*no community answered/)
+        expect.stringMatching(/the rooms of .* were not read \(\d+ ms\): unavailable \(communityUnreachable\)$/)
       )
       expect(s.listMyRooms).toHaveBeenCalledTimes(1)
       await act(async () => void (await jest.advanceTimersByTimeAsync(MY_ROOMS_RETRY_MS - 1)))
@@ -355,5 +355,38 @@ describe('a community left goes from every rooms list at once', () => {
     expect(result.current.rooms).toEqual([])
     await waitFor(() => expect(s.listMyRooms).toHaveBeenCalledTimes(2))
     expect(result.current.rooms).toEqual([])
+  })
+})
+
+// 34VR-Y58H (277.8, 11-03): a community the session was kept from showed nothing at all.
+describe('communities whose rooms are still to come', () => {
+  const LAB = 'did:webvh:QmLab:lab.example'
+  const OTHER = 'did:webvh:QmOther:other.example'
+  beforeEach(() => forgetMyRooms())
+  const withHeld = (held: { communityDid: string }[]) => {
+    const s = service()
+    return Object.assign(s, { heldBack: jest.fn(() => held) })
+  }
+
+  test('carries what the service held back, across communities', async () => {
+    const s = withHeld([{ communityDid: OTHER }])
+    const { result } = renderHook(() => useMyRooms(s))
+    await waitFor(() => expect(result.current.stillLoading).toEqual([{ communityDid: OTHER }]))
+  })
+
+  test("on a community's own screen, only that community's", async () => {
+    const s = withHeld([{ communityDid: OTHER }])
+    const { result } = renderHook(() => useMyRooms(s, LAB))
+    await waitFor(() => expect(result.current.rooms).toEqual([]))
+    expect(result.current.stillLoading).toEqual([])
+  })
+
+  test('clears when the read again finds none held back', async () => {
+    const s = withHeld([{ communityDid: OTHER }])
+    const { result } = renderHook(() => useMyRooms(s))
+    await waitFor(() => expect(result.current.stillLoading).toHaveLength(1))
+    s.heldBack.mockReturnValue([])
+    act(() => result.current.reread())
+    await waitFor(() => expect(result.current.stillLoading).toEqual([]))
   })
 })
