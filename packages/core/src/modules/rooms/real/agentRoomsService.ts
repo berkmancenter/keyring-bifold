@@ -143,7 +143,10 @@ export interface RoomsBackend {
   /** The offers hidden on this phone, by `offerId`. Upstream has no decline, so this is all hiding is. */
   hiddenOffers(): Promise<string[]>
   hideOffer(offerId: string): Promise<void>
-  /** A step that went wrong without failing the operation, for the log. */
+  /**
+   * A step worth a line in the log: one that went wrong without failing the operation, or one whose outcome a report
+   * could not otherwise tell.
+   */
   warn(message: string): void
   /**
    * True for a community task refused because a step keeps this phone's community session as another identity
