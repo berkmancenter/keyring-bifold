@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react-native'
 import { toInertText } from '../inertText'
 import type { RoomPost } from '../roomPosts'
 import type { Identity, RoomsService } from '../types'
-import { useRoomThread } from '../useRoomThread'
+import { type RoomThreadView, useRoomThread } from '../useRoomThread'
 
 const noor = { did: 'did:peer:noor' } as unknown as Identity
 const ines = { did: 'did:peer:ines' } as unknown as Identity
@@ -22,10 +22,11 @@ const post = (key: string, over: Partial<RoomPost> = {}): RoomPost => ({
   ...over,
 })
 const service = (readNote: jest.Mock) => ({ readNote }) as unknown as RoomsService
-const hook = (read: jest.Mock, first: RoomPost[], roomId = 'room') =>
-  renderHook(({ posts, room }) => useRoomThread(service(read), room, undefined, posts), {
-    initialProps: { posts: first as RoomPost[] | undefined, room: roomId },
-  })
+const hook = (read: jest.Mock<any, any>, first: RoomPost[], roomId = 'room') =>
+  renderHook<RoomThreadView, { posts: RoomPost[] | undefined; room: string }>(
+    ({ posts, room }) => useRoomThread(service(read), room, undefined, posts),
+    { initialProps: { posts: first, room: roomId } }
+  )
 
 describe('useRoomThread', () => {
   test('the first version seen is what later ones are compared with', async () => {
@@ -48,7 +49,7 @@ describe('useRoomThread', () => {
   })
 
   test('a target beyond the page is read once however often the page changes, and one on it never', async () => {
-    const read = jest.fn(async () => ({
+    const read = jest.fn(async (_room: string, _key: string) => ({
       key: 't',
       version: 1,
       status: 'active',
