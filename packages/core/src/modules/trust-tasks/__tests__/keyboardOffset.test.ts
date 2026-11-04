@@ -9,7 +9,8 @@ import { type LayoutChangeEvent, Platform, type View } from 'react-native'
 import { useMeasuredKeyboardOffset } from '../screens/keyboardOffset'
 
 const laidOut = (y: number) => ({ nativeEvent: { layout: { x: 0, y, width: 402, height: 600 } } }) as LayoutChangeEvent
-const onScreenAt = (y: number) => ({ measureInWindow: (cb: (x: number, y: number) => void) => cb(0, y) }) as unknown as View
+const onScreenAt = (y: number) =>
+  ({ measureInWindow: (cb: (x: number, y: number) => void) => cb(0, y) }) as unknown as View
 
 describe('useMeasuredKeyboardOffset', () => {
   test('until measured, the offset is the fallback', () => {
