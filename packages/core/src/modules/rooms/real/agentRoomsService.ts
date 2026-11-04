@@ -69,6 +69,17 @@ import {
 
 import { OPEN_FILE_BYTES, openRoomFile, type OpenFileCopy } from './files/open'
 import { checkSender, type ResolveSender } from './files/sender'
+import {
+  governedMembersIn,
+  keptMembers,
+  messageMembers,
+  type RecordFeatures,
+  recordTime,
+  RecordSendingOff,
+  type RecordWrite,
+  requirePermitted,
+  requireReactionValue,
+} from './recordWrites'
 import { holdRoomFileTransfer, sweepRoomFileCopiesOnce } from './files/tempCopies'
 import {
   KEYS_ACT_TYPES,
@@ -95,6 +106,8 @@ import {
   type HeldRoom,
   type OfferRecord,
   type OpenedRecord,
+  parseProfileRecordMembers,
+  type RecordMembers,
   type RenewalRecord,
   type RoomMembershipRecord,
 } from './wire'
@@ -163,6 +176,10 @@ export interface RoomsBackend {
    * is never confirmed.
    */
   resolveSender?: ResolveSender
+  /**
+   * Lets `sendRecord` send. Only tests set it: signing new content needs a maintainer's word on the finished change.
+   */
+  recordSending?: boolean
 }
 
 /** The picked file, and the room host's HTTPS Trust Task door, which an upload's single-use key sends to. */
@@ -379,6 +396,8 @@ export class AgentRoomsService implements RoomsService {
   private readsInFlight = new Map<string, Promise<OpenedRecord>>()
   /** How many times opened records were dropped (a lock, a leave): a read asked before the last one is not kept. */
   private drops = 0
+  /** Each room's `recordMembers`, for the epoch it was read at: a writer may rely on it until the epoch moves. */
+  private recordMembers = new Map<string, { epoch: number; listed: string[] }>()
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
@@ -905,6 +924,7 @@ export class AgentRoomsService implements RoomsService {
     this.listed.clear()
     // A read asked before the lock is not joined after it, nor kept when it answers.
     this.readsInFlight.clear()
+    this.recordMembers.clear()
     this.drops++
   }
 
@@ -913,6 +933,7 @@ export class AgentRoomsService implements RoomsService {
     for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
     for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
     for (const k of [...this.readsInFlight.keys()]) if (k.startsWith(prefix)) this.readsInFlight.delete(k)
+    for (const k of [...this.recordMembers.keys()]) if (k.startsWith(prefix)) this.recordMembers.delete(k)
     // A read of the room still out answers its caller but is not kept, as at a lock (readRecord).
     this.drops++
   }
@@ -1452,6 +1473,97 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
+   * What this room lets its member write: its profile's `recordMembers`, read at most once per room epoch ("A writer
+   * MAY rely on a profile it resolved within the room's current epoch"), and whether the agent seals them. A profile
+   * that can't be read permits none, and isn't kept, so the next ask tries again.
+   */
+  public async recordFeaturesIn(roomId: string): Promise<RecordFeatures> {
+    const room = await this.requireInRoom(roomId, 'write')
+    const { community, host } = this.hostOf(room, 'write')
+    const served = this.served?.types ?? []
+    const canSeal = served.includes(ROOMS_TASK.keysSeal03)
+    if (!served.includes(ROOMS_TASK.keysProfileRead)) return { listed: [], canSeal, unresolved: false }
+    const k = `${room.roomId}\n${host}\n${community.personaDid}`
+    const epoch = await this.heldRooms().then(
+      (held) => held.find((h) => h.roomId === room.roomId && (!h.member || h.member === community.personaDid))?.epoch,
+      () => undefined
+    )
+    const kept = this.recordMembers.get(k)
+    if (kept && epoch !== undefined && kept.epoch === epoch) return { listed: kept.listed, canSeal, unresolved: false }
+    try {
+      const listed = parseProfileRecordMembers(
+        await this.backend.agentTask(ROOMS_TASK.keysProfileRead, { roomId: room.roomId, host })
+      )
+      if (epoch !== undefined) {
+        this.recordMembers.set(k, { epoch, listed })
+        holdingOpened.add(this)
+      }
+      return { listed, canSeal, unresolved: false }
+    } catch {
+      return { listed: [], canSeal, unresolved: true }
+    }
+  }
+
+  /**
+   * Writes a message, a reply or a reaction to an attributed room, by the writer's rule (`recordWrites.ts`). Off until
+   * `RoomsBackend.recordSending` is set, which nothing but tests does: signing new content needs a maintainer's word.
+   */
+  public async sendRecord(roomId: string, write: RecordWrite): Promise<{ key: string; version: number }> {
+    if (!this.backend.recordSending) throw new RecordSendingOff()
+    const room = await this.requireInRoom(roomId, 'write')
+    if (room.tier !== 'attributed')
+      throw new RoomsRefused('write', 'tierNotYet', false, `sending records in a ${room.tier} room is not built`)
+    const { community, host } = this.hostOf(room, 'write')
+    const features = await this.recordFeaturesIn(roomId)
+    const now = this.now()
+
+    let key: string
+    let expectedVersion = 0
+    let ownKey = false
+    let body: string
+    let members: RecordMembers
+    if (write.type === 'message') {
+      key = write.idempotencyKey ? postKey(write.idempotencyKey) : this.backend.newId()
+      ownKey = !!write.idempotencyKey
+      body = write.body
+      members = messageMembers(write.inReplyTo, features, now)
+    } else if (write.type === 'reaction') {
+      requireReactionValue(write.value)
+      key = this.backend.newId()
+      body = write.value
+      members = { kind: 'reaction', inReplyTo: write.target, writtenAt: recordTime(now) }
+    } else {
+      const prior = await this.ownRecord(room, community, write.key)
+      key = write.key
+      expectedVersion = prior.version
+      if (write.type === 'changeReaction') {
+        if (prior.kind !== 'reaction') throw new RoomsRefused('write', 'notThatKind', false, 'not a reaction')
+        requireReactionValue(write.value)
+        body = write.value
+      } else if (write.type === 'edit') {
+        if (prior.kind !== 'message') throw new RoomsRefused('write', 'notThatKind', false, 'not a message')
+        body = write.body
+      } else {
+        if (prior.kind !== 'message' && prior.kind !== 'reaction')
+          throw new RoomsRefused('write', 'notThatKind', false, 'only a message or a reaction is withdrawn')
+        body = ''
+      }
+      members = keptMembers(prior, features, now)
+    }
+    requirePermitted(members, features)
+    return this.writeSealed(room, community, host, key, expectedVersion, { title: '', body, members }, ownKey)
+  }
+
+  /** The current version of a record this member wrote: a new version comes only from its author, and keeps what it must. */
+  private async ownRecord(room: KnownRoom, community: RoomsCommunity, key: string): Promise<OpenedRecord> {
+    const prior = await this.readRecord(room, room.roomId, key)
+    if (prior.status === 'retracted') throw new RoomsRefused('write', 'retracted', false, 'that record was removed')
+    if (prior.author !== community.personaDid)
+      throw new RoomsRefused('write', 'notYours', false, 'someone else wrote it')
+    return prior
+  }
+
+  /**
    * Writes a note to an attributed room, as `pnm rooms put` does (VTA 0.67). The phone builds the record's body
    * naming the member as its author, without a proof; the agent signs it as the member and seals it
    * (`rooms/keys/seal/0.2`, `signAsPrincipal`), and the sealed form is put as the member like any write.
@@ -1468,7 +1580,7 @@ export class AgentRoomsService implements RoomsService {
     host: string,
     key: string,
     expectedVersion: number,
-    note: { title: string; body?: string; file?: FileManifest },
+    note: { title: string; body?: string; file?: FileManifest; members?: RecordMembers },
     ownKey: boolean,
     options: { blobs?: string[] } = {}
   ): Promise<{ key: string; version: number }> {
@@ -1484,9 +1596,13 @@ export class AgentRoomsService implements RoomsService {
         ...(note.title.trim() ? { title: note.title } : {}),
         ...(note.body !== undefined ? { body: note.body } : {}),
         ...(note.file ? { file: note.file } : {}),
+        ...note.members,
       }
+      // Only a body using these members needs 0.3: every other write stays exactly as it was.
+      const sealType =
+        note.members && governedMembersIn(note.members).length > 0 ? ROOMS_TASK.keysSeal03 : ROOMS_TASK.keysSeal02
       const sealed = parseSealed(
-        await this.agentStep('write', 'sign and seal the note as the member', ROOMS_TASK.keysSeal02, {
+        await this.agentStep('write', 'sign and seal the note as the member', sealType, {
           roomId: room.roomId,
           key,
           version: intended,
