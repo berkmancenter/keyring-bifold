@@ -35,6 +35,7 @@ import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText, reactionValueOfBody } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
+import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
@@ -157,7 +158,10 @@ export interface RoomsBackend {
   /** The offers hidden on this phone, by `offerId`. Upstream has no decline, so this is all hiding is. */
   hiddenOffers(): Promise<string[]>
   hideOffer(offerId: string): Promise<void>
-  /** A step that went wrong without failing the operation, for the log. */
+  /**
+   * A step worth a line in the log: one that went wrong without failing the operation, or one whose outcome a report
+   * could not otherwise tell.
+   */
   warn(message: string): void
   /**
    * True for a community task refused because a step keeps this phone's community session as another identity
@@ -1206,8 +1210,10 @@ export class AgentRoomsService implements RoomsService {
         invitation: offer.credentials.invitation,
         ...(accepted.ratchetTree ? { ratchetTree: accepted.ratchetTree } : {}),
       })
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: joined`)
     } catch (e) {
-      // Another surface handed the same Welcome over first.
+      // Another surface handed the same Welcome over first or, by the agent's source, it still holds the group from
+      // before a removal: both answer the same. Said apart from a real join, by kind alone (roomsLogWords).
       if (refusalCode(e) !== 'alreadyJoined')
         throw new RoomsRefused(
           'acceptOffer',
@@ -1215,6 +1221,7 @@ export class AgentRoomsService implements RoomsService {
           true,
           `the agent did not join from the Welcome: ${message(e)}`
         )
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: not used, the agent already holds a group for this room`)
     }
     // The epoch keys the member may read, so the room opens at once. A failure here leaves reads to repair it.
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {
@@ -1381,6 +1388,17 @@ export class AgentRoomsService implements RoomsService {
    * if it changes before the confirmation, the host refuses and `confirmWrite` reports `RoomsConflict`.
    */
   public async prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview> {
+    try {
+      return await this.prepareWriteHere(roomId, draft)
+    } catch (e) {
+      // Before anything was sent, by kind alone (roomsLogWords): refused for good here, or not prepared this time.
+      const outcome = permanentRefusal(e) ? 'was refused on this phone' : 'could not be prepared'
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} ${outcome}: ${failureCategory(e)}`)
+      throw e
+    }
+  }
+
+  private async prepareWriteHere(roomId: string, draft: WriteDraft): Promise<WritePreview> {
     const room = await this.requireInRoom(roomId, 'write')
     // A post's file is refused here, never sent without it, where the room or its host cannot take it.
     if (draft.attachment) await this.requireUpload(room, draft.attachment.size)
@@ -1421,6 +1439,23 @@ export class AgentRoomsService implements RoomsService {
    * replacement must still be at the version the preview read.
    */
   public async confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }> {
+    const roomId = this.writes.get(token)?.roomId
+    try {
+      return await this.confirmWriteNow(token, options)
+    } catch (e) {
+      // A preview gone stale is prepared again by the sender (useRoomSend): not a write that failed.
+      if (e instanceof RoomsPreviewExpired) throw e
+      // By kind alone; the agent refusing for two of the room's authority credentials is named, since no retry passes it.
+      const twoAuthorities = e instanceof Error && holdsTwoAuthorities(e.message) ? ', two authority credentials' : ''
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} was not written: ${failureCategory(e)}${twoAuthorities}`)
+      throw e
+    }
+  }
+
+  private async confirmWriteNow(
+    token: string,
+    options?: RoomsTransferOptions
+  ): Promise<{ key: string; version: number }> {
     const pending = this.writes.get(token)
     this.writes.delete(token)
     if (!pending || this.now() - pending.at > PREVIEW_TOKEN_TTL_MS) throw new RoomsPreviewExpired(token)
