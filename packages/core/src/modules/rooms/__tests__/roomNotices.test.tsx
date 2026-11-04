@@ -223,7 +223,7 @@ describe("a post that didn't send", () => {
     room.unmount()
     await act(async () => release())
     expect(show).toHaveBeenCalledTimes(1)
-    expect(toast(0)).toMatchObject({ type: 'error', text1: 'Rooms.NoticePostFailed', text2: 'Rooms.PostNotSentWhy' })
+    expect(toast(0)).toMatchObject({ type: 'error', text1: 'Rooms.NoticePostFailed', text2: 'Rooms.PostNotTaken' })
     await act(async () => toast(0).onPress())
     await flush()
     expect(service.prepareWrite).toHaveBeenCalledTimes(1)

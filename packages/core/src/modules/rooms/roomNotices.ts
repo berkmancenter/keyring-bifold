@@ -41,7 +41,7 @@ import { communityLabelOf } from '../trust-tasks/screens/communityName'
 
 import { roomTitle } from './components/RoomRow'
 import { toInertText } from './inertText'
-import { postRefusalText } from './postRefusal'
+import { postRefusalWhy } from './postRefusal'
 import { type AccessNotice, nextAccessNotice } from './roomAccess'
 import type { RoomOffer } from './types'
 import { useRoomOffersCount } from './useRoomOffersCount'
@@ -244,7 +244,7 @@ export function useRoomNotices(): void {
         text1: postFailedWords(e.roomName, t),
         // Refused for good: why, and no retry.
         text2: e.refused
-          ? postRefusalText(t, e.refused)
+          ? postRefusalWhy(t, e.refused)
           : (t(e.hasFile ? 'Rooms.PostFileNotSent' : 'Rooms.NoticeTryAgain') as string),
         visibilityTime: NOTICE_MS,
         position: 'bottom',

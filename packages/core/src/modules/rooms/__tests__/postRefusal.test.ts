@@ -5,7 +5,8 @@
  */
 import type { TFunction } from 'i18next'
 
-import { holdsTwoAuthorities, permanentRefusal, postRefusalText } from '../postRefusal'
+import en from '../../../localization/en/en.json'
+import { holdsTwoAuthorities, permanentRefusal, postRefusalText, postRefusalWhy } from '../postRefusal'
 import { RoomsRefused, RoomsUnavailable } from '../types'
 
 const AGENT_WORDS =
@@ -67,5 +68,22 @@ describe('what the post says', () => {
     expect(postRefusalText(t, { code: 'forbidden', twoAuthorities: false })).toBe(
       'Rooms.PostNotSentWhy[Rooms.PostNotTaken]'
     )
+  })
+})
+
+describe('in English, as the member reads it', () => {
+  const rooms = en.Rooms as Record<string, string>
+  const real = ((key: string, o?: { why?: string }) =>
+    (rooms[key.replace('Rooms.', '')] ?? key).replace('{{why}}', o?.why ?? '')) as unknown as TFunction
+  const refusal = { code: 'conflict', twoAuthorities: true }
+  const why =
+    "Your agent holds two memberships for this room and won't pick one. This needs fixing at your agent, not here."
+
+  test('the post itself stands alone, so it says "Not sent." and why', () => {
+    expect(postRefusalText(real, refusal)).toBe(`Not sent. ${why}`)
+  })
+
+  test('a notice has already said it did not send, so it says why alone (control for the line above)', () => {
+    expect(postRefusalWhy(real, refusal)).toBe(why)
   })
 })

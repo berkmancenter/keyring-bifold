@@ -41,12 +41,15 @@ export function permanentRefusal(e: unknown): PostRefusal | undefined {
   return undefined
 }
 
-/** "Not sent." and why, in plain words. */
-export function postRefusalText(t: TFunction, refusal: PostRefusal): string {
-  const why =
-    'reason' in refusal
-      ? (roomsStatusText(t, { status: 'unavailable', reason: refusal.reason, detail: '' }, 'write') ??
+/** Why, in plain words: under a notice that has already said the post did not send. */
+export function postRefusalWhy(t: TFunction, refusal: PostRefusal): string {
+  return 'reason' in refusal
+    ? (roomsStatusText(t, { status: 'unavailable', reason: refusal.reason, detail: '' }, 'write') ??
         (t('Rooms.PostNotTaken') as string))
-      : (t(refusal.twoAuthorities ? 'Rooms.PostTwoAuthorities' : 'Rooms.PostNotTaken') as string)
-  return t('Rooms.PostNotSentWhy', { why, interpolation: { escapeValue: false } }) as string
+    : (t(refusal.twoAuthorities ? 'Rooms.PostTwoAuthorities' : 'Rooms.PostNotTaken') as string)
+}
+
+/** "Not sent." and why, on the post itself. */
+export function postRefusalText(t: TFunction, refusal: PostRefusal): string {
+  return t('Rooms.PostNotSentWhy', { why: postRefusalWhy(t, refusal), interpolation: { escapeValue: false } }) as string
 }
