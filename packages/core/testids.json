@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "9b6856e59871665636160aaea89042eef774fff9",
+  "generatedFrom": "e5747954ffac31522c67177349ef7e18f2134ab8",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -276,6 +276,7 @@
     "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
     "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageActionsNotice": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageImage": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhoto": ["src/components/chat/Chat.ids.ts"],
@@ -1163,6 +1164,7 @@
     "RoomNotePost": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNotePostingAs": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNotePreview": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
+    "RoomNoteReactions": ["src/modules/rooms/screens/Room.tsx"],
     "RoomNoteRemoved": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNoteReread": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteReview": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -1204,18 +1206,34 @@
     "RoomPollTryAgain": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostAgent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostAuthor": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostBubble": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostCancel": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostLate": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostNotSent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostReactions": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostRemoved": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostRetry": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostRewrote": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostSending": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostTime": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostUnread": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostWithdrawn": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPosts": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsFailed": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsIncomplete": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsNone": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsReading": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsUnavailable": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomQuote": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteChanged": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteName": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteText": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomReactionsBackdrop": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsClose": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsLayout": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsList": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsSheet": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsValue": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
     "RoomReadFailed": [
       "src/modules/rooms/screens/Room.tsx",
       "src/modules/rooms/screens/RoomInfo.tsx",
@@ -1745,6 +1763,9 @@
     },
     {
       "src/components/chat/MessageActions.tsx": "ChatIds.actionsBackdrop"
+    },
+    {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actionsNotice"
     },
     {
       "src/components/chat/MessageActions.tsx": "testID"
