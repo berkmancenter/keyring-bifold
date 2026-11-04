@@ -7,10 +7,12 @@
  */
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Platform, StyleSheet, View } from 'react-native'
+import { Platform, ScrollView, StyleSheet, View } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
+import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { minutesOf, type HeldStep } from '../lateStep'
 
@@ -18,7 +20,30 @@ const styles = StyleSheet.create({
   card: { gap: 14, alignSelf: 'stretch' },
   centered: { textAlign: 'center' },
   spinner: { alignSelf: 'center' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { flexShrink: 1, borderTopRightRadius: 20, borderTopLeftRadius: 20 },
+  sheetContent: { padding: 24 },
 })
+
+/**
+ * The bottom sheet the other phone's question sits on. At the largest text sizes the question is taller than the
+ * screen: it scrolls from the top, so the name and what is being asked come before the buttons and none are lost.
+ */
+export const LateStepSheetLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { ColorPalette } = useTheme()
+  return (
+    <SafeAreaView style={styles.sheetOverlay} edges={['top']}>
+      <SafeAreaView
+        style={[styles.sheet, { backgroundColor: ColorPalette.brand.modalPrimaryBackground }]}
+        edges={['bottom']}
+      >
+        <ScrollView bounces={false} contentContainerStyle={styles.sheetContent}>
+          {children}
+        </ScrollView>
+      </SafeAreaView>
+    </SafeAreaView>
+  )
+}
 
 /** "Face ID" or "your fingerprint", in the person's language. */
 function useUnlockWord(): string {

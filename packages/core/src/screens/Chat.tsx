@@ -70,7 +70,18 @@ import { useChatDraft } from '../modules/chat/useChatDraft'
 import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
-import { Alert, Animated, Easing, Platform, View, StyleSheet, Text, TouchableOpacity, ViewToken } from 'react-native'
+import {
+  Alert,
+  Animated,
+  Easing,
+  Platform,
+  ScrollView,
+  View,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  ViewToken,
+} from 'react-native'
 
 const PROGRESS_BAR_WIDTH = 200
 
@@ -708,18 +719,24 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
         {/* A remote step that arrived late: asked before anything is sent or signed (lateStep.ts) */}
         {heldStep && !heldStep.dismissed && (
           <View style={styles.flowOverlay} pointerEvents="auto">
-            <View style={styles.flowOverlayContent}>
-              <LateStepHeldCard
-                name={theirLabel}
-                held={heldStep}
-                now={lateNow}
-                onCheck={() => void onCheckReady()}
-                onNotNow={() => lateStepStore.dismiss(connectionId)}
-                onStop={() => lateStepStore.dismiss(connectionId, true)}
-                busy={lateBusy}
-                textColor="#333"
-              />
-            </View>
+            <ScrollView
+              style={styles.flowOverlayScroll}
+              contentContainerStyle={styles.flowOverlayScrollContent}
+              bounces={false}
+            >
+              <View style={styles.flowOverlayContent}>
+                <LateStepHeldCard
+                  name={theirLabel}
+                  held={heldStep}
+                  now={lateNow}
+                  onCheck={() => void onCheckReady()}
+                  onNotNow={() => lateStepStore.dismiss(connectionId)}
+                  onStop={() => lateStepStore.dismiss(connectionId, true)}
+                  busy={lateBusy}
+                  textColor="#333"
+                />
+              </View>
+            </ScrollView>
           </View>
         )}
         {heldStep?.dismissed && (
@@ -740,71 +757,77 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
         {/* VRC exchange flow loading overlay (a held step's card takes its place until both people are here) */}
         {vrcFlowInProgress && !heldStep && (
           <View style={styles.flowOverlay} pointerEvents="auto">
-            <View style={styles.flowOverlayContent}>
-              {vrcConfirmed ? (
-                <>
-                  <Text style={styles.flowOverlayText}>
-                    {theirLabel
-                      ? t('Chat.RelationshipConfirmedWith', { name: theirLabel })
-                      : t('Chat.RelationshipConfirmed')}
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={() => {
-                      onDismissConfirmation()
-                      const nav = navigation.getParent() ?? navigation
-                      ;(nav as any).navigate(TabStacks.ContactStack, { screen: Screens.Contacts })
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Chat.ViewContacts')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Chat.ViewContacts')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : vrcTimedOut ? (
-                <>
-                  <Text style={styles.flowOverlayTimeoutIcon}>⚠</Text>
-                  <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={() => {
-                      onDismissTimeout()
-                      const nav = navigation.getParent() ?? navigation
-                      ;(nav as any).navigate(Stacks.TabStack)
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Global.Dismiss')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : vrcWaitingOnPeer ? (
-                <WaitingSinceCard
-                  name={theirLabel}
-                  since={waitingSince}
-                  now={lateNow}
-                  onWait={onDismissWaiting}
-                  onStop={onStopExchange}
-                  textColor="#333"
-                />
-              ) : (
-                <>
-                  <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
-                  {isPeerWaitStatus(vrcFlowStore.getStatus(connectionId)) && (
-                    <Text style={styles.flowOverlayNote} testID={testIdWithKey('VrcFlowKeepOpen')}>
-                      {t('LateStep.KeepOpen', { name: theirLabel, interpolation: { escapeValue: false } })}
+            <ScrollView
+              style={styles.flowOverlayScroll}
+              contentContainerStyle={styles.flowOverlayScrollContent}
+              bounces={false}
+            >
+              <View style={styles.flowOverlayContent}>
+                {vrcConfirmed ? (
+                  <>
+                    <Text style={styles.flowOverlayText}>
+                      {theirLabel
+                        ? t('Chat.RelationshipConfirmedWith', { name: theirLabel })
+                        : t('Chat.RelationshipConfirmed')}
                     </Text>
-                  )}
-                  {progressFraction > 0 && (
-                    <FlowProgressBar
-                      fraction={progressFraction}
-                      color={ColorPalette.brand.primary}
-                      complete={progressComplete}
-                    />
-                  )}
-                </>
-              )}
-            </View>
+                    <TouchableOpacity
+                      style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
+                      onPress={() => {
+                        onDismissConfirmation()
+                        const nav = navigation.getParent() ?? navigation
+                        ;(nav as any).navigate(TabStacks.ContactStack, { screen: Screens.Contacts })
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('Chat.ViewContacts')}
+                    >
+                      <Text style={styles.flowOverlayDismissText}>{t('Chat.ViewContacts')}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : vrcTimedOut ? (
+                  <>
+                    <Text style={styles.flowOverlayTimeoutIcon}>⚠</Text>
+                    <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
+                    <TouchableOpacity
+                      style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
+                      onPress={() => {
+                        onDismissTimeout()
+                        const nav = navigation.getParent() ?? navigation
+                        ;(nav as any).navigate(Stacks.TabStack)
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('Global.Dismiss')}
+                    >
+                      <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : vrcWaitingOnPeer ? (
+                  <WaitingSinceCard
+                    name={theirLabel}
+                    since={waitingSince}
+                    now={lateNow}
+                    onWait={onDismissWaiting}
+                    onStop={onStopExchange}
+                    textColor="#333"
+                  />
+                ) : (
+                  <>
+                    <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
+                    {isPeerWaitStatus(vrcFlowStore.getStatus(connectionId)) && (
+                      <Text style={styles.flowOverlayNote} testID={testIdWithKey('VrcFlowKeepOpen')}>
+                        {t('LateStep.KeepOpen', { name: theirLabel, interpolation: { escapeValue: false } })}
+                      </Text>
+                    )}
+                    {progressFraction > 0 && (
+                      <FlowProgressBar
+                        fraction={progressFraction}
+                        color={ColorPalette.brand.primary}
+                        complete={progressComplete}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
+            </ScrollView>
           </View>
         )}
       </View>
@@ -820,6 +843,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
+  // At the largest text sizes a card is taller than the page: it scrolls, and starts at the top, instead of
+  // spilling off both ends with its buttons out of reach.
+  flowOverlayScroll: { alignSelf: 'stretch' },
+  flowOverlayScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 16 },
   flowOverlayContent: {
     backgroundColor: 'white',
     borderRadius: 16,

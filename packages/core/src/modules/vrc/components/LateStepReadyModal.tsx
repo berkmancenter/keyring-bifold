@@ -7,19 +7,15 @@
  */
 import { useAgent } from '@bifold/react-hooks'
 import React, { useCallback, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
 
 import SafeAreaModal from '../../../components/modals/SafeAreaModal'
-import { useTheme } from '../../../contexts/theme'
 import { useConnectionDisplayName } from '../../../hooks/connections'
 import { answerPeerCheck } from '../lateStep'
 import { useAnyPeerCheck } from '../hooks/useLateStep'
-import { PeerReadyCard } from './LateStepCards'
+import { LateStepSheetLayout, PeerReadyCard } from './LateStepCards'
 
 const LateStepReadyModal: React.FC = () => {
   const { agent } = useAgent()
-  const { ColorPalette } = useTheme()
   const check = useAnyPeerCheck()
   const name = useConnectionDisplayName(check?.connectionId ?? '')
   const [busy, setBusy] = useState(false)
@@ -41,31 +37,17 @@ const LateStepReadyModal: React.FC = () => {
 
   if (!check) return null
 
-  const styles = StyleSheet.create({
-    overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    sheet: {
-      backgroundColor: ColorPalette.brand.modalPrimaryBackground,
-      borderTopRightRadius: 20,
-      borderTopLeftRadius: 20,
-    },
-    container: { padding: 24 },
-  })
-
   return (
     <SafeAreaModal visible transparent animationType="slide">
-      <View style={styles.overlay}>
-        <SafeAreaView style={styles.sheet} edges={['bottom']}>
-          <View style={styles.container}>
-            <PeerReadyCard
-              name={name}
-              waitedMs={check.waitedMs + (Date.now() - check.receivedAt)}
-              onReady={() => void answer(true)}
-              onNotNow={() => void answer(false)}
-              busy={busy}
-            />
-          </View>
-        </SafeAreaView>
-      </View>
+      <LateStepSheetLayout>
+        <PeerReadyCard
+          name={name}
+          waitedMs={check.waitedMs + (Date.now() - check.receivedAt)}
+          onReady={() => void answer(true)}
+          onNotNow={() => void answer(false)}
+          busy={busy}
+        />
+      </LateStepSheetLayout>
     </SafeAreaModal>
   )
 }
