@@ -495,6 +495,11 @@ export interface OpenedRecord extends RecordMeta {
   sealedAt?: number
   /** A file record's body as its author signed it, proof and all: what `files/sender.ts` checks. */
   signed?: Record<string, unknown>
+  /**
+   * A sealed text record's body as its author signed it, or null if it is no JSON object, for the log-only count
+   * (`files/textSenderCount.ts`). The service takes it off the record before keeping the record.
+   */
+  signedText?: Record<string, unknown> | null
   /** Whether that signature was checked and holds (`files/sender.ts`); set by the service once checked. */
   sender?: SenderCheck
 }
@@ -517,8 +522,10 @@ export function parseRead(payload: unknown, decodeBase64Url: (s: string) => stri
   let body = raw
   let file: FileManifest | undefined
   let signed: Record<string, unknown> | undefined
+  let parsedBody: Record<string, unknown> | undefined
   try {
     const parsed = obj(JSON.parse(raw))
+    parsedBody = parsed
     file = parseFileManifest(parsed?.file)
     if (file) signed = parsed
     if (parsed && (typeof parsed.body === 'string' || file)) {
@@ -540,6 +547,7 @@ export function parseRead(payload: unknown, decodeBase64Url: (s: string) => stri
     ...(file ? { file } : {}),
     ...(sealedAt !== undefined ? { sealedAt } : {}),
     ...(signed ? { signed } : {}),
+    ...(plaintext && !file && status !== 'retracted' ? { signedText: parsedBody ?? null } : {}),
   }
 }
 
