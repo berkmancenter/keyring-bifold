@@ -2163,7 +2163,7 @@
       "proof": "Detalhes: não foi possível verificar a assinatura da declaração.",
       "noCard": "Detalhes: a declaração chegou antes de este telefone enviar seu cartão nessa sessão.",
       "legacyShape": "Detalhes: a declaração está em um formato antigo que este telefone não aceita mais. Peça ao seu verificador para atualizar o aplicativo e verificar você novamente.",
-      "namedForPrivate": "Este garantidor enviou uma declaração que o identifica, mas esta comunidade faz a verificação em privado, então ela não pode contar. Peça que ele abra seu pedido novamente e garanta em privado."
+      "namedForPrivate": "Este verificador enviou uma declaração que o identifica, mas esta comunidade faz a verificação em privado, então ela não pode contar. Peça que ele abra seu pedido novamente e garanta em privado."
     },
     "CardRefused": "O cartão do solicitante chegou, mas este telefone não pôde aceitá-lo. A sessão continua aberta, então ele pode enviá-lo de novo.",
     "CardRefusedReason": {
@@ -2261,12 +2261,12 @@
     "SubmissionDeferred": "A comunidade pediu mais: {{needs}}. Sua solicitação continua aberta — reúna o que falta e envie de novo, ou retire-a.",
     "SubmissionPending": "Você se candidatou — agora a comunidade decide. Você ainda pode retirar a candidatura.",
     "SubmissionWithdrawn": "Você retirou sua solicitação. Pode se candidatar de novo.",
-    "SubmissionWithdrawnPrivate": "Você retirou sua solicitação. Para se candidatar de novo, terá que pedir a um garantidor novamente.",
+    "SubmissionWithdrawnPrivate": "Você retirou sua solicitação. Para se candidatar de novo, terá que pedir a um verificador novamente.",
     "SubmissionDecided": "A comunidade decidiu sobre sua solicitação ({{effect}}).",
     "SendAgain": "Enviar minhas declarações de novo",
     "Withdraw": "Retirar minha solicitação",
     "WithdrawNothingOpen": "Não havia solicitação aberta para retirar — você pode se candidatar.",
-    "WithdrawPrivateExplains": "Para se candidatar de novo, terá que pedir a um garantidor novamente.",
+    "WithdrawPrivateExplains": "Para se candidatar de novo, terá que pedir a um verificador novamente.",
     "WithdrawStay": "Manter minha solicitação",
     "ApplyRefused": "A comunidade não admitiu você.",
     "ApplyRefusedNeeds": "A comunidade não admitiu você. Ela pede: {{needs}}.",
