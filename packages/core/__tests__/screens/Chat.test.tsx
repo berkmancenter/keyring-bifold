@@ -210,7 +210,7 @@ describe('Chat screen while an exchange waits on the other phone', () => {
     expect(tree.getByText('LateStep.StopExchange')).toBeTruthy()
     // At the largest text sizes the card is taller than the page: its way out has to stay reachable by scrolling.
     let parent = tree.getByText('LateStep.StopExchange').parent
-    while (parent && parent.type !== 'RCTScrollView') parent = parent.parent
+    while (parent && String(parent.type) !== 'RCTScrollView') parent = parent.parent
     expect(parent).toBeTruthy()
     // "Wait in the background" hides the dialog without ending the flow, as Dismiss did.
     fireEvent.press(tree.getByText('LateStep.WaitInBackground'))
