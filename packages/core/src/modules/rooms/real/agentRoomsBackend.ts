@@ -72,7 +72,15 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     runsOn: agent,
     agentLinked: () => vtaAgent.agentAddress() !== undefined,
     agentServedTypes: async () => (await vtaAgent.roomsClient(agent))?.supportedTypes(),
-    agentTask: async (type, payload) => (await client()).task(type, payload),
+    agentTask: async (type, payload, options) =>
+      (await client()).task(
+        type,
+        payload,
+        options?.timeoutMs,
+        undefined,
+        undefined,
+        options?.waitForConsent === undefined ? undefined : { waitForConsent: options.waitForConsent }
+      ),
 
     // The communities this phone holds a membership in under the agent it acts with now, as the
     // persona that holds it. A membership the community has ended (its removal notice) is left out.
