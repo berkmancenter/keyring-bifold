@@ -62,7 +62,8 @@ describe('BaseToast Component', () => {
 })
 
 describe('BaseToast over the screen', () => {
-  const flat = (style: unknown) => StyleSheet.flatten(style as never) ?? {}
+  const flat = (style: unknown) =>
+    (StyleSheet.flatten(style as never) ?? {}) as { borderWidth?: unknown; backgroundColor?: unknown }
   // The tinted box is the title's nearest host ancestor with a border; the next host view behind it with a background
   // must be opaque. Host views only: a component's own instance carries the same style as the view it renders.
   type Node = { type: unknown; props: { style?: unknown }; parent: Node | null }
