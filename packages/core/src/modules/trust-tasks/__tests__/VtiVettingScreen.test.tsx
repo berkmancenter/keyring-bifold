@@ -1141,6 +1141,11 @@ describe('Vetting — withdrawing an application', () => {
       'Vetting.WithdrawPrivateExplains'
     )
     expect(tree.queryByTestId(testIdWithKey('VettingWithdrawButton'))).toBeNull()
+    // The labels are capped, or at the largest text they break mid-word. The words that say the cost aren't.
+    const card = within(tree.getByTestId(testIdWithKey('VettingWithdrawConfirmCard')))
+    expect(card.getByText('Vetting.Withdraw').props.maxFontSizeMultiplier).toBe(2)
+    expect(card.getByText('Vetting.WithdrawStay').props.maxFontSizeMultiplier).toBe(2)
+    expect(tree.getByTestId(testIdWithKey('VettingWithdrawConfirmWords')).props.maxFontSizeMultiplier).toBeUndefined()
 
     await press(tree, 'VettingWithdrawConfirm')
     expect(withdraw).toHaveBeenCalledTimes(1)

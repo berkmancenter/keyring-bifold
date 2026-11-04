@@ -20,7 +20,7 @@ export const VettingWithdrawConfirm: React.FC<{ busy: boolean; onConfirm: () => 
   onStay,
 }) => {
   const { t } = useTranslation()
-  const { ColorPalette, TextTheme } = useTheme()
+  const { ColorPalette, TextTheme, maxFontSizeMultiplier } = useTheme()
   const button = {
     borderRadius: 8,
     paddingVertical: 12,
@@ -51,7 +51,10 @@ export const VettingWithdrawConfirm: React.FC<{ busy: boolean; onConfirm: () => 
         onPress={onConfirm}
       >
         {busy ? <ActivityIndicator color="#FFFFFF" /> : null}
-        <Text style={styles.confirmText}>{t('Vetting.Withdraw')}</Text>
+        {/* Capped as the app's Button caps its label: past this a label breaks mid-word. The words above aren't. */}
+        <Text style={styles.confirmText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          {t('Vetting.Withdraw')}
+        </Text>
       </Pressable>
       <Pressable
         style={styles.stay}
@@ -60,7 +63,9 @@ export const VettingWithdrawConfirm: React.FC<{ busy: boolean; onConfirm: () => 
         disabled={busy}
         onPress={onStay}
       >
-        <Text style={styles.stayText}>{t('Vetting.WithdrawStay')}</Text>
+        <Text style={styles.stayText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+          {t('Vetting.WithdrawStay')}
+        </Text>
       </Pressable>
     </View>
   )
