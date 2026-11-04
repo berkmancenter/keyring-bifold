@@ -167,6 +167,8 @@ export const carriesRecordMembers = (post: Pick<RoomPost, 'kind' | 'inReplyTo' |
 
 /** The longest reaction value, in code points. */
 const REACTION_VALUE_MAX = 64
+// The rule's own list: U+000B and U+000C are control characters on purpose.
+// eslint-disable-next-line no-control-regex
 const LINE_TERMINATOR = /[\n\r\u000B\u000C\u0085\u2028\u2029]/
 const VARIATION_SELECTORS = /[\uFE0E\uFE0F]/g
 
