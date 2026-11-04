@@ -48,6 +48,8 @@ export interface RoomPost {
   editedAt?: string
   /** It answers a reaction, which nothing may: shown nowhere, and counted as no reaction (`withRepliesToReactions`). */
   answersReaction?: true
+  /** A reaction whose body, as written, a reader must not show (`reactionValueOfBody`). */
+  reactionRefused?: true
 }
 
 const sameIdentity = (a?: Identity, b?: Identity): boolean => !!a && !!b && JSON.stringify(a) === JSON.stringify(b)
@@ -106,6 +108,7 @@ export function postOf(note: Note | NoteSummary, actingAs?: Identity, now: numbe
     ...(read && note.inReplyTo ? { inReplyTo: note.inReplyTo } : {}),
     ...(read && note.writtenAt ? { writtenAt: note.writtenAt } : {}),
     ...(read && note.editedAt ? { editedAt: note.editedAt } : {}),
+    ...(read && note.reactionRefused ? { reactionRefused: true as const } : {}),
   }
 }
 
@@ -168,15 +171,26 @@ const LINE_TERMINATOR = /[\n\r\u000B\u000C\u0085\u2028\u2029]/
 const VARIATION_SELECTORS = /[\uFE0E\uFE0F]/g
 
 /**
- * A reaction's value in its normal form (NFC, without the emoji variation selectors), as values are compared and
- * counted, or undefined when it is one a reader must not show: no target, nothing but white space (a reaction its author
- * took back), over 64 code points or holding a line terminator. It refuses that record alone.
+ * A reaction's body in its normal form (NFC, without the emoji variation selectors), as values are compared and counted,
+ * or undefined when it is one a reader must not show: nothing but white space (a reaction its author took back), over 64
+ * code points or holding a line terminator.
  */
-export function reactionValueOf(post: Pick<RoomPost, 'kind' | 'text' | 'inReplyTo' | 'retracted'>): string | undefined {
-  if (post.kind !== 'reaction' || post.retracted || !post.inReplyTo) return undefined
-  const value = String(post.text).normalize('NFC').replace(VARIATION_SELECTORS, '')
+export function reactionValueOfBody(body: string): string | undefined {
+  const value = body.normalize('NFC').replace(VARIATION_SELECTORS, '')
   if (!value.trim() || LINE_TERMINATOR.test(value) || [...value].length > REACTION_VALUE_MAX) return undefined
   return value
+}
+
+/**
+ * A reaction's value, or undefined when a reader must not show it, which refuses that record alone. Also none without a
+ * target. Text from a room reaches a post inert, with some line terminators gone, so whoever makes it inert asks
+ * `reactionValueOfBody` first and says so (`reactionRefused`): "a\fb" must not read as "ab".
+ */
+export function reactionValueOf(
+  post: Pick<RoomPost, 'kind' | 'text' | 'inReplyTo' | 'retracted' | 'reactionRefused'>
+): string | undefined {
+  if (post.kind !== 'reaction' || post.retracted || !post.inReplyTo || post.reactionRefused) return undefined
+  return reactionValueOfBody(String(post.text))
 }
 
 /**

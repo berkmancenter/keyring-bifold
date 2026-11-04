@@ -215,6 +215,8 @@ export interface Note extends NoteSummary {
   /** When its author says they wrote it, and last edited it: the author's claim, not an attested time. */
   writtenAt?: string
   editedAt?: string
+  /** A reaction whose body, as written and before it was made inert, a reader must not show. */
+  reactionRefused?: true
 }
 
 /** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */

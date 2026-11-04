@@ -14,6 +14,7 @@ import {
   placeOf,
   postOf,
   reactionValueOf,
+  reactionValueOfBody,
   withRepliesToReactions,
 } from '../roomPosts'
 import type { Note, NoteSummary } from '../types'
@@ -242,8 +243,16 @@ describe("a reaction's value", () => {
     expect(value('e\u0301'.repeat(64))).toBe('é'.repeat(64))
   })
 
-  test.each(['\n', '\u000B', '\u000C', '\r', '\u0085', '\u2028', '\u2029'])('refuses a line terminator: %j', (eol) => {
-    expect(value(`a${eol}b`)).toBeUndefined()
+  test.each(['\n', '\u000B', '\u000C', '\r', '\u0085', '\u2028', '\u2029'])(
+    'refuses a line terminator in the body as written: %j',
+    (eol) => {
+      expect(reactionValueOfBody(`a${eol}b`)).toBeUndefined()
+    }
+  )
+
+  test('a post made inert has lost some terminators, so it goes by what was said of the body', () => {
+    expect(value('ab', { reactionRefused: true })).toBeUndefined()
+    expect(value('ab')).toBe('ab')
   })
 
   test('nothing but white space is empty: the reaction is withdrawn', () => {

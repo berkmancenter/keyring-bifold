@@ -32,7 +32,7 @@ import { sizeFailure } from '../../chat/media/checkAttachment'
 import { readImageHeader } from '../../chat/media/imageHeader'
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
-import { chatMessageText } from '../roomPosts'
+import { chatMessageText, reactionValueOfBody } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
 import { failureCategory, logRef } from '../roomsLogWords'
@@ -828,6 +828,9 @@ export class AgentRoomsService implements RoomsService {
       ...(opened.inReplyTo ? { inReplyTo: opened.inReplyTo } : {}),
       ...(opened.writtenAt ? { writtenAt: opened.writtenAt } : {}),
       ...(opened.editedAt ? { editedAt: opened.editedAt } : {}),
+      ...(opened.kind === 'reaction' && reactionValueOfBody(opened.body) === undefined
+        ? { reactionRefused: true as const }
+        : {}),
     }
   }
 
