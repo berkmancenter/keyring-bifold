@@ -51,6 +51,8 @@ import { ed25519 } from '@noble/curves/ed25519.js'
 import { signDocumentProof } from '@bifold/trust-tasks'
 
 // eslint-disable-next-line import/order
+import { readOneClock } from '../../../../__tests__/helpers/oneClock'
+// eslint-disable-next-line import/order
 import { startPersonaInbox } from '../module/vtiPersonaInbox'
 // eslint-disable-next-line import/order
 import {
@@ -61,6 +63,9 @@ import {
   type ParkedVettingRequest,
   type VettingTicket,
 } from '../module/vtiVetting'
+
+// A grant's window is read with `new Date()`, a ticket's with `Date.now()`: on a phone they are one clock.
+readOneClock()
 
 const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
 
@@ -216,7 +221,8 @@ describe('a vetting request delivered with no desk listening', () => {
   afterEach(async () => {
     stops.forEach((stop) => stop())
     stops = []
-    jest.restoreAllMocks()
+    // Back to the one clock, not to jestSetup's pin: an expiry test moved it.
+    jest.spyOn(Date, 'now').mockImplementation(() => new Date().getTime())
     // What a store write announced goes out on the next timer: not after the suite has gone.
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
