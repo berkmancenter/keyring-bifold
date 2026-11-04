@@ -138,6 +138,11 @@ beforeEach(async () => {
   vtiAgent.answerTimeoutMs = 400
   clock = 1_000_000
   vtiAgent.now = () => clock
+  // vtiAgent is one for the file and disconnecting keeps its claim, while this clock starts again: an earlier test's claim
+  // and refusals would still be running, so whether a test passed depended on what ran before it.
+  const state = vtiAgent as unknown as { claim?: unknown; refusedByClaim: Map<string, number> }
+  state.claim = undefined
+  state.refusedByClaim.clear()
   mockPersonas[A.community] = persona(A.persona, A.community)
   mockPersonas[B.community] = persona(B.persona, B.community)
 })
@@ -291,13 +296,6 @@ describe('the session claim', () => {
   const noClaimLeft = () => {
     clock += VTI_FOREGROUND_CLAIM_MS + 1
   }
-  // vtiAgent is one for the suite, and each test's clock starts again: an earlier test's claim and refusals would still
-  // be running. Each of these starts with none.
-  beforeEach(() => {
-    const state = vtiAgent as unknown as { claim?: unknown; refusedByClaim: Map<string, number> }
-    state.claim = undefined
-    state.refusedByClaim.clear()
-  })
 
   it("a listing read that claims nothing leaves no claim: another identity's poll goes through at once", async () => {
     await vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), async () => undefined, {
