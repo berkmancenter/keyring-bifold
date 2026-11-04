@@ -56,6 +56,8 @@ import type {
   RoomSummary,
   WriteDraft,
   WritePreview,
+  RecordFeatures,
+  RecordWrite,
 } from '../types'
 import {
   NOTE_BODY_MAX,
@@ -73,10 +75,8 @@ import {
   governedMembersIn,
   keptMembers,
   messageMembers,
-  type RecordFeatures,
   recordTime,
   RecordSendingOff,
-  type RecordWrite,
   requirePermitted,
   requireReactionValue,
 } from './recordWrites'

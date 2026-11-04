@@ -13,35 +13,15 @@
  * @module rooms/real/recordWrites
  */
 import { reactionValueOfBody } from '../roomPosts'
+import type { RecordFeatures } from '../types'
 import type { RecordMembers } from './wire'
+
+export type { RecordFeatures, RecordWrite } from '../types'
 
 /** The body members `recordMembers` governs. */
 export const GOVERNED_BODY_MEMBERS = ['kind', 'inReplyTo', 'writtenAt', 'editedAt'] as const
 /** The members of a record's `file` it governs, listed under these names. */
 export const GOVERNED_FILE_MEMBERS = ['width', 'height', 'preview'] as const
-
-/** One thing a member writes. A key is opaque: it never says what a record is, answers or holds. */
-export type RecordWrite =
-  /** A message, a reply if it names one. `idempotencyKey`: this send's own, so a retry after a lost answer is one record. */
-  | { type: 'message'; body: string; inReplyTo?: { key: string; version?: number }; idempotencyKey?: string }
-  /** A new reaction. A writer already holding one with this value and target reuses it: `changeReaction`. */
-  | { type: 'reaction'; value: string; target: { key: string; version?: number } }
-  /** A new value on this member's own reaction record, in one write. */
-  | { type: 'changeReaction'; key: string; value: string }
-  /** An empty version of this member's own reaction or message. Its replies stay. */
-  | { type: 'withdraw'; key: string }
-  /** New words on this member's own message. */
-  | { type: 'edit'; key: string; body: string }
-
-/** What a room lets this member write now. */
-export interface RecordFeatures {
-  /** What the room's profile lists. Empty when it can't be read: that permits none. */
-  listed: string[]
-  /** This member's agent will seal these members (`rooms/keys/seal/0.3`). */
-  canSeal: boolean
-  /** The profile could not be read, as opposed to listing nothing. */
-  unresolved: boolean
-}
 
 /** Every governed member this body uses, by the name the profile lists it under. */
 export function governedMembersIn(body: RecordMembers & { file?: object }): string[] {
