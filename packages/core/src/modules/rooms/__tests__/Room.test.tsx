@@ -399,13 +399,32 @@ describe('a room not joined yet', () => {
     navigate.mockClear()
     const tree = open(
       notJoined([
-        { offerId: 'offer-1', roomId: 'did:webvh:r:one' },
         { offerId: 'other', roomId: 'x' },
+        { offerId: 'offer-1', roomId: 'did:webvh:r:one' },
       ])
     )
     const button = await waitFor(() => tree.getByTestId(id('RoomNotJoinedOffer')))
     fireEvent.press(button)
     expect(navigate).toHaveBeenCalledWith(Screens.RoomOffer, { offerRef: 'offer-1' })
+  })
+
+  test('no button for an offer of another room (control)', async () => {
+    const service = notJoined([{ offerId: 'other', roomId: 'x' }])
+    const tree = open(service)
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotJoined'))).toBeTruthy())
+    await waitFor(() => expect((service as unknown as { listOffers: jest.Mock }).listOffers).toHaveBeenCalled())
+    await act(async () => undefined)
+    expect(tree.queryByTestId(id('RoomNotJoinedOffer'))).toBeNull()
+  })
+
+  // Its notes and files can't be read either; they said "Couldn't read… Try again later".
+  test.each(['notes', 'files'])('its %s say so too, with no Try again', async (part) => {
+    mockService = notJoined([])
+    mockParams = { roomId: 'did:webvh:r:one', part }
+    const tree = show(require('../screens/RoomPart').default)
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotJoined'))).toBeTruthy())
+    expect(tree.queryByText('Rooms.NotesFailed')).toBeNull()
+    expect(tree.queryByText('Rooms.TryAgain')).toBeNull()
   })
 
   test('a joined room has its composer and no such card (control)', async () => {
