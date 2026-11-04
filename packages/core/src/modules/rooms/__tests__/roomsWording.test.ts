@@ -1,6 +1,6 @@
 /**
  * A room holds messages and notes (11-03): "post" said one thing in Keyring and nothing in the other clients, which
- * call every record a note or a file. The words Alberto chose: a message is sent or written, a note is added or saved.
+ * call every record a note or a file. The words: a message is sent or written, a note is added or saved.
  */
 import en from '../../../localization/en/en.json'
 
