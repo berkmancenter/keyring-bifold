@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "34817e1382b549ce726776eadcb715f7c8686a9a",
+  "generatedFrom": "3b4f4a982c5714076895c636ab667de1d2768fc3",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1146,6 +1146,8 @@
     "RoomMessageRow": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMessageRowHide": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMonogram": ["src/modules/rooms/components/RoomHeader.tsx"],
+    "RoomNotJoined": ["src/modules/rooms/components/RoomNotJoined.tsx"],
+    "RoomNotJoinedOffer": ["src/modules/rooms/components/RoomNotJoined.tsx"],
     "RoomNoteBack": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteBodyInput": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteCancel": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -1669,6 +1671,7 @@
     "RoomPost_": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomRow_": ["src/modules/rooms/components/RoomRow.tsx"],
     "RoomsGroup_": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomsStillLoading_": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "SetActiveProfile-": ["src/modules/vrc/screens/MyProfiles.tsx"],
     "SwitchProfile-": ["src/components/misc/QRScanner.tsx"],
     "SwitchProfileAvatar-": ["src/components/misc/QRScanner.tsx"],
