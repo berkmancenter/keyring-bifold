@@ -38,6 +38,8 @@ const TogglePushNotifications: React.FC = () => {
   const styles = StyleSheet.create({
     controls: { gap: Spacing.md },
     blocked: { color: ColorPalette.semantic.error },
+    // A long label at the largest text sizes wraps, rather than pushing itself and the switch off the screen.
+    toggleLabel: { flexShrink: 1 },
     toggleContainer: {
       display: 'flex',
       flexDirection: 'row',
@@ -104,7 +106,7 @@ const TogglePushNotifications: React.FC = () => {
         <ThemedText testID={testIdWithKey('PushNotificationNotSetUp')}>{t('PushNotifications.NotSetUpYet')}</ThemedText>
       ) : null}
       <View style={styles.toggleContainer}>
-        <ThemedText>{t('PushNotifications.ReceiveNotifications')}</ThemedText>
+        <ThemedText style={styles.toggleLabel}>{t('PushNotifications.ReceiveNotifications')}</ThemedText>
         <Switch
           trackColor={{ false: ColorPalette.grayscale.lightGrey, true: ColorPalette.brand.primaryDisabled }}
           thumbColor={notificationState ? ColorPalette.brand.primary : ColorPalette.grayscale.mediumGrey}
