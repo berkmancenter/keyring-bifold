@@ -147,7 +147,9 @@ describe('LocalityPreflightModal', () => {
     // One sentence, with no gap from a line break inside its text.
     expect(
       getByText(
-        /You can allow it in Settings, or continue without it and this exchange won't carry that confirmation\.$/
+        /You can allow it in Settings, or continue without it and this exchange won't carry that confirmation\.$/,
+        // The default normalizer would hide exactly this: it collapses the whitespace.
+        { normalizer: (text) => text }
       )
     ).toBeTruthy()
   })
