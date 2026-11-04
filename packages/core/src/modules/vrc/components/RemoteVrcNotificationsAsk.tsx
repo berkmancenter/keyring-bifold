@@ -1,27 +1,37 @@
 /**
- * Before a remote VRC starts: ask a person whose phone could be woken to turn notifications on (IN-448).
+ * Before an invitation goes out as a link: ask a person whose phone could be woken to turn notifications on (IN-448).
  *
- * The other person's steps reach a phone while Keyring is closed only through a push, and a phone is wakeable
- * only when the build has push (`enablePushNotifications`), the phone is linked to an agent, and notifications
- * are allowed. So this asks only where turning them on actually makes the phone wakeable: push in the build, an
- * agent linked, permission not yet given. Anyone else is told Keyring has to stay open on both phones instead.
+ * A link is the remote case: the other person's steps reach a phone while Keyring is closed only through a push, and
+ * a phone is wakeable only when the build has push (`enablePushNotifications`), the phone is linked to an agent, and
+ * notifications are allowed. So `useRemoteVrcNotificationsGate` says to ask only where turning them on actually makes
+ * the phone wakeable: push in the build, an agent linked, permission not yet given. A code scanned in the room needs
+ * none of this: both people are there. The ask is a sheet on the "Share as a link" tap, because the QR screen does
+ * not scroll and has no room for it.
  *
- * "Turn on" asks for the permission and, once given, makes the phone wakeable (the app's toggle: the gateway, the
- * agent's set-wake, the mediator's device info). "Not now" puts it away for this run of the app.
+ * Every way out carries on to the share: the ask never stands between a person and their link. "Turn on" asks for
+ * the permission and, once given, makes the phone wakeable (the app's toggle: the gateway, the agent's set-wake, the
+ * mediator's device info). "Not now" puts it away for this run of the app.
  *
  * @module vrc/components/RemoteVrcNotificationsAsk
  */
 import { useAgent } from '@bifold/react-hooks'
-import React, { useEffect, useState, useSyncExternalStore } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet, View } from 'react-native'
+import { Platform, ScrollView, StyleSheet } from 'react-native'
+import { SafeAreaView } from 'react-native-safe-area-context'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
+import SafeAreaModal from '../../../components/modals/SafeAreaModal'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { TOKENS, useServices } from '../../../container-api'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { vtaAgent } from '../../trust-tasks/module/vtaAgent'
+
+/** How long the share waits for the phone to be made wakeable; that goes on regardless. */
+export const WAKEABLE_WAIT_MS = 4000
+/** iOS can't open the share sheet while this sheet is leaving, so it waits for that, or this long if never told. */
+const DISMISS_FALLBACK_MS = 700
 
 /** Put away for this run of the app ("Not now", or done). */
 let putAway = false
@@ -31,90 +41,113 @@ export function resetRemoteVrcNotificationsAsk(): void {
   putAway = false
 }
 
-type Ask = 'checking' | 'ask' | 'denied' | 'hidden'
+/** Whether a share should ask first. Read at the tap, so a permission changed in Settings counts. */
+export function useRemoteVrcNotificationsGate(): () => Promise<boolean> {
+  const [{ enablePushNotifications }] = useServices([TOKENS.CONFIG])
+  return useCallback(async () => {
+    if (putAway || !enablePushNotifications || vtaAgent.getState().link.kind !== 'linked') return false
+    try {
+      return (await enablePushNotifications.status()) !== 'granted'
+    } catch {
+      return false
+    }
+  }, [enablePushNotifications])
+}
 
-const RemoteVrcNotificationsAsk: React.FC = () => {
+const styles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  sheet: { flexShrink: 1, borderTopRightRadius: 20, borderTopLeftRadius: 20 },
+  content: { padding: 24, gap: 12 },
+})
+
+/** Mounted while asking; `onDone` once, when the sheet has gone and the share can open. */
+const RemoteVrcNotificationsAsk: React.FC<{ onDone: () => void }> = ({ onDone }) => {
   const { t } = useTranslation()
   const { agent } = useAgent()
   const { ColorPalette } = useTheme()
   const [{ enablePushNotifications }] = useServices([TOKENS.CONFIG])
-  const linked = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().link.kind === 'linked')
-  const [ask, setAsk] = useState<Ask>(putAway ? 'hidden' : 'checking')
+  const [denied, setDenied] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  const done = useRef(false)
+  const fallback = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  useEffect(() => {
-    if (putAway || !enablePushNotifications || !linked) {
-      setAsk('hidden')
-      return
-    }
-    let live = true
-    enablePushNotifications
-      .status()
-      .then((status) => live && setAsk(status === 'granted' ? 'hidden' : 'ask'))
-      .catch(() => live && setAsk('hidden'))
-    return () => {
-      live = false
-    }
-  }, [enablePushNotifications, linked])
+  useEffect(() => () => clearTimeout(fallback.current), [])
 
-  if (ask === 'hidden' || ask === 'checking' || !enablePushNotifications) return null
+  const finish = useCallback(() => {
+    if (done.current) return
+    done.current = true
+    clearTimeout(fallback.current)
+    onDone()
+  }, [onDone])
+
+  const leave = useCallback(() => {
+    putAway = true
+    setLeaving(true)
+    if (Platform.OS === 'ios') fallback.current = setTimeout(finish, DISMISS_FALLBACK_MS)
+    else finish()
+  }, [finish])
 
   const turnOn = async () => {
-    if (busy || !agent) return
+    if (busy || !agent || !enablePushNotifications) return
     setBusy(true)
     try {
       const status = await enablePushNotifications.setup()
       if (status !== 'granted') {
-        setAsk('denied')
+        setDenied(true)
         return
       }
-      await enablePushNotifications.toggle(true, agent)
-      putAway = true
-      setAsk('hidden')
+      const wakeable = enablePushNotifications.toggle(true, agent)
+      await Promise.race([wakeable, new Promise((resolve) => setTimeout(resolve, WAKEABLE_WAIT_MS))])
+      // Past the wait it goes on on its own, and may still fail: said in the log, like one that fails in time.
+      wakeable.catch((e: unknown) =>
+        agent.config.logger.warn(`[VRC] notifications for a remote exchange not turned on: ${(e as Error).message}`)
+      )
+      leave()
     } catch (e) {
       agent.config.logger.warn(`[VRC] notifications for a remote exchange not turned on: ${(e as Error).message}`)
-      setAsk('denied')
+      setDenied(true)
     } finally {
       setBusy(false)
     }
   }
-  const notNow = () => {
-    putAway = true
-    setAsk('hidden')
-  }
 
-  const styles = StyleSheet.create({
-    card: {
-      alignSelf: 'stretch',
-      gap: 12,
-      padding: 16,
-      marginBottom: 16,
-      borderRadius: 12,
-      backgroundColor: ColorPalette.brand.secondaryBackground,
-    },
-  })
-
+  const label = denied ? t('Global.Continue') : t('RemoteVrcNotify.NotNow')
   return (
-    <View style={styles.card} testID={testIdWithKey('RemoteVrcNotificationsAsk')}>
-      <ThemedText>{ask === 'denied' ? t('RemoteVrcNotify.Denied') : t('RemoteVrcNotify.Ask')}</ThemedText>
-      {ask === 'ask' && (
-        <Button
-          title={t('RemoteVrcNotify.TurnOn')}
-          accessibilityLabel={t('RemoteVrcNotify.TurnOn')}
-          testID={testIdWithKey('RemoteVrcNotificationsTurnOn')}
-          buttonType={ButtonType.Primary}
-          onPress={() => void turnOn()}
-          disabled={busy}
-        />
-      )}
-      <Button
-        title={ask === 'denied' ? t('Global.Dismiss') : t('RemoteVrcNotify.NotNow')}
-        accessibilityLabel={ask === 'denied' ? t('Global.Dismiss') : t('RemoteVrcNotify.NotNow')}
-        testID={testIdWithKey('RemoteVrcNotificationsNotNow')}
-        buttonType={ButtonType.Secondary}
-        onPress={notNow}
-      />
-    </View>
+    <SafeAreaModal visible={!leaving} transparent animationType="slide" onDismiss={finish}>
+      <SafeAreaView style={styles.overlay} edges={['top']}>
+        <SafeAreaView
+          style={[styles.sheet, { backgroundColor: ColorPalette.brand.modalPrimaryBackground }]}
+          edges={['bottom']}
+        >
+          <ScrollView
+            bounces={false}
+            contentContainerStyle={styles.content}
+            testID={testIdWithKey('RemoteVrcNotificationsAsk')}
+          >
+            <ThemedText>{denied ? t('RemoteVrcNotify.Denied') : t('RemoteVrcNotify.Ask')}</ThemedText>
+            {!denied && (
+              <Button
+                title={t('RemoteVrcNotify.TurnOn')}
+                accessibilityLabel={t('RemoteVrcNotify.TurnOn')}
+                testID={testIdWithKey('RemoteVrcNotificationsTurnOn')}
+                buttonType={ButtonType.Primary}
+                onPress={() => void turnOn()}
+                disabled={busy}
+              />
+            )}
+            <Button
+              title={label}
+              accessibilityLabel={label}
+              testID={testIdWithKey('RemoteVrcNotificationsNotNow')}
+              buttonType={ButtonType.Secondary}
+              onPress={leave}
+              disabled={busy}
+            />
+          </ScrollView>
+        </SafeAreaView>
+      </SafeAreaView>
+    </SafeAreaModal>
   )
 }
 

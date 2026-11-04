@@ -1,8 +1,9 @@
 /**
- * Before a remote VRC: the notifications ask shows only where turning them on makes this phone wakeable (push in
- * the build, an agent linked, permission not given), and turning them on also makes the phone wakeable (IN-448).
+ * Before an invitation goes out as a link: the gate says to ask only where turning notifications on makes the phone
+ * wakeable (push in the build, an agent linked, permission not given), turning them on also makes the phone wakeable,
+ * and every way out of the sheet carries on to the share (IN-448).
  */
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native'
 import React from 'react'
 import { container } from 'tsyringe'
 
@@ -11,7 +12,9 @@ import { useAgent } from '@bifold/react-hooks'
 import { TOKENS } from '../../../../src/container-api'
 import { MainContainer, defaultConfig } from '../../../../src/container-impl'
 import RemoteVrcNotificationsAsk, {
+  WAKEABLE_WAIT_MS,
   resetRemoteVrcNotificationsAsk,
+  useRemoteVrcNotificationsGate,
 } from '../../../../src/modules/vrc/components/RemoteVrcNotificationsAsk'
 import { vtaAgent } from '../../../../src/modules/trust-tasks/module/vtaAgent'
 import { testIdWithKey } from '../../../../src/utils/testable'
@@ -21,78 +24,118 @@ jest.mock('@bifold/react-hooks')
 
 const agent = { config: { logger: { warn: jest.fn() } } }
 
-function setup(opts: { push?: boolean; linked?: boolean; status?: string; afterSetup?: string }) {
-  const status = jest.fn().mockResolvedValue(opts.status ?? 'denied')
-  const setupFn = jest.fn().mockResolvedValue(opts.afterSetup ?? 'granted')
+function context(opts: { push?: boolean; linked?: boolean; status?: () => Promise<string>; afterSetup?: string }) {
+  const status = jest.fn(opts.status ?? (async () => 'denied'))
+  const setup = jest.fn().mockResolvedValue(opts.afterSetup ?? 'granted')
   const toggle = jest.fn().mockResolvedValue(undefined)
   const child = container.createChildContainer()
   const c = new MainContainer(child).init()
   child.registerInstance(TOKENS.CONFIG, {
     ...defaultConfig,
-    ...(opts.push === false ? {} : { enablePushNotifications: { status, setup: setupFn, toggle } }),
+    ...(opts.push === false ? {} : { enablePushNotifications: { status, setup, toggle } }),
   })
   jest.spyOn(vtaAgent, 'getState').mockReturnValue({
     ...vtaAgent.getState(),
     link: (opts.linked === false ? { kind: 'notLinked' } : { kind: 'linked' }) as never,
   })
-  const tree = render(
-    <CustomBasicAppContext container={c}>
-      <RemoteVrcNotificationsAsk />
-    </CustomBasicAppContext>
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <CustomBasicAppContext container={c}>{children}</CustomBasicAppContext>
   )
-  return { tree, status, setupFn, toggle }
+  return { wrapper, status, setup, toggle }
 }
 
-describe('the notifications ask before a remote VRC', () => {
+const gateSays = async (opts: Parameters<typeof context>[0]) => {
+  const { wrapper } = context(opts)
+  const { result } = renderHook(() => useRemoteVrcNotificationsGate(), { wrapper })
+  return result.current()
+}
+
+function sheet(opts: Parameters<typeof context>[0] = {}) {
+  const ctx = context(opts)
+  const onDone = jest.fn()
+  const tree = render(<RemoteVrcNotificationsAsk onDone={onDone} />, { wrapper: ctx.wrapper })
+  return { ...ctx, onDone, tree }
+}
+
+describe('the notifications ask before an invitation goes out as a link', () => {
   beforeEach(() => {
     resetRemoteVrcNotificationsAsk()
     ;(useAgent as jest.Mock).mockReturnValue({ agent })
   })
-  afterEach(() => jest.restoreAllMocks())
+  afterEach(() => {
+    jest.useRealTimers()
+    jest.restoreAllMocks()
+  })
 
   it('asks a linked phone whose notifications are off', async () => {
-    const { tree } = setup({})
-    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsAsk'))).toBeTruthy())
-    expect(tree.getByText('RemoteVrcNotify.Ask')).toBeTruthy()
+    expect(await gateSays({})).toBe(true)
   })
 
-  const noAsk: [string, { push?: boolean; linked?: boolean; status?: string }][] = [
+  const noAsk: [string, Parameters<typeof context>[0]][] = [
     ['no push in the build', { push: false }],
     ['no agent linked: turning them on would not make it wakeable', { linked: false }],
-    ['notifications already on', { status: 'granted' }],
+    ['notifications already on', { status: async () => 'granted' }],
+    ['a permission it could not read', { status: () => Promise.reject(new Error('no')) }],
   ]
   it.each(noAsk)('does not ask with %s', async (_label, opts) => {
-    const { tree, status } = setup(opts)
-    await act(async () => undefined)
-    if (opts.push !== false && opts.linked !== false) await waitFor(() => expect(status).toHaveBeenCalled())
-    expect(tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsAsk'))).toBeNull()
+    expect(await gateSays(opts)).toBe(false)
   })
 
-  it('"Turn on" asks for the permission, then makes the phone wakeable, and goes away', async () => {
-    const { tree, setupFn, toggle } = setup({})
-    const turnOn = await waitFor(() => tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn')))
-    await act(async () => fireEvent.press(turnOn))
-    expect(setupFn).toHaveBeenCalledTimes(1)
+  it('says its line, with Turn on and Not now', () => {
+    const { tree } = sheet()
+    expect(tree.getByText('RemoteVrcNotify.Ask')).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))).toBeTruthy()
+    expect(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow'))).toBeTruthy()
+  })
+
+  it('"Turn on" asks for the permission, makes the phone wakeable, then carries on to the share', async () => {
+    const { tree, setup, toggle, onDone } = sheet()
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    expect(setup).toHaveBeenCalledTimes(1)
     expect(toggle).toHaveBeenCalledWith(true, agent)
-    expect(tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsAsk'))).toBeNull()
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
   })
 
-  it('a refused permission says so, and does not try to make the phone wakeable', async () => {
-    const { tree, toggle } = setup({ afterSetup: 'denied' })
-    const turnOn = await waitFor(() => tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn')))
-    await act(async () => fireEvent.press(turnOn))
+  it('a refused permission says so, makes nothing wakeable, and Continue carries on to the share', async () => {
+    const { tree, toggle, onDone } = sheet({ afterSetup: 'denied' })
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
     expect(toggle).not.toHaveBeenCalled()
     expect(tree.getByText('RemoteVrcNotify.Denied')).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))).toBeNull()
+    expect(onDone).not.toHaveBeenCalled()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
   })
 
-  it('"Not now" puts it away for this run of the app', async () => {
-    const first = setup({})
-    const notNow = await waitFor(() => first.tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
-    fireEvent.press(notNow)
-    expect(first.tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsAsk'))).toBeNull()
-    first.tree.unmount()
-    const again = setup({})
-    await act(async () => undefined)
-    expect(again.tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsAsk'))).toBeNull()
+  it('a phone that is slow to become wakeable does not hold up the share', async () => {
+    jest.useFakeTimers()
+    const { tree, toggle, onDone } = sheet()
+    toggle.mockReturnValue(new Promise(() => undefined))
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    expect(onDone).not.toHaveBeenCalled()
+    await act(async () => {
+      jest.advanceTimersByTime(WAKEABLE_WAIT_MS)
+    })
+    // The sheet leaves first, and iOS waits for that.
+    await act(async () => {
+      jest.advanceTimersByTime(1000)
+    })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('"Not now" carries on to the share and puts the ask away for this run of the app', async () => {
+    const { tree, onDone } = sheet()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+    expect(await gateSays({})).toBe(false)
+  })
+
+  it('the buttons are reached past the line, in a scroll', () => {
+    const { tree } = sheet()
+    let parent = tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn')).parent
+    while (parent && String(parent.type) !== 'RCTScrollView') parent = parent.parent
+    expect(parent).toBeTruthy()
+    const json = JSON.stringify(tree.toJSON())
+    expect(json.indexOf('RemoteVrcNotify.Ask')).toBeLessThan(json.indexOf('RemoteVrcNotificationsTurnOn'))
   })
 })
