@@ -26,6 +26,10 @@ export const logRef = (did: string | undefined): string =>
  * The refusal codes a log line may repeat, and no others. A community writes a refusal's code and details as well as
  * its message, so a code is only a kind while it is one this list knows: anything else reads as `other`, whatever it
  * says. An unlisted code loses a word in a report, never more.
+ *
+ * **`refused (other)` in a report means a code missing from this list: find out what it was, and add it.** The list
+ * can't find its own gaps, because a code an agent sends and no specification declares reaches here only from a device.
+ * So regenerating the specifications' part must keep what is listed apart from it.
  */
 const LOGGED_REFUSAL_CODES = new Set([
   // The framework's own (trust-tasks-rs StandardCode, SPEC 8.3).
@@ -45,8 +49,8 @@ const LOGGED_REFUSAL_CODES = new Set([
   'unavailable',
   'internalError',
   'indeterminate',
-  // A room task's own: every code the rooms and community rooms specifications declare (vti-specs-rooms at VTI 4614eabb9),
-  // and those their docs name beside them.
+  // A room task's own: every code any version of the rooms and community rooms specifications declares (vti-specs-rooms
+  // at VTI 4614eabb9), and those their docs name beside them.
   'aboveCeiling',
   'actionNotHeld',
   'admissionPending',
@@ -85,6 +89,7 @@ const LOGGED_REFUSAL_CODES = new Set([
   'invalidCursor',
   'invalidManifest',
   'invalidParts',
+  'invalidRange',
   'invalidSettings',
   'issuerNotPrincipal',
   'keyHolderRefused',
@@ -98,6 +103,7 @@ const LOGGED_REFUSAL_CODES = new Set([
   'listInvalid',
   'locationMismatch',
   'memberLimitsUnavailable',
+  'memberUsageUnavailable',
   'noAuthority',
   'noGroup',
   'noKeyHolder',
@@ -124,6 +130,7 @@ const LOGGED_REFUSAL_CODES = new Set([
   'offerWithdrawn',
   'ownLeaf',
   'principalAmbiguous',
+  'privateRoom',
   'rateLimited',
   'recordTooLarge',
   'retentionConflict',
@@ -146,10 +153,14 @@ const LOGGED_REFUSAL_CODES = new Set([
   'visibilityNotPermitted',
   'welcomeInvalid',
   'wrongState',
+  // Sent by an agent though no specification declares it: `rooms/keys/seal:conflict`, more than one credential for a
+  // room (277.8). Why this refusal needs a word of its own is the reason this list exists at all.
+  'conflict',
   // Keyring's own, for a step that went wrong between a room's tasks.
   'empty',
   'fileTooLarge',
   'joinFailed',
+  'roomKeptMoving',
   'senderRefused',
   'tooLarge',
   'tooLong',
