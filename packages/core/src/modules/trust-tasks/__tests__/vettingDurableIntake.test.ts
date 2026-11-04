@@ -60,6 +60,7 @@ import {
   VETTING,
   VtiVetterDesk,
   closeExpiredParkedRequests,
+  parkVettingRequest,
   type ParkedVettingRequest,
   type VettingTicket,
 } from '../module/vtiVetting'
@@ -197,7 +198,15 @@ async function phone(options: { uses?: number } = {}) {
     from: from.did,
     body: await signed(from, vetter.did, { community: community.did, joinDid: from.did, ticket: ticketPayload }),
   })
-  return { vetter, store, openDesk, parked, request, inbox: () => startPersonaInbox(vetter.agent as never, {}) }
+  return {
+    vetter,
+    persona,
+    store,
+    openDesk,
+    parked,
+    request,
+    inbox: () => startPersonaInbox(vetter.agent as never, {}),
+  }
 }
 
 describe('a vetting request delivered with no desk listening', () => {
@@ -369,10 +378,40 @@ describe('a vetting request delivered with no desk listening', () => {
     const { desk } = await p.openDesk()
     expect(mockSent).toHaveLength(0)
     expect(p.parked()[0].content.closed).toBeUndefined()
+    // The screen looks every few seconds: a request waiting out a bad connection doesn't write a refusal each time.
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('refused unread')
 
     resolve.mockImplementation(async (d: string) => DidKey.fromDid(d).didDocument)
     await p.openDesk(desk)
     expect(answers()).toEqual([RESPONSE])
+  })
+
+  it('keeps waiting too when the desk heard it live but could not check its proof offline', async () => {
+    const p = seat(await phone())
+    const resolve = p.vetter.agent.dids.resolveDidDocument
+    resolve.mockImplementation(async () => Promise.reject(new Error('offline')))
+    const { desk } = await p.openDesk()
+    await deliver(await p.request())
+    expect(mockSent).toHaveLength(0)
+    expect(p.parked()[0].content.closed).toBeUndefined()
+
+    resolve.mockImplementation(async (d: string) => DidKey.fromDid(d).didDocument)
+    await p.openDesk(desk)
+    expect(answers()).toEqual([RESPONSE])
+  })
+
+  it('is not kept once the desk has a row for it', async () => {
+    const p = await phone({ uses: 2 })
+    mockSession.did = p.vetter.did
+    const { stop } = await p.openDesk()
+    const m = await p.request()
+    await deliver(m)
+    expect(answers()).toEqual([RESPONSE])
+    stop()
+
+    await parkVettingRequest(p.store, p.persona as never, m as never)
+
+    expect(p.parked()).toHaveLength(0)
   })
 
   it('is refused unread and closed when its sender is not its issuer, spending nothing', async () => {
@@ -387,6 +426,11 @@ describe('a vetting request delivered with no desk listening', () => {
     expect(mockSent).toHaveLength(0)
     expect((await p.store.listTickets(community.did))[0].usesLeft).toBe(1)
     expect(p.parked()[0].content).toMatchObject({ closed: 'taken' })
+    expect(p.parked()[0].content.message).toBeUndefined()
+
+    // The ticket is still live, so a copy delivered again would pass the test to be kept: the note stops it.
+    await deliver({ ...m, from: impostor.did })
+    expect(p.parked()).toHaveLength(1)
     expect(p.parked()[0].content.message).toBeUndefined()
   })
 
