@@ -109,6 +109,58 @@ describe('the notifications ask before an invitation goes out as a link', () => 
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
   })
 
+  it('an approval rule holding it says so, and Continue carries on to the share', async () => {
+    const { tree, toggle, onDone } = sheet()
+    toggle.mockImplementation(async () => {
+      jest
+        .spyOn(vtaAgent, 'getState')
+        .mockReturnValue({ ...vtaAgent.getState(), wakeBlockedByRule: true, link: { kind: 'linked' } as never })
+      return 'held'
+    })
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    expect(tree.getByText('PushNotifications.BlockedByApprovalRule')).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))).toBeNull()
+    expect(onDone).not.toHaveBeenCalled()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+  })
+
+  it('turning on that did not work says so, and Continue carries on to the share', async () => {
+    const { tree, toggle, onDone } = sheet()
+    toggle.mockResolvedValue('failed')
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    expect(tree.getByText('PushNotifications.NotSetUpYet')).toBeTruthy()
+    expect(onDone).not.toHaveBeenCalled()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+  })
+
+  it('an outcome not known goes straight on: today nothing says it failed', async () => {
+    const { tree, toggle, onDone } = sheet()
+    toggle.mockResolvedValue(undefined)
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+    expect(tree.queryByText('PushNotifications.NotSetUpYet')).toBeNull()
+  })
+
+  it('past the wait, an old approval flag does not stop the share: it is from before this try', async () => {
+    jest.useFakeTimers()
+    const { tree, toggle, onDone } = sheet()
+    jest
+      .spyOn(vtaAgent, 'getState')
+      .mockReturnValue({ ...vtaAgent.getState(), wakeBlockedByRule: true, link: { kind: 'linked' } as never })
+    toggle.mockReturnValue(new Promise(() => undefined))
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsTurnOn'))))
+    await act(async () => {
+      jest.advanceTimersByTime(WAKEABLE_WAIT_MS)
+    })
+    await act(async () => {
+      jest.advanceTimersByTime(DISMISS_FALLBACK_MS)
+    })
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(tree.queryByText('PushNotifications.BlockedByApprovalRule')).toBeNull()
+  })
+
   it('a phone that is slow to become wakeable does not hold up the share', async () => {
     jest.useFakeTimers()
     const { tree, toggle, onDone } = sheet()

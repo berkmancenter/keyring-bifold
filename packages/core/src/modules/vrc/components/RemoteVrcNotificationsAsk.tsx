@@ -10,7 +10,8 @@
  *
  * Every way out carries on to the share: the ask never stands between a person and their link. "Turn on" asks for
  * the permission and, once given, makes the phone wakeable (the app's toggle: the gateway, the agent's set-wake, the
- * mediator's device info). "Not now" puts it away for this run of the app.
+ * mediator's device info). "Not now" puts it away for this run of the app. If that doesn't work, or an approval rule
+ * on the agent holds it, the sheet says so first: it asked, so it shouldn't go quiet about the answer.
  *
  * @module vrc/components/RemoteVrcNotificationsAsk
  */
@@ -69,7 +70,8 @@ const RemoteVrcNotificationsAsk: React.FC<{ onDone: () => void }> = ({ onDone })
   const { agent } = useAgent()
   const { ColorPalette } = useTheme()
   const [{ enablePushNotifications }] = useServices([TOKENS.CONFIG])
-  const [denied, setDenied] = useState(false)
+  // Set when something stands between this phone and being woken: said here, then Continue goes on to the share.
+  const [note, setNote] = useState<string | undefined>()
   const [busy, setBusy] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const done = useRef(false)
@@ -97,24 +99,33 @@ const RemoteVrcNotificationsAsk: React.FC<{ onDone: () => void }> = ({ onDone })
     try {
       const status = await enablePushNotifications.setup()
       if (status !== 'granted') {
-        setDenied(true)
+        setNote('RemoteVrcNotify.Denied')
         return
       }
-      // Past the wait it goes on on its own. `toggle` logs a failure and resolves, so this can't tell whether it worked.
-      await Promise.race([
+      // Past the wait it goes on on its own. An app whose `toggle` returns nothing hasn't said whether it worked.
+      const outcome = await Promise.race([
         enablePushNotifications.toggle(true, agent),
-        new Promise((resolve) => setTimeout(resolve, WAKEABLE_WAIT_MS)),
+        new Promise<'still going'>((resolve) => setTimeout(() => resolve('still going'), WAKEABLE_WAIT_MS)),
       ])
+      // Read only once it has answered: past the wait, the flag is from before this try.
+      if (outcome !== 'still going' && vtaAgent.getState().wakeBlockedByRule) {
+        setNote('PushNotifications.BlockedByApprovalRule')
+        return
+      }
+      if (outcome === 'failed') {
+        setNote('PushNotifications.NotSetUpYet')
+        return
+      }
       leave()
     } catch (e) {
       agent.config.logger.warn(`[VRC] notifications for a remote exchange not turned on: ${(e as Error).message}`)
-      setDenied(true)
+      setNote('RemoteVrcNotify.Denied')
     } finally {
       setBusy(false)
     }
   }
 
-  const label = denied ? t('Global.Continue') : t('RemoteVrcNotify.NotNow')
+  const label = note ? t('Global.Continue') : t('RemoteVrcNotify.NotNow')
   return (
     <SafeAreaModal visible={!leaving} transparent animationType="slide" onDismiss={finish}>
       <SafeAreaView style={styles.overlay} edges={['top']}>
@@ -127,8 +138,8 @@ const RemoteVrcNotificationsAsk: React.FC<{ onDone: () => void }> = ({ onDone })
             contentContainerStyle={styles.content}
             testID={testIdWithKey('RemoteVrcNotificationsAsk')}
           >
-            <ThemedText>{denied ? t('RemoteVrcNotify.Denied') : t('RemoteVrcNotify.Ask')}</ThemedText>
-            {!denied && (
+            <ThemedText>{t(note ?? 'RemoteVrcNotify.Ask')}</ThemedText>
+            {!note && (
               <Button
                 title={t('RemoteVrcNotify.TurnOn')}
                 accessibilityLabel={t('RemoteVrcNotify.TurnOn')}
