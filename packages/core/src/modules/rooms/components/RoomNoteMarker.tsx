@@ -47,7 +47,7 @@ export const RoomNoteMarker: React.FC<RoomNoteMarkerProps> = ({ title, onOpen })
       paddingVertical: 6,
       paddingHorizontal: 12,
       borderRadius: 12,
-      // The day pill's colours: #4A4A4A on #E6E0E6 is 7:1.
+      // The day pill's colours: #4A4A4A on #E6E0E6 is 6.8:1, which clears AA. Fixed, so light only, as the pill's are.
       backgroundColor: '#E6E0E6',
     },
     words: { flex: 1, minWidth: 0 },
