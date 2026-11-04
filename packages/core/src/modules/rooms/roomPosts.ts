@@ -13,6 +13,7 @@
 import { CHAT_PROFILE, type ChatMessageEvent, parseChatEvent } from '../chat/chatEvent'
 
 import { toInertText, type InertText } from './inertText'
+import type { PostRefusal } from './postRefusal'
 import type { Identity, Note, NoteSummary, RoomFile } from './types'
 
 export interface RoomPost {
@@ -37,6 +38,8 @@ export interface RoomPost {
   unread: boolean
   /** A post this phone is still sending, or could not send (not yet a record in the room). */
   delivery?: 'sending' | 'failed'
+  /** Why a failed post can't go, when no retry would pass (postRefusal): said instead of "Tap to try again". */
+  refused?: PostRefusal
   /** The files the post carries, each shown as a chip under its words. None on a retracted post. */
   files: RoomFile[]
   /** How far a sending post's file has come, 0 to 1. */
@@ -107,6 +110,9 @@ export const isNote = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => 
 
 /** A post the room's chat draws: any record that is not a note. */
 export const isChatPost = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => !isNote(post)
+
+/** A note the chat says is there, as one line: one the room still holds, not the marker of a removed one. */
+export const isNoteMarker = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => isNote(post) && !post.retracted
 
 /** Newest first: by time, then by version, so records with no time keep a stable order. */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'>>(notes: T[]): T[] =>
