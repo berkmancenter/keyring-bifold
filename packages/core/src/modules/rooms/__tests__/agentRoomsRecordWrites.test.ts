@@ -224,13 +224,47 @@ describe('sending is off', () => {
 })
 
 describe('a message', () => {
-  it('with nothing listed is exactly today’s sealed post, at seal 0.2', async () => {
+  const PLAIN = { roomId: ROOM, key: 'opaque-1', version: 1, author: ME, body: 'hello' }
+
+  it('with nothing listed is exactly today’s sealed post', async () => {
     const s = setup()
     await send(s, { type: 'message', body: 'hello' })
-    expect(s.sealedBody()).toEqual({
-      type: ROOMS_TASK.keysSeal02,
-      body: { roomId: ROOM, key: 'opaque-1', version: 1, author: ME, body: 'hello' },
+    expect(s.sealedBody().body).toEqual(PLAIN)
+  })
+
+  it('goes at the newest seal the agent serves, the same body at either', async () => {
+    const newest = setup()
+    await send(newest, { type: 'message', body: 'hello' })
+    expect(newest.sealedBody().type).toBe(ROOMS_TASK.keysSeal03)
+
+    const older = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysSeal03) })
+    await send(older, { type: 'message', body: 'hello' })
+    expect(older.sealedBody()).toEqual({ type: ROOMS_TASK.keysSeal02, body: PLAIN })
+
+    const only03 = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysSeal02) })
+    await send(only03, { type: 'message', body: 'hello' })
+    expect(only03.sealedBody()).toEqual({ type: ROOMS_TASK.keysSeal03, body: PLAIN })
+  })
+
+  it('a note written the existing way goes at the newest seal too, its body unchanged', async () => {
+    const s = setup({ recordSending: false })
+    const preview = await s.service.prepareWrite(ROOM, { title: 'Agenda', body: 'Bring seeds' })
+    await s.service.confirmWrite(preview.token)
+    expect(s.sealedBody().type).toBe(ROOMS_TASK.keysSeal03)
+    expect(s.sealedBody().body).toEqual({
+      roomId: ROOM,
+      key: 'opaque-1',
+      version: 1,
+      author: ME,
+      title: 'Agenda',
+      body: 'Bring seeds',
     })
+  })
+
+  it('an agent serving no seal that signs as the member can’t write at all', async () => {
+    const s = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysSeal02 && t !== ROOMS_TASK.keysSeal03) })
+    await expect(send(s, { type: 'message', body: 'hello' })).rejects.toBeInstanceOf(RoomsUnavailable)
+    expectNothingWritten(s)
   })
 
   it('carries what the room lists, and only that', async () => {

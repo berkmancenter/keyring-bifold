@@ -715,11 +715,11 @@ export class AgentRoomsService implements RoomsService {
         reason: 'tierNotYet',
         detail: `writing to ${room.tier} rooms is not built yet`,
       }
-    else if (!(this.served?.types ?? []).includes(ROOMS_TASK.keysSeal02))
+    else if (!this.sealType(false))
       statuses.write = {
         status: 'unavailable',
         reason: 'agentDoesNotServe',
-        detail: `the agent does not serve ${ROOMS_TASK.keysSeal02}`,
+        detail: 'the agent does not serve rooms/keys/seal at a version that signs as the member',
       }
     return statuses
   }
@@ -1508,6 +1508,18 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
+   * The `rooms/keys/seal` this agent takes for a body: the newest it serves. A body using a governed member goes at 0.3
+   * or not at all, since 0.2 refuses those members; any other body is the same at either version.
+   *
+   * @versionLadder rooms/keys/seal
+   */
+  private sealType(usesGoverned: boolean): string | undefined {
+    const served = this.served?.types ?? []
+    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal03, ROOMS_TASK.keysSeal02]
+    return types.find((t) => served.includes(t))
+  }
+
+  /**
    * What this room lets its member write: its profile's `recordMembers`, read at most once per room epoch ("A writer
    * MAY rely on a profile it resolved within the room's current epoch"), and whether the agent seals them. A profile
    * that can't be read permits none, and isn't kept, so the next ask tries again.
@@ -1516,7 +1528,7 @@ export class AgentRoomsService implements RoomsService {
     const room = await this.requireInRoom(roomId, 'write')
     const { community, host } = this.hostOf(room, 'write')
     const served = this.served?.types ?? []
-    const canSeal = served.includes(ROOMS_TASK.keysSeal03)
+    const canSeal = this.sealType(true) !== undefined
     if (!served.includes(ROOMS_TASK.keysProfileRead)) return { listed: [], canSeal, unresolved: false }
     const k = `${room.roomId}\n${host}\n${community.personaDid}`
     const epoch = await this.heldRooms().then(
@@ -1633,9 +1645,8 @@ export class AgentRoomsService implements RoomsService {
         ...(note.file ? { file: note.file } : {}),
         ...note.members,
       }
-      // Only a body using these members needs 0.3: every other write stays exactly as it was.
-      const sealType =
-        note.members && governedMembersIn(note.members).length > 0 ? ROOMS_TASK.keysSeal03 : ROOMS_TASK.keysSeal02
+      const sealType = this.sealType(!!note.members && governedMembersIn(note.members).length > 0)
+      if (!sealType) throw new RoomsUnavailable('write', 'agentDoesNotServe', 'the agent can not seal this record')
       const sealed = parseSealed(
         await this.agentStep('write', 'sign and seal the note as the member', sealType, {
           roomId: room.roomId,
