@@ -351,6 +351,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   )
   const deskRef = useRef<VtiVetterDesk | undefined>(undefined)
   const applicantRef = useRef<VtiApplicant | undefined>(undefined)
+  // Which seat the last read gave this persona, so a re-run listens again at once (the desk effect, below).
+  const seated = useRef<{ did: string; side: 'vetter' | 'applicant' } | undefined>(undefined)
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -518,7 +520,11 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     void (async () => {
       const p = await stores.identity.getPersona(communityDid)
       if (cancelled) return
-      setPersona(p)
+      // The same persona read again keeps its object (an optimisation: the comparison is by serialised value, so
+      // it is only as good as one store path's key order; the early re-listen in the desk effect is the guarantee). A new one re-ran every effect keyed on it, and the desk's
+      // cleanup unhooked the desk each time this connect ran again: the MESSAGE_WAITING bump below brought a
+      // vetting request back exactly while the desk was unhooked (277.7, 0.69 gate kk, 2026-11-03).
+      setPersona((was) => (was && p && JSON.stringify(was) === JSON.stringify(p) ? was : p))
       setPersonaReadFor(communityDid)
       if (!p?.kmsKeyIds?.keyAgreement) return
       try {
@@ -587,6 +593,14 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       })
       if (got.length) bump()
     })
+    // A desk or applicant already seated for this persona listens again before anything here is awaited. The
+    // cleanup below unhooked it, and the seat read can take seconds (a status read); a message delivered in between
+    // reached no desk and was acknowledged, so a vetting request was lost (277.7, 0.69 gate kk, 2026-11-03).
+    // listen() replaces its own registration, so the read's own listen() below adds no second one.
+    if (seated.current?.did === persona.did) {
+      if (seated.current.side === 'vetter') deskRef.current?.listen()
+      else applicantRef.current?.listen()
+    }
     let cancelled = false
     const refreshSeat = async () => {
       const grants = await stores.community.listHeldCredentials('vetter-grant', persona.communityDid)
@@ -614,6 +628,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!deskRef.current)
           deskRef.current = new VtiVetterDesk(agent, persona, stores.vetting, stores.community, bump)
         deskRef.current.listen()
+        // One side listens: a seat that changed side must not leave the other taking deliveries it cannot serve.
+        applicantRef.current?.stopListening()
+        seated.current = { did: persona.did, side: 'vetter' }
         const p = await stores.vetting.getProfile(persona.communityDid)
         setProfile(p)
         setProfileName((v) => v || p?.displayName || '')
@@ -626,6 +643,10 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!applicantRef.current)
           applicantRef.current = new VtiApplicant(agent, persona, stores.vetting, stores.community, bump)
         applicantRef.current.listen()
+        // A desk left listening after its grant went would take a vetting request, have it acknowledged, and be
+        // unable to serve it: the loss this seat's early re-listen exists to prevent.
+        deskRef.current?.stopListening()
+        seated.current = { did: persona.did, side: 'applicant' }
         const a = await stores.vetting.getApplication(persona.communityDid)
         setApplication(a)
         // A ticket kept from an earlier visit (camera, link, paste) is still here.
@@ -727,8 +748,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     // A ticket for another community is not asked with: the field shows why.
     if (!checkTicketFor(ticket, communityDid).ok) return
     void run('request', async () => {
-      await vettingManifest(application.requirementsDigest)
-      await applicantRef.current!.requestVetter({ link: ticket })
+      const m = await vettingManifest(application.requirementsDigest)
+      await applicantRef.current!.requestVetter({ link: ticket, manifest: m })
     })
   }, [ticketLink, application, communityDid, busy, run, vettingManifest])
 
@@ -746,7 +767,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       hiddenVettingSuite(c) === HIDDEN_VETTING_SUITE &&
       (!application?.requirementsDigest || c.requirementsDigest === application.requirementsDigest)
   )
-  const privateHere = carriesPrivate && (checklist ? checklist.mode === 'private' : Boolean(privateCriterion))
+  // The way in counts as well as the checklist: an application with no private
+  // record for its own join DID yet reads as named, and the mark stays.
+  const privateHere = carriesPrivate && (checklist?.mode === 'private' || Boolean(privateCriterion))
   // The manifest, read in a build that carries private vetting: the
   // applicant's mark from the first step, and the vetter's private way. Read
   // afresh even when one from earlier is shown: the community's answer now counts.
@@ -1491,8 +1514,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         disabled={!!busy || !ticketLink.trim() || !!ticketRefused}
         onPress={() =>
           run('request', async () => {
-            await vettingManifest(application?.requirementsDigest)
-            await applicantRef.current!.requestVetter({ link: ticketLink.trim() })
+            const m = await vettingManifest(application?.requirementsDigest)
+            await applicantRef.current!.requestVetter({ link: ticketLink.trim(), manifest: m })
           })
         }
       >
