@@ -205,9 +205,6 @@ export function withRepliesToReactions(posts: RoomPost[]): RoomPost[] {
   )
 }
 
-/** A note the chat says is there, as one line: one the room still holds, not the marker of a removed one. */
-export const isNoteMarker = (post: Pick<RoomPost, 'title' | 'retracted'>): boolean => isNote(post) && !post.retracted
-
 /** Newest first: by time, then by version, so records with no time keep a stable order. */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'>>(notes: T[]): T[] =>
   [...notes].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || b.version - a.version)
