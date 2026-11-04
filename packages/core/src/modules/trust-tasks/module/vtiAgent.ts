@@ -1185,9 +1185,8 @@ class VtiAgentController {
       if (this.connecting === attempt) this.connecting = undefined
     }
     if (!background && wantedDid && claims) {
-      // Refusals count "running" under a claim and its renewals: one that ran out starts them again. A renewal does not:
-      // a claim kept renewed is what starved the other identity.
-      if (!this.claim || this.claim.until <= this.now()) this.refusedByClaim.clear()
+      // Nobody else's refusals are cleared here, by a renewal or by a new claim: the count is the waiter's, and another
+      // claim only makes the wait longer. It starts afresh when that identity gets through, below.
       this.claim = { did: wantedDid, until: this.now() + VTI_FOREGROUND_CLAIM_MS }
     }
     // Its turn came, or it was never refused: counted afresh from here.

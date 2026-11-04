@@ -343,13 +343,27 @@ describe('the session claim', () => {
     expect(vtiAgent.getState().did).toBe(B.persona)
   })
 
-  it('a refusal under a claim that ran out does not count toward the next claim', async () => {
+  it('a claim that ran out and came back does not start the count again: the wait is the same wait', async () => {
+    // A identity acting just past the claim's length takes a fresh claim each time, and B is refused between them.
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(A.persona, A.community) })
-    for (let i = 0; i < VTI_TURN_AFTER_REFUSALS - 1; i++) await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
-    noClaimLeft()
+    for (let i = 0; i < VTI_TURN_AFTER_REFUSALS; i++) {
+      await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
+      noClaimLeft()
+      await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(A.persona, A.community) })
+    }
+    expect(vtiAgent.getState().did).toBe(A.persona)
+    await poll(B)
+    expect(vtiAgent.getState().did).toBe(B.persona)
+  })
+
+  it('an identity that took a claim starts its own count afresh: it was not waiting', async () => {
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(A.persona, A.community) })
-    // Nearly its turn before; now the whole count again, from nothing. One refusal alone would pass with the old count kept.
     for (let i = 0; i < VTI_TURN_AFTER_REFUSALS; i++) await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
+    // B signs in as a step would, then A claims: B's earlier refusals are behind it.
+    noClaimLeft()
+    await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(B.persona, B.community) })
+    await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(A.persona, A.community) })
+    await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
     expect(vtiAgent.getState().did).toBe(A.persona)
   })
 
