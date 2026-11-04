@@ -1165,8 +1165,8 @@ export class AgentRoomsService implements RoomsService {
       })
       this.backend.warn(`rooms: ${logRef(roomId)} Welcome: joined`)
     } catch (e) {
-      // Another surface handed the same Welcome over first, or the agent still holds the group from before a removal:
-      // both answer the same. Said apart from a real join, by kind alone, since they don't read the same afterwards.
+      // Another surface handed the same Welcome over first or, by the agent's source, it still holds the group from
+      // before a removal: both answer the same. Said apart from a real join, by kind alone (roomsLogWords).
       if (refusalCode(e) !== 'alreadyJoined')
         throw new RoomsRefused(
           'acceptOffer',
