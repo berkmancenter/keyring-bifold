@@ -348,8 +348,8 @@ describe('the session claim', () => {
     for (let i = 0; i < VTI_TURN_AFTER_REFUSALS - 1; i++) await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
     noClaimLeft()
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(A.persona, A.community) })
-    // Nearly its turn before; refused again now, from nothing.
-    await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
+    // Nearly its turn before; now the whole count again, from nothing. One refusal alone would pass with the old count kept.
+    for (let i = 0; i < VTI_TURN_AFTER_REFUSALS; i++) await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
     expect(vtiAgent.getState().did).toBe(A.persona)
   })
 
