@@ -31,12 +31,10 @@ function setup(opts: { push?: boolean; linked?: boolean; status?: string; afterS
     ...defaultConfig,
     ...(opts.push === false ? {} : { enablePushNotifications: { status, setup: setupFn, toggle } }),
   })
-  jest
-    .spyOn(vtaAgent, 'getState')
-    .mockReturnValue({
-      ...vtaAgent.getState(),
-      link: (opts.linked === false ? { kind: 'notLinked' } : { kind: 'linked' }) as never,
-    })
+  jest.spyOn(vtaAgent, 'getState').mockReturnValue({
+    ...vtaAgent.getState(),
+    link: (opts.linked === false ? { kind: 'notLinked' } : { kind: 'linked' }) as never,
+  })
   const tree = render(
     <CustomBasicAppContext container={c}>
       <RemoteVrcNotificationsAsk />
@@ -58,11 +56,12 @@ describe('the notifications ask before a remote VRC', () => {
     expect(tree.getByText('RemoteVrcNotify.Ask')).toBeTruthy()
   })
 
-  it.each([
+  const noAsk: [string, { push?: boolean; linked?: boolean; status?: string }][] = [
     ['no push in the build', { push: false }],
     ['no agent linked: turning them on would not make it wakeable', { linked: false }],
     ['notifications already on', { status: 'granted' }],
-  ] as const)('does not ask with %s', async (_label, opts) => {
+  ]
+  it.each(noAsk)('does not ask with %s', async (_label, opts) => {
     const { tree, status } = setup(opts)
     await act(async () => undefined)
     if (opts.push !== false && opts.linked !== false) await waitFor(() => expect(status).toHaveBeenCalled())
