@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "3b9c694fbd0f45a625da860edd2b532fc246d7d1",
+  "generatedFrom": "c57acf3cc1f04d2a9b5147a37a3898e4ffe176c6",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1479,6 +1479,10 @@
     "VettingVouchStuck": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingVouchTokens": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingWithdrawButton": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirm": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirmCard": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirmWords": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawStay": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingYouVetFor": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VtaClaim": ["src/modules/trust-tasks/screens/VtaClaim.ids.ts"],
     "VtaClaimCancel": ["src/modules/trust-tasks/screens/VtaClaim.ids.ts"],
@@ -2213,6 +2217,18 @@
     },
     {
       "src/modules/trust-tasks/screens/SuggestedAccessLabel.tsx": "testIdStem"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirm"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirmCard"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirmWords"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawStay"
     },
     {
       "src/modules/trust-tasks/screens/VtaAgentHome.tsx": "VtaAgentHomeIds.addedCard"
