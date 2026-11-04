@@ -2010,6 +2010,8 @@
       "RequirementsChanged": "{{community}} mudou o que pede de novos membros desde que esta pessoa se candidatou, então garantir agora não valeria. Peça que ela se candidate de novo.",
       "NotEnrolledError": "Você não está inscrito neste período. Inscreva-se e tente de novo.",
       "RequestNotPrivate": "Nada foi assinado: {{community}} só verifica em privado, e este pedido não era privado. Dê um novo ticket a essa pessoa.",
+      "RulesUnread": "Não foi possível verificar as regras de verificação desta comunidade. Tente novamente em instantes.",
+      "RulesUnusable": "As regras de verificação desta comunidade não podem ser lidas, então nada foi assinado. Avise a comunidade.",
       "PeriodClosed": "Este período de verificação terminou. Inscreva-se no novo e tente de novo.",
       "MemberMismatch": "Este agente não pode dar garantia de forma privada nesta comunidade. Uma versão anterior do Keyring o inscreveu na verificação privada com uma identidade diferente daquela com que você verifica aqui, e um agente não pode mudar isso, então a comunidade recusaria todo token de garantia que ele retirar. A inscrição dele aqui está travada e não se resolve reabrindo a mesa, e os tokens que ele guarda para esta comunidade não podem ser usados. Para dar garantia de forma privada aqui, conecte outro agente.",
       "ErrorGeneric": "Algo deu errado. Tente de novo em um instante.",

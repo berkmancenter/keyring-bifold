@@ -54,7 +54,14 @@ import {
 import { resolveDidDocumentRetrying } from './VtiMediatorTransport'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import { disclosedUnder, recordAnswer, recordSent, recordStatus } from './joinSubmission'
-import { joinRequestRefusal, openJoinRequestOf, vtiAgent, type VtiManifest, type VtiVerdict } from './vtiAgent'
+import {
+  isUnsupportedJoinVersion,
+  joinRequestRefusal,
+  openJoinRequestOf,
+  vtiAgent,
+  type VtiManifest,
+  type VtiVerdict,
+} from './vtiAgent'
 import { checkCredentialStatus, checkStatusEntry, statusEntryOf, type CredentialStatusResult } from './vtiStatusList'
 import { pickOwnVetterGrant, vetterNotEligibleReason } from './vtiGrantState'
 import { emitCommunityChanged } from './communityChanged'
@@ -1515,6 +1522,8 @@ export class VtiVetterDesk {
       try {
         return { manifest: await vtiAgent.fetchManifest(communityDid, this.agent) }
       } catch (e) {
+        // It serves no version this wallet speaks, and said so: asking again gets the same answer.
+        if (isUnsupportedJoinVersion(e)) return { unusable: (e as Error)?.message ?? String(e) }
         unread = (e as Error)?.message ?? String(e)
         if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
       }
@@ -1529,24 +1538,17 @@ export class VtiVetterDesk {
    * vetter's own grant from it (B); a manifest that cannot be read now leaves
    * the grant to decide. `off` and `force` read nothing.
    */
-  private async statementShapeFor(communityDid: string, read: ManifestRead): Promise<StatementShapeChoice> {
+  private async statementShapeFor(communityDid: string, manifest?: VtiManifest): Promise<StatementShapeChoice> {
     const mode = getDtgV1WritingMode()
     if (mode !== 'auto') return chooseStatementShape({ mode })
-    const statementType = read.manifest ? publishedStatementType(read.manifest) : undefined
-    const unread = read.unread
+    const statementType = manifest ? publishedStatementType(manifest) : undefined
     const grants =
       (await this.communityStore?.listHeldCredentials?.('vetter-grant', communityDid).catch(() => [])) ?? []
     const own = grants
       .filter((g) => g.subjectDid === this.persona.did)
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
     const grantShape = communityRoleCard(own[0]?.credential)?.shape
-    const choice = chooseStatementShape({ mode, statementType, grantShape })
-    if (unread) {
-      releaseWarn(
-        `[VTI] statement shape: the community's requirements could not be read twice (${unread}); writing ${choice.shape} by ${choice.by}`
-      )
-    }
-    return choice
+    return chooseStatementShape({ mode, statementType, grantShape })
   }
 
   async attest(
@@ -1596,29 +1598,48 @@ export class VtiVetterDesk {
     let statement: Record<string, unknown>
     // Read in `auto`, the release mode, as the shape has always been; `off`
     // and `force` are for development and read nothing.
-    const read: ManifestRead = getDtgV1WritingMode() === 'auto' ? await this.readManifest(desk.communityDid) : {}
+    const auto = getDtgV1WritingMode() === 'auto'
+    const read: ManifestRead = auto ? await this.readManifest(desk.communityDid) : {}
+    // The community's rules say whether a statement can count there and in
+    // which shape. Without them nothing is signed, rather than a statement
+    // written on a guess (the owner's decision, 2026-11-04). The two ways of
+    // not having them read differently, because trying again only helps one:
+    // an answer that never came may come; rules that came and say nothing about
+    // vetting will say the same next time. `readManifest` (joinManifest) reads
+    // a malformed answer as no criteria at all rather than throwing, so that
+    // case arrives here as a manifest, and has to be looked for.
+    if (auto) {
+      const unusable =
+        read.unusable ??
+        (read.manifest && vettingCriteriaOf(read.manifest).length === 0 ? 'no vetting rules' : undefined)
+      if (unusable) {
+        releaseWarn(`[VTI] statement not written: the community's requirements cannot be used (${unusable})`)
+        throw Object.assign(new Error("vtiVetting: the community's vetting rules cannot be used"), {
+          code: 'keyring/hidden-vetter/attest:rulesUnusable',
+        })
+      }
+      if (!read.manifest) {
+        releaseWarn(
+          `[VTI] statement not written: the community's requirements could not be read twice (${read.unread ?? 'no manifest'})`
+        )
+        throw Object.assign(new Error("vtiVetting: the community's vetting rules could not be read"), {
+          code: 'keyring/hidden-vetter/attest:rulesUnread',
+        })
+      }
+    }
     // A request that did not ask to be vetted privately, for a community whose
     // every way in is private: a statement naming this vetter cannot count
     // there (the community counts only the agent's proof), so nothing is signed
     // and the vetter is told to have the person ask again. The applicant's
     // Keyring sent such a request from a stale private record (2026-11-03,
     // 277.7).
-    //
-    // A manifest that cannot be read leaves this to the shape below, on
-    // purpose. The guard that matters is the applicant's: a Keyring that holds
-    // a current private application never sends this request (`requestVetter`).
-    // This check is the second line, for an older or other app. Refusing on an
-    // unread manifest would block a named community's vetting whenever its
-    // manifest read fails, to guard a case the applicant already prevents; and
-    // the cost of letting one through is a statement that does not count and is
-    // refused on arrival, not a disclosure the applicant did not already have.
     if (read.manifest && everyWayInIsPrivate(read.manifest)) {
       throw Object.assign(
         new Error('vtiVetting: this request did not ask to be vetted privately, and this community vets privately'),
         { code: 'keyring/hidden-vetter/attest:requestNotPrivate' }
       )
     }
-    const shape = await this.statementShapeFor(desk.communityDid, read)
+    const shape = await this.statementShapeFor(desk.communityDid, read.manifest)
     // Which shape went out, and what decided it: a device run cannot see it
     // otherwise (the Farm 0.47 gate reads it from a Release build's log).
     releaseWarn(`[VTI] statement shape: writing ${shape.shape} (by ${shape.by})`)
@@ -3214,7 +3235,17 @@ export interface HiddenAttestMeta {
 }
 
 /** A community's manifest as a vetter read it: the manifest, or why it could not be read. */
-type ManifestRead = { manifest?: VtiManifest; unread?: string }
+type ManifestRead = { manifest?: VtiManifest; unread?: string; unusable?: string }
+
+/** The criteria that publish vetting requirements; a malformed `criteria` or `vetting` counts as none. */
+function vettingCriteriaOf(manifest: VtiManifest): VtiManifest['criteria'] {
+  const criteria = (manifest as { criteria?: unknown }).criteria
+  if (!Array.isArray(criteria)) return []
+  return criteria.filter((c) => {
+    const vetting = (c as { vetting?: unknown } | null | undefined)?.vetting
+    return typeof vetting === 'object' && vetting !== null && !Array.isArray(vetting)
+  })
+}
 
 /**
  * Whether every criterion that vets in this manifest vets privately (publishes
@@ -3222,7 +3253,7 @@ type ManifestRead = { manifest?: VtiManifest; unread?: string }
  * no vetting is never read as private.
  */
 export function everyWayInIsPrivate(manifest: VtiManifest): boolean {
-  const vetting = manifest.criteria.filter((c) => (c as { vetting?: unknown }).vetting !== undefined)
+  const vetting = vettingCriteriaOf(manifest)
   return vetting.length > 0 && vetting.every((c) => hiddenParametersOf(c) !== undefined)
 }
 

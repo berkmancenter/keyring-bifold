@@ -79,6 +79,10 @@ export function hiddenVetterErrorKey(code: string | undefined): string {
   // A request that did not ask to be vetted privately, for a community that
   // vets only privately: nothing was signed.
   if (code.endsWith(':requestNotPrivate')) return 'Vetting.Vouch.RequestNotPrivate'
+  // The community's rules could not be read twice: nothing was signed.
+  if (code.endsWith(':rulesUnread')) return 'Vetting.Vouch.RulesUnread'
+  // Rules that came and cannot be used: trying again says the same, so this does not promise it will help.
+  if (code.endsWith(':rulesUnusable')) return 'Vetting.Vouch.RulesUnusable'
   return 'Vetting.Vouch.ErrorGeneric'
 }
 
