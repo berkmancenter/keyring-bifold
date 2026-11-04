@@ -3165,7 +3165,6 @@
     "PostEdited": "Edited",
     "PostRewrote": "Rewrote {{name}}'s message",
     "PostArrivedLate": "Arrived late. It says it was written {{when}}.",
-    "RepliesOff": "Replies and reactions aren't on in this room yet.",
     "PostsFailed": "Couldn't read this room's messages. Pull down to try again.",
     "RefreshFailed": "Couldn't refresh",
     "PostsNone": "No messages yet.",

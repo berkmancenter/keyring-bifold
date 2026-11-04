@@ -275,7 +275,6 @@
     "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
     "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
-    "ChatMessageActionsNotice": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageImage": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhoto": ["src/components/chat/Chat.ids.ts"],
@@ -1762,9 +1761,6 @@
     },
     {
       "src/components/chat/MessageActions.tsx": "ChatIds.actionsBackdrop"
-    },
-    {
-      "src/components/chat/MessageActions.tsx": "ChatIds.actionsNotice"
     },
     {
       "src/components/chat/MessageActions.tsx": "testID"

@@ -727,14 +727,14 @@ describe('replies and reactions in a room (trust-tasks-tf #1027)', () => {
     await waitFor(() => expect(tree.getByTestId(id('RoomNoteReactions'))).toBeTruthy())
   })
 
-  test('a long press offers Copy and says replies and reactions are not on: nothing can be sent', async () => {
+  test('a long press offers Copy and nothing else: nothing can be sent', async () => {
     const tree = open(withPosts([post('m1', 'Hi all')]))
     await waitFor(() => expect(tree.getByText('Hi all')).toBeTruthy())
     fireEvent(tree.getByTestId(id('RoomPostBubble')), 'longPress')
-    expect(tree.getByTestId(id('ChatMessageActionsNotice'))).toHaveTextContent('Rooms.RepliesOff')
     expect(tree.getByTestId(id('ChatActionCopy'))).toBeTruthy()
     expect(tree.queryByTestId(id('ChatReactionBar'))).toBeNull()
     expect(tree.queryByTestId(id('ChatActionReply'))).toBeNull()
+    expect(tree.queryByTestId(id('ChatActionDeleteForMe'))).toBeNull()
   })
 
   test('a withdrawn message offers nothing on a long press', async () => {
@@ -742,7 +742,7 @@ describe('replies and reactions in a room (trust-tasks-tf #1027)', () => {
     await waitFor(() => expect(tree.getByTestId(id('RoomPostWithdrawn'))).toBeTruthy())
     const withdrawn = within(tree.getByTestId(id(`RoomPost_${roomHandle('m2')}`)))
     fireEvent(withdrawn.getByTestId(id('RoomPostBubble')), 'longPress')
-    expect(tree.queryByTestId(id('ChatMessageActionsNotice'))).toBeNull()
+    expect(tree.queryByTestId(id('ChatActionCopy'))).toBeNull()
   })
 
   test('your own withdrawn message says you withdrew it', async () => {

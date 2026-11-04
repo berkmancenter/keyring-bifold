@@ -3015,7 +3015,6 @@
     "PostEdited": "Editada",
     "PostRewrote": "Reescreveu a mensagem de {{name}}",
     "PostArrivedLate": "Chegou atrasada. Diz ter sido escrita em {{when}}.",
-    "RepliesOff": "As respostas e reações ainda não estão ativadas nesta sala.",
     "PostsFailed": "Não foi possível ler as mensagens desta sala. Puxe para baixo para tentar de novo.",
     "RefreshFailed": "Não foi possível atualizar",
     "PostsNone": "Nenhuma mensagem ainda.",

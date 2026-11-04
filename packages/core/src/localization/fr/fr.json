@@ -3102,7 +3102,6 @@
     "PostEdited": "Modifié",
     "PostRewrote": "A réécrit le message de {{name}}",
     "PostArrivedLate": "Arrivé en retard. Il indique avoir été écrit le {{when}}.",
-    "RepliesOff": "Les réponses et les réactions ne sont pas encore activées dans ce salon.",
     "PostsFailed": "Impossible de lire les messages de ce salon. Tirez vers le bas pour réessayer.",
     "RefreshFailed": "Actualisation impossible",
     "PostsNone": "Aucun message pour l'instant.",

@@ -528,7 +528,6 @@ const Room: React.FC = () => {
         <MessageActions
           visible={!!actionFor}
           onClose={() => setActionFor(undefined)}
-          notice={t('Rooms.RepliesOff') as string}
           onCopy={() => {
             Clipboard.setString(String(actionFor?.text ?? ''))
             setActionFor(undefined)

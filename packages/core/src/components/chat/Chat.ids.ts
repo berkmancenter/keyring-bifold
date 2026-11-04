@@ -4,8 +4,6 @@ export const ChatIds = {
   actions: 'ChatMessageActions',
   // Tapping outside the sheet closes it.
   actionsBackdrop: 'ChatMessageActionsBackdrop',
-  // A line above the sheet's entries, saying why something isn't offered.
-  actionsNotice: 'ChatMessageActionsNotice',
   reactionBar: 'ChatReactionBar',
   // One quick reaction is `ChatReaction-<n>`, n from 0, in the bar's order.
   reaction: 'ChatReaction',
