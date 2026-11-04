@@ -3,12 +3,12 @@ import React from 'react'
 import { container } from 'tsyringe'
 import { Keyboard } from 'react-native'
 
-import { ContainerProvider } from '../../src/container-api'
+import { ContainerProvider, TOKENS } from '../../src/container-api'
 import { MainContainer } from '../../src/container-impl'
 import { AuthContext } from '../../src/contexts/auth'
 import { StoreProvider, defaultState } from '../../src/contexts/store'
 import reducer from '../../src/contexts/reducers/store'
-import PINEnter from '../../src/screens/PINEnter'
+import PINEnter, { biometricFailureKind } from '../../src/screens/PINEnter'
 import { testIdWithKey } from '../../src/utils/testable'
 import authContext from '../contexts/auth'
 
@@ -312,5 +312,119 @@ describe('PINEnter Screen', () => {
       },
       { timeout: 1000 }
     )
+  })
+})
+
+describe('when a biometric unlock does not complete (IN-491, IN-452)', () => {
+  const SECRET_WORDS = 'keychain said something private'
+  const logger = { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() }
+  const setAuthenticated = jest.fn()
+  const auth = {
+    ...authContext,
+    isBiometricsActive: jest.fn(async () => true),
+    getWalletSecret: jest.fn(),
+  }
+
+  const show = async () => {
+    const child = container.createChildContainer()
+    const main = new MainContainer(child).init()
+    child.registerInstance(TOKENS.UTIL_LOGGER, logger as never)
+    const tree = render(
+      <ContainerProvider value={main}>
+        <StoreProvider
+          initialState={{ ...defaultState, preferences: { ...defaultState.preferences, useBiometry: true } }}
+          reducer={stableReducer}
+        >
+          <AuthContext.Provider value={auth as never}>
+            <PINEnter setAuthenticated={setAuthenticated} />
+          </AuthContext.Provider>
+        </StoreProvider>
+      </ContainerProvider>
+    )
+    await act(async () => undefined)
+    return tree
+  }
+
+  const tapTheButton = async (tree: ReturnType<typeof render>) => {
+    // Not returned to act: the press's own promise is what some of these leave unresolved.
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('BiometricsUnlock')))
+    })
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks()
+    // The prompt on arriving is cancelled, so what follows is the button's own.
+    auth.getWalletSecret.mockReset()
+    auth.getWalletSecret.mockRejectedValueOnce(new Error('User canceled the operation.'))
+  })
+
+  test('the button logs a keychain failure, and nothing else changes on screen', async () => {
+    const tree = await show()
+    auth.getWalletSecret.mockRejectedValueOnce(new Error('Wallet secret is missing key property'))
+    await tapTheButton(tree)
+    expect(logger.warn).toHaveBeenCalledWith('[PIN] biometric unlock did not complete: no key')
+    expect(tree.queryByText('PINEnter.BiometricsError')).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('Enter'))).toBeTruthy()
+    expect(setAuthenticated).not.toHaveBeenCalled()
+  })
+
+  test('the log has the kind, never the words', async () => {
+    const tree = await show()
+    auth.getWalletSecret.mockRejectedValueOnce(new Error(SECRET_WORDS))
+    await tapTheButton(tree)
+    const logged = JSON.stringify([...logger.warn.mock.calls, ...logger.error.mock.calls])
+    expect(logged).toContain('biometric unlock did not complete: other')
+    expect(logged).not.toContain(SECRET_WORDS)
+  })
+
+  test('no secret and no error is logged too', async () => {
+    const tree = await show()
+    auth.getWalletSecret.mockResolvedValueOnce(undefined)
+    await tapTheButton(tree)
+    expect(logger.warn).toHaveBeenCalledWith('[PIN] biometric unlock did not complete: no secret')
+  })
+
+  test('a read that never returns still shows it started', async () => {
+    const tree = await show()
+    logger.info.mockClear()
+    auth.getWalletSecret.mockReturnValueOnce(new Promise(() => undefined))
+    await tapTheButton(tree)
+    expect(logger.info).toHaveBeenCalledWith('[PIN] biometric unlock: asking the keychain')
+  })
+
+  test('a PIN check that never returns still shows it started', async () => {
+    auth.checkWalletPIN = jest.fn(() => new Promise(() => undefined)) as never
+    const tree = await show()
+    logger.info.mockClear()
+    fireEvent.changeText(tree.getByTestId(testIdWithKey('EnterPIN')), '123456')
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('Enter')))
+    })
+    expect(logger.info).toHaveBeenCalledWith('[PIN] checking the PIN')
+    expect(logger.info).not.toHaveBeenCalledWith('[PIN] PIN checked')
+  })
+
+  test('success still unlocks', async () => {
+    const tree = await show()
+    auth.getWalletSecret.mockResolvedValueOnce({ id: 'i', key: 'k', salt: 's' })
+    await tapTheButton(tree)
+    expect(setAuthenticated).toHaveBeenCalledWith(true)
+  })
+
+  test.each([
+    ['User canceled the operation.', 'cancelled'],
+    ['code: 13, msg: Cancel', 'cancelled'],
+    ['Wallet secret is missing key property', 'no key'],
+    ['code: 7, msg: Too many attempts. Try again later.', 'locked out'],
+    ['code: 9, msg: Biometric lockout', 'locked out'],
+    ['anything else', 'other'],
+  ])('%s reads as %s', (message, kind) => {
+    expect(biometricFailureKind(new Error(message))).toBe(kind)
+  })
+
+  test('something that is not an error still has a kind', () => {
+    expect(biometricFailureKind('cancel')).toBe('cancelled')
+    expect(biometricFailureKind(undefined)).toBe('other')
   })
 })
