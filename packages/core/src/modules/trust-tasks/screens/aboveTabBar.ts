@@ -29,6 +29,10 @@ export function useToastAboveTabBar(): number {
  * The padding came from one screenshot (gate 235, iOS: "Your identity in this
  * community" sat at the tabs), read then as an overlay. The 90 pt above is a
  * height, for a toast placed at the root, and says nothing about a page.
+ *
+ * Whether a page still needs this room is unmeasured, so it stays. Taking it out
+ * is a layout change on every screen that uses it: it needs renders of those
+ * screens, not this comment.
  */
 export function useRoomAboveTabBar(): number {
   return useSafeAreaInsets().bottom + TAB_BAR_CLEARANCE
