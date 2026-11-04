@@ -5,6 +5,7 @@
  */
 import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native'
 import React from 'react'
+import { Modal, Platform } from 'react-native'
 import { container } from 'tsyringe'
 
 import { useAgent } from '@bifold/react-hooks'
@@ -12,6 +13,7 @@ import { useAgent } from '@bifold/react-hooks'
 import { TOKENS } from '../../../../src/container-api'
 import { MainContainer, defaultConfig } from '../../../../src/container-impl'
 import RemoteVrcNotificationsAsk, {
+  DISMISS_FALLBACK_MS,
   WAKEABLE_WAIT_MS,
   resetRemoteVrcNotificationsAsk,
   useRemoteVrcNotificationsGate,
@@ -118,8 +120,44 @@ describe('the notifications ask before an invitation goes out as a link', () => 
     })
     // The sheet leaves first, and iOS waits for that.
     await act(async () => {
-      jest.advanceTimersByTime(1000)
+      jest.advanceTimersByTime(DISMISS_FALLBACK_MS)
     })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('on iOS the share waits for the sheet to have gone, and opens once', async () => {
+    jest.useFakeTimers()
+    const { tree, onDone } = sheet()
+    const modal = tree.UNSAFE_getByType(Modal)
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    // Too early and iOS refuses the share sheet, so "Share as a link" would do nothing.
+    expect(onDone).not.toHaveBeenCalled()
+    act(() => modal.props.onDismiss())
+    expect(onDone).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      jest.advanceTimersByTime(DISMISS_FALLBACK_MS * 2)
+    })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('on iOS a dismissal never reported still reaches the share, but not early', async () => {
+    jest.useFakeTimers()
+    const { tree, onDone } = sheet()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
+    await act(async () => {
+      jest.advanceTimersByTime(DISMISS_FALLBACK_MS - 1)
+    })
+    expect(onDone).not.toHaveBeenCalled()
+    await act(async () => {
+      jest.advanceTimersByTime(1)
+    })
+    expect(onDone).toHaveBeenCalledTimes(1)
+  })
+
+  it('on Android the share does not wait', () => {
+    jest.replaceProperty(Platform, 'OS', 'android')
+    const { tree, onDone } = sheet()
+    fireEvent.press(tree.getByTestId(testIdWithKey('RemoteVrcNotificationsNotNow')))
     expect(onDone).toHaveBeenCalledTimes(1)
   })
 

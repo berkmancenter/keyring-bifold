@@ -30,8 +30,11 @@ import { vtaAgent } from '../../trust-tasks/module/vtaAgent'
 
 /** How long the share waits for the phone to be made wakeable; that goes on regardless. */
 export const WAKEABLE_WAIT_MS = 4000
-/** iOS can't open the share sheet while this sheet is leaving, so it waits for that, or this long if never told. */
-const DISMISS_FALLBACK_MS = 700
+/**
+ * iOS can't open the share sheet while this sheet is leaving, so it waits for that, or this long if never told. Long
+ * on purpose: too long opens the share a moment late, too short and "Share as a link" silently does nothing.
+ */
+export const DISMISS_FALLBACK_MS = 1500
 
 /** Put away for this run of the app ("Not now", or done). */
 let putAway = false
@@ -97,12 +100,11 @@ const RemoteVrcNotificationsAsk: React.FC<{ onDone: () => void }> = ({ onDone })
         setDenied(true)
         return
       }
-      const wakeable = enablePushNotifications.toggle(true, agent)
-      await Promise.race([wakeable, new Promise((resolve) => setTimeout(resolve, WAKEABLE_WAIT_MS))])
-      // Past the wait it goes on on its own, and may still fail: said in the log, like one that fails in time.
-      wakeable.catch((e: unknown) =>
-        agent.config.logger.warn(`[VRC] notifications for a remote exchange not turned on: ${(e as Error).message}`)
-      )
+      // Past the wait it goes on on its own. `toggle` logs a failure and resolves, so this can't tell whether it worked.
+      await Promise.race([
+        enablePushNotifications.toggle(true, agent),
+        new Promise((resolve) => setTimeout(resolve, WAKEABLE_WAIT_MS)),
+      ])
       leave()
     } catch (e) {
       agent.config.logger.warn(`[VRC] notifications for a remote exchange not turned on: ${(e as Error).message}`)
