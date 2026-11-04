@@ -1149,7 +1149,12 @@ class VtiAgentController {
     } finally {
       if (this.connecting === attempt) this.connecting = undefined
     }
-    if (!background && wantedDid && claims) this.claim = { did: wantedDid, until: this.now() + VTI_FOREGROUND_CLAIM_MS }
+    if (!background && wantedDid && claims) {
+      // Refusals count "running" under a claim and its renewals: one that ran out starts them again. A renewal does not:
+      // a claim kept renewed is what starved the other identity.
+      if (!this.claim || this.claim.until <= this.now()) this.refusedByClaim.clear()
+      this.claim = { did: wantedDid, until: this.now() + VTI_FOREGROUND_CLAIM_MS }
+    }
     // Its turn came, or it was never refused: counted afresh from here.
     if (wantedDid) this.refusedByClaim.delete(wantedDid)
     // Nothing awaited since the attempt settled: a caller that waited on it sees this hold when it looks.
