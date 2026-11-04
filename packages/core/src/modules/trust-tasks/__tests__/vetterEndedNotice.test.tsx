@@ -18,7 +18,7 @@ const grant = (id: string, subjectDid = ME, communityDid = COMMUNITY) => ({
   kind: 'vetter-grant' as const,
   communityDid,
   subjectDid,
-  credential: { id, type: ['VerifiableCredential'], validFrom: '2024-01-01T00:00:00Z' },
+  credential: { id, type: ['VerifiableCredential'], validFrom: '2024-01-01T00:00:00Z' } as Record<string, unknown>,
   receivedAt: '2024-01-01T00:00:00Z',
 })
 
@@ -75,9 +75,7 @@ describe('which revoke ends the vetter role', () => {
 })
 
 test('an expired grant read as NOT revoked says nothing: only a revoke ends the role here, not its dates', async () => {
-  mockGrants = [
-    { ...grant('g1'), credential: { ...grant('g1').credential, validUntil: '2020-01-01T00:00:00Z' } },
-  ] as ReturnType<typeof grant>[]
+  mockGrants = [{ ...grant('g1'), credential: { ...grant('g1').credential, validUntil: '2020-01-01T00:00:00Z' } }]
   expect(await vetterRoleEndedBy(mockAgent as never, 'g1')).toBeUndefined()
 })
 
