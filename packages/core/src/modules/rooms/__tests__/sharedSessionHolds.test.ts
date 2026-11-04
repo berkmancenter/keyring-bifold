@@ -153,6 +153,18 @@ afterEach(async () => {
   await new Promise((r) => realSetTimeout(r, 10))
   await vtiAgent.disconnect()
 })
+/**
+ * Until a hold just asked for is up. It goes up after a sign-in, so a fixed wait raced it on a loaded runner: the clock
+ * here only moves when a test moves it, so a hold that went up after the test moved it never ran out, and the test hung.
+ */
+const holdIsUp = async () => {
+  const state = vtiAgent as unknown as { holds: Map<unknown, unknown> }
+  const giveUpAt = Date.now() + 2000
+  while (state.holds.size === 0) {
+    if (Date.now() > giveUpAt) throw new Error('the hold never went up within 2 s')
+    await new Promise((r) => realSetTimeout(r, 1))
+  }
+}
 /** A step's body that runs until the test lets it go (or the test ends). */
 const untilReleased = () => {
   let release!: () => void
@@ -187,7 +199,7 @@ describe("the rooms backend's polls for a phone in two communities", () => {
     const step = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, {
       reason: 'vetter round',
     })
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     await expect(backend.communityTask(B.community, MEMBERSHIPS, {})).rejects.toBeInstanceOf(VtiSessionHeld)
     // The step's persona is listed on the session it holds.
     await expect(backend.communityTask(A.community, MEMBERSHIPS, {})).resolves.toEqual({ items: [] })
@@ -219,7 +231,7 @@ describe('the session claim', () => {
       },
       { reason: 'vetter round' }
     )
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     const refused = vtiAgent.connect(agent, 'did:peer:lab', {
       persona: persona(B.persona, B.community),
       background: true,
@@ -252,7 +264,7 @@ describe('the session claim', () => {
       await done
       order.push('round done')
     })
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     // A second hold as the same DID runs beside the first, on the same session.
     await vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), async (did) => {
       order.push(`shared as ${did}`)
@@ -272,7 +284,7 @@ describe('the session claim', () => {
     await expect(vtiAgent.whenFree(B.persona)).resolves.toBeUndefined()
     const { done, release } = untilReleased()
     const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done)
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     let free = false
     const waited = vtiAgent.whenFree(B.persona).then(() => (free = true))
     await new Promise((r) => realSetTimeout(r, 20))
@@ -395,7 +407,7 @@ describe('the session claim', () => {
     const step = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, {
       reason: 'a step',
     })
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     for (let i = 0; i < VTI_TURN_AFTER_REFUSALS + 3; i++) await expect(poll(B)).rejects.toBeInstanceOf(VtiSessionHeld)
     expect(vtiAgent.getState().did).toBe(A.persona)
     release()
@@ -405,7 +417,7 @@ describe('the session claim', () => {
   it('stops keeping others waiting once a hold runs past its time', async () => {
     const { done, release } = untilReleased()
     const held = vtiAgent.holding(agent, 'did:peer:lab', persona(A.persona, A.community), () => done, { maxMs: 50 })
-    await new Promise((r) => realSetTimeout(r, 10))
+    await holdIsUp()
     const screen = vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(B.persona, B.community) })
     clock += 51
     await screen
