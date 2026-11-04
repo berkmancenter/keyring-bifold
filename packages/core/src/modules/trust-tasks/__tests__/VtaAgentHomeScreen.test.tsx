@@ -470,7 +470,7 @@ describe('Your agent — after linking', () => {
     })
     expect(tree.getByTestId(testIdWithKey('AgentSeat'))).not.toHaveTextContent('VtaLink.SeatMember')
     const key = communityCardKey(communityDid)
-    // The community stays on screen as history, collapsed (Alberto, 11-03): one line saying the person was a member,
+    // The community stays on screen as history, collapsed: one line saying the person was a member,
     // until when, who removed them, and that they can ask again; what they held behind a tap.
     expect(tree.getByTestId(testIdWithKey(`AgentCommunityStatus_${key}`))).toHaveTextContent(/VtaLink\.CardWasMember/)
     expect(tree.queryByTestId(testIdWithKey(`AgentMemberSince_${key}`))).toBeNull()

@@ -91,7 +91,7 @@ export const CommunityCard: React.FC<CommunityCardProps> = ({
   const [checking, setChecking] = useState(false)
   // A membership the community removed says so from the start (#166).
   const removal = membership && !isCurrentMembership(membership) ? membership.removal : undefined
-  // Kept as history, collapsed (Alberto, 11-03): one line saying the person was a member, and what they held behind
+  // Kept as history, collapsed: one line saying the person was a member, and what they held behind
   // a tap. The records stay; only what is shown first changes.
   const [historyShown, setHistoryShown] = useState(false)
   // Until the journey is read, or when its read failed, the held membership stands in for it, never "none".
