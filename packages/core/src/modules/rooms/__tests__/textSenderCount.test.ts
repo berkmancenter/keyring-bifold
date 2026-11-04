@@ -7,7 +7,7 @@ import { DeviceEventEmitter } from 'react-native'
 
 import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 import { SENDER_RESOLVE_MS, senderResolver } from '../real/files/senderDocuments'
-import type { ReadAt } from '../real/files/sender'
+import type { ReadAt, ResolveSender } from '../real/files/sender'
 import {
   MAX_CHECKED_CHARS,
   MAX_CHECKS_PER_UNLOCK,
@@ -37,7 +37,7 @@ const AT: ReadAt = { roomId: ROOM, key: 'record-secret-key', version: 4, hostAut
 const FAST: TextSenderCountOptions = { startDelayMs: 0, gapMs: 0, logEveryMs: 0, whenIdle: async () => undefined }
 
 /** A count with no pauses, whose every drain writes a line. */
-function counting(resolve = resolverOf(ALICE, MALLORY).resolve) {
+function counting(resolve: ResolveSender = resolverOf(ALICE, MALLORY).resolve) {
   const lines: string[] = []
   const count = new TextSenderCount(resolve, (line) => lines.push(line), FAST)
   return { count, lines, last: () => lines[lines.length - 1] ?? '' }
