@@ -1029,7 +1029,9 @@ export function hiddenApplicationEnd(
   record: Pick<HiddenVettingRecord, 'joinDid' | 'createdAt'>,
   facts: HiddenApplicationFacts
 ): HiddenApplicationEnd | undefined {
-  const since = (at?: string) => at !== undefined && at >= record.createdAt
+  const { createdAt } = record
+  // A record with no date can't be shown to be older than a decision, so no decision ends it.
+  const since = (at?: string) => at !== undefined && createdAt !== undefined && at >= createdAt
   const { membership, application, submission } = facts
   if (membership?.personaDid === record.joinDid && since(membership.grantedAt))
     return membership.removal ? 'removed' : 'joined'

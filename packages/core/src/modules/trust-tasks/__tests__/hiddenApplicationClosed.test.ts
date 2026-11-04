@@ -324,6 +324,15 @@ describe('whether an application has ended', () => {
     expect(hiddenApplicationEnd(record, { identityHeld: false })).toBe('left')
   })
 
+  it('with no date on the record, no decision ends it, and only the identity going does', () => {
+    const undated = { joinDid: ME }
+    expect(hiddenApplicationEnd(undated, { ...facts, ...submitted('decided', 'deny') })).toBeUndefined()
+    expect(
+      hiddenApplicationEnd(undated, { ...facts, membership: { personaDid: ME, grantedAt: at(5) } })
+    ).toBeUndefined()
+    expect(hiddenApplicationEnd(undated, { identityHeld: false })).toBe('left')
+  })
+
   it.each([
     ['a refusal older than the application', submitted('decided', 'deny', at(-5))],
     ['a withdrawal older than the application', submitted('withdrawn', undefined, at(-5))],
