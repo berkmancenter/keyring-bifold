@@ -767,6 +767,9 @@ class VtiAgentController {
    * - undefined: anything else stays the shared session's. A request, a refusal, a reply naming no thread (matched by
    *   type, which a listener must not guess at), an ask of another identity, or an unclaimed answer to a write, whose
    *   only copy this may be (276.10: a vetting request taken by a listener was lost).
+   *
+   * Not a pure check, though it reads like one: it lets go of expired holds first, whatever it returns. That is only
+   * time-based housekeeping on the holds.
    */
   answerFromListener(did: string, received: DidCommV2PlaintextMessage): 'answered' | 'orphan' | undefined {
     const plaintext = unwrapBindingEnvelope(received)
