@@ -518,6 +518,8 @@ export interface ParkedVettingRequest {
   requestDocumentId: string
   personaDid: string
   communityDid: string
+  /** The ticket it presented, which bounds how many are kept (`MAX_PARKED_PER_TICKET`). */
+  ticketId: string
   parkedAt: string
   /** The ticket's own expiry: after it the desk could not take the request anyway. */
   expiresAt: string
@@ -539,7 +541,7 @@ export interface VtiVettingStore {
   saveApplication(application: VettingApplication): Promise<void>
   /** The application alone, leaving a vetter's desk, tickets and profile for that community. */
   forgetApplication?(communityDid: string): Promise<void>
-  /** Keep a request for the desk. One already held, waiting or closed, stays as it is. */
+  /** Keep a request for the desk (`parkVettingRequest` decides whether it may be kept). */
   parkRequest?(request: ParkedVettingRequest): Promise<void>
   listParkedRequests?(): Promise<ParkedVettingRequest[]>
   /** Blank a parked request's message and mark why it is finished. */
@@ -615,8 +617,6 @@ export class GenericRecordsVettingStore implements VtiVettingStore {
     emitCommunityChanged(communityDid, 'application')
   }
   async parkRequest(request: ParkedVettingRequest) {
-    const held = await this.list<ParkedVettingRequest>('parked')
-    if (held.some((p) => p.requestDocumentId === request.requestDocumentId)) return
     await this.put('parked', request.requestDocumentId, { ...request })
   }
   async listParkedRequests() {
@@ -632,6 +632,7 @@ export class GenericRecordsVettingStore implements VtiVettingStore {
       requestDocumentId: held.requestDocumentId,
       personaDid: held.personaDid,
       communityDid: held.communityDid,
+      ticketId: held.ticketId,
       parkedAt: held.parkedAt,
       expiresAt: held.expiresAt,
       closed,
@@ -984,6 +985,16 @@ export function identityCommitment(salt: string, claims: { type: string; value: 
   return digestMultibase({ salt, claims: selected })
 }
 
+/**
+ * How many requests one ticket can keep, closed ones included: a real applicant
+ * keeps one. Closed ones count because a refused request closes and spends
+ * nothing, so its ticket stays live for the next.
+ */
+export const MAX_PARKED_PER_TICKET = 10
+
+/** The largest request kept, in characters: a real one is a few thousand, and the sender decides. */
+export const MAX_PARKED_REQUEST_CHARS = 64 * 1024
+
 /** Whether a message is an applicant's vetting request. */
 export const isVettingRequest = (m: DidCommV2PlaintextMessage): boolean => typeOf(m) === VETTING.request
 
@@ -1002,8 +1013,14 @@ export async function closeExpiredParkedRequests(store: VtiVettingStore, now = D
  * vetter elsewhere in the app, was acknowledged and lost (2026-11-04).
  *
  * Only a request presenting a live ticket here: the desk would answer nothing
- * else but a wrong QR secret, and this way a stranger can't fill the wallet, nor a
- * wrong secret be stored. Who sent it is checked when the desk takes it.
+ * else but a wrong QR secret, so a stranger can't write here and a wrong secret is
+ * never stored. Who sent it is checked when the desk takes it.
+ *
+ * Holding a ticket doesn't make the sender trusted: keeping spends no use, an
+ * unbound ticket fits any sender, a code gets shared, and the sender picks the
+ * document id. So what one ticket can keep is bounded, in number and in size. A
+ * request past the bound isn't kept, as before this existed: a desk listening
+ * still takes it, and with none it is lost.
  */
 export async function parkVettingRequest(
   store: VtiVettingStore,
@@ -1022,10 +1039,19 @@ export async function parkVettingRequest(
   if (!ticket) return
   // A desk listening took it already.
   if ((await store.listDesk()).some((r) => r.requestDocumentId === requestDocumentId)) return
+  const parked = (await store.listParkedRequests?.()) ?? []
+  // A copy of one already kept changes nothing, whatever the count.
+  if (parked.some((held) => held.requestDocumentId === requestDocumentId)) return
+  const forTicket = parked.filter((held) => held.ticketId === ticket.ticketId).length
+  if (forTicket >= MAX_PARKED_PER_TICKET || JSON.stringify(m).length > MAX_PARKED_REQUEST_CHARS) {
+    releaseWarn('[VTI] a vetting request was not kept for the desk: past the bound for its ticket')
+    return
+  }
   await store.parkRequest?.({
     requestDocumentId,
     personaDid: persona.did,
     communityDid: persona.communityDid,
+    ticketId: ticket.ticketId,
     parkedAt: new Date().toISOString(),
     expiresAt: ticket.expiresAt,
     message: m,

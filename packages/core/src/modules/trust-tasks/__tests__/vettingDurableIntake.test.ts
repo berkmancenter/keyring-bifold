@@ -59,6 +59,8 @@ import {
   GenericRecordsVettingStore,
   VETTING,
   VtiVetterDesk,
+  MAX_PARKED_PER_TICKET,
+  MAX_PARKED_REQUEST_CHARS,
   closeExpiredParkedRequests,
   parkVettingRequest,
   type ParkedVettingRequest,
@@ -438,6 +440,66 @@ describe('a vetting request delivered with no desk listening', () => {
     await deliver({ ...m, from: impostor.did })
     expect(p.parked()).toHaveLength(1)
     expect(p.parked()[0].content.message).toBeUndefined()
+  })
+
+  describe('what one ticket can keep', () => {
+    const impostor = didKeySigner()
+    const fill = async (p: Awaited<ReturnType<typeof phone>>, count: number) => {
+      for (let i = 0; i < count; i++) await deliver({ ...(await p.request()), from: impostor.did })
+    }
+
+    it('is bounded: one shared code cannot write without limit, though keeping spends no use', async () => {
+      const p = seat(await phone())
+      await fill(p, MAX_PARKED_PER_TICKET + 5)
+      expect(p.parked()).toHaveLength(MAX_PARKED_PER_TICKET)
+      expect((await p.store.listTickets(community.did))[0].usesLeft).toBe(1)
+      // Said, with nothing of the request in it: a request not kept must not look like one that never came.
+      expect(mockLogged.join()).toContain('was not kept for the desk')
+      expect(mockLogged.join()).not.toContain(CODE)
+    })
+
+    it('is not refilled by requests the desk refuses, which close and leave the ticket live', async () => {
+      const p = seat(await phone())
+      await fill(p, MAX_PARKED_PER_TICKET)
+      await p.openDesk()
+      expect(p.parked().every((r) => r.content.closed === 'taken')).toBe(true)
+      expect((await p.store.listTickets(community.did))[0].usesLeft).toBe(1)
+
+      await fill(p, 5)
+
+      expect(p.parked()).toHaveLength(MAX_PARKED_PER_TICKET)
+    })
+
+    it('is counted per ticket: another ticket still keeps its request', async () => {
+      const p = seat(await phone())
+      await fill(p, MAX_PARKED_PER_TICKET)
+      const [first] = await p.store.listTickets(community.did)
+      await p.store.saveTicket({ ...first, ticketId: 'vt-2', code: 'CCCC-DDDD', secret: 'another-secret' })
+
+      await deliver(await p.request({ code: 'CCCC-DDDD' }))
+
+      expect(p.parked()).toHaveLength(MAX_PARKED_PER_TICKET + 1)
+    })
+
+    it('leaves a desk that is listening able to take a request past the bound', async () => {
+      const p = seat(await phone())
+      await fill(p, MAX_PARKED_PER_TICKET)
+      await p.openDesk()
+
+      await deliver(await p.request())
+
+      expect(answers()).toEqual([RESPONSE])
+      expect(p.parked()).toHaveLength(MAX_PARKED_PER_TICKET)
+    })
+
+    it('does not keep a request larger than any real one', async () => {
+      const p = seat(await phone())
+      const m = await p.request()
+      await deliver({ ...m, padding: 'x'.repeat(MAX_PARKED_REQUEST_CHARS) })
+      expect(p.parked()).toHaveLength(0)
+      await deliver(m)
+      expect(p.parked()).toHaveLength(1)
+    })
   })
 
   it('is not taken by a later identity in the same community', async () => {
