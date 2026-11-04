@@ -316,6 +316,71 @@ describe('withDayPills, for a list drawn from the bottom up', () => {
   })
 })
 
+describe('a chat with messages says a note is there, in one line', () => {
+  const note = (key: string, title: string, over: Partial<Note> = {}) =>
+    post(key, 'First record in a VTC data room', { title: toInertText(title), ...over })
+  const at = (hour: number) => `2026-11-03T${String(hour).padStart(2, '0')}:00:00Z`
+  // The chat's order: the list is drawn bottom up, so its data is newest first.
+  const inOrder = (tree: ReturnType<typeof open>) =>
+    (tree.UNSAFE_getByType(FlatList).props.data as { kind: string; post?: { key: string } }[])
+      .filter((item) => item.kind !== 'day')
+      .map((item) => item.post?.key)
+
+  test('at its time among the messages, its title shown, and a tap opens the Notes', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const tree = open(
+      withPosts([
+        post('m1', 'Before', { updatedAt: at(9), version: 1 }),
+        note('n1', 'Onboarding decisions', { updatedAt: at(10), version: 2 }),
+        post('m2', 'After', { updatedAt: at(11), version: 3 }),
+      ])
+    )
+    await waitFor(() => expect(tree.getByTestId(id('RoomNoteMarker'))).toBeTruthy())
+    expect(inOrder(tree)).toEqual(['m2', 'n1', 'm1'])
+    const words = tree.getByTestId(id('RoomNoteMarkerWords'))
+    expect(words).toHaveTextContent('Rooms.NoteMarker Onboarding decisions')
+    expect(tree.getByTestId(id('RoomNoteMarkerOpen'))).toHaveTextContent('Rooms.NoteMarkerOpen')
+    fireEvent.press(tree.getByTestId(id('RoomNoteMarker')))
+    expect(navigate).toHaveBeenCalledWith(Screens.RoomPart, { roomId: 'did:webvh:r:one', part: 'notes' })
+  })
+
+  test("its words say nothing of a body, an edit or a count: a version is the room's, not the note's", async () => {
+    // A note first written at a high version, as a room's first note was at 3 (IN-459).
+    const tree = open(
+      withPosts([post('m1', 'Hi all'), note('n1', 'Agenda', { version: 13, body: toInertText('Secret words') })])
+    )
+    await waitFor(() => expect(tree.getByTestId(id('RoomNoteMarker'))).toBeTruthy())
+    expect(tree.getByTestId(id('RoomNoteMarkerWords'))).toHaveTextContent('Rooms.NoteMarker Agenda')
+    expect(tree.queryByText(/Secret words/)).toBeNull()
+  })
+
+  test('two notes, two lines; a removed note none (control)', async () => {
+    const tree = open(
+      withPosts([
+        post('m1', 'Hi all'),
+        note('n1', 'One'),
+        note('n2', 'Two'),
+        note('n3', 'Gone', { status: 'retracted' }),
+      ])
+    )
+    await waitFor(() => expect(tree.getAllByTestId(id('RoomNoteMarker'))).toHaveLength(2))
+    expect(tree.queryByText(/Gone/)).toBeNull()
+  })
+
+  test('with no messages, the card and no line (control)', async () => {
+    const tree = open(withPosts([note('n1', 'Hello World')]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotesWaiting'))).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomNoteMarker'))).toBeNull()
+  })
+
+  test('a record with no title stays a message (control)', async () => {
+    const tree = open(withPosts([post('m1', 'Hi all'), post('m2', 'No title here')]))
+    await waitFor(() => expect(tree.getByText('No title here')).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomNoteMarker'))).toBeNull()
+  })
+})
+
 describe("the host's answer", () => {
   test.each<[HostCheck['verdict'], boolean]>([
     ['conflict', true],
@@ -370,5 +435,50 @@ describe('reaching a room', () => {
     await waitFor(() => expect(tree.getByText('Planning')).toBeTruthy())
     fireEvent.press(tree.getByTestId(id(`RoomRow_${roomHandle(PLANNING)}`)))
     expect(navigate).toHaveBeenCalledWith(Screens.Room, { roomId: PLANNING })
+  })
+})
+
+// IN-434 (277.7, 11-03): a note written from the community's web page lives on the room's Notes, never in its chat, and
+// the room itself said only "No posts yet": the tester restarted the app several times looking for it.
+describe('an empty chat says what notes the room holds', () => {
+  const note = (key: string, title: string, over: Partial<Note> = {}) =>
+    post(key, 'First record in a VTC data room', { title: toInertText(title), ...over })
+
+  test('one note: counted, the newest named, and a tap opens the Notes', async () => {
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    const tree = open(withPosts([note('n1', 'Hello World')]))
+    await waitFor(() => expect(tree.getByTestId(id('RoomPostsNone'))).toHaveTextContent('Rooms.PostsNone'))
+    const card = tree.getByTestId(id('RoomNotesWaiting'))
+    expect(card).toHaveTextContent(/Rooms\.NotesWaiting/)
+    expect(tree.getByTestId(id('RoomNotesWaitingNewest'))).toHaveTextContent('Hello World')
+    fireEvent.press(card)
+    expect(navigate).toHaveBeenCalledWith(Screens.RoomPart, { roomId: 'did:webvh:r:one', part: 'notes' })
+  })
+
+  test('the newest of several is the one named', async () => {
+    const tree = open(
+      withPosts([
+        note('n1', 'Older', { updatedAt: '2026-10-20T09:00:00Z' }),
+        note('n2', 'Newest', { updatedAt: '2026-10-26T09:00:00Z' }),
+      ])
+    )
+    await waitFor(() => expect(tree.getByTestId(id('RoomNotesWaitingNewest'))).toHaveTextContent('Newest'))
+  })
+
+  test('no notes, or only a retracted one: no card (control)', async () => {
+    const empty = open(withPosts([]))
+    await waitFor(() => expect(empty.getByTestId(id('RoomPostsNone'))).toBeTruthy())
+    expect(empty.queryByTestId(id('RoomNotesWaiting'))).toBeNull()
+    empty.unmount()
+    const retracted = open(withPosts([note('n1', 'Gone', { status: 'retracted' })]))
+    await waitFor(() => expect(retracted.getByTestId(id('RoomPostsNone'))).toBeTruthy())
+    expect(retracted.queryByTestId(id('RoomNotesWaiting'))).toBeNull()
+  })
+
+  test('a chat with messages shows them, not the card (control)', async () => {
+    const tree = open(withPosts([note('n1', 'Hello World'), post('m1', 'Hi all')]))
+    await waitFor(() => expect(tree.getByText('Hi all')).toBeTruthy())
+    expect(tree.queryByTestId(id('RoomNotesWaiting'))).toBeNull()
   })
 })
