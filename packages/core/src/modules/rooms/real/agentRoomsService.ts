@@ -824,6 +824,10 @@ export class AgentRoomsService implements RoomsService {
       flags: inertFlags(body),
       check: opened.check,
       ...(opened.file ? { files: [roomFileOf(opened.file, opened)] } : {}),
+      ...(opened.kind ? { kind: opened.kind } : {}),
+      ...(opened.inReplyTo ? { inReplyTo: opened.inReplyTo } : {}),
+      ...(opened.writtenAt ? { writtenAt: opened.writtenAt } : {}),
+      ...(opened.editedAt ? { editedAt: opened.editedAt } : {}),
     }
   }
 
