@@ -233,6 +233,21 @@ describe("a reaction's value", () => {
     expect(value('agreed')).toBe('agreed')
   })
 
+  test('takes the emoji people send, each several code points: the limit is 64, not one', () => {
+    const fair = '👍🏽'
+    const family = '👨\u200D👩\u200D👧'
+    const flag = '🇧🇷'
+    expect(value(fair)).toBe(fair)
+    expect(value(family)).toBe(family)
+    expect(value(flag)).toBe(flag)
+    // The joiner survives, in the body as written and once inert: a family is one value, not three people.
+    expect(value(family)).toContain('\u200D')
+    expect(reactionValueOfBody(family)).toBe(family)
+    // With a selector inside a joined sequence: gone, as the rule says, and the sequence holds.
+    expect(value('❤️\u200D🔥')).toBe('❤\u200D🔥')
+    expect(value(family.repeat(12))).toBe(family.repeat(12))
+  })
+
   test('counts 64 code points after the normal form, not UTF-16 units', () => {
     expect(value('a'.repeat(64))).toBe('a'.repeat(64))
     expect(value('a'.repeat(65))).toBeUndefined()
