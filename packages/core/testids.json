@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "91be9af697805c9b352b28ed39ea587a86219b9c",
+  "generatedFrom": "34817e1382b549ce726776eadcb715f7c8686a9a",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1153,6 +1153,9 @@
     "RoomNoteEdit": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNoteEditor": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteFailed": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
+    "RoomNoteMarker": ["src/modules/rooms/components/RoomNoteMarker.tsx"],
+    "RoomNoteMarkerOpen": ["src/modules/rooms/components/RoomNoteMarker.tsx"],
+    "RoomNoteMarkerWords": ["src/modules/rooms/components/RoomNoteMarker.tsx"],
     "RoomNoteNew": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotePinned": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNotePost": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -1173,6 +1176,8 @@
     "RoomNotesNone": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesReading": ["src/modules/rooms/components/RoomNotesTab.tsx"],
     "RoomNotesUnavailable": ["src/modules/rooms/components/RoomNotesTab.tsx"],
+    "RoomNotesWaiting": ["src/modules/rooms/components/RoomNotesWaiting.tsx"],
+    "RoomNotesWaitingNewest": ["src/modules/rooms/components/RoomNotesWaiting.tsx"],
     "RoomOfferAccept": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferAccess": ["src/modules/rooms/screens/RoomOffer.tsx"],
     "RoomOfferActingAs": ["src/modules/rooms/screens/RoomOffer.tsx"],
