@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "2c220c2d7ac4dc76c87a9b79c73fd4c6a00512b3",
+  "generatedFrom": "c9f0368710f4396d28e123a9abdf5a01899ba87d",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -1005,6 +1005,7 @@
     "PushNotificationContinue": ["src/screens/PushNotifications.tsx"],
     "PushNotificationImage": ["src/components/views/PushNotificationsContent.tsx"],
     "PushNotificationNotNow": ["src/screens/PushNotifications.tsx"],
+    "PushNotificationNotSetUp": ["src/screens/TogglePushNotifications.tsx"],
     "PushNotificationSettings": ["src/screens/TogglePushNotifications.tsx"],
     "PushNotificationSwitch": ["src/screens/TogglePushNotifications.tsx"],
     "PushNotificationWhatItSays": ["src/components/views/PushNotificationsContent.tsx"],
@@ -1148,6 +1149,8 @@
     "RoomMessageRow": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMessageRowHide": ["src/modules/rooms/components/RoomMessageRow.tsx"],
     "RoomMonogram": ["src/modules/rooms/components/RoomHeader.tsx"],
+    "RoomNotJoined": ["src/modules/rooms/components/RoomNotJoined.tsx"],
+    "RoomNotJoinedOffer": ["src/modules/rooms/components/RoomNotJoined.tsx"],
     "RoomNoteBack": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteBodyInput": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteCancel": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -1671,6 +1674,7 @@
     "RoomPost_": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomRow_": ["src/modules/rooms/components/RoomRow.tsx"],
     "RoomsGroup_": ["src/modules/rooms/components/RoomsListBody.tsx"],
+    "RoomsStillLoading_": ["src/modules/rooms/components/RoomsListBody.tsx"],
     "SetActiveProfile-": ["src/modules/vrc/screens/MyProfiles.tsx"],
     "SwitchProfile-": ["src/components/misc/QRScanner.tsx"],
     "SwitchProfileAvatar-": ["src/components/misc/QRScanner.tsx"],
