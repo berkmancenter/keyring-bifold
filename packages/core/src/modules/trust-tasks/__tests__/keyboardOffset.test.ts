@@ -39,6 +39,13 @@ describe('useMeasuredKeyboardOffset', () => {
     expect(result.current.offset).toBe(62)
   })
 
+  test('a view measured above its own place in its parent counts as at the top, never below it', () => {
+    const { result } = renderHook(() => useMeasuredKeyboardOffset(62))
+    ;(result.current.ref as { current: View | null }).current = onScreenAt(0)
+    act(() => result.current.onLayout(laidOut(24)))
+    expect(result.current.offset).toBe(0)
+  })
+
   describe('where the app draws under the status bar', () => {
     const STATUS_BAR = 42
     // The two measures of one view, as they differ on an Android phone: the window's leaves the status bar out.
