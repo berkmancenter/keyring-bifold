@@ -98,6 +98,7 @@ import { useVtaDid } from './VtaStatus'
 import { applicantPrimary, deskPrimary, type ApplicantStep, type VetterStep } from './vettingPrimary'
 import { useRoomAboveTabBar } from './aboveTabBar'
 import { localDate } from './localTime'
+import { VettingWithdrawConfirm } from './VettingWithdrawConfirm'
 import { VtiVettingIds, type VtiVettingId } from './VtiVetting.ids'
 import { appDateWords, dateTime, phoneUses24HourClock, timeLabel } from '../../../utils/localDay'
 
@@ -214,6 +215,7 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   // Off unless the person turns it on (VTI-Q14).
   const [listMe, setListMe] = useState(false)
   const [busy, setBusy] = useState<string>()
+  const [confirmingWithdraw, setConfirmingWithdraw] = useState(false)
   const [tick, setTick] = useState(0)
   const bump = useCallback(() => setTick((n) => n + 1), [])
 
@@ -707,6 +709,16 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     },
     [bump, ticketWords, communityDid, t]
   )
+
+  const withdraw = () =>
+    run('withdraw', async () => {
+      try {
+        const outcome = await applicantRef.current!.withdraw()
+        if (outcome === 'nothingOpen') throw new InWords(t('Vetting.WithdrawNothingOpen'))
+      } finally {
+        setConfirmingWithdraw(false)
+      }
+    })
 
   // Vetting this version cannot do (private vetting, an unsupported critical
   // extension) is never started, asked of a vetter, or sent: the community
@@ -2045,23 +2057,26 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
                             : tp('Vetting.SubmissionDecided', { effect: application.submission.effect ?? '—' })}
                     </Text>
                     {application.submission.state === 'deferred' || application.submission.state === 'pending' ? (
-                      <Pressable
-                        style={look(VtiVettingIds.withdrawButton).button}
-                        testID={testIdWithKey(VtiVettingIds.withdrawButton)}
-                        accessibilityRole="button"
-                        disabled={!!busy}
-                        onPress={() =>
-                          run('withdraw', async () => {
-                            const outcome = await applicantRef.current!.withdraw()
-                            if (outcome === 'nothingOpen') throw new InWords(t('Vetting.WithdrawNothingOpen'))
-                          })
-                        }
-                      >
-                        {busy === 'withdraw' ? (
-                          <ActivityIndicator color={look(VtiVettingIds.withdrawButton).spinner} />
-                        ) : null}
-                        <Text style={look(VtiVettingIds.withdrawButton).text}>{t('Vetting.Withdraw')}</Text>
-                      </Pressable>
+                      confirmingWithdraw ? (
+                        <VettingWithdrawConfirm
+                          busy={busy === 'withdraw'}
+                          onConfirm={withdraw}
+                          onStay={() => setConfirmingWithdraw(false)}
+                        />
+                      ) : (
+                        <Pressable
+                          style={look(VtiVettingIds.withdrawButton).button}
+                          testID={testIdWithKey(VtiVettingIds.withdrawButton)}
+                          accessibilityRole="button"
+                          disabled={!!busy}
+                          onPress={() => (checklist?.mode === 'private' ? setConfirmingWithdraw(true) : withdraw())}
+                        >
+                          {busy === 'withdraw' ? (
+                            <ActivityIndicator color={look(VtiVettingIds.withdrawButton).spinner} />
+                          ) : null}
+                          <Text style={look(VtiVettingIds.withdrawButton).text}>{t('Vetting.Withdraw')}</Text>
+                        </Pressable>
+                      )
                     ) : null}
                   </View>
                 ) : null}

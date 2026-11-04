@@ -1068,6 +1068,114 @@ describe('Vetting — opened with a ticket for a community that runs private vet
   })
 })
 
+// Withdrawing a private application destroys it at the agent, attestations included,
+// so applying again means going back to a vetter: it asks first. A named application
+// keeps its statements, so it doesn't.
+describe('Vetting — withdrawing an application', () => {
+  const testVtc = readManifest(testVtcCapture.manifest03.payload as Partial<VtiManifest>, '0.3')
+  const application = (submission: Record<string, unknown>): Rec => ({
+    tags: { recordType: 'keyring/vti-vetting', kind: 'application', key: communityDid },
+    content: {
+      communityDid,
+      joinDid: personaDid,
+      minStatements: 1,
+      requiredClaims: ['name.legal'],
+      acceptedMethods: ['inPerson'],
+      commitmentSalt: 'salt',
+      claims: { 'name.legal': 'Someone' },
+      requests: [],
+      startedAt: '2026-11-04T10:00:00Z',
+      submission: { requestId: 'q', at: '2026-11-04T11:00:00Z', ...submission },
+    },
+  })
+  const openPrivate: Rec = {
+    tags: { recordType: 'keyring/hidden-vetting', kind: 'application', key: communityDid },
+    content: {
+      community: communityDid,
+      joinDid: personaDid,
+      applicationId: 'app-1',
+      id: 'pcs-1',
+      requirementsDigest: 'z',
+      parameters: {},
+      createdAt: '2026-11-04T10:00:00Z',
+      held: 1,
+      minimum: 1,
+    },
+  }
+  const closedPrivate: Rec = {
+    ...openPrivate,
+    content: { community: communityDid, joinDid: personaDid, minimum: 1, held: 0, closed: 'withdrawn', closedAt: 't' },
+  }
+  let withdraw: jest.SpyInstance
+  beforeEach(() => {
+    setVta({ link: linked })
+    jest.spyOn(vtiAgent, 'fetchManifest').mockResolvedValue(testVtc as never)
+    jest.spyOn(vtiAgent, 'connect').mockResolvedValue(undefined as never)
+    withdraw = jest.spyOn(vtiAgent, 'withdraw').mockResolvedValue({ status: 'withdrawn' } as never)
+  })
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+  const open = async (records: Rec[]) => {
+    mockUseAgent.mockReturnValue(withRecords([persona, ...records]))
+    const tree = render(
+      <BasicAppContext>
+        <VtiVetting config={storeConfig} />
+      </BasicAppContext>
+    )
+    for (let i = 0; i < 5; i++) await act(async () => undefined)
+    return tree
+  }
+  const press = async (tree: ReturnType<typeof render>, id: string) => {
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey(id)))
+    })
+  }
+
+  test('private: asks first, with what it costs, and withdraws nothing until confirmed', async () => {
+    const tree = await open([application({ state: 'pending' }), openPrivate])
+    await press(tree, 'VettingWithdrawButton')
+
+    expect(withdraw).not.toHaveBeenCalled()
+    expect(tree.getByTestId(testIdWithKey('VettingWithdrawConfirmWords'))).toHaveTextContent(
+      'Vetting.WithdrawPrivateExplains'
+    )
+    expect(tree.queryByTestId(testIdWithKey('VettingWithdrawButton'))).toBeNull()
+
+    await press(tree, 'VettingWithdrawConfirm')
+    expect(withdraw).toHaveBeenCalledTimes(1)
+    expect(tree.queryByTestId(testIdWithKey('VettingWithdrawConfirmCard'))).toBeNull()
+  })
+
+  test('private: keeping it withdraws nothing and puts the button back', async () => {
+    const tree = await open([application({ state: 'deferred' }), openPrivate])
+    await press(tree, 'VettingWithdrawButton')
+    await press(tree, 'VettingWithdrawStay')
+
+    expect(withdraw).not.toHaveBeenCalled()
+    expect(tree.queryByTestId(testIdWithKey('VettingWithdrawConfirmCard'))).toBeNull()
+    expect(tree.getByTestId(testIdWithKey('VettingWithdrawButton'))).toBeTruthy()
+  })
+
+  test('named: withdraws at once, as before', async () => {
+    const tree = await open([application({ state: 'pending' })])
+    await press(tree, 'VettingWithdrawButton')
+
+    expect(withdraw).toHaveBeenCalledTimes(1)
+    expect(tree.queryByTestId(testIdWithKey('VettingWithdrawConfirmCard'))).toBeNull()
+  })
+
+  test('after: private says to ask a vetter again, named that you can apply again', async () => {
+    const closed = await open([application({ state: 'withdrawn' }), closedPrivate])
+    expect(closed.getByTestId(testIdWithKey('VettingSubmissionState'))).toHaveTextContent(
+      'Vetting.SubmissionWithdrawnPrivate'
+    )
+    closed.unmount()
+    const named = await open([application({ state: 'withdrawn' })])
+    expect(named.getByTestId(testIdWithKey('VettingSubmissionState'))).toHaveTextContent(/SubmissionWithdrawn$/)
+  })
+})
+
 // 262: the vetter attested privately and the applicant's agent took it ("it
 // reports 1 held"), but the screen stayed on "The vetter is checking your
 // document" — the request was never moved on. Driven here through the real

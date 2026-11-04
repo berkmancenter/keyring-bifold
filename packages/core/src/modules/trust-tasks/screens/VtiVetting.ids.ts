@@ -85,6 +85,10 @@ export const VtiVettingIds = {
   replaceRequest: 'VettingReplaceRequest',
   submissionState: 'VettingSubmissionState',
   withdrawButton: 'VettingWithdrawButton',
+  withdrawConfirmCard: 'VettingWithdrawConfirmCard',
+  withdrawConfirmWords: 'VettingWithdrawConfirmWords',
+  withdrawConfirm: 'VettingWithdrawConfirm',
+  withdrawStay: 'VettingWithdrawStay',
   error: 'VettingError',
 } as const
 export type VtiVettingId = (typeof VtiVettingIds)[keyof typeof VtiVettingIds]
