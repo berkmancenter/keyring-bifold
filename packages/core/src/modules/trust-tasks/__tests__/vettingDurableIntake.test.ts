@@ -388,10 +388,16 @@ describe('a vetting request delivered with no desk listening', () => {
 
   it('keeps waiting too when the desk heard it live but could not check its proof offline', async () => {
     const p = seat(await phone())
+    const m = await p.request()
+    // Kept first, so the desk's refusal below has a record to close: delivered together, the order is a race.
+    await deliver(m)
+    expect(p.parked()).toHaveLength(1)
     const resolve = p.vetter.agent.dids.resolveDidDocument
     resolve.mockImplementation(async () => Promise.reject(new Error('offline')))
     const { desk } = await p.openDesk()
-    await deliver(await p.request())
+
+    await deliver(m)
+
     expect(mockSent).toHaveLength(0)
     expect(p.parked()[0].content.closed).toBeUndefined()
 
