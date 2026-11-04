@@ -9,7 +9,7 @@
  * signed. Only the session is a stand-in: `deliver` runs the handlers and
  * acknowledges as vtiAgent.deliver does.
  */
-const mockSent: { to: string; type: string }[] = []
+const mockSent: { to: string; type: string; body?: { payload?: Record<string, unknown> } }[] = []
 const mockHandlers: Array<(m: unknown) => unknown> = []
 const mockSession = { did: undefined as string | undefined, signingInAs: undefined as string | undefined }
 const mockLogged: string[] = []
@@ -17,8 +17,8 @@ const mockLogged: string[] = []
 jest.mock('../module/vtiAgent', () => ({
   ...jest.requireActual('../module/vtiAgent'),
   vtiAgent: {
-    send: jest.fn(async (to: string, type: string) => {
-      mockSent.push({ to, type })
+    send: jest.fn(async (to: string, type: string, body?: { payload?: Record<string, unknown> }) => {
+      mockSent.push({ to, type, body })
     }),
     onInbound: (handler: (m: unknown) => unknown) => {
       mockHandlers.push(handler)
@@ -103,6 +103,10 @@ const CODE = 'AAAA-BBBB'
 const QR_SECRET = 'qr-secret-that-must-not-stay'
 const RESPONSE = `${VETTING.request}#response`
 const DAY_MS = 86400000
+
+/** What the applicant was sent; a refusal shows its code and details, so a failure here says why. */
+const answers = () =>
+  mockSent.map((s) => (s.type === RESPONSE ? s.type : `${s.type} ${JSON.stringify(s.body?.payload ?? {})}`))
 
 const signed = (from: ReturnType<typeof didKeySigner>, to: string, payload: Record<string, unknown>) =>
   signDocumentProof(
@@ -209,10 +213,12 @@ describe('a vetting request delivered with no desk listening', () => {
     logger.info.mockClear()
     logger.debug.mockClear()
   })
-  afterEach(() => {
+  afterEach(async () => {
     stops.forEach((stop) => stop())
     stops = []
     jest.restoreAllMocks()
+    // What a store write announced goes out on the next timer: not after the suite has gone.
+    await new Promise((resolve) => setTimeout(resolve, 0))
   })
 
   it('reaches the desk when the vetter opens it, though it was acknowledged while they were elsewhere', async () => {
@@ -222,7 +228,7 @@ describe('a vetting request delivered with no desk listening', () => {
 
     await p.openDesk()
 
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
     const [row] = await p.store.listDesk()
     expect(row).toMatchObject({ applicantDid: applicant.did, status: 'accepted' })
     expect((await p.store.listTickets(community.did))[0]).toMatchObject({ usesLeft: 0, boundTo: applicant.did })
@@ -237,7 +243,7 @@ describe('a vetting request delivered with no desk listening', () => {
 
     await p.openDesk()
 
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
     expect(p.parked()).toHaveLength(1)
     expect(JSON.stringify(p.parked())).not.toContain(QR_SECRET)
     expect(p.parked()[0].content).toMatchObject({ closed: 'taken' })
@@ -316,7 +322,7 @@ describe('a vetting request delivered with no desk listening', () => {
 
     mockSession.did = p.vetter.did
     await p.openDesk(desk)
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
   })
 
   it('is answered once, however many copies come and however often the screen listens', async () => {
@@ -330,7 +336,7 @@ describe('a vetting request delivered with no desk listening', () => {
     await p.openDesk(desk)
     await deliver(m)
 
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
     expect(await p.store.listDesk()).toHaveLength(1)
     expect((await p.store.listTickets(community.did))[0].usesLeft).toBe(1)
     expect(JSON.stringify(p.parked())).not.toContain(CODE)
@@ -340,7 +346,7 @@ describe('a vetting request delivered with no desk listening', () => {
     const p = seat(await phone())
     const { desk } = await p.openDesk()
     await deliver(await p.request({ ticketId: 'vt-1', secret: QR_SECRET }))
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
 
     await p.openDesk(desk)
 
@@ -360,7 +366,7 @@ describe('a vetting request delivered with no desk listening', () => {
 
     resolve.mockImplementation(async (d: string) => DidKey.fromDid(d).didDocument)
     await p.openDesk(desk)
-    expect(mockSent.map((s) => s.type)).toEqual([RESPONSE])
+    expect(answers()).toEqual([RESPONSE])
   })
 
   it('is refused unread and closed when its sender is not its issuer, spending nothing', async () => {
