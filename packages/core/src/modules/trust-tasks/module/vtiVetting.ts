@@ -1120,7 +1120,8 @@ export function closeEndedHiddenApplications(
     const records = await listHiddenVettingRecords(agent)
     if (records.length === 0) return
     // An agent that failed once this sweep is left until the next: its other records would wait out the same
-    // deadline one after another, on the unlock path.
+    // deadline one after another, on the unlock path. Any failure counts, not only an agent that can't be reached:
+    // one that answers and refuses the delete is skipped too, and the cost is a later retry, never a loss.
     const unreachable = new Set<string | undefined>()
     for (const record of records) {
       if (unreachable.has(agentOf(record))) continue
