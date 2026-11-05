@@ -544,6 +544,9 @@ export class AgentRoomsService implements RoomsService {
         `no community answered for this member's rooms (${unreachable.join(', ')})`
       )
     // None reached because none can sign yet: said as that, with what to do, not as communities that didn't answer.
+    // After `communityUnreachable` on purpose: a mix of the two is rare, as only a record naming no key-agreement copy
+    // at all is caught here (one brought back, or shared while the first held stored copies). After a restart a record
+    // still names its in-memory copies, so a phone just restarted is not this case, and the order is not reversed for it.
     if (awaitingKeys.length > 0 && failedAll && kept.length === 0)
       throw new RoomsUnavailable(
         'listMyRooms',
