@@ -17,12 +17,15 @@ export function directoryStatusText(t: TFunction, status: OperationStatus, commu
         ? 'Directory.StatusNoRight'
         : status.reason === 'noIdentity'
           ? 'Directory.StatusNoIdentity'
-          : 'Directory.StatusUnreachable'
+          : status.reason === 'keysNotHeld'
+            ? 'Directory.StatusKeysNotHeld'
+            : 'Directory.StatusUnreachable'
   return t(key, { community, interpolation: { escapeValue: false } }) as string
 }
 
-/** Whether "Try again" can help: only when the community didn't answer. */
-export const directoryRetryable = (status: OperationStatus): boolean => status.reason === 'communityUnreachable'
+/** Whether "Try again" can help: when the community didn't answer, or once the agent has handed over the keys. */
+export const directoryRetryable = (status: OperationStatus): boolean =>
+  status.reason === 'communityUnreachable' || status.reason === 'keysNotHeld'
 
 /** Who sees a value, in the existing disclosure words ("all members of Keyring Lab"). */
 export function audienceText(t: TFunction, audience: DirectoryAudience, community: string): string {

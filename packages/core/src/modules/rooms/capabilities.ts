@@ -87,6 +87,7 @@ const STATUS_OF: Record<RoomsReason, RoomsStatus> = {
   noRight: 'unavailable',
   communityUnreachable: 'unavailable',
   noIdentity: 'unavailable',
+  keysNotHeld: 'unavailable',
   tierNotYet: 'comingSoon',
   notOnThisTier: 'unavailable',
 }

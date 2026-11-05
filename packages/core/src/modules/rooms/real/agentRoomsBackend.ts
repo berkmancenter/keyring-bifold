@@ -10,7 +10,12 @@ import { listKeyed, putKeyed } from '../../trust-tasks/module/keyedRecords'
 import { vtaAgent } from '../../trust-tasks/module/vtaAgent'
 import { GenericRecordsCommunityStore } from '../../trust-tasks/module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../../trust-tasks/module/VtiIdentityStore'
-import { personaForCommunity, VtiNoIdentity } from '../../trust-tasks/module/sharedIdentity'
+import {
+  canConnectAs,
+  personaForCommunity,
+  VtiKeysNotHeld,
+  VtiNoIdentity,
+} from '../../trust-tasks/module/sharedIdentity'
 import { leaveCommunity } from '../../trust-tasks/module/vtiJoin'
 import { GenericRecordsVettingStore } from '../../trust-tasks/module/vtiVetting'
 import { vtiAgent } from '../../trust-tasks/module/vtiAgent'
@@ -62,6 +67,13 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
       // The kind only: which community is not logged (log privacy rule).
       agent.config?.logger?.warn?.('[Rooms] no identity for the community: nothing asked (noIdentity)')
       throw new VtiNoIdentity('rooms: this phone holds no identity for that community')
+    }
+    // Its keys not on the phone yet (an identity brought back, or kept for a second community while the first held
+    // its copies in the wallet's store): the session could not open, and would say only that it failed. The agent's
+    // session-open sweep borrows them (sharedIdentity).
+    if (!canConnectAs(persona)) {
+      agent.config?.logger?.warn?.("[Rooms] the identity's keys are not on the phone yet: nothing asked (keysNotHeld)")
+      throw new VtiKeysNotHeld("rooms: this identity's keys are not on this phone yet")
     }
     return vtiAgent.holding(agent, options.mediatorDid, persona, fn, {
       peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),

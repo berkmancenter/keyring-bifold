@@ -139,7 +139,8 @@ export async function personaForCommunity(
 /**
  * A reader that finds no identity for a community runs the heal, which reads every identity and membership. A
  * community that truly has none would pay that on every read (the directory and rooms poll): one heal per store at a
- * time, and none again within `HEAL_AGAIN_MS` of the last. A card arriving later is shared as it is filed, not here.
+ * time, and none again within `HEAL_AGAIN_MS` of the last. A membership that becomes current inside that window is not
+ * healed here until it passes; it needs nothing from here, as its card is shared as it is filed (`fileUnder`).
  */
 export const HEAL_AGAIN_MS = 30_000
 const healing = new WeakMap<object, { at: number; run: Promise<number> }>()
@@ -164,6 +165,14 @@ function healThrottled(
  */
 export const canSignAs = (persona: Pick<VtiPersona, 'kmsKeyIds'> | undefined): boolean =>
   Boolean(persona?.kmsKeyIds?.keyAgreement && persona.kmsKeyIds.signing)
+
+/**
+ * Whether the phone can open a session as this identity now: its key-agreement copy is recorded, which is what the
+ * session's sign-in needs (vtiAgent.connect). Without a signing copy it still reads over DIDComm, unsigned, as it did
+ * before; what must be signed (Leave) asks `canSignAs`.
+ */
+export const canConnectAs = (persona: Pick<VtiPersona, 'kmsKeyIds'> | undefined): boolean =>
+  Boolean(persona?.kmsKeyIds?.keyAgreement)
 
 /** A leave asked of an identity whose key copies this phone does not hold yet: nothing was sent. Read by its name. */
 export class VtiKeysNotHeld extends Error {

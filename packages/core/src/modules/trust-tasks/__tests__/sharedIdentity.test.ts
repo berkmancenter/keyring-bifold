@@ -314,6 +314,10 @@ describe('a membership with no identity the phone can sign in as', () => {
     expect(status.reason).toBe('noIdentity')
     expect(directoryRetryable(status)).toBe(false)
     // Control: anything else is still a community that did not answer, which Try again can help.
+    // Keys not on the phone yet: its own words, and Try again helps once the agent has connected.
+    const keys = directoryStatusOf(new VtiKeysNotHeld())
+    expect(keys.reason).toBe('keysNotHeld')
+    expect(directoryRetryable(keys)).toBe(true)
     const other = directoryStatusOf(new Error('socket closed'))
     expect(other.reason).toBe('communityUnreachable')
     expect(directoryRetryable(other)).toBe(true)

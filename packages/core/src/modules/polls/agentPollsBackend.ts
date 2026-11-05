@@ -10,7 +10,7 @@ import type { Agent } from '@credo-ts/core'
 import { getKeyed, listKeyed, putKeyed, withKeyLock } from '../trust-tasks/module/keyedRecords'
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 import { vtiAgent } from '../trust-tasks/module/vtiAgent'
-import { personaForCommunity, VtiNoIdentity } from '../trust-tasks/module/sharedIdentity'
+import { canConnectAs, personaForCommunity, VtiKeysNotHeld, VtiNoIdentity } from '../trust-tasks/module/sharedIdentity'
 import { GenericRecordsCommunityStore } from '../trust-tasks/module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../trust-tasks/module/VtiIdentityStore'
 import { GenericRecordsTspPeerRevisionStore } from '../trust-tasks/module/vtiTsp'
@@ -55,6 +55,10 @@ export function createAgentPollsBackend(agent: Agent, options: { mediatorDid?: s
     if (!persona) {
       agent.config?.logger?.warn?.('[Polls] no identity for the community: nothing asked (noIdentity)')
       throw new VtiNoIdentity('polls: this phone holds no identity for that community')
+    }
+    if (!canConnectAs(persona)) {
+      agent.config?.logger?.warn?.("[Polls] the identity's keys are not on the phone yet: nothing asked (keysNotHeld)")
+      throw new VtiKeysNotHeld("polls: this identity's keys are not on this phone yet")
     }
     return vtiAgent.holding(agent, options.mediatorDid, persona, fn, {
       peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),

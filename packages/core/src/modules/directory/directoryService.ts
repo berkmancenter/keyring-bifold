@@ -221,6 +221,9 @@ export function directoryStatusOf(error: unknown): OperationStatus {
   // sharedIdentity's VtiNoIdentity, read by its name so the directory does not import the identity stores.
   if (error instanceof Error && error.name === 'VtiNoIdentity')
     return { status: 'unavailable', reason: 'noIdentity', detail: error.message }
+  // Its keys not on the phone yet: nothing was asked either, and the agent's next connection fixes it.
+  if (error instanceof Error && error.name === 'VtiKeysNotHeld')
+    return { status: 'unavailable', reason: 'keysNotHeld', detail: error.message }
   if (error instanceof DirectoryRefused) {
     if (error.code === 'unsupportedType' || error.code === 'unsupportedVersion')
       return { status: 'unavailable', reason: 'communityDoesNotServe', detail: error.message }
