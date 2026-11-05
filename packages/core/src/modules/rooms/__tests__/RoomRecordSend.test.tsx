@@ -292,12 +292,15 @@ describe('with sending on', () => {
     )
   })
 
-  test('a write the room no longer takes reads its profile again and says they are not on here', async () => {
+  test('a write the room no longer takes says they are not on here, and the sheet follows what the refusal says', async () => {
     const show = jest.spyOn(Toast, 'show')
     const s = service([post('m1', 'Hi all')], {
       sendRecord: async () => {
-        const e = new Error('this room cannot take kind')
-        e.name = 'RecordMembersNotPermitted'
+        const e = Object.assign(new Error('this room cannot take kind'), {
+          name: 'RecordMembersNotPermitted',
+          refused: ['kind'],
+          features: { listed: [], canSeal: true, unresolved: false },
+        })
         throw e
       },
     })
@@ -306,6 +309,23 @@ describe('with sending on', () => {
     await longPress(tree, 'm1')
     await press(tree, 'ChatReaction-0')
     await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Rooms.RecordsNotOn' })))
+    await longPress(tree, 'm1')
+    await waitFor(() => expect(tree.getByTestId(id('ChatMessageActionsNotice'))).toBeTruthy())
+    expect(tree.queryByTestId(id('ChatReactionBar'))).toBeNull()
+    // Told, so not asked again.
+    expect(s.recordFeaturesIn).toHaveBeenCalledTimes(1)
+  })
+
+  test('a refusal that says nothing of the room reads its profile again', async () => {
+    const s = service([post('m1', 'Hi all')], {
+      sendRecord: async () => {
+        throw Object.assign(new Error('refused'), { name: 'RecordMembersNotPermitted' })
+      },
+    })
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalledTimes(1))
+    await longPress(tree, 'm1')
+    await press(tree, 'ChatReaction-0')
     await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalledTimes(2))
   })
 

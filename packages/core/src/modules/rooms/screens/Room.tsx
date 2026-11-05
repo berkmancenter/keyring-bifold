@@ -70,7 +70,7 @@ import { permanentRefusal, postRefusalWhy } from '../postRefusal'
 import { isChatPost, isNoteMarker, reactionValueOfBody, type RoomPost } from '../roomPosts'
 import { byArrival, drawnInChat, quotedWords, type RoomReactionTally } from '../roomThread'
 import { openInMyAgent } from '../roomLinks'
-import type { Identity, RoomFile } from '../types'
+import type { Identity, RecordFeatures, RoomFile } from '../types'
 import { useMyName } from '../useMyName'
 import { usePetnames } from '../usePetname'
 import { useInViewAndActive } from '../useInViewAndActive'
@@ -270,13 +270,14 @@ const Room: React.FC = () => {
   // The day of the posts at the top of the screen, floated while the member scrolls (as the person-to-person chat's).
   const floating = useFloatingDay()
   const { send: outboxSend } = outbox
-  const { send: sendRecord, recheck, typedMessages } = records
+  const { send: sendRecord, learn, typedMessages } = records
   const { refresh } = feed
   // A write refused or failed: said in the words a post uses. A room that no longer takes it is read again.
   const notSent = useCallback(
     (e: unknown, words: string) => {
       if (e instanceof Error && e.name === 'RecordMembersNotPermitted') {
-        recheck()
+        // The refusal says what the room takes now (`RecordMembersNotPermitted.features`): the sheet follows it.
+        learn((e as Error & { features?: RecordFeatures }).features)
         Toast.show({ type: ToastType.Error, text1: t('Rooms.RecordsNotOn') as string })
         return
       }
@@ -287,7 +288,7 @@ const Room: React.FC = () => {
         ...(refusal ? { text2: postRefusalWhy(t, refusal) } : {}),
       })
     },
-    [recheck, t]
+    [learn, t]
   )
   const send = useCallback(
     (text: string, file?: Parameters<typeof outboxSend>[1]): boolean | Promise<boolean> => {

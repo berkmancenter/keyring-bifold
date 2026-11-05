@@ -30,8 +30,11 @@ export interface RecordSending {
   /** Whether the member may edit or withdraw this post of theirs. */
   canChange: (post: RoomPost) => boolean
   send: (write: RecordWrite) => Promise<{ key: string; version: number }>
-  /** Reads the room's profile again: after a write it refused, which may mean the profile changed. */
-  recheck: () => void
+  /**
+   * After a write the room or the agent refused for its members: what the refusal says the room takes now, or, when
+   * it says nothing, a fresh read. Within one room epoch a fresh read gives back the profile already held.
+   */
+  learn: (features?: RecordFeatures) => void
 }
 
 /** What a member needs listed, and sealed, for each write (`messageMembers`, `keptMembers`, a reaction's members). */
@@ -94,7 +97,13 @@ export function useRecordSending(service: RoomsService | undefined, room: Room |
     (write: RecordWrite) => (on && service?.sendRecord && roomId ? service.sendRecord(roomId, write) : NOT_SENT()),
     [on, service, roomId]
   )
-  const recheck = useCallback(() => setAsked((n) => n + 1), [])
+  const learn = useCallback(
+    (told?: RecordFeatures) => {
+      if (told && roomId) setFeatures({ roomId, features: told })
+      else setAsked((n) => n + 1)
+    },
+    [roomId]
+  )
 
   return {
     on,
@@ -105,6 +114,6 @@ export function useRecordSending(service: RoomsService | undefined, room: Room |
     notOn: !!read && !replies && !reactions,
     canChange,
     send,
-    recheck,
+    learn,
   }
 }
