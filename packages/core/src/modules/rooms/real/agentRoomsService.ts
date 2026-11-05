@@ -70,6 +70,7 @@ import {
 
 import { OPEN_FILE_BYTES, openRoomFile, type OpenFileCopy } from './files/open'
 import { checkSender, type ResolveSender } from './files/sender'
+import { TextSenderCount } from './files/textSenderCount'
 import { holdRoomFileTransfer, sweepRoomFileCopiesOnce } from './files/tempCopies'
 import {
   KEYS_ACT_TYPES,
@@ -383,6 +384,8 @@ export class AgentRoomsService implements RoomsService {
   private readsInFlight = new Map<string, Promise<OpenedRecord>>()
   /** How many times opened records were dropped (a lock, a leave): a read asked before the last one is not kept. */
   private drops = 0
+  /** The log-only count of text posts' signatures; made on the first post read, by a build that fetches documents. */
+  private textSenders?: TextSenderCount
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
@@ -517,6 +520,8 @@ export class AgentRoomsService implements RoomsService {
     const unreachable: string[] = []
     const tooOld: string[] = []
     const kept: RoomsCommunity[] = []
+    // Its identity's keys are not on the phone yet (sharedIdentity's VtiKeysNotHeld, read by name): not unreached.
+    const awaitingKeys: string[] = []
     const memberships = await Promise.all(
       communities.map(async (community) => ({
         community,
@@ -524,6 +529,7 @@ export class AgentRoomsService implements RoomsService {
           // By short id, and why by kind alone: no error's words beside a community (roomsLogWords).
           this.backend.warn(`rooms: ${logRef(community.did)} did not list this member's rooms: ${failureCategory(e)}`)
           if (this.sessionKept(community, e)) kept.push(community)
+          else if (e instanceof Error && e.name === 'VtiKeysNotHeld') awaitingKeys.push(community.did)
           else if (refusalCode(e) === 'unsupportedType') tooOld.push(community.did)
           else unreachable.push(community.did)
           return []
@@ -533,11 +539,22 @@ export class AgentRoomsService implements RoomsService {
     // When none answered, custody alone is not the member's rooms: an open room holds no keys and would be
     // missing, and every other room would show by its id. The read fails instead, and the screen says why — unless
     // only a kept session stopped them: that is not a failure, and the read again follows.
-    if (unreachable.length > 0 && unreachable.length + tooOld.length + kept.length === communities.length)
+    const failedAll = unreachable.length + tooOld.length + kept.length + awaitingKeys.length === communities.length
+    if (unreachable.length > 0 && failedAll)
       throw new RoomsUnavailable(
         'listMyRooms',
         'communityUnreachable',
         `no community answered for this member's rooms (${unreachable.join(', ')})`
+      )
+    // None reached because none can sign yet: said as that, with what to do, not as communities that didn't answer.
+    // After `communityUnreachable` on purpose: a mix of the two is rare, as only a record naming no key-agreement copy
+    // at all is caught here (one brought back, or shared while the first held stored copies). After a restart a record
+    // still names its in-memory copies, so a phone just restarted is not this case, and the order is not reversed for it.
+    if (awaitingKeys.length > 0 && failedAll && kept.length === 0)
+      throw new RoomsUnavailable(
+        'listMyRooms',
+        'keysNotHeld',
+        `this member's identity keys are not on the phone yet (${awaitingKeys.join(', ')})`
       )
     if (tooOld.length > 0 && tooOld.length === communities.length)
       throw new RoomsUnavailable(
@@ -854,12 +871,13 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * Checks who shared a file record (`files/sender.ts`) and notes the outcome on it; a record with no file is not
-   * checked. The body must have been signed where it was read: at the version the agent opened it at, never past the
-   * record's own (as upstream refuses).
+   * Checks who shared a file record (`files/sender.ts`) and notes the outcome on it. The body must have been signed
+   * where it was read: at the version the agent opened it at, never past the record's own (as upstream refuses).
+   * A record with no file changes nothing here: it is only counted, in the background (`files/textSenderCount.ts`).
    */
   private async noteSender(roomId: string, opened: OpenedRecord): Promise<void> {
-    if (!opened.file || opened.sender) return
+    if (!opened.file) return this.countTextSender(roomId, opened)
+    if (opened.sender) return
     const version = opened.sealedAt ?? opened.version
     const outcome =
       !opened.signed || version > opened.version
@@ -872,6 +890,25 @@ export class AgentRoomsService implements RoomsService {
     opened.sender = outcome.check
     if (outcome.check !== 'confirmed')
       this.backend.warn(`rooms: who shared ${opened.key} in ${roomId} is ${outcome.check}: ${outcome.why}`)
+  }
+
+  /** Hands a sealed text record's body to the count and keeps no copy of it; never waits, and the read is unchanged. */
+  private countTextSender(roomId: string, opened: OpenedRecord): void {
+    const { signedText } = opened
+    delete opened.signedText
+    const { resolveSender } = this.backend
+    if (signedText === undefined || !resolveSender) return
+    this.textSenders ??= new TextSenderCount(resolveSender, (line) => this.backend.warn(line))
+    this.textSenders.add(
+      signedText,
+      {
+        roomId,
+        key: opened.key,
+        version: opened.sealedAt ?? opened.version,
+        ...(opened.author ? { hostAuthor: opened.author } : {}),
+      },
+      opened.version
+    )
   }
 
   /** The opened copy of the version the room's last listing names, if there is one (and it is now the newest used). */
@@ -910,6 +947,7 @@ export class AgentRoomsService implements RoomsService {
     // A read asked before the lock is not joined after it, nor kept when it answers.
     this.readsInFlight.clear()
     this.drops++
+    this.textSenders?.lock()
   }
 
   private dropRoomReads(roomId: string): void {
