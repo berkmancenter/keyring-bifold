@@ -316,12 +316,12 @@ describe('a message', () => {
 describe("a message's words", () => {
   // An empty message reads as a withdrawn one; a post's own path refuses both of these, and so does this one.
   it.each([
-    ['empty', 'message', ''],
-    ['empty', 'message', '  \n '],
-    ['tooLong', 'message', 'x'.repeat(NOTE_BODY_MAX + 1)],
-    ['empty', 'edit', ' '],
-    ['tooLong', 'edit', 'x'.repeat(NOTE_BODY_MAX + 1)],
-  ])('refused as %s: a %s of %j sends nothing', async (reason, type, body) => {
+    ['empty', 'message', 'no text', ''],
+    ['empty', 'message', 'only spaces and a line break', '  \n '],
+    ['tooLong', 'message', 'one character over the limit', 'x'.repeat(NOTE_BODY_MAX + 1)],
+    ['empty', 'edit', 'only a space', ' '],
+    ['tooLong', 'edit', 'one character over the limit', 'x'.repeat(NOTE_BODY_MAX + 1)],
+  ])('refused as %s: the %s, with %s, sends nothing', async (reason, type, _what, body) => {
     const s = setup({ listed: ALL })
     const write = (type === 'edit' ? { type, key: 'm9', body } : { type, body }) as RecordWrite
     await expect(send(s, write)).rejects.toMatchObject({ name: 'RoomsRefused', code: reason })
