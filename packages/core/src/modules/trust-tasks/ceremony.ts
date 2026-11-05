@@ -72,6 +72,7 @@ import { createDidCommV1Carriage } from './module/DidCommV1Carriage'
 import { setupChatInbound } from '../chat/inbound'
 import { createDidCommV2Carriage } from './module/DidCommV2Carriage'
 import { createTspCarriage } from './module/TspCarriage'
+import { hasJcsProof, verifySharedConnectVrc } from './module/sharedConnectCredential'
 import { WITNESS_VERIFIED_TAG } from '../vrc/utils/witnessCredentialUtils'
 
 import { TrustTasksModule } from './module/TrustTasksModule'
@@ -1496,15 +1497,22 @@ async function handleInboundIssue(
       // Spec conformance (receiving party item 2): verify the credential's
       // OWN proof before storing it or returning a receipt. A credential that
       // does not even parse as a verifiable credential is the same refusal.
-      let credentialInstance: W3cJsonLdVerifiableCredential
-      try {
-        credentialInstance = JsonTransformer.fromJSON(vc, W3cJsonLdVerifiableCredential)
-      } catch {
-        return notAccepted('payload is not a well-formed verifiable credential')
-      }
-      const verification = await agent.w3cCredentials.verifyCredential({ credential: credentialInstance })
-      if (!verification.isValid) {
-        return notAccepted('credential proof did not verify')
+      if (hasJcsProof(vc)) {
+        // eddsa-jcs-2022 (the shared-connect credential profile): Credo's JSON-LD verifier has no such suite, so the
+        // proof is checked through the document-proof verifier under the issuer already bound above. Every other
+        // suite takes the Credo path below, unchanged.
+        if (!(await verifySharedConnectVrc(agent, vc))) return notAccepted('credential proof did not verify')
+      } else {
+        let credentialInstance: W3cJsonLdVerifiableCredential
+        try {
+          credentialInstance = JsonTransformer.fromJSON(vc, W3cJsonLdVerifiableCredential)
+        } catch {
+          return notAccepted('payload is not a well-formed verifiable credential')
+        }
+        const verification = await agent.w3cCredentials.verifyCredential({ credential: credentialInstance })
+        if (!verification.isValid) {
+          return notAccepted('credential proof did not verify')
+        }
       }
 
       // Authority flip: store the delivered VRC (deduplicated by digest —

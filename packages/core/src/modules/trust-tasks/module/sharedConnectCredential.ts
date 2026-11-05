@@ -58,6 +58,9 @@ const proofOf = (vc: Record<string, unknown>): { cryptosuite?: string } | undefi
   return proof && typeof proof === 'object' ? (proof as { cryptosuite?: string }) : undefined
 }
 
+/** True when the credential's proof names the `eddsa-jcs-2022` suite. */
+export const hasJcsProof = (vc: Record<string, unknown>): boolean => proofOf(vc)?.cryptosuite === JCS
+
 /**
  * Verify a received VRC's own proof, by the suite it names: JCS through the
  * document-proof verifier under the credential issuer's DID, anything else
@@ -67,7 +70,7 @@ export async function verifySharedConnectVrc(agent: Agent, vc: Record<string, un
   try {
     const issuer = vcIssuerId(vc)
     if (!issuer) return false
-    if (proofOf(vc)?.cryptosuite === JCS) return await verifyDocumentProof(agent, vc, issuer)
+    if (hasJcsProof(vc)) return await verifyDocumentProof(agent, vc, issuer)
     const instance = JsonTransformer.fromJSON(vc, W3cJsonLdVerifiableCredential)
     return (await agent.w3cCredentials.verifyCredential({ credential: instance })).isValid
   } catch {
