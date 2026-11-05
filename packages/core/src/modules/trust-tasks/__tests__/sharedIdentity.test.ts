@@ -19,9 +19,17 @@ import { GenericRecordsCommunityStore, type VtiMembership } from '../module/VtiC
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 import { CREDENTIAL_EXCHANGE_ISSUE, receiveIssue } from '../module/vtiInbox'
 import { leaveCommunity } from '../module/vtiJoin'
+import { REMOVAL_NOTICE } from '../module/vtiCommunityNotices'
 import { keepForPersona } from '../module/vtiPersonaInbox'
+import { GenericRecordsVettingStore } from '../module/vtiVetting'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
+// A removal notice's proof is vtiCommunityNotices' own tests; here it is taken as a removal.
+const mockReceiveNotice = jest.fn(async (..._a: unknown[]) => 'removed')
+jest.mock('../module/vtiCommunityNotices', () => ({
+  ...jest.requireActual('../module/vtiCommunityNotices'),
+  receiveCommunityNotice: (...a: unknown[]) => mockReceiveNotice(...a),
+}))
 // The change events are deferred on a timer; nothing here listens for them.
 jest.mock('../module/communityChanged', () => ({
   ...jest.requireActual('../module/communityChanged'),
@@ -143,6 +151,24 @@ describe('a card from a community the identity was not made for', () => {
     const own = persona(AGENT, FIRST)
     await expect(shareIdentityWith(identities, own, TEST)).resolves.toBe('agentItself')
     expect(await identities.getPersona(TEST)).toBeUndefined()
+  })
+})
+
+describe("a community's removal notice, to an identity kept for two communities", () => {
+  const notice = (from: string) => ({ type: REMOVAL_NOTICE, from, body: {} }) as unknown as DidCommV2PlaintextMessage
+
+  it('ends the application of the community that sent it, not the one the identity was made for', async () => {
+    const { agent, first } = await setup()
+    const forget = jest.spyOn(GenericRecordsVettingStore.prototype, 'forgetApplication').mockResolvedValue(undefined)
+    await keepForPersona(agent, first, notice(TEST))
+    expect(forget.mock.calls).toEqual([[TEST]])
+  })
+
+  it("from the identity's own community, ends that one's (control)", async () => {
+    const { agent, first } = await setup()
+    const forget = jest.spyOn(GenericRecordsVettingStore.prototype, 'forgetApplication').mockResolvedValue(undefined)
+    await keepForPersona(agent, first, notice(FIRST))
+    expect(forget.mock.calls).toEqual([[FIRST]])
   })
 })
 
