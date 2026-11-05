@@ -86,7 +86,7 @@ import {
   type HiddenApplicationEnd,
   type HiddenVettingRecord,
 } from './hiddenVetting'
-import { HIDDEN_VETTING_SUITE, pcsErrorCode, type HiddenAttestation } from './pcsVtaPayloads'
+import { HIDDEN_VETTING_SUITE, pcsErrorCode, pcsRefusalCode, type HiddenAttestation } from './pcsVtaPayloads'
 import { PRIVATE_ATTEST_RELATIONSHIPS } from './pcsVetterTasks'
 import {
   asVetter,
@@ -1437,6 +1437,8 @@ export class VtiVetterDesk {
     const logger = this.agent.config?.logger
     this.hiddenReadying = this.readyHiddenVetter(trigger)
       .catch((e: unknown) => {
+        // Any code, not only the agent's refusals: a round's own failures carry one too (hiddenVetterRounds, a task
+        // that went unanswered), and that is what this records.
         const code = (e as { code?: unknown })?.code ?? pcsErrorCode((e as { document?: unknown })?.document ?? e)
         this.hiddenRoundFailure = code ? String(code) : 'keyring/hidden-vetter:roundFailed'
         logger?.warn?.(
@@ -2462,7 +2464,7 @@ export class VtiApplicant {
       const record = await takeHiddenAttestation(this.agent, await this.pcsClient(), community, attestation)
       logger?.info?.(`[hidden-vetting] attestation taken by the agent; it reports ${record.held} held`)
     } catch (error) {
-      const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+      const code = pcsRefusalCode(error)
       if (!code) throw error
       logger?.warn?.(`[hidden-vetting] the agent refused an attestation (${code}); dropped`)
       return

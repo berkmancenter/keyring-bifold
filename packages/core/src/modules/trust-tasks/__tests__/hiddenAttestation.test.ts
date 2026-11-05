@@ -815,3 +815,24 @@ describe('a private record left by an earlier identity', () => {
     expect(mockTake).not.toHaveBeenCalled()
   })
 })
+
+describe('an attestation the agent refuses, as the client reports it', () => {
+  const { VtiRefusal } = jest.requireActual('../module/vtiAgent')
+  const { VtaNoAnswer } = jest.requireActual('../module/VtaClient')
+
+  it('is dropped, and said, when the agent refuses it (a VtiRefusal, no document)', async () => {
+    mockLoadRecord.mockResolvedValue(HIDDEN_RECORD)
+    mockTake.mockRejectedValue(new VtiRefusal('vta/pcs/verify-attestation:wrongCommunity', 'not this community'))
+    const log = logger()
+    await expect(deliver(applicantWith(memoryStore({}), log), attestationMessage(ATTESTATION))).resolves.toBeUndefined()
+    expect(JSON.stringify(log.warn.mock.calls)).toContain('wrongCommunity')
+  })
+
+  it('is left for redelivery when the agent did not answer', async () => {
+    mockLoadRecord.mockResolvedValue(HIDDEN_RECORD)
+    mockTake.mockRejectedValue(new VtaNoAnswer('https://trusttasks.org/spec/vta/pcs/verify-attestation/0.1', 30000))
+    await expect(deliver(applicantWith(memoryStore({})), attestationMessage(ATTESTATION))).rejects.toBeInstanceOf(
+      VtaNoAnswer
+    )
+  })
+})

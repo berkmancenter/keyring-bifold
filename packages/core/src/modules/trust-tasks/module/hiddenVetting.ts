@@ -37,7 +37,7 @@ import {
   type PcsApplication,
   type PublishedConfig,
   parametersToSend,
-  pcsErrorCode,
+  pcsRefusalCode,
 } from './pcsVtaPayloads'
 
 const RECORD_TYPE = 'keyring/hidden-vetting'
@@ -328,12 +328,7 @@ async function deleteAtAgent(client: VtaClient, applicationId: string): Promise<
   try {
     await client.deletePcsApplication(applicationId)
   } catch (error) {
-    // The client reports the agent's refusal as a VtiRefusal, its code on `code` (VtaClient, the trust-task-error
-    // branch). Read only from a document, as this first was, the agent's notFound was never recognised: the
-    // application stayed open here and was asked about again at every unlock.
-    const raw = (error as { code?: unknown })?.code
-    const code =
-      (typeof raw === 'string' ? raw : undefined) ?? pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    const code = pcsRefusalCode(error)
     if (code !== 'vta/pcs/applications/delete:notFound') throw error
   }
 }
@@ -431,7 +426,7 @@ export async function refreshHiddenApplication(
   try {
     application = await client.showPcsApplication(record.applicationId)
   } catch (error) {
-    const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    const code = pcsRefusalCode(error)
     if (code?.endsWith(':notFound') || code === 'notFound') return 'gone'
     throw error
   }
@@ -592,7 +587,7 @@ export async function hiddenSubmissionExtensions(
     })
     return { hiddenVetting }
   } catch (error) {
-    const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    const code = pcsRefusalCode(error)
     if (code === PCS_ERROR.noUsableAttestation) return NOT_ENOUGH_YET
     throw error
   }

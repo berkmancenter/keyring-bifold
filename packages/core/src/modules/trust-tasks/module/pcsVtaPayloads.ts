@@ -204,6 +204,25 @@ export const PCS_ERROR = {
   permissionDenied: 'permissionDenied',
 } as const
 
+/**
+ * The code of the agent's refusal of a task, however it arrives: on the VtiRefusal the
+ * client throws (VtaClient, the trust-task-error branch), or on a `trust-task-error`
+ * document. Undefined for anything else, so a task that went unanswered (`VtaNoAnswer`,
+ * whose own code is `vta:noAnswer`) is never read as the agent's no.
+ *
+ * Told by name, not `instanceof`: this module imports nothing, and a refusal's class
+ * lives in vtiAgent (as rooms/roomsLogWords does). Before this the module read every
+ * error with `pcsErrorCode`, which reads only a document, so a refusal the client
+ * actually threw read as undefined (#924).
+ */
+export function pcsRefusalCode(error: unknown): string | undefined {
+  if (error instanceof Error && error.name === 'VtiRefusal') {
+    const code = (error as { code?: unknown }).code
+    return typeof code === 'string' ? code : undefined
+  }
+  return pcsErrorCode((error as { document?: unknown } | undefined)?.document ?? error)
+}
+
 /** The code of a `trust-task-error`, or undefined when the document is not one. */
 export function pcsErrorCode(document: unknown): string | undefined {
   if (!document || typeof document !== 'object') return undefined
