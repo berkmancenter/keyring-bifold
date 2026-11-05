@@ -106,6 +106,8 @@ jest.mock('../module/releaseLog', () => ({
 // eslint-disable-next-line import/order
 import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 // eslint-disable-next-line import/order
+import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
+// eslint-disable-next-line import/order
 import { VtaClient } from '../module/VtaClient'
 // eslint-disable-next-line import/order
 import { loadHiddenVettingRecord, startHiddenApplication } from '../module/hiddenVetting'
@@ -255,24 +257,27 @@ async function newPhone() {
 }
 
 let messages = 0
-const issue = (credential: Record<string, unknown>) => ({
+const issue = (credential: Record<string, unknown>, from = COMMUNITY) => ({
   id: `urn:uuid:00000000-0000-4000-8000-${String(++messages).padStart(12, '0')}`,
   type: CREDENTIAL_EXCHANGE_ISSUE,
-  from: COMMUNITY,
+  from,
   body: { credential_response: { credential } },
 })
-const membershipCard = (subject: string) =>
-  issue({
-    '@context': ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1'],
-    id: `urn:uuid:11111111-0000-4000-8000-${String(messages).padStart(12, '0')}`,
-    type: ['VerifiableCredential', 'DTGCredential', 'MembershipCredential'],
-    issuer: COMMUNITY,
-    issuerScope: 'public',
-    validFrom: new Date().toISOString(),
-    validUntil: new Date(Date.now() + 30 * 86400000).toISOString(),
-    credentialSubject: { id: subject },
-    proof: { type: 'DataIntegrityProof' },
-  })
+const membershipCard = (subject: string, issuer = COMMUNITY) =>
+  issue(
+    {
+      '@context': ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1'],
+      id: `urn:uuid:11111111-0000-4000-8000-${String(messages).padStart(12, '0')}`,
+      type: ['VerifiableCredential', 'DTGCredential', 'MembershipCredential'],
+      issuer,
+      issuerScope: 'public',
+      validFrom: new Date().toISOString(),
+      validUntil: new Date(Date.now() + 30 * 86400000).toISOString(),
+      credentialSubject: { id: subject },
+      proof: { type: 'DataIntegrityProof' },
+    },
+    issuer
+  )
 const roleCard = (subject: string) =>
   issue({
     '@context': ['https://www.w3.org/ns/credentials/v2'],
@@ -490,5 +495,62 @@ describe('a lock while a sweep runs, on real stores', () => {
     expect(after.vta.deletesSent()).toEqual([record.applicationId])
     expect(after.vta.held.has(record.applicationId)).toBe(false)
     expect(await after.stored()).toEqual([expect.objectContaining({ closed: 'joined', joinDid: meAfter })])
+  })
+})
+
+describe('a membership card kept on its own (known limit)', () => {
+  // KNOWN LIMIT, pinned on purpose: do not "fix" this test to pass the other way without the follow-up.
+  //
+  // A card from a community this identity was not made for is kept for that community too, unless the phone already
+  // keeps another identity there (or this is the agent's own). Then it is filed on its own as a held credential whose
+  // kind is not kept (vtiInbox, receiveIssue: "a held membership is not a kind"), no membership is written, and the
+  // sweep, which reads memberships, finds no ending. The application stays open at the agent, with its key and
+  // attestations. The follow-up records the admission as a fact on the filing side, for the end rule to read; it is
+  // not done by teaching the end rule to recognise a card filed as `other`. When that lands, this test turns over.
+  it('a sweep that closes an ended application leaves the one whose card was kept on its own open', async () => {
+    const OTHER = 'did:webvh:QmOther:vtc.example:keyring-other-vtc'
+    const p = await newPhone()
+    const me = ME
+    // The phone already keeps someone else for the other community.
+    await new GenericRecordsIdentityStore(p.agent).setPersona({
+      communityDid: OTHER,
+      vtaDid: VTA_DID,
+      did: 'did:webvh:QmSomeoneElse:dids.example:kept-for-other',
+      contextId: 'vta',
+      vtaKeyIds: { signing: 'other#key-1', keyAgreement: 'other#key-2' },
+    })
+    // This identity, made for COMMUNITY, applied privately there and to the other community. Both records name the
+    // same agent, so the per-agent skip, which engages only after a failure, can't be what leaves one open.
+    const own = await p.apply(me)
+    const other = await startHiddenApplication(p.agent, p.client, {
+      contextId: 'vta',
+      community: OTHER,
+      joinDid: me,
+      requirementsDigest: 'zQmDigest',
+      parameters: { suite: 'ps-ddh-bls12381' } as never,
+      minimum: 2,
+    })
+    const target = { ...p.persona(me), vtaDid: VTA_DID, contextId: 'vta' }
+
+    await later()
+    // The other community admits it first: its card is kept on its own.
+    await keepForPersona(p.agent, target as never, membershipCard(me, OTHER) as never)
+    await settle()
+    // Then COMMUNITY admits it. The sweep this card starts reads both records.
+    await keepForPersona(p.agent, target as never, membershipCard(me) as never)
+    await until("COMMUNITY's application is closed", async () =>
+      (await p.stored()).some((s) => s.community === COMMUNITY && s.closed !== undefined)
+    )
+    await settle()
+
+    // That sweep ran: COMMUNITY's application was destroyed and left a note.
+    expect(p.vta.held.has(own.applicationId)).toBe(false)
+    expect(await loadHiddenVettingRecord(p.agent, COMMUNITY)).toBeUndefined()
+    // The card kept on its own wrote no membership for the other community.
+    expect(await p.community.getMembership(OTHER, me)).toBeUndefined()
+    // So in that same sweep nothing ended the other application: never asked to delete, still open with its handle.
+    expect(p.vta.deletesSent()).toEqual([own.applicationId])
+    expect(p.vta.held.has(other.applicationId)).toBe(true)
+    expect(await loadHiddenVettingRecord(p.agent, OTHER)).toMatchObject({ applicationId: other.applicationId })
   })
 })
