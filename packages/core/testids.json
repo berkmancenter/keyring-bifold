@@ -614,6 +614,8 @@
       "src/screens/OnboardingPages.tsx",
       "src/screens/ProofRequest.tsx"
     ],
+    "HiddenApplicationProbes": ["src/modules/trust-tasks/screens/HiddenApplicationProbes.tsx"],
+    "HiddenApplicationProbesSweep": ["src/modules/trust-tasks/screens/HiddenApplicationProbes.tsx"],
     "HiddenVetter": ["src/modules/trust-tasks/screens/VtiHiddenVetter.tsx"],
     "HiddenVetterClaims": ["src/modules/trust-tasks/screens/VtiHiddenVetter.tsx"],
     "HiddenVetterConfirm": ["src/modules/trust-tasks/screens/VtiHiddenVetter.tsx"],
@@ -1684,6 +1686,9 @@
     "DirectoryMember_": ["src/modules/directory/screens/CommunityMembers.tsx"],
     "Dismiss": ["src/components/listItems/NotificationListItem.tsx", "src/components/misc/InfoBox.tsx"],
     "EmojiPickerEmoji_": ["src/modules/chat/emoji/EmojiPicker.tsx"],
+    "HiddenApplicationProbeAnswer_": ["src/modules/trust-tasks/screens/HiddenApplicationProbes.tsx"],
+    "HiddenApplicationProbeAsk_": ["src/modules/trust-tasks/screens/HiddenApplicationProbes.tsx"],
+    "HiddenApplicationProbe_": ["src/modules/trust-tasks/screens/HiddenApplicationProbes.tsx"],
     "JoinPrivateVettingRefused_": ["src/modules/trust-tasks/screens/PrivateVettingStart.tsx"],
     "JoinPrivateVettingStart_": ["src/modules/trust-tasks/screens/PrivateVettingStart.tsx"],
     "JoinWayCannotUse_": ["src/modules/trust-tasks/screens/JoinWaysCard.tsx"],
