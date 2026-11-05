@@ -47,7 +47,11 @@ import { join } from 'path'
 const mockLogged: string[] = []
 let mockClient: unknown
 const VTA_DID = 'did:webvh:QmAgent:agent.example:keyring-test-agent'
-const ME = 'did:webvh:QmMe:dids.example:me-now'
+// A new identity for each phone. The acknowledgement keeps its work in flight per community and identity, in the
+// module, beyond any one agent, so one test's would otherwise stand in for the next one's.
+let mockMe = 'did:webvh:QmMe:dids.example:me-0'
+let ME = mockMe
+let identities = 0
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 // A store write announces itself on a timer, which could fire after the suite has gone.
@@ -67,9 +71,11 @@ jest.mock('@bifold/trust-tasks', () => ({
 jest.mock('../module/vtiAgent', () => ({
   ...jest.requireActual('../module/vtiAgent'),
   vtiAgent: {
-    did: ME,
+    get did() {
+      return mockMe
+    },
     isConnected: true,
-    getState: () => ({ status: 'connected', did: ME }),
+    getState: () => ({ status: 'connected', did: mockMe }),
     onInbound: () => () => undefined,
     subscribe: () => () => undefined,
     send: jest.fn(async () => undefined),
@@ -202,6 +208,7 @@ const dirs: string[] = []
 const agents: Agent[] = []
 
 async function newPhone() {
+  ME = mockMe = `did:webvh:QmMe:dids.example:me-${++identities}`
   const storeDir = mkdtempSync(join(tmpdir(), 'hidden-app-real-'))
   dirs.push(storeDir)
   const agent = new Agent({
