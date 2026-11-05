@@ -6,8 +6,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Platform, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { Platform, ScrollView, StyleSheet, TouchableOpacity, View, ActivityIndicator } from 'react-native'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialIcons'
 
 import { hitSlop } from '../../constants'
@@ -30,6 +30,7 @@ const BiometricConfirmationModal: React.FC = () => {
   const { ColorPalette, TextTheme } = useTheme()
   const { isModalVisible, pendingRequest, onConfirm, onCancel, onError } = useBiometricConfirmation()
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const insets = useSafeAreaInsets()
   // Outside an AuthProvider (a test, a host that mounts none) there is no PIN to check.
   const walletSecret = useAuth()?.walletSecret
   const [logger] = useServices([TOKENS.UTIL_LOGGER])
@@ -243,88 +244,92 @@ const BiometricConfirmationModal: React.FC = () => {
 
   return (
     <SafeAreaModal transparent={true} visible={isModalVisible} animationType="slide">
-      <View style={styles.overlay}>
-        <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.safeAreaView}>
-          {/* Close button */}
-          <View style={styles.headerView}>
-            <TouchableOpacity
-              accessibilityLabel={t('Global.Close')}
-              accessibilityRole={'button'}
-              testID={testIdWithKey('CloseBiometricModal')}
-              onPress={handleCancelPress}
-              hitSlop={hitSlop}
-              disabled={isAuthenticating}
-            >
-              <Icon name={'close'} size={28} color={ColorPalette.brand.modalIcon || ColorPalette.grayscale.black} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.container}>
-            <View style={styles.contentContainer}>
-              {/* Auth icon */}
-              <View style={styles.iconContainer}>
-                <Icon
-                  name={isPasscodeMode || isKeyringPinMode ? 'lock' : 'fingerprint'}
-                  size={40}
-                  color={ColorPalette.brand.primary}
-                />
-              </View>
-
-              <ThemedText style={styles.title}>
-                {pendingRequest.copy?.title ?? String(t('Biometry.ConfirmRelationship') || 'Confirm Relationship')}
-              </ThemedText>
-
-              {/* A name, when there is one: a stand-in like "your vetter" read as
-                  one on the sheet (219), so a caller with no name passes none. */}
-              {pendingRequest.counterpartyName ? (
-                <ThemedText style={styles.counterpartyName}>{pendingRequest.counterpartyName}</ThemedText>
-              ) : null}
-
-              <ThemedText style={styles.description}>
-                {pendingRequest.copy?.description ??
-                  String(
-                    t('Biometry.VrcConfirmationDescription') ||
-                      "You're about to sign a credential establishing a verified relationship with this contact. This proves you authorized this connection."
-                  )}
-              </ThemedText>
-
-              <View style={styles.securityNote}>
-                <Icon name="security" size={20} color={ColorPalette.notification.infoIcon || '#1976D2'} />
-                <ThemedText style={styles.securityNoteText}>{modalCopy.securityNote}</ThemedText>
-              </View>
+      {/* At a large text size the sheet is taller than the screen: it stops below the status bar and
+          scrolls, so the title is never pushed off the top, and the buttons are reached past the words. */}
+      <View style={[styles.overlay, { paddingTop: insets.top }]}>
+        <SafeAreaView edges={['left', 'right', 'bottom']} style={[styles.safeAreaView, { maxHeight: '100%' }]}>
+          <ScrollView bounces={false} testID={testIdWithKey('BiometricConfirmationScroll')}>
+            {/* Close button */}
+            <View style={styles.headerView}>
+              <TouchableOpacity
+                accessibilityLabel={t('Global.Close')}
+                accessibilityRole={'button'}
+                testID={testIdWithKey('CloseBiometricModal')}
+                onPress={handleCancelPress}
+                hitSlop={hitSlop}
+                disabled={isAuthenticating}
+              >
+                <Icon name={'close'} size={28} color={ColorPalette.brand.modalIcon || ColorPalette.grayscale.black} />
+              </TouchableOpacity>
             </View>
 
-            {/* Buttons */}
-            <View style={styles.buttonsContainer}>
-              {isAuthenticating ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color={ColorPalette.brand.primary} />
-                  <ThemedText style={styles.loadingText}>
-                    {t('Biometry.Authenticating') || 'Authenticating...'}
-                  </ThemedText>
-                </View>
-              ) : (
-                <>
-                  {pinUnavailable ? null : (
-                    <Button
-                      title={modalCopy.confirmLabel}
-                      accessibilityLabel={modalCopy.confirmLabel}
-                      testID={testIdWithKey('ConfirmBiometric')}
-                      onPress={handleConfirmPress}
-                      buttonType={ButtonType.Primary}
-                    />
-                  )}
-                  <Button
-                    title={t('Global.Cancel')}
-                    accessibilityLabel={t('Global.Cancel')}
-                    testID={testIdWithKey('CancelBiometric')}
-                    onPress={handleCancelPress}
-                    buttonType={ButtonType.Secondary}
+            <View style={styles.container}>
+              <View style={styles.contentContainer}>
+                {/* Auth icon */}
+                <View style={styles.iconContainer}>
+                  <Icon
+                    name={isPasscodeMode || isKeyringPinMode ? 'lock' : 'fingerprint'}
+                    size={40}
+                    color={ColorPalette.brand.primary}
                   />
-                </>
-              )}
+                </View>
+
+                <ThemedText style={styles.title}>
+                  {pendingRequest.copy?.title ?? String(t('Biometry.ConfirmRelationship') || 'Confirm Relationship')}
+                </ThemedText>
+
+                {/* A name, when there is one: a stand-in like "your vetter" read as
+                  one on the sheet (219), so a caller with no name passes none. */}
+                {pendingRequest.counterpartyName ? (
+                  <ThemedText style={styles.counterpartyName}>{pendingRequest.counterpartyName}</ThemedText>
+                ) : null}
+
+                <ThemedText style={styles.description}>
+                  {pendingRequest.copy?.description ??
+                    String(
+                      t('Biometry.VrcConfirmationDescription') ||
+                        "You're about to sign a credential establishing a verified relationship with this contact. This proves you authorized this connection."
+                    )}
+                </ThemedText>
+
+                <View style={styles.securityNote}>
+                  <Icon name="security" size={20} color={ColorPalette.notification.infoIcon || '#1976D2'} />
+                  <ThemedText style={styles.securityNoteText}>{modalCopy.securityNote}</ThemedText>
+                </View>
+              </View>
+
+              {/* Buttons */}
+              <View style={styles.buttonsContainer}>
+                {isAuthenticating ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color={ColorPalette.brand.primary} />
+                    <ThemedText style={styles.loadingText}>
+                      {t('Biometry.Authenticating') || 'Authenticating...'}
+                    </ThemedText>
+                  </View>
+                ) : (
+                  <>
+                    {pinUnavailable ? null : (
+                      <Button
+                        title={modalCopy.confirmLabel}
+                        accessibilityLabel={modalCopy.confirmLabel}
+                        testID={testIdWithKey('ConfirmBiometric')}
+                        onPress={handleConfirmPress}
+                        buttonType={ButtonType.Primary}
+                      />
+                    )}
+                    <Button
+                      title={t('Global.Cancel')}
+                      accessibilityLabel={t('Global.Cancel')}
+                      testID={testIdWithKey('CancelBiometric')}
+                      onPress={handleCancelPress}
+                      buttonType={ButtonType.Secondary}
+                    />
+                  </>
+                )}
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </SafeAreaView>
       </View>
       {/* Inside the sheet's own modal: iOS will not present a second modal while this one is up. */}

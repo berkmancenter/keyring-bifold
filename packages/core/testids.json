@@ -224,6 +224,7 @@
     "BackToList": ["src/screens/ProofDetails.tsx"],
     "BackToProofList": ["src/screens/MobileVerifierLoading.tsx"],
     "BiometricChangedEnterPIN": ["src/screens/PINVerify.tsx"],
+    "BiometricConfirmationScroll": ["src/components/modals/BiometricConfirmationModal.tsx"],
     "Biometrics": ["src/screens/Settings.tsx"],
     "BiometricsUnlock": ["src/screens/PINEnter.tsx"],
     "BiometryRecommended": ["src/components/inputs/BiometryControl.tsx"],

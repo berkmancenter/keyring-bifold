@@ -353,7 +353,7 @@
     "ConfirmWithKeyringPIN": "Confirm with Keyring PIN",
     "ConfirmPinNote": "Biometric Unlock is off in Keyring's Menu, so confirm with your Keyring PIN.",
     "ConfirmPinAfterMissingKey": "Biometric Unlock couldn't be used here. Confirm with your Keyring PIN instead.",
-    "ConfirmPinUnavailable": "Biometric Unlock is off in Keyring's Menu, and Keyring can't check your PIN right now. Turn Biometric Unlock on in the Menu, or close Keyring and open it again with your PIN, then try again."
+    "ConfirmPinUnavailable": "Biometric Unlock is off in Keyring's Menu, and Keyring can't check your PIN on this screen. Close Keyring, open it again with your PIN, then try again."
   },
   "VrcBiometric": {
     "StatusNotVerified": "Contact did not complete identity verification for this relationship.",

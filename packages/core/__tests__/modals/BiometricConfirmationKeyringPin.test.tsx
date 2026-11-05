@@ -129,6 +129,25 @@ describe('the confirm sheet with Biometric Unlock off in Keyring', () => {
   })
 })
 
+describe('the confirm sheet at a large text size', () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  // Taller than the screen, the sheet scrolled nowhere and pushed its title off the top: it scrolls now,
+  // with the buttons reached past the words (renders in the PR).
+  it('keeps the title, the words and the buttons in one scroll, buttons last', () => {
+    const { tree } = sheet({ authMode: 'keyringPin' })
+    const scroll = tree.getByTestId(testIdWithKey('BiometricConfirmationScroll'))
+    for (const id of ['CloseBiometricModal', 'ConfirmBiometric', 'CancelBiometric']) {
+      let node = tree.getByTestId(testIdWithKey(id)).parent
+      while (node && node !== scroll) node = node.parent
+      expect(node).toBe(scroll)
+    }
+    const json = JSON.stringify(tree.toJSON())
+    expect(json.indexOf('Join.ConfirmTitle')).toBeLessThan(json.indexOf('Biometry.ConfirmPinNote'))
+    expect(json.indexOf('Biometry.ConfirmPinNote')).toBeLessThan(json.indexOf(testIdWithKey('ConfirmBiometric')))
+  })
+})
+
 describe('the confirm sheet when the biometric key is not there', () => {
   beforeEach(() => jest.clearAllMocks())
 

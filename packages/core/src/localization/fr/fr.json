@@ -375,7 +375,7 @@
     "ConfirmWithKeyringPIN": "Confirmer avec le NIP Keyring",
     "ConfirmPinNote": "La Biométrie est désactivée dans le Menu de Keyring : confirmez avec votre NIP Keyring.",
     "ConfirmPinAfterMissingKey": "La Biométrie n'a pas pu être utilisée ici. Confirmez plutôt avec votre NIP Keyring.",
-    "ConfirmPinUnavailable": "La Biométrie est désactivée dans le Menu de Keyring, et Keyring ne peut pas vérifier votre NIP pour le moment. Activez la Biométrie dans le Menu, ou fermez Keyring et rouvrez-le avec votre NIP, puis réessayez."
+    "ConfirmPinUnavailable": "La Biométrie est désactivée dans le Menu de Keyring, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez."
   },
   "ActivityHistory": {
     "Header": "Activity history(fr)",

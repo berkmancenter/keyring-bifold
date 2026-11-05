@@ -327,7 +327,7 @@
     "ConfirmWithKeyringPIN": "Confirmar com o PIN do Keyring",
     "ConfirmPinNote": "A Biometria está desativada no Menu do Keyring, então confirme com o seu PIN do Keyring.",
     "ConfirmPinAfterMissingKey": "Não foi possível usar a Biometria aqui. Confirme com o seu PIN do Keyring.",
-    "ConfirmPinUnavailable": "A Biometria está desativada no Menu do Keyring, e o Keyring não consegue verificar o seu PIN agora. Ative a Biometria no Menu, ou feche o Keyring e abra de novo com o seu PIN, e tente outra vez."
+    "ConfirmPinUnavailable": "A Biometria está desativada no Menu do Keyring, e o Keyring não consegue verificar o seu PIN nesta tela. Feche o Keyring, abra de novo com o seu PIN e tente outra vez."
   },
   "ActivityHistory": {
     "Header": "Activity history",
