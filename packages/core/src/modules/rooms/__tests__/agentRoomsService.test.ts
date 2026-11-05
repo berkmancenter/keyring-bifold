@@ -210,6 +210,37 @@ describe('AgentRoomsService', () => {
     expect(b.warn).toHaveBeenCalledWith(`rooms: ${COMMUNITY.did} did not list this member's rooms: failed`)
   })
 
+  // #938: an identity whose keys are not on the phone yet is refused before any session opens (VtiKeysNotHeld). Its
+  // community was never asked, so "Couldn't reach your community" is not what happened: the screen says to let the
+  // agent connect. The raw sign-in failure above stays unreached (control).
+  it('says the identity keys are not here yet, not that no community answered, when that is why none was read', async () => {
+    const { b } = backend({
+      communityTask: jest.fn(async () => {
+        throw Object.assign(new Error("rooms: this identity's keys are not on this phone yet"), {
+          name: 'VtiKeysNotHeld',
+        })
+      }),
+    })
+    await expect(new AgentRoomsService(b).listMyRooms()).rejects.toMatchObject({
+      name: 'RoomsUnavailable',
+      operation: 'listMyRooms',
+      reason: 'keysNotHeld',
+    })
+  })
+
+  it('with another community unreached as well, says that one was not reached', async () => {
+    const other: RoomsCommunity = { did: 'did:webvh:community:b', personaDid: 'did:key:persona-b' }
+    const { b } = backend({
+      communities: async () => [COMMUNITY, other],
+      communityTask: jest.fn(async (did: string) => {
+        throw did === other.did
+          ? new Error('community unreachable')
+          : Object.assign(new Error('keys'), { name: 'VtiKeysNotHeld' })
+      }),
+    })
+    await expect(new AgentRoomsService(b).listMyRooms()).rejects.toMatchObject({ reason: 'communityUnreachable' })
+  })
+
   // An older community answers, and the answer is that it has no such task (277, on a VTC before rooms): "Couldn't
   // reach your community" was not what happened.
   it('says the community is too old for rooms, not unreached, when it answers that it has no such task', async () => {
@@ -744,7 +775,21 @@ describe('every community kept from for now', () => {
     [
       'refused',
       Object.assign(new Error('did:key:persona-a is not one'), { name: 'VtiRefusal', code: 'notMember' }),
-      'VtiRefusal',
+      'refused (notMember)',
+    ],
+    [
+      'refused for more than one persona',
+      Object.assign(new Error('you may act as 2 personas, did:key:persona-a among them'), {
+        name: 'VtiRefusal',
+        code: 'taskFailed',
+        details: { reason: 'conflict' },
+      }),
+      'refused (taskFailed, conflict)',
+    ],
+    [
+      'refused with words for a code',
+      Object.assign(new Error('said no'), { name: 'VtiRefusal', code: 'did:key:persona-a said no' }),
+      'refused (other)',
     ],
     ['a TypeError', new TypeError("did:key:persona-a's agent is gone"), 'TypeError'],
     ['a plain error naming an identity', new Error("did:key:persona-a's agent is no longer linked"), 'failed'],
