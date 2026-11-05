@@ -10,6 +10,7 @@ import { listKeyed, putKeyed } from '../../trust-tasks/module/keyedRecords'
 import { vtaAgent } from '../../trust-tasks/module/vtaAgent'
 import { GenericRecordsCommunityStore } from '../../trust-tasks/module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../../trust-tasks/module/VtiIdentityStore'
+import { personaForCommunity, VtiNoIdentity } from '../../trust-tasks/module/sharedIdentity'
 import { leaveCommunity } from '../../trust-tasks/module/vtiJoin'
 import { GenericRecordsVettingStore } from '../../trust-tasks/module/vtiVetting'
 import { vtiAgent } from '../../trust-tasks/module/vtiAgent'
@@ -54,8 +55,14 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
   // (two communities' polls flipped it every 4 s and stopped each other's asks, 10-31). An accept is the person's own
   // act, and holds the session as an ordinary caller does.
   const asPersona = async <T>(communityDid: string, poll: boolean, fn: () => Promise<T>): Promise<T> => {
-    const persona = await identityStore.getPersona(communityDid)
-    if (!persona) throw new Error('rooms: this phone holds no identity for that community')
+    // The identity kept for this community, or the one its membership names when it was kept only for another
+    // community (sharedIdentity, IN-517). None: a named refusal the screens word, not a community that didn't answer.
+    const persona = await personaForCommunity(identityStore, communityStore, communityDid)
+    if (!persona) {
+      // The kind only: which community is not logged (log privacy rule).
+      agent.config?.logger?.warn?.('[Rooms] no identity for the community: nothing asked (noIdentity)')
+      throw new VtiNoIdentity('rooms: this phone holds no identity for that community')
+    }
     return vtiAgent.holding(agent, options.mediatorDid, persona, fn, {
       peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
       reason: poll ? 'rooms listing' : 'rooms',
@@ -80,7 +87,7 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
       const out: RoomsCommunity[] = []
       for (const membership of await communityStore.listMemberships()) {
         if (membership.removal) continue
-        const persona = await identityStore.getPersona(membership.communityDid)
+        const persona = await personaForCommunity(identityStore, communityStore, membership.communityDid)
         if (persona?.did === membership.personaDid)
           out.push({ did: membership.communityDid, personaDid: membership.personaDid })
       }

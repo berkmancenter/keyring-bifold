@@ -15,7 +15,9 @@ export function directoryStatusText(t: TFunction, status: OperationStatus, commu
       ? 'Directory.StatusNotServed'
       : status.reason === 'noRight'
         ? 'Directory.StatusNoRight'
-        : 'Directory.StatusUnreachable'
+        : status.reason === 'noIdentity'
+          ? 'Directory.StatusNoIdentity'
+          : 'Directory.StatusUnreachable'
   return t(key, { community, interpolation: { escapeValue: false } }) as string
 }
 

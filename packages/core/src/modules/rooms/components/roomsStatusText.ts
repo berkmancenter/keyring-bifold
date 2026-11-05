@@ -22,6 +22,7 @@ const KEY: Record<Exclude<RoomsReason, 'ok' | 'sample' | 'noRight'>, string> = {
   agentUnknown: 'Rooms.AgentUnknown',
   detailsNotLoaded: 'Rooms.DetailsNotLoaded',
   communityUnreachable: 'Rooms.CommunityUnreachable',
+  noIdentity: 'Rooms.NoIdentity',
   tierNotYet: 'Rooms.TierNotYet',
   notOnThisTier: 'Rooms.FilesNotOnOpenRooms',
 }

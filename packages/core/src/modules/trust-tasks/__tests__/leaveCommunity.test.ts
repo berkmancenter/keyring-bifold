@@ -21,12 +21,16 @@ function stores() {
   const communityStore = {
     forgetCommunity: jest.fn(async () => undefined),
     getMembership: jest.fn(async () => undefined),
+    // No membership here under an identity kept for another community (sharedIdentity): nothing to heal.
+    listMemberships: jest.fn(async () => []),
     getSubmission: jest.fn(async () => undefined),
     getDeparture: jest.fn(async () => departure),
     saveDeparture: jest.fn(async (d: VtiDeparture) => void (departure = d)),
   }
   const identityStore = {
     getPersona: jest.fn(async () => persona),
+    listPersonas: jest.fn(async () => [persona]),
+    setPersona: jest.fn(async () => undefined),
     forgetPersona: jest.fn(async () => undefined),
   }
   const vettingStore = { forget: jest.fn(async () => undefined) }
