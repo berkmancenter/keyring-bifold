@@ -1578,6 +1578,7 @@
     "RemoveHereConfirm": "Remove from this phone",
     "LeaveExplains": "Leaving removes you as a member of {{community}}, and this phone forgets your identity, card and vetting for it. To come back, you join again with a new identity.",
     "LeaveNotFromThisPhone": "You can't leave {{community}} from this phone yet. Ask its admin to remove you.",
+    "LeaveWaitsForKeys": "Leaving {{community}} needs this identity's keys from your agent first. Open My Agent so your agent can connect, then try again.",
     "LeaveExplainsShared": "Leaving removes you as a member of {{community}}, and this phone forgets your card and vetting for it. Your identity stays: {{other}} still uses it.",
     "LeaveConfirm": "Leave community",
     "Stay": "Stay",

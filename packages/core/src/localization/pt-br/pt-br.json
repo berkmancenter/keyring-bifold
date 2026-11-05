@@ -1433,6 +1433,7 @@
     "RemoveHereConfirm": "Remover deste telefone",
     "LeaveExplains": "Ao sair, você deixa de ser membro de {{community}}, e este telefone esquece sua identidade, cartão e verificação para ela. Para voltar, você entra de novo com uma nova identidade.",
     "LeaveNotFromThisPhone": "Você ainda não pode sair de {{community}} por este telefone. Peça ao administrador para remover você.",
+    "LeaveWaitsForKeys": "Para sair de {{community}}, este telefone precisa primeiro receber do seu agente as chaves desta identidade. Abra Meu agente para que ele se conecte e tente de novo.",
     "LeaveExplainsShared": "Ao sair, você deixa de ser membro de {{community}}, e este telefone esquece seu cartão e verificação para ela. Sua identidade continua: {{other}} ainda a usa.",
     "LeaveConfirm": "Sair da comunidade",
     "Stay": "Ficar",

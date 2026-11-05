@@ -11,7 +11,12 @@ import { leaveCommunity, readJoinState } from '../module/vtiJoin'
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
 const COMMUNITY = 'did:webvh:Qm:vtc.example:c'
-const persona = { did: 'did:webvh:Qm:vta.example:p', communityDid: COMMUNITY }
+// Signable: both key copies recorded (canSignAs).
+const persona = {
+  did: 'did:webvh:Qm:vta.example:p',
+  communityDid: COMMUNITY,
+  kmsKeyIds: { signing: 's', keyAgreement: 'k' },
+}
 const answer = (payload: unknown, type = 'https://trusttasks.org/spec/vtc/members/self-remove/0.1#response') =>
   ({ type, body: { payload } }) as unknown as DidCommV2PlaintextMessage
 const refusal = (code: string) => answer({ code, message: 'no' }, 'https://trusttasks.org/spec/trust-task-error/0.1')

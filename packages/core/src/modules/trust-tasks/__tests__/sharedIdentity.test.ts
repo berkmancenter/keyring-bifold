@@ -13,7 +13,15 @@ import { fakeAgent } from '../../../../__tests__/helpers/cardVault'
 import { directoryStatusOf } from '../../directory/directoryService'
 import { directoryRetryable } from '../../directory/components/directoryWords'
 import { setCurrentAgentDid } from '../module/currentAgent'
-import { healSharedIdentities, personaForCommunity, shareIdentityWith, VtiNoIdentity } from '../module/sharedIdentity'
+import {
+  canSignAs,
+  HEAL_AGAIN_MS,
+  healSharedIdentities,
+  personaForCommunity,
+  shareIdentityWith,
+  VtiKeysNotHeld,
+  VtiNoIdentity,
+} from '../module/sharedIdentity'
 import { vtiAgent } from '../module/vtiAgent'
 import { GenericRecordsCommunityStore, type VtiMembership } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
@@ -151,6 +159,68 @@ describe('a card from a community the identity was not made for', () => {
     const own = persona(AGENT, FIRST)
     await expect(shareIdentityWith(identities, own, TEST)).resolves.toBe('agentItself')
     expect(await identities.getPersona(TEST)).toBeUndefined()
+  })
+})
+
+// ac on #938: an install from before memory-only custody keeps an identity's copies in the wallet's store until its
+// keys move (vtaKeyMigration). Those belong to the first record, and a record naming one copy of two cannot sign.
+describe('an identity whose key copies are not both in memory', () => {
+  it('kept for the second community names no copies at all, and cannot sign until the agent hands them over', async () => {
+    const { agent, identities, first } = await setup()
+    const stored = { ...first, kmsKeyIds: { signing: 'kms-signing', keyAgreement: 'kms-ka' } }
+    await identities.setPersona(stored)
+    await keepForPersona(agent, stored, issue(TEST, card(TEST, ID)))
+    const kept = await identities.getPersona(TEST)
+    expect(kept?.did).toBe(ID)
+    expect(kept?.kmsKeyIds).toBeUndefined()
+    expect(canSignAs(kept)).toBe(false)
+    // The first record keeps its own copies.
+    expect((await identities.getPersona(FIRST))?.kmsKeyIds).toEqual(stored.kmsKeyIds)
+  })
+
+  it('one copy in memory and one stored: still none named, never half', async () => {
+    const { agent, identities, first } = await setup()
+    const half = { ...first, kmsKeyIds: { signing: 'kms-signing', keyAgreement: first.kmsKeyIds?.keyAgreement } }
+    await identities.setPersona(half)
+    await keepForPersona(agent, half, issue(TEST, card(TEST, ID)))
+    expect((await identities.getPersona(TEST))?.kmsKeyIds).toBeUndefined()
+  })
+
+  it('both in memory: named, and it can sign (control)', async () => {
+    const { agent, identities, first } = await setup()
+    await keepForPersona(agent, first, issue(TEST, card(TEST, ID)))
+    expect(canSignAs(await identities.getPersona(TEST))).toBe(true)
+  })
+
+  it('Leave of the second community refuses before anything is sent or cleared', async () => {
+    const { agent, identities, communities, first } = await setup()
+    const stored = { ...first, kmsKeyIds: { signing: 'kms-signing', keyAgreement: 'kms-ka' } }
+    await identities.setPersona(stored)
+    await keepForPersona(agent, stored, issue(TEST, card(TEST, ID)))
+    const connect = jest.spyOn(vtiAgent, 'connect')
+    const remove = jest.spyOn(vtiAgent, 'selfRemove')
+    await expect(
+      leaveCommunity({ agent, identityStore: identities, communityStore: communities }, TEST)
+    ).rejects.toBeInstanceOf(VtiKeysNotHeld)
+    expect(connect).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+    expect(await identities.getPersona(TEST)).toBeDefined()
+    expect(await communities.getMembership(TEST, ID)).toBeDefined()
+  })
+})
+
+describe('a reader that finds no identity', () => {
+  it('heals once per store within a while, not on every read; again after it', async () => {
+    const { identities, communities } = await setup()
+    const scan = jest.spyOn(communities, 'listMemberships')
+    let at = 1_000_000
+    const now = () => at
+    await expect(personaForCommunity(identities, communities, TEST, now)).resolves.toBeUndefined()
+    await expect(personaForCommunity(identities, communities, TEST, now)).resolves.toBeUndefined()
+    expect(scan).toHaveBeenCalledTimes(1)
+    at += HEAL_AGAIN_MS
+    await personaForCommunity(identities, communities, TEST, now)
+    expect(scan).toHaveBeenCalledTimes(2)
   })
 })
 

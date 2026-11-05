@@ -26,7 +26,7 @@ import { testIdWithKey } from '../../../utils/testable'
 import { CommunityDirectorySection } from '../../directory/components/CommunityDirectorySection'
 import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
-import { communitiesSharing, personaForCommunity } from '../module/sharedIdentity'
+import { canSignAs, communitiesSharing, personaForCommunity } from '../module/sharedIdentity'
 import { selfRemoveRefusal, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { leaveCommunity } from '../module/vtiJoin'
 import { GenericRecordsVettingStore } from '../module/vtiVetting'
@@ -124,10 +124,13 @@ const VtiCommunity: React.FC = () => {
   // as (the agent's own DID, or one this phone does not keep) cannot be left from here: the screen says so instead
   // of a Leave that fails (IN-517).
   const [canSign, setCanSign] = useState(false)
+  // An identity is here but its keys are not on the phone yet: its agent hands them over when it next connects.
+  const [awaitingKeys, setAwaitingKeys] = useState(false)
   // The other communities this identity is kept for: leaving here keeps it for them.
   const [sharedWith, setSharedWith] = useState<string[]>([])
   const canLeave = holds && !heldElsewhere && canSign
-  const cannotLeaveHere = holds && !heldElsewhere && !canSign
+  const cannotLeaveHere = holds && !heldElsewhere && !canSign && !awaitingKeys
+  const leaveWaitsForKeys = holds && !heldElsewhere && !canSign && awaitingKeys
   useEffect(() => {
     if (!agent) return
     let live = true
@@ -142,7 +145,8 @@ const VtiCommunity: React.FC = () => {
       .then(([p, m, all]) => {
         if (!live) return
         setHolds(Boolean(p || m))
-        setCanSign(Boolean(p))
+        setCanSign(canSignAs(p))
+        setAwaitingKeys(Boolean(p) && !canSignAs(p))
         setSharedWith(p ? communitiesSharing(all, p) : [])
       })
       .catch(() => undefined)
@@ -564,6 +568,14 @@ const VtiCommunity: React.FC = () => {
           </CommunityGroup>
           {canLeave && !confirmingLeave && !leaveUnanswered ? (
             <Text style={styles.label}>{t('Join.StandingAgain')}</Text>
+          ) : null}
+          {leaveWaitsForKeys ? (
+            <Text style={styles.label}>
+              {t('Community.LeaveWaitsForKeys', {
+                community: communityLabelOf(communityDid, t),
+                interpolation: { escapeValue: false },
+              })}
+            </Text>
           ) : null}
           {cannotLeaveHere ? (
             <Text style={styles.label}>

@@ -20,6 +20,18 @@
  * (agentOwnIdentity). And never over an identity the phone already keeps for
  * that community: a card for it naming another identity is kept on its own.
  *
+ * Key copies. The new record names the first record's key copies only when
+ * both are held in memory: those are named the same every session
+ * (VtaClient.borrowKey), so two records may name them. A copy kept in the
+ * wallet's store (an install from before memory-only custody, until its keys
+ * move: vtaKeyMigration) belongs to the first record, whose migration deletes
+ * it, so it is never named here; and a record naming only one of the two would
+ * open a session it cannot sign on. Then the new record names no copies at
+ * all, as an identity brought back from the agent does, and the agent's
+ * session-open sweep borrows both into memory and records them on it
+ * (vtaAgent.holdPersonaKeys → VtaClient.borrowAdoptedKeys). Until then it
+ * cannot sign: `canSignAs` says so, and Leave waits for it.
+ *
  * @module trust-tasks/module/sharedIdentity
  */
 import { isAgentsOwnPersona } from './agentOwnIdentity'
@@ -62,18 +74,17 @@ export async function shareIdentityWith(
   if (isAgentsOwnPersona(persona)) return 'agentItself'
   const there = await identities.getPersona(communityDid, persona.vtaDid)
   if (there) return sameIdentity(there.did, persona.did) ? 'already' : 'conflict'
-  // Copies held in memory are named the same every session (VtaClient.borrowKey), so the record can name them too.
-  // A copy kept in the wallet's store belongs to the first record, which deletes it: it is not named twice.
-  const inMemory = (id?: string) => (id && isInMemoryKeyId(id) ? id : undefined)
-  const signing = inMemory(persona.kmsKeyIds?.signing)
-  const keyAgreement = inMemory(persona.kmsKeyIds?.keyAgreement)
+  // Both copies in memory, or none named (see the module comment): never one, never a stored copy.
+  const signing = persona.kmsKeyIds?.signing
+  const keyAgreement = persona.kmsKeyIds?.keyAgreement
+  const bothInMemory = Boolean(signing && keyAgreement && isInMemoryKeyId(signing) && isInMemoryKeyId(keyAgreement))
   await identities.setPersona({
     communityDid,
     vtaDid: persona.vtaDid,
     did: persona.did,
     contextId: persona.contextId,
     vtaKeyIds: { ...persona.vtaKeyIds },
-    ...(signing || keyAgreement ? { kmsKeyIds: { signing, keyAgreement } } : {}),
+    ...(bothInMemory ? { kmsKeyIds: { signing, keyAgreement } } : {}),
     ...(persona.label ? { label: persona.label } : {}),
     createdAt: now().toISOString(),
   })
@@ -94,7 +105,8 @@ export async function healSharedIdentities(
   let kept = 0
   for (const membership of await communities.listMemberships()) {
     if (!membership.personaDid || !isCurrentMembership(membership)) continue
-    // Its own community's record first; otherwise the first other community's that is the same identity.
+    // A record kept for the membership's own community already: nothing to do. Otherwise the first other community's
+    // record of the same identity that may be kept (the agent's own DID may not, and the next is tried).
     const holders = personas.filter((p) => p.vtaDid && sameIdentity(p.did, membership.personaDid as string))
     if (holders.length === 0 || holders.some((p) => p.communityDid === membership.communityDid)) continue
     for (const from of holders) {
@@ -115,12 +127,50 @@ export async function healSharedIdentities(
 export async function personaForCommunity(
   identities: Pick<VtiIdentityStore, 'getPersona' | 'setPersona' | 'listPersonas'>,
   communities: Pick<VtiCommunityStore, 'listMemberships'>,
-  communityDid: string
+  communityDid: string,
+  now: () => number = Date.now
 ): Promise<VtiPersona | undefined> {
   const found = await identities.getPersona(communityDid)
   if (found) return found
-  if ((await healSharedIdentities(identities, communities)) === 0) return undefined
+  if ((await healThrottled(identities, communities, now)) === 0) return undefined
   return identities.getPersona(communityDid)
+}
+
+/**
+ * A reader that finds no identity for a community runs the heal, which reads every identity and membership. A
+ * community that truly has none would pay that on every read (the directory and rooms poll): one heal per store at a
+ * time, and none again within `HEAL_AGAIN_MS` of the last. A card arriving later is shared as it is filed, not here.
+ */
+export const HEAL_AGAIN_MS = 30_000
+const healing = new WeakMap<object, { at: number; run: Promise<number> }>()
+
+function healThrottled(
+  identities: Pick<VtiIdentityStore, 'getPersona' | 'setPersona' | 'listPersonas'>,
+  communities: Pick<VtiCommunityStore, 'listMemberships'>,
+  now: () => number
+): Promise<number> {
+  const last = healing.get(identities)
+  if (last && now() - last.at < HEAL_AGAIN_MS) return last.run
+  const run = healSharedIdentities(identities, communities).catch(() => 0)
+  healing.set(identities, { at: now(), run })
+  return run
+}
+
+/**
+ * Whether the phone can sign as this identity now: both of its key copies are recorded. One brought back from the
+ * agent, or kept for a second community while the first held its copies in the wallet's store, has none until the
+ * agent's session-open sweep borrows them (see the module comment); one with only a key-agreement copy would open a
+ * session and send unsigned.
+ */
+export const canSignAs = (persona: Pick<VtiPersona, 'kmsKeyIds'> | undefined): boolean =>
+  Boolean(persona?.kmsKeyIds?.keyAgreement && persona.kmsKeyIds.signing)
+
+/** A leave asked of an identity whose key copies this phone does not hold yet: nothing was sent. Read by its name. */
+export class VtiKeysNotHeld extends Error {
+  public constructor(message = "this identity's keys are not on this phone yet") {
+    super(message)
+    this.name = 'VtiKeysNotHeld'
+  }
 }
 
 /**
