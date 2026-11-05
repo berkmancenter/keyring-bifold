@@ -47,11 +47,13 @@ import { AppState } from 'react-native'
 import { onSessionOpened } from './agentSession'
 import type { InertText } from './inertText'
 import { failureCategory, logRef } from './roomsLogWords'
-import { isNote, newestFirst, postOf } from './roomPosts'
+import { isNote, newestFirst, placeOf, postOf } from './roomPosts'
 import type { Identity, NoteSummary, RoomsService, RoomSummary } from './types'
 
 /** While Messages is in view: about the offers poll's idle pace, never faster. */
 export const ROWS_POLL_MS = 120_000
+/** How many of a room's newest records are read to find what its row shows, when the newest are shown nowhere. */
+const ROW_READS_MAX = 5
 /** Coming back to the app reads again, unless the last read is this recent. */
 export const ROWS_RETURN_FLOOR_MS = 60_000
 /** Messages coming into view reads again, unless the last read is this recent. */
@@ -89,6 +91,8 @@ export interface RoomRow {
   lastPost?: RoomRowPost
   /** Its posts not read yet: the row says it is reading, not that there are none. */
   reading?: boolean
+  /** A sealed room not joined yet (`RoomSummary.joined`): never read, and the row says so rather than reading. */
+  notJoined?: boolean
 }
 
 interface Track {
@@ -97,6 +101,8 @@ interface Track {
   /** Others' posts after `seen`: key → version. */
   unread: Map<string, number>
   last?: RoomRowPost
+  /** The record `last` came from: if its author takes it back, the row stops quoting it. */
+  lastKey?: string
   at?: Date
   actingAs?: Identity
 }
@@ -201,17 +207,29 @@ async function readRoom(service: RoomsService, room: RoomSummary, track: Track |
   for (const note of listing.notes) if (note.status === 'retracted') next.unread.delete(note.key)
   // The newest of what came, read in full only if it is newer than the post the row shows: an edit to an older
   // post (a higher version, an earlier time) never takes the row back.
-  const newest = newestFirst(standing)[0]
-  const at = newest?.updatedAt ? new Date(newest.updatedAt) : undefined
-  if (newest && (!next.at || !at || at.getTime() >= next.at.getTime())) {
-    let read: NoteSummary = newest
+  // A record shown nowhere (a reaction, a withdrawn message) is not the row's: the last thing that is shows instead, or
+  // what the row had. A listing's entry can't tell one on a sealed room, so it takes a read each, a few at most.
+  for (const candidate of newestFirst(standing).slice(0, ROW_READS_MAX)) {
+    const at = candidate.updatedAt ? new Date(candidate.updatedAt) : undefined
+    if (next.at && at && at.getTime() < next.at.getTime()) break
+    let read: NoteSummary = candidate
     try {
-      read = await service.readNote(room.roomId, newest.key)
+      read = await service.readNote(room.roomId, candidate.key)
     } catch {
       // Its listing entry says who and when; the words wait for a newer post.
     }
+    const post = postOf(read, actingAs)
+    if (placeOf(post) === 'nowhere') {
+      if (candidate.key === next.lastKey) {
+        next.last = undefined
+        next.lastKey = undefined
+      }
+      continue
+    }
     next.last = rowPostOf(read, actingAs)
+    next.lastKey = candidate.key
     next.at = at ?? next.at
+    break
   }
   return next
 }
@@ -226,7 +244,7 @@ const rowOf = (room: RoomSummary & { communityDid: string }, track: Track | unde
   lastActivityAt: track?.at && !Number.isNaN(track.at.getTime()) ? track.at : undefined,
   unread: track?.unread.size ?? 0,
   lastPost: track?.last,
-  ...(track ? {} : { reading: true }),
+  ...(room.joined === false ? { notJoined: true } : track ? {} : { reading: true }),
 })
 
 /**
@@ -241,6 +259,7 @@ const sameRow = (a: RoomRow, b: RoomRow): boolean =>
   a.communityName === b.communityName &&
   a.nameFrom === b.nameFrom &&
   !!a.reading === !!b.reading &&
+  !!a.notJoined === !!b.notJoined &&
   a.unread === b.unread &&
   a.lastActivityAt?.getTime() === b.lastActivityAt?.getTime() &&
   a.lastPost?.text === b.lastPost?.text &&
@@ -316,6 +335,8 @@ async function readAll(service: RoomsService): Promise<void> {
     show()
     for (const room of rooms) {
       if (feed.service !== service) return
+      // Not joined: there are no keys to read it with, and asking again every poll only fails again.
+      if (room.joined === false) continue
       try {
         byRoom.set(room.roomId, await readRoom(service, room, byRoom.get(room.roomId)))
       } catch (e) {
