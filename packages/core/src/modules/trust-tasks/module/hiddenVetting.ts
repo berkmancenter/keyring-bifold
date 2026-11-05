@@ -328,7 +328,12 @@ async function deleteAtAgent(client: VtaClient, applicationId: string): Promise<
   try {
     await client.deletePcsApplication(applicationId)
   } catch (error) {
-    const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    // The client reports the agent's refusal as a VtiRefusal, its code on `code` (VtaClient, the trust-task-error
+    // branch). Read only from a document, as this first was, the agent's notFound was never recognised: the
+    // application stayed open here and was asked about again at every unlock.
+    const raw = (error as { code?: unknown })?.code
+    const code =
+      (typeof raw === 'string' ? raw : undefined) ?? pcsErrorCode((error as { document?: unknown })?.document ?? error)
     if (code !== 'vta/pcs/applications/delete:notFound') throw error
   }
 }
