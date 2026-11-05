@@ -329,7 +329,8 @@
     "ConfirmPinAfterMissingKey": "Não foi possível usar a Biometria aqui. Confirme com o seu PIN do Keyring.",
     "ConfirmPinUnavailable": "A Biometria está desativada no Menu do Keyring, e o Keyring não consegue verificar o seu PIN nesta tela. Feche o Keyring, abra de novo com o seu PIN e tente outra vez.",
     "ConfirmPinNoBiometricsNote": "Este telefone não tem impressão digital nem desbloqueio facial configurados, então confirme com o seu PIN do Keyring.",
-    "ConfirmPinUnavailableNoBiometrics": "Este telefone não tem impressão digital nem desbloqueio facial configurados, e o Keyring não consegue verificar o seu PIN nesta tela. Feche o Keyring, abra de novo com o seu PIN e tente outra vez."
+    "ConfirmPinUnavailableNoBiometrics": "Este telefone não tem impressão digital nem desbloqueio facial configurados, e o Keyring não consegue verificar o seu PIN nesta tela. Feche o Keyring, abra de novo com o seu PIN e tente outra vez.",
+    "ConfirmNobodyAsked": "O Keyring não conseguiu pedir a sua confirmação, então nada foi feito. Feche o Keyring, abra de novo e tente outra vez."
   },
   "ActivityHistory": {
     "Header": "Activity history",

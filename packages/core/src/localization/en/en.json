@@ -355,7 +355,8 @@
     "ConfirmPinAfterMissingKey": "Biometric Unlock couldn't be used here. Confirm with your Keyring PIN instead.",
     "ConfirmPinUnavailable": "Biometric Unlock is off in Keyring's Menu, and Keyring can't check your PIN on this screen. Close Keyring, open it again with your PIN, then try again.",
     "ConfirmPinNoBiometricsNote": "This phone has no fingerprint or face unlock set up, so confirm with your Keyring PIN.",
-    "ConfirmPinUnavailableNoBiometrics": "This phone has no fingerprint or face unlock set up, and Keyring can't check your PIN on this screen. Close Keyring, open it again with your PIN, then try again."
+    "ConfirmPinUnavailableNoBiometrics": "This phone has no fingerprint or face unlock set up, and Keyring can't check your PIN on this screen. Close Keyring, open it again with your PIN, then try again.",
+    "ConfirmNobodyAsked": "Keyring couldn't ask you to confirm this, so nothing was done. Close Keyring, open it again, then try again."
   },
   "VrcBiometric": {
     "StatusNotVerified": "Contact did not complete identity verification for this relationship.",

@@ -16,7 +16,9 @@
  */
 
 import { Agent } from '@credo-ts/core'
+import i18next from 'i18next'
 import { AppState, AppStateStatus } from 'react-native'
+import Toast from 'react-native-toast-message'
 
 import { LocalStorageKeys } from '../../constants'
 import {
@@ -178,9 +180,15 @@ export async function requestBiometricConfirmationWithUI(
           timestamp: response.timestamp,
         }
 
-      // Nothing asked the person: the action does not go ahead (IN-452). The provider no longer answers
-      // this, but an answer of it must never read as a confirm.
+      // Nothing asked the person: the action does not go ahead, and the person is told, since every caller
+      // returns quietly on a failed confirm and no one cancelled anything here (IN-452).
       case 'not_available':
+        logger.info(`${LOG_PREFIX} confirm: nothing could ask, so the action stops`)
+        Toast.show({
+          // ToastType.Error: its module pulls in the theme, which this one must not load.
+          type: 'error',
+          text1: i18next.t('Biometry.ConfirmNobodyAsked'),
+        })
         return { success: false, reason: 'not_available', timestamp: response.timestamp }
 
       default:

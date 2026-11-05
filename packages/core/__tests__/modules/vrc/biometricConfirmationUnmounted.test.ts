@@ -1,14 +1,14 @@
 /**
- * IN-452: with no BiometricConfirmationProvider mounted, nothing can ask the person, so the step stops. It used to
- * answer 'not_available', which the confirm step read as success: the action went ahead unasked.
+ * IN-452: with no BiometricConfirmationProvider mounted, nothing can ask the person: the answer is 'not_available',
+ * which the confirm step reads as a stop and says so (vrc-biometric.test.ts), never as a pass.
  */
 import { requestBiometricConfirmationUI } from '../../../src/contexts/biometric-confirmation'
 
 describe('a confirm asked with no provider mounted', () => {
-  it('answers an error, never a pass', async () => {
+  it('answers that no one could ask, never a confirm', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     const response = await requestBiometricConfirmationUI('Keyring Lab Community', 'join', false, 'keyringPin')
-    expect(response.status).toBe('error')
+    expect(response.status).toBe('not_available')
     expect(response.error).toMatch(/not mounted/)
     warn.mockRestore()
   })

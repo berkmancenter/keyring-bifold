@@ -377,7 +377,8 @@
     "ConfirmPinAfterMissingKey": "La Biométrie n'a pas pu être utilisée ici. Confirmez plutôt avec votre NIP Keyring.",
     "ConfirmPinUnavailable": "La Biométrie est désactivée dans le Menu de Keyring, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez.",
     "ConfirmPinNoBiometricsNote": "Ce téléphone n'a ni empreinte digitale ni déverrouillage par le visage configuré : confirmez avec votre NIP Keyring.",
-    "ConfirmPinUnavailableNoBiometrics": "Ce téléphone n'a ni empreinte digitale ni déverrouillage par le visage configuré, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez."
+    "ConfirmPinUnavailableNoBiometrics": "Ce téléphone n'a ni empreinte digitale ni déverrouillage par le visage configuré, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez.",
+    "ConfirmNobodyAsked": "Keyring n'a pas pu vous demander de confirmer, donc rien n'a été fait. Fermez Keyring, rouvrez-le, puis réessayez."
   },
   "ActivityHistory": {
     "Header": "Activity history(fr)",

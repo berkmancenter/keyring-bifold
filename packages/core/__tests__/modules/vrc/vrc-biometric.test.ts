@@ -59,6 +59,11 @@ Object.defineProperty(AppState, 'currentState', {
 })
 AppState.addEventListener = ((...args: unknown[]) => mockAddEventListener(...args)) as typeof AppState.addEventListener
 
+import Toast from 'react-native-toast-message'
+
+jest.mock('i18next', () => ({ t: (key: string) => key }))
+jest.spyOn(Toast, 'show').mockImplementation(() => undefined)
+
 import {
   requestBiometricWithHardwareSigning,
   sendBiometricStatusNotification,
@@ -475,6 +480,19 @@ describe('VRC Biometric Confirmation', () => {
       const result = await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
 
       expect(result).toMatchObject({ success: false, reason: 'not_available' })
+      // Every caller returns quietly on a failed confirm, and no one cancelled: the person is told.
+      expect(Toast.show).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error', text1: 'Biometry.ConfirmNobodyAsked' })
+      )
+    })
+
+    it('a cancel says nothing more: the person knows why nothing happened', async () => {
+      mockIsBiometricsActive.mockResolvedValue(true)
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'cancelled', timestamp: 't' })
+
+      await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      expect(Toast.show).not.toHaveBeenCalled()
     })
 
     it('on a phone with no biometrics, Cancel stops the action: it never goes ahead unasked', async () => {
