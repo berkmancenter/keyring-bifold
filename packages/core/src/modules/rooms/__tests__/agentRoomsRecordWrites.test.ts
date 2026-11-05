@@ -8,7 +8,7 @@ import { join } from 'path'
 import { AgentRoomsService, type RoomsBackend, type RoomsCommunity } from '../real/agentRoomsService'
 import { RecordMembersNotPermitted, RecordSendingOff, type RecordWrite } from '../real/recordWrites'
 import { ROOMS_TASK } from '../real/wire'
-import { RoomsRefused, RoomsUnavailable } from '../types'
+import { NOTE_BODY_MAX, RoomsRefused, RoomsUnavailable } from '../types'
 
 const COMMUNITY: RoomsCommunity = { did: 'did:webvh:community:a', name: 'Garden club', personaDid: 'did:key:persona-a' }
 const HOST = COMMUNITY.did
@@ -310,6 +310,29 @@ describe('a message', () => {
     })
     await send(s, { type: 'message', body: 'hello' })
     expect(s.sealedBody().body).not.toHaveProperty('kind')
+  })
+})
+
+describe("a message's words", () => {
+  // An empty message reads as a withdrawn one; a post's own path refuses both of these, and so does this one.
+  it.each([
+    ['empty', 'message', ''],
+    ['empty', 'message', '  \n '],
+    ['tooLong', 'message', 'x'.repeat(NOTE_BODY_MAX + 1)],
+    ['empty', 'edit', ' '],
+    ['tooLong', 'edit', 'x'.repeat(NOTE_BODY_MAX + 1)],
+  ])('refused as %s: a %s of %j sends nothing', async (reason, type, body) => {
+    const s = setup({ listed: ALL })
+    const write = (type === 'edit' ? { type, key: 'm9', body } : { type, body }) as RecordWrite
+    await expect(send(s, write)).rejects.toMatchObject({ name: 'RoomsRefused', code: reason })
+    expectNothingWritten(s)
+    expect(s.agentTask).not.toHaveBeenCalled()
+  })
+
+  it('control: a message at exactly the limit goes', async () => {
+    const s = setup({ listed: ALL })
+    await send(s, { type: 'message', body: 'x'.repeat(NOTE_BODY_MAX) })
+    expect(s.sendCompleted).toHaveBeenCalledTimes(1)
   })
 })
 
