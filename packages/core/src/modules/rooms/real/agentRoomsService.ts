@@ -32,9 +32,10 @@ import { sizeFailure } from '../../chat/media/checkAttachment'
 import { readImageHeader } from '../../chat/media/imageHeader'
 import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
-import { chatMessageText } from '../roomPosts'
+import { chatMessageText, reactionValueOfBody } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { roomRef } from '../roomRef'
+import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
 import type {
   AgentGrant,
@@ -144,7 +145,10 @@ export interface RoomsBackend {
   /** The offers hidden on this phone, by `offerId`. Upstream has no decline, so this is all hiding is. */
   hiddenOffers(): Promise<string[]>
   hideOffer(offerId: string): Promise<void>
-  /** A step that went wrong without failing the operation, for the log. */
+  /**
+   * A step worth a line in the log: one that went wrong without failing the operation, or one whose outcome a report
+   * could not otherwise tell.
+   */
   warn(message: string): void
   /**
    * True for a community task refused because a step keeps this phone's community session as another identity
@@ -513,6 +517,8 @@ export class AgentRoomsService implements RoomsService {
     const unreachable: string[] = []
     const tooOld: string[] = []
     const kept: RoomsCommunity[] = []
+    // Its identity's keys are not on the phone yet (sharedIdentity's VtiKeysNotHeld, read by name): not unreached.
+    const awaitingKeys: string[] = []
     const memberships = await Promise.all(
       communities.map(async (community) => ({
         community,
@@ -520,6 +526,7 @@ export class AgentRoomsService implements RoomsService {
           // By short id, and why by kind alone: no error's words beside a community (roomsLogWords).
           this.backend.warn(`rooms: ${logRef(community.did)} did not list this member's rooms: ${failureCategory(e)}`)
           if (this.sessionKept(community, e)) kept.push(community)
+          else if (e instanceof Error && e.name === 'VtiKeysNotHeld') awaitingKeys.push(community.did)
           else if (refusalCode(e) === 'unsupportedType') tooOld.push(community.did)
           else unreachable.push(community.did)
           return []
@@ -529,11 +536,22 @@ export class AgentRoomsService implements RoomsService {
     // When none answered, custody alone is not the member's rooms: an open room holds no keys and would be
     // missing, and every other room would show by its id. The read fails instead, and the screen says why — unless
     // only a kept session stopped them: that is not a failure, and the read again follows.
-    if (unreachable.length > 0 && unreachable.length + tooOld.length + kept.length === communities.length)
+    const failedAll = unreachable.length + tooOld.length + kept.length + awaitingKeys.length === communities.length
+    if (unreachable.length > 0 && failedAll)
       throw new RoomsUnavailable(
         'listMyRooms',
         'communityUnreachable',
         `no community answered for this member's rooms (${unreachable.join(', ')})`
+      )
+    // None reached because none can sign yet: said as that, with what to do, not as communities that didn't answer.
+    // After `communityUnreachable` on purpose: a mix of the two is rare, as only a record naming no key-agreement copy
+    // at all is caught here (one brought back, or shared while the first held stored copies). After a restart a record
+    // still names its in-memory copies, so a phone just restarted is not this case, and the order is not reversed for it.
+    if (awaitingKeys.length > 0 && failedAll && kept.length === 0)
+      throw new RoomsUnavailable(
+        'listMyRooms',
+        'keysNotHeld',
+        `this member's identity keys are not on the phone yet (${awaitingKeys.join(', ')})`
       )
     if (tooOld.length > 0 && tooOld.length === communities.length)
       throw new RoomsUnavailable(
@@ -839,6 +857,13 @@ export class AgentRoomsService implements RoomsService {
       flags: inertFlags(body),
       check: opened.check,
       ...(opened.file ? { files: [roomFileOf(opened.file, opened)] } : {}),
+      ...(opened.kind ? { kind: opened.kind } : {}),
+      ...(opened.inReplyTo ? { inReplyTo: opened.inReplyTo } : {}),
+      ...(opened.writtenAt ? { writtenAt: opened.writtenAt } : {}),
+      ...(opened.editedAt ? { editedAt: opened.editedAt } : {}),
+      ...(opened.kind === 'reaction' && reactionValueOfBody(opened.body) === undefined
+        ? { reactionRefused: true as const }
+        : {}),
     }
   }
 
@@ -1178,8 +1203,10 @@ export class AgentRoomsService implements RoomsService {
         invitation: offer.credentials.invitation,
         ...(accepted.ratchetTree ? { ratchetTree: accepted.ratchetTree } : {}),
       })
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: joined`)
     } catch (e) {
-      // Another surface handed the same Welcome over first.
+      // Another surface handed the same Welcome over first or, by the agent's source, it still holds the group from
+      // before a removal: both answer the same. Said apart from a real join, by kind alone (roomsLogWords).
       if (refusalCode(e) !== 'alreadyJoined')
         throw new RoomsRefused(
           'acceptOffer',
@@ -1187,6 +1214,7 @@ export class AgentRoomsService implements RoomsService {
           true,
           `the agent did not join from the Welcome: ${message(e)}`
         )
+      this.backend.warn(`rooms: ${logRef(roomId)} Welcome: not used, the agent already holds a group for this room`)
     }
     // The epoch keys the member may read, so the room opens at once. A failure here leaves reads to repair it.
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {
@@ -1210,7 +1238,7 @@ export class AgentRoomsService implements RoomsService {
       return await this.backend.agentTask(type, payload)
     } catch (e) {
       const code = refusalCode(e)
-      if (code) throw new RoomsRefused(operation, code, false, `the agent would not ${what}: ${message(e)}`)
+      if (code) throw new RoomsRefused(operation, code, false, `the agent would not ${what}: ${message(e)}`, e)
       throw e
     }
   }
@@ -1322,7 +1350,7 @@ export class AgentRoomsService implements RoomsService {
           await this.sleep(ADMISSION_PENDING_WAITS_MS[attempt])
           continue
         }
-        throw new RoomsRefused('acceptOffer', code, RETRYABLE.has(code), message(e))
+        throw new RoomsRefused('acceptOffer', code, RETRYABLE.has(code), message(e), e)
       }
       const accepted = parseAccept(answer)
       if (!accepted || accepted.roomId !== roomId)
@@ -1353,6 +1381,17 @@ export class AgentRoomsService implements RoomsService {
    * if it changes before the confirmation, the host refuses and `confirmWrite` reports `RoomsConflict`.
    */
   public async prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview> {
+    try {
+      return await this.prepareWriteHere(roomId, draft)
+    } catch (e) {
+      // Before anything was sent, by kind alone (roomsLogWords): refused for good here, or not prepared this time.
+      const outcome = permanentRefusal(e) ? 'was refused on this phone' : 'could not be prepared'
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} ${outcome}: ${failureCategory(e)}`)
+      throw e
+    }
+  }
+
+  private async prepareWriteHere(roomId: string, draft: WriteDraft): Promise<WritePreview> {
     const room = await this.requireInRoom(roomId, 'write')
     // A post's file is refused here, never sent without it, where the room or its host cannot take it.
     if (draft.attachment) await this.requireUpload(room, draft.attachment.size)
@@ -1393,6 +1432,23 @@ export class AgentRoomsService implements RoomsService {
    * replacement must still be at the version the preview read.
    */
   public async confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }> {
+    const roomId = this.writes.get(token)?.roomId
+    try {
+      return await this.confirmWriteNow(token, options)
+    } catch (e) {
+      // A preview gone stale is prepared again by the sender (useRoomSend): not a write that failed.
+      if (e instanceof RoomsPreviewExpired) throw e
+      // By kind alone; the agent refusing for two of the room's authority credentials is named, since no retry passes it.
+      const twoAuthorities = e instanceof Error && holdsTwoAuthorities(e.message) ? ', two authority credentials' : ''
+      this.backend.warn(`rooms: a write to ${logRef(roomId)} was not written: ${failureCategory(e)}${twoAuthorities}`)
+      throw e
+    }
+  }
+
+  private async confirmWriteNow(
+    token: string,
+    options?: RoomsTransferOptions
+  ): Promise<{ key: string; version: number }> {
     const pending = this.writes.get(token)
     this.writes.delete(token)
     if (!pending || this.now() - pending.at > PREVIEW_TOKEN_TTL_MS) throw new RoomsPreviewExpired(token)
@@ -1594,7 +1650,7 @@ export class AgentRoomsService implements RoomsService {
     } catch (e) {
       const code = refusalCode(e)
       if (code && !(e instanceof RoomsRefused))
-        throw new RoomsRefused('write', code, code === 'rateLimited', message(e))
+        throw new RoomsRefused('write', code, code === 'rateLimited', message(e), e)
       throw e
     } finally {
       // The file in the clear does not stay in memory either.
@@ -1669,7 +1725,7 @@ export class AgentRoomsService implements RoomsService {
       const current = await this.versionOf(room, key).catch(() => undefined)
       if (current !== undefined && current !== expectedVersion) return new RoomsConflict(key, current)
     }
-    return new RoomsRefused(operation, code, false, message(e))
+    return new RoomsRefused(operation, code, false, message(e), e)
   }
   /**
    * The room's files. No task lists them: a file is described in its record's sealed body, so the room is browsed

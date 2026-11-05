@@ -1,5 +1,4 @@
 {
-  "generatedFrom": "c9f0368710f4396d28e123a9abdf5a01899ba87d",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -924,6 +923,7 @@
     "PhotoRemoveBody": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
     "PhotoRemoveConfirm": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
     "PhotoRemoveNotNow": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
+    "PollAppBehind": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBackToCommunity": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotBack": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotBeforeItGoes": ["src/modules/polls/components/Polls.ids.ts"],
@@ -945,6 +945,7 @@
     "PollCertifiedLine": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosed": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosedEarly": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollCredentialRoll": ["src/modules/polls/components/Polls.ids.ts"],
     "PollGetTicket": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHead": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHostedAgent": ["src/modules/polls/components/Polls.ids.ts"],
@@ -964,6 +965,7 @@
     "PollSending": ["src/modules/polls/components/Polls.ids.ts"],
     "PollSendingStopped": ["src/modules/polls/components/Polls.ids.ts"],
     "PollStepBar": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollTextReleaseEarly": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTicketHeld": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTicketTimeline": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTitle": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1166,6 +1168,7 @@
     "RoomNotePost": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNotePostingAs": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNotePreview": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
+    "RoomNoteReactions": ["src/modules/rooms/screens/Room.tsx"],
     "RoomNoteRemoved": ["src/modules/rooms/components/RoomNoteCard.tsx"],
     "RoomNoteReread": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
     "RoomNoteReview": ["src/modules/rooms/components/RoomNoteEditor.tsx"],
@@ -1207,18 +1210,34 @@
     "RoomPollTryAgain": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostAgent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostAuthor": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostBubble": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostCancel": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostLate": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostNotSent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostReactions": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostRemoved": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostRetry": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostRewrote": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostSending": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostTime": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostUnread": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostWithdrawn": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPosts": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsFailed": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsIncomplete": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsNone": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsReading": ["src/modules/rooms/screens/Room.tsx"],
     "RoomPostsUnavailable": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomQuote": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteChanged": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteName": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomQuoteText": ["src/modules/rooms/components/RoomQuote.tsx"],
+    "RoomReactionsBackdrop": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsClose": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsLayout": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsList": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsSheet": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
+    "RoomReactionsValue": ["src/modules/rooms/components/RoomReactionsSheet.tsx"],
     "RoomReadFailed": [
       "src/modules/rooms/screens/Room.tsx",
       "src/modules/rooms/screens/RoomInfo.tsx",
@@ -1619,6 +1638,7 @@
     "AgentDeviceUntil_": ["src/modules/trust-tasks/screens/DeviceRow.tsx"],
     "AgentDevice_": ["src/modules/trust-tasks/screens/DeviceRow.tsx"],
     "AgentGetCardsRefused_": ["src/modules/trust-tasks/screens/GetCardsFromAgent.tsx"],
+    "AgentIdentityShared_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
     "AgentJourney": ["src/modules/trust-tasks/screens/VtaAgentHome.tsx"],
     "AgentJourneyStop_": ["src/modules/trust-tasks/screens/VtaAgentHome.tsx"],
     "AgentMemberBeforeLink_": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
@@ -1906,6 +1926,9 @@
       "src/modules/polls/components/PollWaitingCard.tsx": "PollsIds.waitingCardTitle"
     },
     {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.appBehind"
+    },
+    {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.backToCommunity"
     },
     {
@@ -1913,6 +1936,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.closedEarly"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.credentialRoll"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.getTicket"
@@ -1961,6 +1987,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.sendingStopped"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.textReleaseEarly"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.ticketHeld"
