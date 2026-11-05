@@ -50,16 +50,24 @@ const BiometricConfirmationModal: React.FC = () => {
   const isHardwareSigningFlow = pendingRequest?.skipNativeBiometric === true
   // With Biometric Unlock off in Keyring the app has removed the key Face ID or
   // a fingerprint would open, so the person confirms with the Keyring PIN (IN-452).
-  const isKeyringPinMode = !isHardwareSigningFlow && (pendingRequest?.authMode === 'keyringPin' || pinAfterMissingKey)
+  const isKeyringPinMode =
+    !isHardwareSigningFlow &&
+    (pendingRequest?.authMode === 'keyringPin' ||
+      pendingRequest?.authMode === 'keyringPinNoBiometrics' ||
+      pinAfterMissingKey)
+
+  const noBiometrics = pendingRequest?.authMode === 'keyringPinNoBiometrics'
 
   const modalCopy = useMemo(() => {
     if (isKeyringPinMode) {
       return {
+        // On a phone with no biometrics, "Biometric Unlock is off" would point at a switch that
+        // cannot be turned on: the words say what the phone lacks instead.
         securityNote: pinUnavailable
-          ? t('Biometry.ConfirmPinUnavailable')
+          ? t(noBiometrics ? 'Biometry.ConfirmPinUnavailableNoBiometrics' : 'Biometry.ConfirmPinUnavailable')
           : pinAfterMissingKey
             ? t('Biometry.ConfirmPinAfterMissingKey')
-            : t('Biometry.ConfirmPinNote'),
+            : t(noBiometrics ? 'Biometry.ConfirmPinNoBiometricsNote' : 'Biometry.ConfirmPinNote'),
         confirmLabel: t('Biometry.ConfirmWithKeyringPIN'),
       }
     }
@@ -82,7 +90,7 @@ const BiometricConfirmationModal: React.FC = () => {
       ),
       confirmLabel: String(t('Biometry.ConfirmWithBiometrics') || 'Confirm with Biometrics'),
     }
-  }, [isHardwareSigningFlow, isKeyringPinMode, isPasscodeMode, pinAfterMissingKey, pinUnavailable, t])
+  }, [isHardwareSigningFlow, isKeyringPinMode, isPasscodeMode, noBiometrics, pinAfterMissingKey, pinUnavailable, t])
 
   const styles = StyleSheet.create({
     overlay: {

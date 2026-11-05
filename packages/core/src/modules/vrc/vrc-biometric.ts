@@ -132,9 +132,9 @@ export async function requestBiometricConfirmationWithUI(
   const logger = agent.config.logger
 
   try {
-    if (!(await isBiometricsActive())) {
-      return { success: true, reason: 'not_available', timestamp: new Date().toISOString() }
-    }
+    // A phone with no Face ID or fingerprint set up confirms with the Keyring PIN too: the step
+    // always confirms, it never goes ahead unasked.
+    const biometricsOnPhone = await isBiometricsActive()
 
     // Keyring's own setting, not the phone's: with Biometric Unlock off the app
     // has removed the key Face ID or a fingerprint would open, so the sheet asks
@@ -146,8 +146,11 @@ export async function requestBiometricConfirmationWithUI(
     } catch {
       useBiometry = undefined
     }
-    const authMode = useBiometry === false ? 'keyringPin' : 'biometric'
+    const authMode = !biometricsOnPhone ? 'keyringPinNoBiometrics' : useBiometry === false ? 'keyringPin' : 'biometric'
     if (authMode === 'keyringPin') logger.info(`${LOG_PREFIX} confirm with the Keyring PIN: Biometric Unlock is off`)
+    if (authMode === 'keyringPinNoBiometrics') {
+      logger.info(`${LOG_PREFIX} confirm with the Keyring PIN: no biometrics set up on the phone`)
+    }
 
     const response: BiometricConfirmationResponse = await requestBiometricConfirmationUI(
       counterpartyName,

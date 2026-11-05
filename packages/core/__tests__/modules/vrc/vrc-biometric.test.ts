@@ -455,14 +455,26 @@ describe('VRC Biometric Confirmation', () => {
       expect(lines).not.toContain(connectionId)
     })
 
-    it('should return not_available when biometrics not active', async () => {
+    // A phone with no biometrics set up used to go ahead with no confirm at all: it asks for the Keyring PIN now.
+    it('a phone with no biometrics set up still confirms, with the Keyring PIN', async () => {
       mockIsBiometricsActive.mockResolvedValue(false)
+      mockFetchPreferences.mockResolvedValue({ useBiometry: true })
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'confirmed', timestamp: 't' })
 
       const result = await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
 
-      expect(result.success).toBe(true)
-      expect(result.reason).toBe('not_available')
-      expect(mockRequestBiometricConfirmationUI).not.toHaveBeenCalled()
+      expect(mockRequestBiometricConfirmationUI).toHaveBeenCalledTimes(1)
+      expect(mockRequestBiometricConfirmationUI.mock.calls[0][3]).toBe('keyringPinNoBiometrics')
+      expect(result).toMatchObject({ success: true, reason: 'confirmed' })
+    })
+
+    it('on a phone with no biometrics, Cancel stops the action: it never goes ahead unasked', async () => {
+      mockIsBiometricsActive.mockResolvedValue(false)
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'cancelled', timestamp: 't' })
+
+      const result = await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      expect(result).toMatchObject({ success: false, reason: 'cancelled' })
     })
 
     it('should return error without sending DIDComm notification when UI returns error status', async () => {

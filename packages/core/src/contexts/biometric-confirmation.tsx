@@ -22,9 +22,10 @@ export type HardwareAuthMode = 'biometric' | 'passcode'
  * How the person confirms: the hardware key's prompt, or, with Biometric Unlock
  * off in Keyring, their Keyring PIN (`keyringPin`): the app removes its
  * biometric copy of the wallet key then, so there is nothing for Face ID or a
- * fingerprint to open (IN-452).
+ * fingerprint to open (IN-452). On a phone with no biometrics set up at all, the Keyring PIN too
+ * (`keyringPinNoBiometrics`): the step always confirms, never goes ahead unasked.
  */
-export type AuthMode = HardwareAuthMode | 'keyringPin'
+export type AuthMode = HardwareAuthMode | 'keyringPin' | 'keyringPinNoBiometrics'
 
 export interface BiometricConfirmationRequest {
   counterpartyName: string

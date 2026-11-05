@@ -29,7 +29,11 @@ import { loadWalletKey } from '../../src/services/keychain'
 
 const secret = { id: 'wallet', key: 'k', salt: 's' }
 
-function sheet(opts: { authMode: 'biometric' | 'keyringPin'; walletSecret?: typeof secret; pinRight?: boolean }) {
+function sheet(opts: {
+  authMode: 'biometric' | 'keyringPin' | 'keyringPinNoBiometrics'
+  walletSecret?: typeof secret
+  pinRight?: boolean
+}) {
   const ctx = { isModalVisible: true, onConfirm: jest.fn(), onCancel: jest.fn(), onError: jest.fn() }
   mockUseBiometricConfirmation.mockReturnValue({
     ...ctx,
@@ -122,6 +126,28 @@ describe('the confirm sheet with Biometric Unlock off in Keyring', () => {
     expect(onError).not.toHaveBeenCalled()
     fireEvent.press(tree.getByTestId(testIdWithKey('CancelBiometric')))
     expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the confirm sheet on a phone with no biometrics set up', () => {
+  beforeEach(() => jest.clearAllMocks())
+
+  it('says what the phone lacks, not that a setting is off, and the Keyring PIN confirms', async () => {
+    const { tree, onConfirm } = sheet({ authMode: 'keyringPinNoBiometrics' })
+    expect(tree.getByText('Biometry.ConfirmPinNoBiometricsNote')).toBeTruthy()
+    expect(tree.queryByText('Biometry.ConfirmPinNote')).toBeNull()
+    await confirmPress(tree)
+    expect(loadWalletKey).not.toHaveBeenCalled()
+    await enterPin(tree)
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1))
+  })
+
+  it('when the PIN cannot be checked it says so in the same terms, and only Cancel is left', async () => {
+    const { tree, onConfirm } = sheet({ authMode: 'keyringPinNoBiometrics', walletSecret: undefined })
+    await confirmPress(tree)
+    expect(tree.getByText('Biometry.ConfirmPinUnavailableNoBiometrics')).toBeTruthy()
+    expect(tree.queryByTestId(testIdWithKey('ConfirmBiometric'))).toBeNull()
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 })
 
