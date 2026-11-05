@@ -146,6 +146,14 @@ class LateStepStore extends EventEmitter {
     this.changed(connectionId)
   }
 
+  /** The ready-check `checkId` was not sent after all: the hold asks the person here again, as before it. */
+  notAsked(connectionId: string, checkId: string): void {
+    const held = this.holds.get(connectionId)
+    if (!held || held.phase !== 'asking' || held.check?.id !== checkId) return
+    this.holds.set(connectionId, { ...held, phase: 'held', check: undefined })
+    this.changed(connectionId)
+  }
+
   /** The person put the hold aside; with `stopAsking`, an outstanding check no longer counts. */
   dismiss(connectionId: string, stopAsking = false): void {
     const held = this.holds.get(connectionId)
@@ -204,7 +212,9 @@ class LateStepStore extends EventEmitter {
     return this.peerChecks.values().next().value
   }
 
-  clearPeerCheck(connectionId: string): void {
+  /** With `checkId`, only that check: one that came in since is kept. */
+  clearPeerCheck(connectionId: string, checkId?: string): void {
+    if (checkId !== undefined && this.peerChecks.get(connectionId)?.checkId !== checkId) return
     this.peerChecks.delete(connectionId)
     this.emit('peerCheck', undefined)
     this.changed(connectionId)
@@ -331,8 +341,15 @@ export async function askPeerReady(agent: Agent, connectionId: string): Promise<
   const held = lateStepStore.get(connectionId)
   if (!held) return
   const checkId = newCheckId()
+  // Marked before the send, so an answer that comes back before the send resolves still finds its check.
   lateStepStore.asked(connectionId, checkId)
-  await send(agent, connectionId, readyCheckMessage(checkId, held.waitedMs))
+  try {
+    await send(agent, connectionId, readyCheckMessage(checkId, held.waitedMs))
+  } catch (e) {
+    // Not sent: the card doesn't say "Asked" for a check the other phone never got. It offers the ask again.
+    lateStepStore.notAsked(connectionId, checkId)
+    throw e
+  }
   agent.config.logger.info(`${LOG} ready-check ${checkId} sent on ${connectionId}`)
 }
 
@@ -340,8 +357,9 @@ export async function askPeerReady(agent: Agent, connectionId: string): Promise<
 export async function answerPeerCheck(agent: Agent, connectionId: string, ready: boolean): Promise<void> {
   const check = lateStepStore.getPeerCheck(connectionId)
   if (!check) return
-  lateStepStore.clearPeerCheck(connectionId)
+  // Cleared once the answer is sent: if the send fails, the sheet still asks, and nothing here pretends it answered.
   await send(agent, connectionId, readyAnswerMessage(check.checkId, ready))
+  lateStepStore.clearPeerCheck(connectionId, check.checkId)
   agent.config.logger.info(
     `${LOG} answered ready-check ${check.checkId} on ${connectionId}: ${ready ? 'ready' : 'not now'}`
   )

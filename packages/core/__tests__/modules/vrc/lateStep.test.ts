@@ -227,6 +227,62 @@ describe('the two phones', () => {
     expect(lateStepStore.isHeld('conn-1')).toBe(true)
   })
 
+  it('a ready-check that fails to send leaves the card asking here, not saying "Asked"', async () => {
+    const { agent, sent } = fakeAgent()
+    const ran = jest.fn(async () => undefined)
+    lateStepStore.hold({ connectionId: 'conn-1', reason: 'connected', waitedMs: 49 * 60_000 })
+    lateStepStore.defer('conn-1', ran)
+    ;(agent as any).modules.didcomm.basicMessages.sendMessage.mockRejectedValueOnce(new Error('no route'))
+    await expect(askPeerReady(agent, 'conn-1')).rejects.toThrow('no route')
+    expect(sent).toHaveLength(0)
+    expect(lateStepStore.get('conn-1')).toMatchObject({ phase: 'held', dismissed: false })
+    expect(lateStepStore.get('conn-1')?.check).toBeUndefined()
+    // Asked again, it goes out, and its answer releases the hold as usual.
+    await askPeerReady(agent, 'conn-1')
+    const { checkId } = lateStepMessageOf(JSON.parse(sent[0].content)) as { checkId: string }
+    await handleLateStepMessage(agent, 'conn-1', { kind: 'answer', checkId, ready: true })
+    expect(ran).toHaveBeenCalledTimes(1)
+  })
+
+  it('a check sent while an older one fails is not rolled back by it', () => {
+    lateStepStore.hold({ connectionId: 'conn-1', reason: 'connected', waitedMs: 0 })
+    lateStepStore.asked('conn-1', 'c2')
+    lateStepStore.notAsked('conn-1', 'c1')
+    expect(lateStepStore.get('conn-1')).toMatchObject({ phase: 'asking', check: { id: 'c2' } })
+  })
+
+  it('an answer that fails to send keeps the question on screen and releases nothing', async () => {
+    const { agent, sent } = fakeAgent()
+    const own = jest.fn(async () => undefined)
+    lateStepStore.hold({ connectionId: 'conn-1', reason: 'connected', waitedMs: 62 * 60_000 })
+    lateStepStore.defer('conn-1', own)
+    await handleLateStepMessage(agent, 'conn-1', { kind: 'check', checkId: 'c9', waitedMs: 49 * 60_000 })
+    ;(agent as any).modules.didcomm.basicMessages.sendMessage.mockRejectedValueOnce(new Error('no route'))
+    await expect(answerPeerCheck(agent, 'conn-1', true)).rejects.toThrow('no route')
+    expect(sent).toHaveLength(0)
+    expect(lateStepStore.getAnyPeerCheck()).toMatchObject({ connectionId: 'conn-1', checkId: 'c9' })
+    expect(own).not.toHaveBeenCalled()
+    expect(lateStepStore.isHeld('conn-1')).toBe(true)
+    // Tapped again, it goes.
+    await answerPeerCheck(agent, 'conn-1', true)
+    expect(lateStepMessageOf(JSON.parse(sent[0].content))).toEqual({ kind: 'answer', checkId: 'c9', ready: true })
+    expect(lateStepStore.getAnyPeerCheck()).toBeUndefined()
+    expect(own).toHaveBeenCalledTimes(1)
+  })
+
+  it('a newer check that arrives while an answer is sending stays on screen', async () => {
+    const { agent, sent } = fakeAgent()
+    await handleLateStepMessage(agent, 'conn-1', { kind: 'check', checkId: 'c9', waitedMs: 0 })
+    ;(agent as any).modules.didcomm.basicMessages.sendMessage.mockImplementationOnce(
+      async (connectionId: string, content: string) => {
+        await handleLateStepMessage(agent, 'conn-1', { kind: 'check', checkId: 'c10', waitedMs: 0 })
+        sent.push({ connectionId, content })
+      }
+    )
+    await answerPeerCheck(agent, 'conn-1', false)
+    expect(lateStepStore.getPeerCheck('conn-1')).toMatchObject({ checkId: 'c10' })
+  })
+
   it('a stop, sent or received, ends the flow as cancelled and forgets the hold', async () => {
     const { agent, sent } = fakeAgent()
     vrcFlowStore.setStatus('conn-1', 'connecting')
