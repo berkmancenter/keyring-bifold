@@ -1098,13 +1098,13 @@ function withinDeadline(work: Promise<void>, deadlineMs: number): Promise<void> 
 }
 
 /**
- * The sweep running now, and the agent to sweep again once it ends. Both are one for the whole app, not one per
- * agent: one sweep runs at a time, and a trigger while it runs asks for one more, on the agent that asked last. After
- * a lock that is the new agent, whose records are the ones still to read; the agent the running sweep started with
- * may be shut down by then.
+ * The sweep running now, and the one to run once it ends. Both are one for the whole app, not one per agent: one
+ * sweep runs at a time, and a trigger while it runs asks for one more, with the agent and deadline of the call that
+ * asked last. After a lock that is the new agent, whose records are the ones still to read; the agent the running
+ * sweep started with may be shut down by then.
  */
 let closingEnded: Promise<void> | undefined
-let closeAgain: Agent | undefined
+let closeAgain: { agent: Agent; deadlineMs: number } | undefined
 
 /**
  * End at the agent every private application that has ended (`hiddenApplicationEnd`):
@@ -1118,7 +1118,7 @@ export function closeEndedHiddenApplications(
   deadlineMs: number = CLOSE_APPLICATION_DEADLINE_MS
 ): Promise<void> {
   if (closingEnded) {
-    closeAgain = agent
+    closeAgain = { agent, deadlineMs }
     return closingEnded
   }
   const sweep = async () => {
@@ -1142,7 +1142,7 @@ export function closeEndedHiddenApplications(
       closingEnded = undefined
       const next = closeAgain
       closeAgain = undefined
-      if (next) void closeEndedHiddenApplications(next, deadlineMs)
+      if (next) void closeEndedHiddenApplications(next.agent, next.deadlineMs)
     })
   return closingEnded
 }
