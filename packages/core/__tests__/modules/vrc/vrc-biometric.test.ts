@@ -468,6 +468,15 @@ describe('VRC Biometric Confirmation', () => {
       expect(result).toMatchObject({ success: true, reason: 'confirmed' })
     })
 
+    it('an answer that nothing asked the person never reads as a confirm', async () => {
+      mockIsBiometricsActive.mockResolvedValue(true)
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'not_available', timestamp: 't' })
+
+      const result = await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      expect(result).toMatchObject({ success: false, reason: 'not_available' })
+    })
+
     it('on a phone with no biometrics, Cancel stops the action: it never goes ahead unasked', async () => {
       mockIsBiometricsActive.mockResolvedValue(false)
       mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'cancelled', timestamp: 't' })

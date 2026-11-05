@@ -126,10 +126,12 @@ export async function requestBiometricConfirmationUI(
   copy?: BiometricConfirmationCopy
 ): Promise<BiometricConfirmationResponse> {
   if (!globalRequestConfirmation) {
+    // Nothing can ask the person, so the step stops: a confirm never goes ahead unasked (IN-452).
+    // It used to answer 'not_available', which the confirm step read as success.
     // eslint-disable-next-line no-console
-    console.warn('[BiometricConfirmation] Provider not mounted, falling back to allow')
+    console.warn('[BiometricConfirmation] Provider not mounted: nothing can ask, so the step stops')
     return {
-      status: 'not_available',
+      status: 'error',
       timestamp: new Date().toISOString(),
       error: 'BiometricConfirmationProvider not mounted',
     }

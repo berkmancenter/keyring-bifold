@@ -178,8 +178,10 @@ export async function requestBiometricConfirmationWithUI(
           timestamp: response.timestamp,
         }
 
+      // Nothing asked the person: the action does not go ahead (IN-452). The provider no longer answers
+      // this, but an answer of it must never read as a confirm.
       case 'not_available':
-        return { success: true, reason: 'not_available', timestamp: response.timestamp }
+        return { success: false, reason: 'not_available', timestamp: response.timestamp }
 
       default:
         return {
