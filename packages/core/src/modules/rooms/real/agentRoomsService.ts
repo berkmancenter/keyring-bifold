@@ -72,6 +72,7 @@ import {
 
 import { OPEN_FILE_BYTES, openRoomFile, type OpenFileCopy } from './files/open'
 import { checkSender, type ResolveSender } from './files/sender'
+import { TextSenderCount } from './files/textSenderCount'
 import {
   governedMembersIn,
   keptMembers,
@@ -402,6 +403,8 @@ export class AgentRoomsService implements RoomsService {
   private drops = 0
   /** Each room's `recordMembers`, for the epoch it was read at: a writer may rely on it until the epoch moves. */
   private recordMembers = new Map<string, { epoch: number; listed: string[] }>()
+  /** The log-only count of text posts' signatures; made on the first post read, by a build that fetches documents. */
+  private textSenders?: TextSenderCount
   /** Renewals stored this run, by room and issue time: a renewal stays listed until the authority it renews lapses. */
   private renewed = new Set<string>()
   /** The offers list each community answered, so the badge's poll asks it once a session, not twice a minute. */
@@ -887,12 +890,13 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * Checks who shared a file record (`files/sender.ts`) and notes the outcome on it; a record with no file is not
-   * checked. The body must have been signed where it was read: at the version the agent opened it at, never past the
-   * record's own (as upstream refuses).
+   * Checks who shared a file record (`files/sender.ts`) and notes the outcome on it. The body must have been signed
+   * where it was read: at the version the agent opened it at, never past the record's own (as upstream refuses).
+   * A record with no file changes nothing here: it is only counted, in the background (`files/textSenderCount.ts`).
    */
   private async noteSender(roomId: string, opened: OpenedRecord): Promise<void> {
-    if (!opened.file || opened.sender) return
+    if (!opened.file) return this.countTextSender(roomId, opened)
+    if (opened.sender) return
     const version = opened.sealedAt ?? opened.version
     const outcome =
       !opened.signed || version > opened.version
@@ -905,6 +909,25 @@ export class AgentRoomsService implements RoomsService {
     opened.sender = outcome.check
     if (outcome.check !== 'confirmed')
       this.backend.warn(`rooms: who shared ${opened.key} in ${roomId} is ${outcome.check}: ${outcome.why}`)
+  }
+
+  /** Hands a sealed text record's body to the count and keeps no copy of it; never waits, and the read is unchanged. */
+  private countTextSender(roomId: string, opened: OpenedRecord): void {
+    const { signedText } = opened
+    delete opened.signedText
+    const { resolveSender } = this.backend
+    if (signedText === undefined || !resolveSender) return
+    this.textSenders ??= new TextSenderCount(resolveSender, (line) => this.backend.warn(line))
+    this.textSenders.add(
+      signedText,
+      {
+        roomId,
+        key: opened.key,
+        version: opened.sealedAt ?? opened.version,
+        ...(opened.author ? { hostAuthor: opened.author } : {}),
+      },
+      opened.version
+    )
   }
 
   /** The opened copy of the version the room's last listing names, if there is one (and it is now the newest used). */
@@ -944,6 +967,7 @@ export class AgentRoomsService implements RoomsService {
     this.readsInFlight.clear()
     this.recordMembers.clear()
     this.drops++
+    this.textSenders?.lock()
   }
 
   private dropRoomReads(roomId: string): void {
