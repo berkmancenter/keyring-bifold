@@ -7,7 +7,8 @@
  * "reacted 👍" messages is worse than nothing.
  *
  * A sent event is stored only after the send succeeds, so a failed send
- * leaves nothing that looks delivered.
+ * leaves nothing that looks delivered. A plain message's record is stored by
+ * Credo before it sends, so a failed one is marked (plainNotSent.ts).
  *
  * A photo (§4.3, §4.4) is checked by the same descriptor check a receiver
  * runs before anything is sent: one over the limit, or one whose descriptor
@@ -30,6 +31,7 @@ import { normalizeEmoji } from './emoji/validate'
 import { newEventId } from './eventId'
 import { ChatEventMessage } from './messages/ChatEventMessage'
 import { checkImageAttachment } from './media/checkAttachment'
+import { sendPlainMessage } from './plainNotSent'
 import type { ImageAttachmentDescriptor, ImageCheckFailure } from './media/checkAttachment'
 import type { PreparedPhoto } from './media/prepare'
 import { removeChatMedia, writeChatMedia } from './media/store'
@@ -111,7 +113,7 @@ export async function sendChatText(
     throw new Error('chat: inReplyTo is not an event id')
 
   if (!(await counterpartySpeaksChat(agent, connectionId))) {
-    await agent.modules.didcomm.basicMessages.sendMessage(connectionId, text)
+    await sendPlainMessage(agent, connectionId, text)
     return { carriedAs: 'basic' }
   }
   // The chat's timer applies to messages sent from now on; each message carries the expiresIn it was sent with.
@@ -167,7 +169,7 @@ export async function sendChatPhoto(
   // The same words go to a contact without chat now, and to one that refuses the chat event later (notice.ts).
   const fallbackText = caption ? `${options.fallbackText}\n\n${caption}` : options.fallbackText
   if (!(await counterpartySpeaksChat(agent, connectionId))) {
-    await agent.modules.didcomm.basicMessages.sendMessage(connectionId, fallbackText)
+    await sendPlainMessage(agent, connectionId, fallbackText)
     return { carriedAs: 'basic' }
   }
 

@@ -81,3 +81,39 @@ describe("a message's time", () => {
     expect(render(<ChatMessage messageProps={photo} />).getByText('4:01 PM')).toBeTruthy()
   })
 })
+
+// A plain message whose send failed (chat/plainNotSent.ts): its bubble must not read as sent.
+describe('a message that was not sent', () => {
+  const at = new Date(2026, 9, 25, 16, 1)
+  const sent = (overrides: Partial<ExtendedChatMessage>) =>
+    item(at, { user: { _id: Role.me }, ...overrides } as Partial<ExtendedChatMessage>)
+
+  beforeEach(() => {
+    mockUses24HourClock.mockReturnValue(false)
+    mockI18n.changeLanguage('en')
+  })
+
+  test('says so beside its time', () => {
+    const tree = render(<ChatMessage messageProps={sent({ notSent: true })} />)
+    expect(tree.getByText('Not sent')).toBeTruthy()
+    expect(tree.getByText('4:01 PM')).toBeTruthy()
+  })
+
+  test('in the bubble’s text colour, not the dim one the time uses', () => {
+    const tree = render(<ChatMessage messageProps={sent({ notSent: true })} />)
+    const flat = (node: { props: { style: unknown } }) => Object.assign({}, ...[node.props.style].flat(3))
+    expect(flat(tree.getByText('Not sent')).color).not.toBe(flat(tree.getByText('4:01 PM')).color)
+  })
+
+  // Controls: a sent one says nothing, and a contact's message never carries it.
+  test('a message that went says nothing', () => {
+    const tree = render(<ChatMessage messageProps={sent({})} />)
+    expect(tree.queryByText('Not sent')).toBeNull()
+    expect(tree.getByText('4:01 PM')).toBeTruthy()
+  })
+
+  test('a contact’s message never says it', () => {
+    const tree = render(<ChatMessage messageProps={item(at, { user: { _id: Role.them }, notSent: true })} />)
+    expect(tree.queryByText('Not sent')).toBeNull()
+  })
+})

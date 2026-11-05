@@ -75,6 +75,8 @@ export interface ExtendedChatMessage extends IMessage {
   chatEvent?: ChatEventRecord
   /** A plain BasicMessage's record id, so Delete for me can remove it. Cards never carry one. */
   basicMessageId?: string
+  /** A plain message whose send failed (chat/plainNotSent.ts): it says so beside its time. */
+  notSent?: boolean
   /** A photo on its way, not yet stored (media/pending.ts): drawn as its pending bubble. */
   photoSending?: PhotoSending
 }
@@ -140,6 +142,17 @@ const MessageTime: React.FC<{ message: ExtendedChatMessage }> = ({ message }) =>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }} testID={testIdWithKey(ChatIds.photoSent)}>
         <ThemedText style={theme.timeStyleRight}>{timeOnly}</ThemedText>
         <ThemedText style={theme.timeStyleRight}>{`✓ ${t('Chat.PhotoSent')}`}</ThemedText>
+      </View>
+    )
+
+  // In the bubble's text colour, not the time's dim one: this is what the person most needs to read here.
+  if (isMe && message.notSent)
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <ThemedText style={theme.timeStyleRight}>{timeOnly}</ThemedText>
+        <ThemedText style={[theme.timeStyleRight, { color: theme.rightText.color, fontWeight: 'bold' }]}>
+          {t('Chat.NotSent')}
+        </ThemedText>
       </View>
     )
 

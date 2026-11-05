@@ -51,6 +51,7 @@ import { timerLine } from '../components/chat/disappearing'
 import { messageTextOf } from '../components/chat/messageText'
 import { foldChatEvents, type ChatReaction } from '../modules/chat/fold'
 import { chatMediaUri } from '../modules/chat/media/store'
+import { isPlainNotSent } from '../modules/chat/plainNotSent'
 import type { ChatEventRecord } from '../modules/chat/records/ChatEventRecord'
 
 /**
@@ -1079,6 +1080,7 @@ export const useChatMessagesByConnection = (connection: DidCommConnectionRecord)
           type: record.type,
           user: { _id: role },
           basicMessageId: record.id,
+          ...(isPlainNotSent(record) ? { notSent: true } : {}),
         }
       }) as Array<ExtendedChatMessage | null>
     ).filter((msg): msg is ExtendedChatMessage => msg !== null)
