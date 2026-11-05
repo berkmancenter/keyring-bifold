@@ -93,6 +93,9 @@ export interface SharedConnectDeps {
 
 export type SessionOutcome = 'completed' | 'declined' | 'refused' | 'unanswered' | 'expired' | 'failed'
 
+/** What a watcher is told: an ending (an `unanswered` one is not final), or `waiting` again after a retry. */
+export type SessionState = SessionOutcome | 'waiting'
+
 const nowSeconds = (d: SharedConnectDeps) => Math.floor(d.now() / 1000)
 
 export function defaultSharedConnectDeps(agent: Agent): SharedConnectDeps {
@@ -167,6 +170,7 @@ export class SharedConnectSession {
   private readonly replied = new Map<string, Record<string, unknown>>()
   private resolveFinished!: (outcome: SessionOutcome) => void
   readonly finished: Promise<SessionOutcome>
+  private readonly listeners = new Set<(state: SessionState) => void>()
 
   constructor(
     private readonly agent: Agent,
@@ -180,6 +184,22 @@ export class SharedConnectSession {
 
   get outcome(): SessionOutcome | undefined {
     return this.ended
+  }
+
+  /** Be told each ending (and `waiting` after a retry), for the screen. Returns the way to stop listening. */
+  subscribe(listener: (state: SessionState) => void): () => void {
+    this.listeners.add(listener)
+    return () => void this.listeners.delete(listener)
+  }
+
+  private notify(state: SessionState) {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener(state)
+      } catch {
+        // a watcher's failure is not the ceremony's
+      }
+    }
   }
 
   private log(message: string) {
@@ -220,6 +240,7 @@ export class SharedConnectSession {
     if (this.ended !== 'unanswered' || this.expired(SHARED_CONNECT_EXP_GRACE_MS)) return
     this.ended = undefined
     this.attempts = 0
+    this.notify('waiting')
     const document = this.waitingFor === 'receipt' ? this.ownIssueDoc : this.proposeDoc
     if (document && this.waitingFor) await this.sendAndWait(document, this.waitingFor)
   }
@@ -499,5 +520,6 @@ export class SharedConnectSession {
     else if (outcome !== 'unanswered') vrcFlowStore.clearFlow(this.key, flow ?? 'error')
     this.log(`encounter ended: ${outcome} at ${nowSeconds(this.deps)}`)
     if (outcome !== 'unanswered') this.resolveFinished(outcome)
+    this.notify(outcome)
   }
 }

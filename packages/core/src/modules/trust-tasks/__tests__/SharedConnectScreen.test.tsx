@@ -7,6 +7,7 @@ import React from 'react'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
+import type { SessionState } from '../module/sharedConnect'
 import type { SharedConnectPreview } from '../module/sharedConnectStart'
 import { SharedConnectFlow, type SharedConnectSteps } from '../screens/SharedConnect'
 import { SharedConnectIds } from '../screens/SharedConnect.ids'
@@ -143,5 +144,90 @@ describe('a link that cannot be used', () => {
     const tree = await show(s, null)
     expect(JSON.stringify(tree.toJSON())).toContain('Scan.TriggerLinkInvalid')
     expect(s.preview).not.toHaveBeenCalled()
+  })
+})
+
+describe('after Connect: waiting for the answer', () => {
+  type Listener = (state: SessionState) => void
+  const fakeSession = (outcome?: SessionState) => {
+    const listeners = new Set<Listener>()
+    const handle = {
+      outcome,
+      subscribe: jest.fn((l: Listener) => {
+        listeners.add(l)
+        return () => void listeners.delete(l)
+      }),
+      retry: jest.fn(async () => undefined),
+      cancel: jest.fn(async () => undefined),
+    }
+    return { handle, emit: (state: SessionState) => listeners.forEach((l) => l(state)), listeners }
+  }
+  const started = async (session?: ReturnType<typeof fakeSession>) => {
+    const s = steps({
+      start: jest.fn(async () => ({ kind: 'started', encounter: { enactment: PREVIEW.enactment } }) as never),
+      session: jest.fn(() => session?.handle),
+    })
+    const tree = await show(s)
+    await press(tree, SharedConnectIds.connect)
+    return { s, tree }
+  }
+  const emit = async (session: ReturnType<typeof fakeSession>, state: SessionState) =>
+    act(async () => session.emit(state))
+
+  it('looks the session up by enactment and shows waiting, with Stop', async () => {
+    const session = fakeSession()
+    const { s, tree } = await started(session)
+    expect(s.session).toHaveBeenCalledWith(PREVIEW.enactment)
+    expect(tree.getByTestId(id(SharedConnectIds.waiting))).toBeTruthy()
+    await press(tree, SharedConnectIds.stop)
+    expect(session.handle.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('unanswered offers Ask again and Stop and is not shown as a failure; Ask again returns to waiting', async () => {
+    const session = fakeSession()
+    const { tree } = await started(session)
+    await emit(session, 'unanswered')
+    expect(tree.getByTestId(id(SharedConnectIds.unanswered))).toBeTruthy()
+    expect(JSON.stringify(tree.toJSON())).toContain('SharedConnect.Unanswered')
+    expect(JSON.stringify(tree.toJSON())).not.toContain('SharedConnect.Failed')
+    await press(tree, SharedConnectIds.retry)
+    expect(session.handle.retry).toHaveBeenCalledTimes(1)
+    await emit(session, 'waiting')
+    expect(tree.getByTestId(id(SharedConnectIds.waiting))).toBeTruthy()
+    await emit(session, 'unanswered')
+    await press(tree, SharedConnectIds.stop)
+    expect(session.handle.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ['completed', 'SharedConnect.Completed'],
+    ['expired', 'SharedConnect.Expired'],
+    ['declined', 'SharedConnect.Declined'],
+    ['refused', 'SharedConnect.Refused'],
+    ['failed', 'SharedConnect.Cancelled'],
+  ] as const)('%s ends with %s and Done', async (state, words) => {
+    const session = fakeSession()
+    const { tree } = await started(session)
+    await emit(session, state)
+    expect(tree.getByTestId(id(SharedConnectIds.result))).toBeTruthy()
+    expect(JSON.stringify(tree.toJSON())).toContain(words)
+    await press(tree, SharedConnectIds.done)
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('shows an ending the session already had when the screen found it, and stops listening on unmount', async () => {
+    const ended = fakeSession('declined')
+    const { tree } = await started(ended)
+    expect(JSON.stringify(tree.toJSON())).toContain('SharedConnect.Declined')
+    const live = fakeSession()
+    const second = await started(live)
+    expect(live.listeners.size).toBe(1)
+    second.tree.unmount()
+    expect(live.listeners.size).toBe(0)
+  })
+
+  it('falls back to "request sent" when the session is already gone', async () => {
+    const { tree } = await started(undefined)
+    expect(JSON.stringify(tree.toJSON())).toContain('SharedConnect.Ready')
   })
 })

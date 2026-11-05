@@ -11,6 +11,10 @@ export const SharedConnectIds = {
   connect: 'SharedConnectConnect',
   cancel: 'SharedConnectCancel',
   connecting: 'SharedConnectConnecting',
+  waiting: 'SharedConnectWaiting',
+  unanswered: 'SharedConnectUnanswered',
+  retry: 'SharedConnectRetry',
+  stop: 'SharedConnectStop',
   result: 'SharedConnectResult',
   done: 'SharedConnectDone',
 } as const

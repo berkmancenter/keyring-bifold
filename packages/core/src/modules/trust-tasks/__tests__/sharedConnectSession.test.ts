@@ -278,6 +278,25 @@ describe('the scanner session', () => {
       await expect(session.finished).resolves.toBe('completed')
     })
 
+    it('tells a watcher about unanswered, the retry (waiting again) and a stop', async () => {
+      const { session, sent, timers } = setup()
+      const seen: string[] = []
+      const stop = session.subscribe((state) => seen.push(state))
+      await session.start()
+      timers[1].fn()
+      await new Promise((r) => setImmediate(r))
+      timers
+        .filter((t) => !t.cleared && t.ms === SHARED_CONNECT_ANSWER_WAIT_MS)
+        .pop()
+        ?.fn()
+      await new Promise((r) => setImmediate(r))
+      await session.retry()
+      expect(sent[sent.length - 1]).toBe(sent[0])
+      await session.cancel()
+      expect(seen).toEqual(['unanswered', 'waiting', 'failed'])
+      stop()
+    })
+
     it('does not start on an expired link', async () => {
       const { session, sent } = setup({}, encounter({ exp: NOW - 1 }))
       await session.start()
