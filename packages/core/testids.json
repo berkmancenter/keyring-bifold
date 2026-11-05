@@ -1,5 +1,4 @@
 {
-  "generatedFrom": "3607eec62f852837f94cf3e39bc73e9c1c2ee116",
   "prefix": "com.ariesbifold:id/",
   "keys": {
     "AbortGoToCredentialsButton": ["src/components/modals/CommonRemoveModal.tsx"],
@@ -924,6 +923,7 @@
     "PhotoRemoveBody": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
     "PhotoRemoveConfirm": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
     "PhotoRemoveNotNow": ["src/modules/directory/components/PhotoRemoveSheet.tsx"],
+    "PollAppBehind": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBackToCommunity": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotBack": ["src/modules/polls/components/Polls.ids.ts"],
     "PollBallotBeforeItGoes": ["src/modules/polls/components/Polls.ids.ts"],
@@ -945,6 +945,7 @@
     "PollCertifiedLine": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosed": ["src/modules/polls/components/Polls.ids.ts"],
     "PollClosedEarly": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollCredentialRoll": ["src/modules/polls/components/Polls.ids.ts"],
     "PollGetTicket": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHead": ["src/modules/polls/components/Polls.ids.ts"],
     "PollHostedAgent": ["src/modules/polls/components/Polls.ids.ts"],
@@ -964,6 +965,7 @@
     "PollSending": ["src/modules/polls/components/Polls.ids.ts"],
     "PollSendingStopped": ["src/modules/polls/components/Polls.ids.ts"],
     "PollStepBar": ["src/modules/polls/components/Polls.ids.ts"],
+    "PollTextReleaseEarly": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTicketHeld": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTicketTimeline": ["src/modules/polls/components/Polls.ids.ts"],
     "PollTitle": ["src/modules/polls/components/Polls.ids.ts"],
@@ -1907,6 +1909,9 @@
       "src/modules/polls/components/PollWaitingCard.tsx": "PollsIds.waitingCardTitle"
     },
     {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.appBehind"
+    },
+    {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.backToCommunity"
     },
     {
@@ -1914,6 +1919,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.closedEarly"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.credentialRoll"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.getTicket"
@@ -1962,6 +1970,9 @@
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.sendingStopped"
+    },
+    {
+      "src/modules/polls/screens/Poll.tsx": "PollsIds.textReleaseEarly"
     },
     {
       "src/modules/polls/screens/Poll.tsx": "PollsIds.ticketHeld"
