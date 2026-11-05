@@ -50,6 +50,10 @@ export type RoomsOperation =
  *   record of it (rights, host). The operation needs those ("Details not loaded").
  * - `noRight`: this member's rights in the room do not include it ("You can't post here").
  * - `communityUnreachable`: none of the member's communities answered for their rooms; try again later.
+ * - `noIdentity`: the phone holds a membership in the community but no identity it can sign in as there, so nothing
+ *   was asked of it; trying again does not help (IN-517).
+ * - `keysNotHeld`: the identity is on the phone but its keys are not yet: the agent hands them over when it next
+ *   connects, and trying again then helps.
  * - `tierNotYet`: served, but Keyring does not yet do it in a room of this tier, e.g. writing in an `attributed`
  *   room, whose records are sealed ("not available yet in this kind of room").
  */
@@ -66,6 +70,8 @@ export type RoomsReason =
   | 'detailsNotLoaded'
   | 'noRight'
   | 'communityUnreachable'
+  | 'noIdentity'
+  | 'keysNotHeld'
   | 'tierNotYet'
   // Never in this kind of room: files exist on attributed and private rooms only (upstream refuses them on open ones).
   | 'notOnThisTier'
@@ -161,6 +167,10 @@ export interface NoteSummary {
   /** Set when an AI agent wrote it under its person's membership. */
   byAgent?: boolean
   updatedAt?: string
+  /** When the host first stored the record; neither an edit nor a curation moves it. Only where an agent serves it. */
+  createdAt?: string
+  /** Who wrote the record's first version, as the host recorded it. Only where an agent serves it, never on a private room. */
+  createdBy?: Identity
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
@@ -214,6 +224,15 @@ export interface Note extends NoteSummary {
   body: InertText
   flags: InertFlags
   check: HostCheck
+  /** What the record says it is (trust-tasks-tf #1027). An open set: see `placeOf`. Only once it is read. */
+  kind?: string
+  /** The record it answers, in this room. */
+  inReplyTo?: { key: string; version?: number }
+  /** When its author says they wrote it, and last edited it: the author's claim, not an attested time. */
+  writtenAt?: string
+  editedAt?: string
+  /** A reaction whose body, as written and before it was made inert, a reader must not show. */
+  reactionRefused?: true
 }
 
 /** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */
@@ -408,7 +427,9 @@ export class RoomsRefused extends Error {
     public readonly operation: RoomsOperation,
     public readonly code: string,
     public readonly retryable: boolean,
-    detail?: string
+    detail?: string,
+    /** The agent's or community's own refusal, where this passes one on: what a log reads its reason from. */
+    public readonly refusal?: unknown
   ) {
     super(`${operation} was refused (${code})${detail ? `: ${detail}` : ''}`)
     this.name = 'RoomsRefused'
