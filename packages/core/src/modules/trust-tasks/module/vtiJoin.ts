@@ -484,10 +484,10 @@ export async function leaveCommunity(
   await deps.communityStore.forgetCommunity(communityDid, persona.did).catch(() => undefined)
   await deps.vettingStore?.forget(communityDid).catch(() => undefined)
   await deps.identityStore.forgetPersona(communityDid).catch(() => undefined)
-  // Not waited for: leaving is done, whatever the agent answers.
-  void closeEndedHiddenApplications(deps.agent)
   await deps.communityStore
     .saveDeparture?.({ communityDid, personaDid: persona.did, disposition, at: new Date().toISOString() })
     .catch(() => undefined)
+  // After the departure is kept: it is what tells the sweep this identity left. Not waited for.
+  void closeEndedHiddenApplications(deps.agent)
   return { disposition, alreadyGone }
 }

@@ -283,7 +283,7 @@ const flush = async () => {
 
 describe('whether an application has ended', () => {
   const record = { joinDid: ME, createdAt: CREATED }
-  const facts = { identityHeld: true }
+  const facts = {}
   const submitted = (state: string, effect?: string, when = at(5)) => ({
     application: { joinDid: ME, submission: { state, effect, at: when } } as never,
   })
@@ -320,17 +320,25 @@ describe('whether an application has ended', () => {
     expect(hiddenApplicationEnd(record, { ...facts, ...extra })).toBe(end)
   })
 
-  it('has when the identity it is for is gone from this phone', () => {
-    expect(hiddenApplicationEnd(record, { identityHeld: false })).toBe('left')
+  it('has when that identity left, as Leave records it', () => {
+    expect(hiddenApplicationEnd(record, { departure: { personaDid: ME, at: at(5) } })).toBe('left')
   })
 
-  it('with no date on the record, no decision ends it, and only the identity going does', () => {
+  it.each([
+    ['another identity left', { departure: { personaDid: EARLIER_ME, at: at(5) } }],
+    ['the identity left before this application', { departure: { personaDid: ME, at: at(-5) } }],
+    ['a departure kept before identities were told apart', { departure: { at: at(5) } }],
+  ])('has not when %s', (_name, extra) => {
+    expect(hiddenApplicationEnd(record, extra as never)).toBeUndefined()
+  })
+
+  it('with no date on the record, nothing ends it', () => {
     const undated = { joinDid: ME }
     expect(hiddenApplicationEnd(undated, { ...facts, ...submitted('decided', 'deny') })).toBeUndefined()
     expect(
       hiddenApplicationEnd(undated, { ...facts, membership: { personaDid: ME, grantedAt: at(5) } })
     ).toBeUndefined()
-    expect(hiddenApplicationEnd(undated, { identityHeld: false })).toBe('left')
+    expect(hiddenApplicationEnd(undated, { departure: { personaDid: ME, at: at(5) } })).toBeUndefined()
   })
 
   it.each([
@@ -456,7 +464,16 @@ describe('closing what has ended', () => {
     expect(await loadHiddenVettingRecord(p.agent, COMMUNITY)).toBeUndefined()
   })
 
-  it('does not read a failed read of the identities as the identity being gone', async () => {
+  it('is not ended by its identity going from this phone: an unlink, an erase, a fresh join', async () => {
+    const p = phone([])
+    await p.begin()
+    await closeEndedHiddenApplications(p.agent)
+    expect(deleted).toEqual([])
+    expect(mockConnects).toEqual([])
+    expect(await loadHiddenVettingRecord(p.agent, COMMUNITY)).toMatchObject({ applicationId: 'app-1' })
+  })
+
+  it('does not fail when the identities cannot be read: they are not what decides', async () => {
     const p = phone()
     await p.begin()
     p.unreadable.add('keyring/vti-identity')
@@ -540,9 +557,15 @@ describe('closing what has ended', () => {
   })
 
   describe('when it runs', () => {
-    it('at an unlock: an identity gone since the last one, on a phone that never had this', async () => {
+    it('at an unlock: an identity that left since the last one', async () => {
       const p = phone([])
       await p.begin(EARLIER_ME)
+      await p.community.saveDeparture({
+        communityDid: COMMUNITY,
+        personaDid: EARLIER_ME,
+        disposition: 'purge',
+        at: at(5),
+      })
       const stop = startPersonaInbox(p.agent, {})
       await flush()
       stop()
@@ -604,7 +627,10 @@ describe('closing what has ended', () => {
           agent: p.agent,
           mediatorDid: 'did:peer:2.Emediator',
           identityStore: { getPersona: async () => persona, forgetPersona: async () => undefined },
-          communityStore: { forgetCommunity: async () => undefined },
+          communityStore: {
+            forgetCommunity: async () => undefined,
+            saveDeparture: (d: never) => p.community.saveDeparture(d),
+          },
           vettingStore: p.vetting,
         } as never,
         COMMUNITY

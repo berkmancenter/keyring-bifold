@@ -46,9 +46,10 @@ import {
   type JoinSubmission,
   type VtiCommunityStore,
   type VtiHeldCredential,
+  type VtiDeparture,
   type VtiMembership,
 } from './VtiCommunityStore'
-import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
+import type { VtiPersona } from './VtiIdentityStore'
 import { IDENTITY_VETTING_ENDORSEMENT_TYPE, CREDENTIAL_EXCHANGE_ISSUE } from './vtiInbox'
 import {
   chooseStatementShape,
@@ -1011,8 +1012,8 @@ export interface HiddenApplicationFacts {
   membership?: Pick<VtiMembership, 'personaDid' | 'grantedAt' | 'removal'>
   application?: Pick<VettingApplication, 'joinDid' | 'submission'>
   submission?: Pick<JoinSubmission, 'status' | 'sentAt' | 'privateVetting'>
-  /** Whether this phone still holds the identity the application is for. */
-  identityHeld: boolean
+  /** The departure Leave recorded for the identity, if it left. */
+  departure?: Pick<VtiDeparture, 'personaDid' | 'at'>
 }
 
 /**
@@ -1024,6 +1025,9 @@ export interface HiddenApplicationFacts {
  *   also covers a referred request approved later, since that only arrives as a card.
  * - A decision ends only an application older than it. Someone turned down can ask a
  *   vetter again on the same identity, and the old refusal must not end the new one.
+ * - Leaving counts only as Leave records it. An identity missing from this phone isn't
+ *   one that left: unlinking or erasing an agent, a fresh join, and an identity found
+ *   held by another agent all forget it here, and the agent may still be asked to go on.
  */
 export function hiddenApplicationEnd(
   record: Pick<HiddenVettingRecord, 'joinDid' | 'createdAt'>,
@@ -1046,10 +1050,11 @@ export function hiddenApplicationEnd(
     if (submission.status === 'rejected') return 'denied'
     if (submission.status === 'withdrawn') return 'withdrawn'
   }
-  return facts.identityHeld ? undefined : 'left'
+  if (facts.departure?.personaDid === record.joinDid && since(facts.departure.at)) return 'left'
+  return undefined
 }
 
-async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecord, personas: VtiPersona[]) {
+async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecord) {
   const community = new GenericRecordsCommunityStore(agent)
   const vetting = new GenericRecordsVettingStore(agent)
   const submission = await community.getSubmission(record.community, record.joinDid)
@@ -1057,7 +1062,7 @@ async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecor
     membership: await community.getMembership(record.community, record.joinDid),
     application: await vetting.getApplication(record.community),
     submission: submission?.personaDid === record.joinDid ? submission : undefined,
-    identityHeld: personas.some((p) => p.did === record.joinDid),
+    departure: await community.getDeparture(record.community, record.joinDid),
   })
   if (!end) return
   const vtaDid = record.vtaDid ?? vtaAgent.agentAddress()
@@ -1111,10 +1116,8 @@ export function closeEndedHiddenApplications(
   const sweep = async () => {
     const records = await listHiddenVettingRecords(agent)
     if (records.length === 0) return
-    // Read once and first: a failure here must not read as "the identity is gone".
-    const personas = await new GenericRecordsIdentityStore(agent).listPersonas()
     for (const record of records) {
-      await withinDeadline(closeOneEndedApplication(agent, record, personas), deadlineMs).catch(() =>
+      await withinDeadline(closeOneEndedApplication(agent, record), deadlineMs).catch(() =>
         releaseWarn('[hidden-vetting] an ended application was not closed at the agent; tried again at the next unlock')
       )
     }
