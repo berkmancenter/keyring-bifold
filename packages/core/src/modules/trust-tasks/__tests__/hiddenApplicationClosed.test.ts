@@ -629,7 +629,11 @@ describe('closing what has ended', () => {
           identityStore: { getPersona: async () => persona, forgetPersona: async () => undefined },
           communityStore: {
             forgetCommunity: async () => undefined,
-            saveDeparture: (d: never) => p.community.saveDeparture(d),
+            // Slow, as a real store can be: a sweep started before this finishes finds no departure.
+            saveDeparture: async (d: never) => {
+              await new Promise((resolve) => setTimeout(resolve, 50))
+              await p.community.saveDeparture(d)
+            },
           },
           vettingStore: p.vetting,
         } as never,
