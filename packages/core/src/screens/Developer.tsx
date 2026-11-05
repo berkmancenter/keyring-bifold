@@ -11,6 +11,7 @@ import { testIdWithKey } from '../utils/testable'
 import { ThemedText } from '../components/texts/ThemedText'
 import { seedTestContacts, clearTestContacts } from '../utils/seedTestCredentials'
 import { E2EClockRows } from '../components/misc/E2EClockRows'
+import { HiddenApplicationProbes } from '../modules/trust-tasks/screens/HiddenApplicationProbes'
 import { roomsSwitchAvailable } from '../modules/rooms/useRoomsService'
 
 const Developer: React.FC = () => {
@@ -421,6 +422,8 @@ const Developer: React.FC = () => {
         ) : null}
         {/* The clocks in force, in a test build only (gate efficiency item 4). */}
         <E2EClockRows />
+        {/* bifold #924's device run only: this branch is never merged. */}
+        <HiddenApplicationProbes />
       </ScrollView>
     </SafeAreaView>
   )
