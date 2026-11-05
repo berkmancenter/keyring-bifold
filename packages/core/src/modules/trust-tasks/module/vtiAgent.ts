@@ -1632,6 +1632,7 @@ class VtiAgentController {
         this.agent.config.logger.info(
           `${TSP_LOG_PREFIX} asked ${named(type, communityDid, 'the community')} ${type} over ${packed.revision} ${frameForm(packed.bytes)} (${packed.bytes.length} bytes)`
         )
+        releaseWarn(`[carriage] community ask ${type}: tsp ${packed.revision === 'v1' ? '1.0' : packed.revision}`)
         const viaTsp = await this.waitFor(entry, timeoutMs)
         if (viaTsp) return viaTsp
         // A community can advertise TSPTransport and not answer it — measured
@@ -1666,6 +1667,7 @@ class VtiAgentController {
     // The VTC threads its DIDComm reply, and any problem-report, on this id.
     entry.correlation.add(messageId)
     entry.lastSentAt = Date.now()
+    releaseWarn(`[carriage] community ask ${type}: didcomm`)
     await session.sendTo(communityDid, {
       id: messageId,
       typ: 'application/didcomm-plain+json',

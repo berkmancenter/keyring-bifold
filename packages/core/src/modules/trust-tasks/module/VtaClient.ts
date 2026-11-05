@@ -1648,7 +1648,9 @@ export class VtaClient {
           this.agent.config.logger.info(
             `${LOG_PREFIX} asked ${agentNamedFor(type, this.vtaDid)} ${type} over ${packed.revision}`
           )
-        } else
+          releaseWarn(`[carriage] vta ask ${type}: tsp ${packed.revision === 'v1' ? '1.0' : packed.revision}`)
+        } else {
+          releaseWarn(`[carriage] vta ask ${type}: didcomm`)
           await session.sendTo(this.vtaDid, {
             id: envelopeId,
             typ: 'application/didcomm-plain+json',
@@ -1660,6 +1662,7 @@ export class VtaClient {
             expires_time: nowSec() + 300,
             body: document,
           })
+        }
         onSent?.()
       } catch (error) {
         settle()

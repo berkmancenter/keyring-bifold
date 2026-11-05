@@ -143,7 +143,7 @@ export type Carriage = 'tsp' | 'didcomm'
  * advertise no transports, and they reach TSP through the peer-leg setting.
  * Tests that exercise the TSP path turn it off with {@link setPreferDidcommForUpstream}.
  */
-let preferDidcommForUpstream = true
+let preferDidcommForUpstream = false
 
 export function setPreferDidcommForUpstream(prefer: boolean): void {
   preferDidcommForUpstream = prefer
