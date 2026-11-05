@@ -570,7 +570,6 @@ export function recordMembersOf(body: Record<string, unknown> | undefined): Reco
   }
 }
 
-/** One opened record (`rooms/keys/read`). The body is decoded text, or the open room's cleartext as JSON text. */
 /**
  * What a room's profile lists in `recordMembers` (`rooms/keys/profile/read/0.1`). None for a room with no profile, a
  * cleared one, one that lists none, or an answer that doesn't read: each means nothing may be written.
@@ -582,6 +581,7 @@ export function parseProfileRecordMembers(payload: unknown): string[] {
   return Array.isArray(listed) ? listed.filter((m): m is string => typeof m === 'string') : []
 }
 
+/** One opened record (`rooms/keys/read`). The body is decoded text, or the open room's cleartext as JSON text. */
 export interface OpenedRecord extends RecordMeta, RecordMembers {
   body: string
   check: HostCheck
