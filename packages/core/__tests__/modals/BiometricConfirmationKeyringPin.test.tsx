@@ -7,8 +7,6 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import React from 'react'
 
-// Loaded first, as the PIN screen tests do: PINInput reads the PIN length when its module loads.
-import { MainContainer } from '../../src/container-impl'
 import { AuthContext } from '../../src/contexts/auth'
 import { testIdWithKey } from '../../src/utils/testable'
 import authContext from '../contexts/auth'
@@ -28,8 +26,6 @@ jest.mock('../../src/services/keychain', () => ({
 
 import BiometricConfirmationModal from '../../src/components/modals/BiometricConfirmationModal'
 import { loadWalletKey } from '../../src/services/keychain'
-
-void MainContainer
 
 const secret = { id: 'wallet', key: 'k', salt: 's' }
 
