@@ -33,6 +33,7 @@ const deps = () => ({
   resolveMediator: jest.fn(async () => MEDIATOR),
   createDid: jest.fn(async () => 'did:peer:2.mine'),
   save: jest.fn(async () => undefined),
+  run: jest.fn(async () => undefined),
 })
 
 beforeEach(() => {
@@ -122,6 +123,15 @@ describe('startSharedConnect', () => {
       },
     })
     expect(d.save).toHaveBeenCalledWith(expect.anything(), (result as { encounter: object }).encounter)
+    expect(d.run).toHaveBeenCalledWith(expect.anything(), (result as { encounter: object }).encounter, MEDIATOR)
+  })
+
+  it('reports failed when the relay cannot be reached', async () => {
+    const d = deps()
+    d.run.mockRejectedValueOnce(new Error('relay down'))
+    await expect(startSharedConnect(agentWith(), sharedConnectLink(), { now: NOW, deps: d })).resolves.toEqual({
+      kind: 'failed',
+    })
   })
 
   it('mints no TSP service when the carriage is DIDComm', async () => {

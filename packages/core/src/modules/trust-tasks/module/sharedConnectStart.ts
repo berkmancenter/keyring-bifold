@@ -6,8 +6,8 @@
  *     document, offline, and say what the screen may show. Sends nothing.
  *  2. {@link startSharedConnect}: after the person taps Connect, check the
  *     link has not expired in the meantime, mint the encounter DID and keep
- *     the encounter record. The first document is sent by the carriage
- *     (WP5/WP6), which is not built in this slice.
+ *     the encounter record, then run the ceremony: open the relay session
+ *     (TSP or the DIDComm v2 fallback) and send `propose`.
  *
  * Everything the screen shows from the link is either structural (a DID
  * prefix, a relay host parsed from the inviter's own document, an expiry) or
@@ -20,6 +20,8 @@
 import type { Agent } from '@credo-ts/core'
 
 import { didPrefix } from './didPrefix'
+import { chooseEncounterCarriage } from './sharedConnectCarriage'
+import { SharedConnectSession } from './sharedConnect'
 import { createEncounterDid, ENCOUNTER_LOG_PREFIX, saveEncounter, type EncounterRecord } from './sharedConnectEncounter'
 import { resolveInviter, type InviterCarriage } from './sharedConnectInviter'
 import { readTrigger, triggerAction, type TriggerUi } from './triggerLink'
@@ -86,12 +88,47 @@ export interface SharedConnectStartDeps {
   resolveMediator: (agent: Agent, mediatorDid: string) => Promise<VtiMediatorEndpoints>
   createDid: typeof createEncounterDid
   save: typeof saveEncounter
+  /** Open the carriage and run the ceremony for a saved encounter; resolves once `propose` is on its way. */
+  run: (agent: Agent, encounter: EncounterRecord, mediator: VtiMediatorEndpoints) => Promise<void>
+}
+
+const sessions = new Map<string, SharedConnectSession>()
+
+/** The live session for an encounter, for retry and cancel from the screen. */
+export const getSharedConnectSession = (enactment: string): SharedConnectSession | undefined => sessions.get(enactment)
+
+async function runEncounter(agent: Agent, encounter: EncounterRecord, mediator: VtiMediatorEndpoints) {
+  const live: { session?: SharedConnectSession } = {}
+  const carriage = chooseEncounterCarriage({
+    agent,
+    encounter,
+    mediator,
+    onDocument: (document) => live.session?.handle(document),
+  })
+  const session = new SharedConnectSession(agent, encounter, carriage)
+  live.session = session
+  sessions.set(encounter.enactment, session)
+  void session.finished.then(async () => {
+    sessions.delete(encounter.enactment)
+    await carriage.stop().catch(() => undefined)
+  })
+  try {
+    await carriage.start()
+    await session.start()
+  } catch (error) {
+    // Could not reach the relay or send: nothing was proposed that we can wait on.
+    sessions.delete(encounter.enactment)
+    await carriage.stop().catch(() => undefined)
+    await session.cancel().catch(() => undefined)
+    throw error
+  }
 }
 
 const defaultDeps: SharedConnectStartDeps = {
   resolveMediator: resolveVtiMediator,
   createDid: createEncounterDid,
   save: saveEncounter,
+  run: runEncounter,
 }
 
 /**
@@ -127,6 +164,7 @@ export async function startSharedConnect(
       createdAt: new Date(now * 1000).toISOString(),
     }
     await deps.save(agent, encounter)
+    await deps.run(agent, encounter, mediator)
     return { kind: 'started', encounter }
   } catch (error) {
     // The error's name only: its message may carry a DID or an endpoint the inviter chose.
