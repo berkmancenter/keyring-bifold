@@ -210,7 +210,9 @@ describe('a text send that fails', () => {
   })
 
   const toldKept = () =>
-    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', text1: 'Chat.MessageNotSentKept' }))
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', text1: 'Chat.MessageNotSentKept', visibilityTime: 8000 })
+    )
 
   test('the chat left while the send was out: kept as its draft, and the notice says where', async () => {
     const fail = holdNext()
@@ -279,7 +281,9 @@ describe('a text send that fails', () => {
     tree.rerender(chat('2'))
     await fail()
     await waitFor(() =>
-      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ type: 'error', text1: 'Chat.MessageNotSentLost' }))
+      expect(toast).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'error', text1: 'Chat.MessageNotSentLost', visibilityTime: 15_000 })
+      )
     )
     expect(toast).toHaveBeenCalledTimes(1)
     ;(saveChatDraft as jest.Mock).mockImplementation(async () => undefined)

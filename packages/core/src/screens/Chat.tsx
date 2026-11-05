@@ -373,12 +373,17 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           Toast.show({
             type: ToastType.Error,
             text1: t('Chat.MessageNotSentKept', { name: theirLabel, interpolation: { escapeValue: false } }),
+            // About 20 words, and the person may be looking elsewhere. Missed, it costs a moment's confusion: the words
+            // are in that chat's draft.
+            visibilityTime: 8000,
           })
         } catch (keepError) {
           agent.config?.logger?.warn(`[Chat] a message not sent was not kept: ${failureCategory(keepError)}`)
           Toast.show({
             type: ToastType.Error,
             text1: t('Chat.MessageNotSentLost', { name: theirLabel, interpolation: { escapeValue: false } }),
+            // Longer than the one above: missed, this loss is silent. This toast is the only record of it.
+            visibilityTime: 15_000,
           })
         }
       }
