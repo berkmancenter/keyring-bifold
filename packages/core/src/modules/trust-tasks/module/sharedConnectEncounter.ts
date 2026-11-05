@@ -88,7 +88,15 @@ export async function createEncounterDid(
   return did
 }
 
-export type EncounterState = 'confirmed' | 'proposing' | 'completed' | 'expired' | 'failed'
+export type EncounterState =
+  | 'confirmed'
+  | 'proposing'
+  | 'accepted'
+  | 'unanswered'
+  | 'declined'
+  | 'completed'
+  | 'expired'
+  | 'failed'
 
 /**
  * One encounter, persisted so it outlives the screen. Holds identifiers only:
