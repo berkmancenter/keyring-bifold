@@ -29,6 +29,7 @@ import type { Agent } from '@credo-ts/core'
 
 import { HIDDEN_VETTING_EXT, type VtiCriterion } from './joinManifest'
 import type { VtaClient } from './VtaClient'
+import { noteDeleteOutcome, recordProbe } from './hiddenVettingProbe'
 import { getKeyed, listKeyed, putKeyed, withKeyLock } from './keyedRecords'
 import {
   HIDDEN_VETTING_SUITE,
@@ -324,11 +325,17 @@ export async function listHiddenVettingRecords(agent: Agent): Promise<HiddenVett
  * for one already deleted. It also says it to an agent that never held it, which is
  * why a record names its agent.
  */
-async function deleteAtAgent(client: VtaClient, applicationId: string): Promise<void> {
+async function deleteAtAgent(client: VtaClient, applicationId: string, agent?: Agent): Promise<void> {
   try {
     await client.deletePcsApplication(applicationId)
+    await noteDeleteOutcome(agent, applicationId, 'ok').catch(() => undefined)
   } catch (error) {
     const code = pcsRefusalCode(error)
+    await noteDeleteOutcome(
+      agent,
+      applicationId,
+      code ?? `error: ${error instanceof Error ? error.message : String(error)}`
+    ).catch(() => undefined)
     if (code !== 'vta/pcs/applications/delete:notFound') throw error
   }
 }
@@ -345,7 +352,7 @@ export async function closeHiddenApplication(
   record: HiddenVettingRecord,
   end: HiddenApplicationEnd
 ): Promise<void> {
-  await deleteAtAgent(client, record.applicationId)
+  await deleteAtAgent(client, record.applicationId, agent)
   // A newer application may have replaced it while the agent answered: that one stays.
   const current = await loadHiddenVettingRecord(agent, record.community)
   if (current?.applicationId !== record.applicationId) return
@@ -402,6 +409,12 @@ export async function startHiddenApplication(
     minimum: what.minimum,
   }
   await saveHiddenVettingRecord(agent, record)
+  await recordProbe(agent, {
+    applicationId: record.applicationId,
+    community: record.community,
+    joinDid: record.joinDid,
+    vtaDid: record.vtaDid,
+  }).catch(() => undefined)
   return record
 }
 
@@ -522,7 +535,7 @@ export async function beginHiddenApplication(
   // the agent. Not being able to delete it doesn't stop the person applying.
   const earlier = await loadHiddenVettingRecord(agent, communityDid)
   if (earlier) {
-    await deleteAtAgent(client, earlier.applicationId).catch(() =>
+    await deleteAtAgent(client, earlier.applicationId, agent).catch(() =>
       agent.config?.logger?.warn?.('[hidden-vetting] an earlier application could not be deleted at the agent')
     )
   }
