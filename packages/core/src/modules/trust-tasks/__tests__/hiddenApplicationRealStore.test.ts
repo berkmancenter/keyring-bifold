@@ -458,3 +458,37 @@ describe('the agent refuses the delete, on a real store', () => {
     expect(p.vta.deletesSent()).toEqual([record.applicationId])
   })
 })
+
+describe('a lock while a sweep runs, on real stores', () => {
+  it("the sweep a new agent's card asks for runs on the new agent, and closes its application then", async () => {
+    // The phone before the lock: a join went through, and the agent has not answered the delete yet.
+    const before = await newPhone()
+    const meBefore = ME
+    await before.apply()
+    let answer: () => void = () => undefined
+    before.vta.answerDeleteAfter = new Promise<void>((resolve) => (answer = resolve))
+    await later()
+    await keepForPersona(before.agent, before.persona(meBefore), membershipCard(meBefore) as never)
+    await until('the first sweep is waiting on the agent', async () => before.vta.deletesSent().length > 0)
+
+    // Locked: the agent is shut down, as a lock-out does, with that sweep still running.
+    await before.agent.shutdown()
+
+    // Unlocked: a new agent, whose own join goes through while the first sweep still runs. Its card asks for a sweep.
+    const after = await newPhone()
+    const meAfter = ME
+    const record = await after.apply()
+    await later()
+    await keepForPersona(after.agent, after.persona(meAfter), membershipCard(meAfter) as never)
+
+    // The first sweep ends (its store is closed, so it can't write its note). Nothing else asks for a sweep after
+    // this: what closes the new agent's application can only be the one its card asked for.
+    answer()
+    await until("the new agent's application is closed", async () =>
+      (await after.stored()).some((s) => s.closed !== undefined)
+    )
+    expect(after.vta.deletesSent()).toEqual([record.applicationId])
+    expect(after.vta.held.has(record.applicationId)).toBe(false)
+    expect(await after.stored()).toEqual([expect.objectContaining({ closed: 'joined', joinDid: meAfter })])
+  })
+})
