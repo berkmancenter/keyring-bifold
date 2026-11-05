@@ -216,6 +216,13 @@ describe('sending is off', () => {
     expect(s.sendCompleted).not.toHaveBeenCalled()
   })
 
+  it('says so up front, so a screen asks nothing of the room; on only where the backend says (control)', () => {
+    const off = setup({ listed: ALL, recordSending: false })
+    expect(off.service.recordSendingOn()).toBe(false)
+    expect(off.agentTask).not.toHaveBeenCalled()
+    expect(setup({ listed: ALL }).service.recordSendingOn()).toBe(true)
+  })
+
   it('the real backend does not switch it on', () => {
     const source = readFileSync(join(__dirname, '../real/agentRoomsBackend.ts'), 'utf8')
     expect(source).toContain('resolveSender') // control: this is the file that builds the real backend

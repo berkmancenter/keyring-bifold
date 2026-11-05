@@ -1533,6 +1533,11 @@ export class AgentRoomsService implements RoomsService {
     return types.find((t) => served.includes(t))
   }
 
+  /** Whether `sendRecord` is on: only where `RoomsBackend.recordSending` is set, which nothing but tests does. */
+  public recordSendingOn(): boolean {
+    return this.backend.recordSending === true
+  }
+
   /**
    * What this room lets its member write: its profile's `recordMembers`, read at most once per room epoch ("A writer
    * MAY rely on a profile it resolved within the room's current epoch"), and whether the agent seals them. A profile

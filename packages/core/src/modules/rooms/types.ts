@@ -523,6 +523,11 @@ export interface RoomsService {
   listFiles(roomId: string): Promise<RoomFile[]>
   /** The largest file this room's host takes, in bytes, where that is less than the picker's own limit. */
   fileLimit?(roomId: string): Promise<number>
+  /**
+   * Whether `sendRecord` is switched on in this build, asked before anything else: off, a screen offers no write and
+   * reads no profile for one. Absent reads as off.
+   */
+  recordSendingOn?(): boolean
   /** What this room lets its member write: `real/recordWrites.ts`. Absent: the sheet offers less. */
   recordFeaturesIn?(roomId: string): Promise<RecordFeatures>
   /** Writes a message, reply or reaction, by the writer's rule. Off in every build until a maintainer says otherwise. */
