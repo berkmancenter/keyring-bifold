@@ -16,7 +16,7 @@ import {
   NOW,
   REFERENCE_STYLE_DID,
   sharedConnectLink,
-} from './helpers/sharedConnectFixtures'
+} from './fixtures/sharedConnectFixtures'
 
 const SENTINEL = 'LABEL-SENTINEL-do-not-log'
 const logger = { debug: jest.fn() }

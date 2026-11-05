@@ -24,7 +24,7 @@ import {
   peer2,
   REFERENCE_STYLE_DID,
   sharedConnectLink,
-} from './helpers/sharedConnectFixtures'
+} from './fixtures/sharedConnectFixtures'
 
 const read = (link: string) => readTrigger(link, { channel: 'scan', now: NOW })
 

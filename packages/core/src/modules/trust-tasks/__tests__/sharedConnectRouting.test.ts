@@ -3,7 +3,7 @@ import { Screens } from '../../../types/navigators'
 import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
 import { keyringAgentLinkKind, MY_AGENT_SCREEN, myAgentLinkParams, routeKeyringAgentLink } from '../module/vtiLinks'
 
-import { sharedConnectLink } from './helpers/sharedConnectFixtures'
+import { sharedConnectLink } from './fixtures/sharedConnectFixtures'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 

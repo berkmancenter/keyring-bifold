@@ -3,7 +3,7 @@ import type { Agent } from '@credo-ts/core'
 
 import { chooseInviterService, resolveInviter } from '../module/sharedConnectInviter'
 
-import { KEYRING_STYLE_DID, MEDIATOR_DID } from './helpers/sharedConnectFixtures'
+import { KEYRING_STYLE_DID, MEDIATOR_DID } from './fixtures/sharedConnectFixtures'
 
 const logger = { debug: jest.fn() }
 const agentResolving = (resolve: jest.Mock) =>
