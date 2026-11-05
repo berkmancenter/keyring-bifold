@@ -530,6 +530,48 @@ describe('closing what has ended', () => {
     expect(deleted).toEqual(['app-1'])
   })
 
+  it('leaves an agent that failed once until the next sweep, and goes on with other agents', async () => {
+    const p = phone([ME, EARLIER_ME])
+    const second = 'did:webvh:QmOther:dids.example:second-vtc'
+    await p.begin()
+    await p.member()
+    // Two more applications at the same agent, and one at another, all ended.
+    const base = p.held()[0]
+    for (const [community, applicationId, vtaDid] of [
+      [`${COMMUNITY}-b`, 'app-2', 'did:webvh:agent:current'],
+      [`${COMMUNITY}-c`, 'app-3', 'did:webvh:agent:current'],
+      [second, 'app-4', 'did:webvh:agent:other'],
+    ]) {
+      p.records.push({
+        ...base,
+        id: `x-${applicationId}`,
+        tags: { ...base.tags, key: community },
+        content: { ...base.content, community, applicationId, vtaDid },
+      })
+      await p.community.saveMembership({
+        communityDid: community,
+        personaDid: ME,
+        grantedAt: at(5),
+        role: 'member',
+        via: 'vetting',
+      } as never)
+    }
+    const asked: string[] = []
+    mockClient = fakeClient({
+      deletePcsApplication: async (id: string) => {
+        asked.push(id)
+        if (id !== 'app-4') throw new Error('unreachable')
+      },
+    })
+
+    await closeEndedHiddenApplications(p.agent)
+
+    // The current agent was asked once, not three times; the other agent was still asked.
+    expect(asked.filter((id) => id !== 'app-4')).toHaveLength(1)
+    expect(asked).toContain('app-4')
+    expect(await loadHiddenVettingRecord(p.agent, `${COMMUNITY}-b`)).toBeDefined()
+  })
+
   it('runs once at a time, and again for what ended while it ran', async () => {
     const p = phone()
     await p.begin()

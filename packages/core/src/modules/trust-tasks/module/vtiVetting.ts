@@ -1054,6 +1054,9 @@ export function hiddenApplicationEnd(
   return undefined
 }
 
+/** The agent an application belongs to: the one it names, else (a record from before 11-2026) the current one. */
+const agentOf = (record: HiddenVettingRecord) => record.vtaDid ?? vtaAgent.agentAddress()
+
 async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecord) {
   const community = new GenericRecordsCommunityStore(agent)
   const vetting = new GenericRecordsVettingStore(agent)
@@ -1065,7 +1068,7 @@ async function closeOneEndedApplication(agent: Agent, record: HiddenVettingRecor
     departure: await community.getDeparture(record.community, record.joinDid),
   })
   if (!end) return
-  const vtaDid = record.vtaDid ?? vtaAgent.agentAddress()
+  const vtaDid = agentOf(record)
   if (!vtaDid) return
   await vtaAgent.connect(agent, vtaDid)
   await closeHiddenApplication(agent, vtaAgent.client(agent, vtaDid), record, end)
@@ -1116,10 +1119,15 @@ export function closeEndedHiddenApplications(
   const sweep = async () => {
     const records = await listHiddenVettingRecords(agent)
     if (records.length === 0) return
+    // An agent that failed once this sweep is left until the next: its other records would wait out the same
+    // deadline one after another, on the unlock path.
+    const unreachable = new Set<string | undefined>()
     for (const record of records) {
-      await withinDeadline(closeOneEndedApplication(agent, record), deadlineMs).catch(() =>
+      if (unreachable.has(agentOf(record))) continue
+      await withinDeadline(closeOneEndedApplication(agent, record), deadlineMs).catch(() => {
+        unreachable.add(agentOf(record))
         releaseWarn('[hidden-vetting] an ended application was not closed at the agent; tried again at the next unlock')
-      )
+      })
     }
   }
   closingEnded = sweep()
