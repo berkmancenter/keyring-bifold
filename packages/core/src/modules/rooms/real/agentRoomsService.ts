@@ -1576,6 +1576,12 @@ export class AgentRoomsService implements RoomsService {
    */
   public async sendRecord(roomId: string, write: RecordWrite): Promise<{ key: string; version: number }> {
     if (!this.backend.recordSending) throw new RecordSendingOff()
+    // A message's words are held to a post's own rules: an empty one would read as withdrawn, a long one as no post did.
+    if (write.type === 'message' || write.type === 'edit') {
+      if (write.body.trim().length === 0) throw new RoomsRefused('write', 'empty', false, 'the message has no text')
+      if (write.body.length > NOTE_BODY_MAX)
+        throw new RoomsRefused('write', 'tooLong', false, `a message holds ${NOTE_BODY_MAX} characters`)
+    }
     const room = await this.requireInRoom(roomId, 'write')
     if (room.tier !== 'attributed')
       throw new RoomsRefused('write', 'tierNotYet', false, `sending records in a ${room.tier} room is not built`)
