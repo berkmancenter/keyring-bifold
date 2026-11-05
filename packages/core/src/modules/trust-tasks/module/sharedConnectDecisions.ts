@@ -7,6 +7,8 @@
  * @module trust-tasks/module/sharedConnectDecisions
  */
 
+import type { VrcProfile } from '../../vrc/vrc-manager'
+
 /**
  * Decision 2, the TSP revision Keyring packs toward ecosystem peers. Default:
  * `rev3`, what the codec packs today (`createTspCodec`); `1.0` is present in
@@ -27,12 +29,12 @@ export const SHARED_CONNECT_PROOF_SIGNER: 'issuer-vid' | 'relationship-did' = 'i
  * Decision 4, the credential profile toward non-Keyring peers, selected by
  * path rather than by the peer's RCE announcement (plan D4). Default: VCDM
  * 2.0, Data Integrity, `eddsa-jcs-2022`, no `validUntil`, no hardware
- * `evidence` (smaller frames toward RLTP). Applied by WP8, not built yet.
+ * `evidence` (smaller frames toward RLTP). Applied by `sharedConnectCredential`.
  */
-export const SHARED_CONNECT_VRC_PROFILE = {
+export const SHARED_CONNECT_VRC_PROFILE: VrcProfile = {
   vc20: true,
   dataIntegrity: true,
-  suite: 'eddsa-jcs-2022' as 'eddsa-jcs-2022' | 'eddsa-rdfc-2022',
+  suite: 'eddsa-jcs-2022',
   validUntil: false,
   evidence: false,
 }
@@ -50,3 +52,12 @@ export const SHARED_CONNECT_CEREMONY_DEFINITION = 'https://trusttasks.org/ceremo
  * through `registerTrustTask`.
  */
 export const SHARED_CONNECT_FLOW_OWNER: 'core' | 'demo-profile' = 'core'
+
+/**
+ * Timing, in milliseconds (plan WP10). The wait for a `propose#response` or a
+ * receipt, how often the document is re-sent in that time, and the grace after
+ * `_exp` for which an already-started encounter stays open.
+ */
+export const SHARED_CONNECT_ANSWER_WAIT_MS = 2 * 60 * 1000
+export const SHARED_CONNECT_SEND_ATTEMPTS = 2
+export const SHARED_CONNECT_EXP_GRACE_MS = 5 * 60 * 1000
