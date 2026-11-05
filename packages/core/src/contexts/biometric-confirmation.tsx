@@ -15,7 +15,16 @@ import BiometricConfirmationModal from '../components/modals/BiometricConfirmati
 
 export type BiometricConfirmationStatus = 'confirmed' | 'cancelled' | 'error' | 'not_available'
 
-export type AuthMode = 'biometric' | 'passcode'
+/** How the hardware key's own prompt authenticates. */
+export type HardwareAuthMode = 'biometric' | 'passcode'
+
+/**
+ * How the person confirms: the hardware key's prompt, or, with Biometric Unlock
+ * off in Keyring, their Keyring PIN (`keyringPin`): the app removes its
+ * biometric copy of the wallet key then, so there is nothing for Face ID or a
+ * fingerprint to open (IN-452).
+ */
+export type AuthMode = HardwareAuthMode | 'keyringPin'
 
 export interface BiometricConfirmationRequest {
   counterpartyName: string

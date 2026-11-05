@@ -23,7 +23,7 @@ import {
   requestBiometricConfirmationUI,
   BiometricConfirmationResponse,
   type BiometricConfirmationCopy,
-  type AuthMode,
+  type HardwareAuthMode,
 } from '../../contexts/biometric-confirmation'
 import { isBiometricsActive } from '../../services/keychain'
 import { PersistentStorage } from '../../services/storage'
@@ -44,7 +44,7 @@ const FOREGROUND_WAIT_TIMEOUT_MS = 15000
  *   show biometrics first; the user can tap "Enter Passcode". Evidence records DevicePasscode
  *   to reflect app policy (user opted out of biometrics), not necessarily what the OS showed first.
  */
-export async function resolveHardwareSigningAuthMode(): Promise<AuthMode> {
+export async function resolveHardwareSigningAuthMode(): Promise<HardwareAuthMode> {
   const [biometricsAvailable, preferences] = await Promise.all([
     isBiometricsActive(),
     PersistentStorage.fetchValueForKey<Preferences>(LocalStorageKeys.Preferences),
@@ -136,11 +136,24 @@ export async function requestBiometricConfirmationWithUI(
       return { success: true, reason: 'not_available', timestamp: new Date().toISOString() }
     }
 
+    // Keyring's own setting, not the phone's: with Biometric Unlock off the app
+    // has removed the key Face ID or a fingerprint would open, so the sheet asks
+    // for the Keyring PIN. An unread setting tries biometrics, and the sheet
+    // offers the PIN if the key is not there (IN-452).
+    let useBiometry: boolean | undefined
+    try {
+      useBiometry = (await PersistentStorage.fetchValueForKey<Preferences>(LocalStorageKeys.Preferences))?.useBiometry
+    } catch {
+      useBiometry = undefined
+    }
+    const authMode = useBiometry === false ? 'keyringPin' : 'biometric'
+    if (authMode === 'keyringPin') logger.info(`${LOG_PREFIX} confirm with the Keyring PIN: Biometric Unlock is off`)
+
     const response: BiometricConfirmationResponse = await requestBiometricConfirmationUI(
       counterpartyName,
       connectionId,
       false,
-      'biometric',
+      authMode,
       copy
     )
 

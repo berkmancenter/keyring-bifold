@@ -82,7 +82,7 @@ const createMockAgent = () =>
         },
       },
     },
-  } as any)
+  }) as any
 
 describe('VRC Biometric Confirmation', () => {
   let mockAgent: ReturnType<typeof createMockAgent>
@@ -416,6 +416,45 @@ describe('VRC Biometric Confirmation', () => {
   })
 
   describe('requestBiometricConfirmationWithUI', () => {
+    // IN-452: with Biometric Unlock off in Keyring the app has removed the key Face ID would open.
+    it.each([
+      ['Biometric Unlock off in Keyring', { useBiometry: false }, 'keyringPin'],
+      ['Biometric Unlock on', { useBiometry: true }, 'biometric'],
+      ['no setting stored', undefined, 'biometric'],
+    ])('asks the sheet for the right way to confirm with %s', async (_label, prefs, mode) => {
+      mockIsBiometricsActive.mockResolvedValue(true)
+      mockFetchPreferences.mockResolvedValue(prefs)
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'confirmed', timestamp: 't' })
+
+      const result = await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      expect(result).toMatchObject({ success: true, reason: 'confirmed' })
+      expect(mockRequestBiometricConfirmationUI.mock.calls[0][3]).toBe(mode)
+    })
+
+    it('tries biometrics when the setting cannot be read', async () => {
+      mockIsBiometricsActive.mockResolvedValue(true)
+      mockFetchPreferences.mockRejectedValue(new Error('storage'))
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'confirmed', timestamp: 't' })
+
+      await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      expect(mockRequestBiometricConfirmationUI.mock.calls[0][3]).toBe('biometric')
+    })
+
+    it('logs the way only, never who it is with', async () => {
+      mockIsBiometricsActive.mockResolvedValue(true)
+      mockFetchPreferences.mockResolvedValue({ useBiometry: false })
+      mockRequestBiometricConfirmationUI.mockResolvedValue({ status: 'confirmed', timestamp: 't' })
+
+      await requestBiometricConfirmationWithUI(mockAgent, counterpartyName, connectionId)
+
+      const lines = JSON.stringify(mockAgent.config.logger.info.mock.calls)
+      expect(lines).toContain('Keyring PIN')
+      expect(lines).not.toContain(counterpartyName)
+      expect(lines).not.toContain(connectionId)
+    })
+
     it('should return not_available when biometrics not active', async () => {
       mockIsBiometricsActive.mockResolvedValue(false)
 
