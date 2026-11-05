@@ -106,7 +106,7 @@ jest.mock('../module/releaseLog', () => ({
 // eslint-disable-next-line import/order
 import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 // eslint-disable-next-line import/order
-import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
+import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
 // eslint-disable-next-line import/order
 import { VtaClient } from '../module/VtaClient'
 // eslint-disable-next-line import/order
@@ -214,7 +214,7 @@ async function newPhone() {
   const storeDir = mkdtempSync(join(tmpdir(), 'hidden-app-real-'))
   dirs.push(storeDir)
   const agent = new Agent({
-    config: { label: 'hidden-application-real-store' },
+    config: {},
     dependencies: agentDependencies,
     modules: {
       askar: new AskarModule({
@@ -233,11 +233,15 @@ async function newPhone() {
   const client = clientFor(vta)
   mockClient = client
   const community = new GenericRecordsCommunityStore(agent)
-  const persona = (did: string) => ({
+  // An identity as the phone keeps one: made for COMMUNITY at this agent, its keys named at the agent.
+  const persona = (did: string): VtiPersona => ({
     did,
     communityDid: COMMUNITY,
+    vtaDid: VTA_DID,
+    contextId: 'vta',
     vtaKeyIds: { signing: `${did}#key-1`, keyAgreement: `${did}#key-2` },
     kmsKeyIds: { signing: 'kms-signing', keyAgreement: 'kms-agreement' },
+    createdAt: new Date().toISOString(),
   })
   const apply = (joinDid = ME) =>
     startHiddenApplication(agent, client, {
@@ -518,6 +522,7 @@ describe('a membership card kept on its own (known limit)', () => {
       did: 'did:webvh:QmSomeoneElse:dids.example:kept-for-other',
       contextId: 'vta',
       vtaKeyIds: { signing: 'other#key-1', keyAgreement: 'other#key-2' },
+      createdAt: new Date().toISOString(),
     })
     // This identity, made for COMMUNITY, applied privately there and to the other community. Both records name the
     // same agent, so the per-agent skip, which engages only after a failure, can't be what leaves one open.
@@ -530,14 +535,14 @@ describe('a membership card kept on its own (known limit)', () => {
       parameters: { suite: 'ps-ddh-bls12381' } as never,
       minimum: 2,
     })
-    const target = { ...p.persona(me), vtaDid: VTA_DID, contextId: 'vta' }
+    const target = p.persona(me)
 
     await later()
     // The other community admits it first: its card is kept on its own.
-    await keepForPersona(p.agent, target as never, membershipCard(me, OTHER) as never)
+    await keepForPersona(p.agent, target, membershipCard(me, OTHER) as never)
     await settle()
     // Then COMMUNITY admits it. The sweep this card starts reads both records.
-    await keepForPersona(p.agent, target as never, membershipCard(me) as never)
+    await keepForPersona(p.agent, target, membershipCard(me) as never)
     await until("COMMUNITY's application is closed", async () =>
       (await p.stored()).some((s) => s.community === COMMUNITY && s.closed !== undefined)
     )
