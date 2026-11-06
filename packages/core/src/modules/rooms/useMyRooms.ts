@@ -19,8 +19,16 @@ import { WALLET_LOCKED_EVENT } from '../../utils/walletLocked'
 
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
+import { failureCategory, logRef } from './roomsLogWords'
 import { RoomsUnavailable } from './types'
-import type { OperationStatus, RoomOffer, RoomsCapabilities, RoomsService, RoomSummary } from './types'
+import type {
+  HeldBackCommunity,
+  OperationStatus,
+  RoomOffer,
+  RoomsCapabilities,
+  RoomsService,
+  RoomSummary,
+} from './types'
 import { useRoomOfferIds } from './useRoomOffersCount'
 
 export interface MyRooms {
@@ -30,6 +38,11 @@ export interface MyRooms {
   rooms?: RoomSummary[]
   /** Empty when listing offers is not available; undefined until they are first read. */
   offers?: RoomOffer[]
+  /**
+   * Communities whose rooms are still to come: the last read could not ask them for now (the session was kept for
+   * another identity) and reads again when it can. Said as "Still loading…" under their names, never why.
+   */
+  stillLoading?: HeldBackCommunity[]
   /** The last read of the offers failed: the rooms show anyway, and the screen says the offers couldn't be read. */
   offersFailed: boolean
   /** The last read failed; what was read before stays. */
@@ -77,8 +90,6 @@ export const forgetMyRooms = (): void => {
   remembered = new WeakMap()
 }
 
-const why = (e: unknown) => (e instanceof Error ? e.message : String(e))
-
 export function useMyRooms(service: RoomsService | undefined, communityDid?: string): MyRooms {
   const [state, setState] = useState<Omit<MyRooms, 'reload' | 'reread' | 'offersNotShown'>>(() => ({
     ...rememberedOf(service, communityDid),
@@ -121,7 +132,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
   useEffect(() => {
     if (!service) return
     let live = true
-    const where = communityDid ? `rooms of ${communityDid}` : 'rooms'
+    const where = communityDid ? `rooms of ${logRef(communityDid)}` : 'rooms'
     const began = Date.now()
     void (async () => {
       try {
@@ -142,7 +153,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
           },
           (e: unknown) => {
             service.note?.(
-              `[Rooms:list] the offers for the ${where} were not read (${Date.now() - began} ms): ${why(e)}`
+              `[Rooms:list] the offers for the ${where} were not read (${Date.now() - began} ms): ${failureCategory(e)}`
             )
             if (live) setState((s) => ({ ...s, offersFailed: true }))
           }
@@ -150,11 +161,15 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
         const rooms = listRooms ? await service.listMyRooms() : undefined
         if (!live) return
         const mine = communityDid ? rooms?.filter((r) => r.communityDid === communityDid) : rooms
+        const held = (listRooms ? (service.heldBack?.() ?? []) : []).filter(
+          (c) => !communityDid || c.communityDid === communityDid
+        )
         remember(service, communityDid, { capabilities, rooms: mine })
         setState((s) => ({
           ...s,
           capabilities,
           rooms: mine,
+          stillLoading: held,
           failed: false,
           failure: undefined,
           failures: 0,
@@ -163,7 +178,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
       } catch (e) {
         const failure: OperationStatus | undefined =
           e instanceof RoomsUnavailable ? { status: 'unavailable', reason: e.reason, detail: e.message } : undefined
-        service.note?.(`[Rooms:list] the ${where} were not read (${Date.now() - began} ms): ${why(e)}`)
+        service.note?.(`[Rooms:list] the ${where} were not read (${Date.now() - began} ms): ${failureCategory(e)}`)
         if (live) setState((s) => ({ ...s, failed: true, failure, failures: s.failures + 1, refreshing: false }))
       }
     })()
@@ -177,7 +192,7 @@ export function useMyRooms(service: RoomsService | undefined, communityDid?: str
   useEffect(() => {
     if (!service || !state.failed || state.failures !== 1) return
     const timer = setTimeout(() => {
-      service.note?.(`[Rooms:list] trying the ${communityDid ? `rooms of ${communityDid}` : 'rooms'} again`)
+      service.note?.(`[Rooms:list] trying the ${communityDid ? `rooms of ${logRef(communityDid)}` : 'rooms'} again`)
       // Said on the screen as the member's Try again is: "Trying again…", not a still failure.
       setState((s) => ({ ...s, refreshing: true }))
       reread()

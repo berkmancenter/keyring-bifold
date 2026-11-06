@@ -33,13 +33,21 @@ import { REQUEST_VMC } from './vtiMemberVmc'
 import { receiveRequestVmc, reciprocateIfOwed } from './vtiReciprocate'
 import { invitationOfferOfMessage, redeemInvitationOffer, VtiInvitationOfferError } from './vtiInvitationOffer'
 import { didPrefix } from './didPrefix'
+import { sameIdentity } from './didScid'
+import { shareIdentityWith } from './sharedIdentity'
 import { releaseWarn } from './releaseLog'
 import { vtiAgent } from './vtiAgent'
 import { vtaAgent } from './vtaAgent'
 import { refusedAsNotOnAcl } from './VtaClient'
 import { KeyCopyUnavailable } from './EphemeralKeyManagementService'
 import { GenericRecordsTspPeerRevisionStore } from './vtiTsp'
-import { GenericRecordsVettingStore, VtiApplicant } from './vtiVetting'
+import {
+  closeExpiredParkedRequests,
+  GenericRecordsVettingStore,
+  isVettingRequest,
+  parkVettingRequest,
+  VtiApplicant,
+} from './vtiVetting'
 
 /** Emitted with `{ communityDid, kinds }` whenever the inbox stores something. */
 export { VTI_PERSONA_DELIVERIES_EVENT }
@@ -96,13 +104,17 @@ export async function keepForPersona(
   // The community removed this persona, or received its join request: applied
   // once checked (vtiCommunityNotices), and nothing else to do with it.
   if (message.type === REMOVAL_NOTICE || message.type === SUBMIT_RECEIPT) {
+    // The community that sent it, which is not this identity's own when the
+    // identity is kept for a second community too (sharedIdentity).
+    const sender = typeof message.from === 'string' && message.from ? message.from : target.communityDid
+    const about = sameIdentity(sender, target.communityDid) ? target.communityDid : sender
     return receiveCommunityNotice(agent, community, target.did, message).then(async (outcome) => {
       // A removal ends what was gathered to join, too: joining again is a new
       // identity, and a new application (IN-104).
-      if (outcome === 'removed') await vetting.forgetApplication(target.communityDid).catch(() => undefined)
+      if (outcome === 'removed') await vetting.forgetApplication(about).catch(() => undefined)
       if (outcome === 'removed' || outcome === 'acknowledged')
         DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
-          communityDid: target.communityDid,
+          communityDid: about,
           kinds: [outcome],
         })
     })
@@ -125,22 +137,40 @@ export async function keepForPersona(
     })
   const onFiled = (item: VtiReceivedCredential) =>
     agent.config?.logger?.info?.(`[VTI] card filed: ${cardRef(item.credential)} as ${item.kind}`)
+  // A card from a community this identity was not made for: the person joined
+  // it with this identity elsewhere. The identity is kept for that community
+  // too, so the phone can act there; it is never put over another identity the
+  // phone keeps for it (IN-517).
+  // The cards kept on their own, not on a membership: nothing is owed to their community for them.
+  const onItsOwn = new Set<VtiReceivedCredential>()
+  const fileUnder = async (item: VtiReceivedCredential): Promise<boolean> => {
+    if (item.communityDid === target.communityDid) return true
+    const outcome = await shareIdentityWith(new GenericRecordsIdentityStore(agent), target, item.communityDid)
+    if (outcome === 'shared') agent.config?.logger?.info?.('[VTI] identity kept for a second community')
+    if (outcome === 'shared' || outcome === 'already') return true
+    agent.config?.logger?.warn?.(`[VTI] ${item.kind} card for another community kept on its own (${outcome})`)
+    onItsOwn.add(item)
+    return false
+  }
   return receiveIssue(community, target.did, message, {
     acceptStatement,
     onRefused,
     onFiled,
+    fileUnder,
     checkCard: deliveredCardCheck(agent),
   }).then(
     (got: VtiReceivedCredential[]) => {
-      // A membership card kept: the member's half of the pair goes back (vtc/members/vmc/0.1).
-      if (got.some((c) => c.kind === 'membership'))
-        void reciprocateIfOwed(agent, community, target, target.communityDid)
-      if (got.length) {
-        DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
-          communityDid: target.communityDid,
-          kinds: got.map((c) => c.kind),
-        })
+      // Each community whose membership card was kept: the member's half of the pair goes back to it
+      // (vtc/members/vmc/0.1), from the community the card came from, not the one this identity was made for.
+      const joined = new Set(got.filter((c) => c.kind === 'membership' && !onItsOwn.has(c)).map((c) => c.communityDid))
+      for (const communityDid of joined) void reciprocateIfOwed(agent, community, target, communityDid)
+      const byCommunity = new Map<string, VtiReceivedCredential['kind'][]>()
+      for (const c of got) {
+        const about = c.kind === 'vetting-statement' ? target.communityDid : c.communityDid
+        byCommunity.set(about, [...(byCommunity.get(about) ?? []), c.kind])
       }
+      for (const [communityDid, kinds] of byCommunity)
+        DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, { communityDid, kinds })
     },
     (e) => {
       // A card whose status list could not be read stays off the mediator for
@@ -227,6 +257,11 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
     // and lost (227.1: five invitation offers; a vetter grant, 227 gate).
     const { did, signingInAs } = vtiAgent.getState()
     const sessionDid = did ?? signingInAs
+    // Whose it is decides which desk takes it, so this waits on the mediator too. Named by kind only: nothing of a
+    // vetting request reaches the log.
+    if (isVettingRequest(message) && !sessionDid) {
+      throw new Error("[VTI] persona inbox: a vetting request not taken yet: the session's identity is not known")
+    }
     if (owned && !sessionDid) {
       // Not taken, so not acknowledged: the mediator keeps it for the next drain.
       throw new Error(
@@ -250,8 +285,12 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
           ? `the session is ${sessionDid ? didPrefix(sessionDid) : 'not connected'}, not an identity of this phone`
           : `no persona for ${options.communityDid ? didPrefix(options.communityDid) : 'any community'}`
       )
+    // Kept for the desk before it is acknowledged: the desk listens only while the Vetting screen is open.
+    if (isVettingRequest(message)) return parkVettingRequest(new GenericRecordsVettingStore(agent), holder, message)
     return keepForPersona(agent, holder, message, options)
   })
+  // A parked request's ticket can expire with the vetter never back at the desk.
+  void closeExpiredParkedRequests(new GenericRecordsVettingStore(agent)).catch(() => undefined)
 
   const tick = async (): Promise<void> => {
     if (stopped) return

@@ -36,7 +36,9 @@ import {
 import type { PhotoSource } from '../modules/chat/media/pick'
 import EmojiPickerSheet from '../modules/chat/emoji/EmojiPickerSheet'
 import { type ChatMessageIds, deleteChatMessages } from '../modules/chat/history'
+import { loadChatDraft, saveChatDraft } from '../modules/chat/draft'
 import { removeReaction, sendChatText, sendReaction } from '../modules/chat/send'
+import { failureCategory } from '../modules/rooms/roomsLogWords'
 import type { ChatSendOutcome } from '../modules/chat/send'
 import { chatEventsShown } from '../modules/chat/shown'
 import { renderActions } from '../components/chat/ChatActions'
@@ -45,14 +47,24 @@ import { renderDayPill } from '../components/chat/DayPill'
 import { useNetwork } from '../contexts/network'
 import { useStore } from '../contexts/store'
 import { useTheme } from '../contexts/theme'
-import { useChatMessagesByConnection, useVrcFlowInProgress, PROGRESS_MILESTONES } from '../hooks/chat-messages'
+import {
+  isPeerWaitStatus,
+  useChatMessagesByConnection,
+  useVrcFlowInProgress,
+  PROGRESS_MILESTONES,
+} from '../hooks/chat-messages'
 import { useConnectionDisplayName } from '../hooks/connections'
 import ContinuityRequestCard from '../modules/vrc/components/ContinuityRequestCard'
+import { LateStepHeldCard, WaitingSinceCard } from '../modules/vrc/components/LateStepCards'
+import { useHeldStep, useTickingNow } from '../modules/vrc/hooks/useLateStep'
+import { askPeerReady, lateStepStore, stopExchange } from '../modules/vrc/lateStep'
+import { vrcFlowStore } from '../modules/vrc/witnessStatusStore'
 import { useWitnessConnection } from '../modules/vrc/context/WitnessConnectionProvider'
 import { Role } from '../types/chat'
 import { markChatEventsSeen } from '../modules/chat/seen'
 import { BasicMessageMetadata, basicMessageCustomMetadata } from '../types/metadata'
 import { getActiveChatConnectionId, setActiveChatConnectionId } from '../utils/activeChatTracker'
+import { testIdWithKey } from '../utils/testable'
 import { sendCapabilityNoticeIfNeeded } from '../modules/chat/notice'
 import { counterpartySpeaksChat } from '../modules/chat/capability'
 import { useChatEvents } from '../modules/chat/chatEventsStore'
@@ -60,7 +72,18 @@ import { useChatDraft } from '../modules/chat/useChatDraft'
 import { timerOf } from '../modules/chat/timer'
 import { registerOtaApplyBlocker } from '../utils/otaApply'
 import { RootStackParams, ContactStackParams, Screens, Stacks, TabStacks } from '../types/navigators'
-import { Alert, Animated, Easing, Platform, View, StyleSheet, Text, TouchableOpacity, ViewToken } from 'react-native'
+import {
+  Alert,
+  Animated,
+  Easing,
+  Platform,
+  ScrollView,
+  View,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  ViewToken,
+} from 'react-native'
 
 const PROGRESS_BAR_WIDTH = 200
 
@@ -172,6 +195,29 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
     onDismissConfirmation,
     onDismissWaiting,
   } = useVrcFlowInProgress(connectionId)
+
+  // A step that arrived late waits for both people (lateStep.ts, IN-448): asked here, or offered again from the bar.
+  const heldStep = useHeldStep(connectionId)
+  const lateNow = useTickingNow(Boolean(heldStep && !heldStep.dismissed) || vrcWaitingOnPeer)
+  const waitingSince = vrcWaitingOnPeer ? vrcFlowStore.getStatusSince(connectionId) : undefined
+  const [lateBusy, setLateBusy] = useState(false)
+  const onCheckReady = useCallback(async () => {
+    if (!agent || lateBusy) return
+    setLateBusy(true)
+    try {
+      await askPeerReady(agent, connectionId)
+    } catch (e) {
+      agent.config.logger.warn(`[VRC:LateStep] ready-check not sent: ${(e as Error).message}`)
+    } finally {
+      setLateBusy(false)
+    }
+  }, [agent, connectionId, lateBusy])
+  const onStopExchange = useCallback(() => {
+    if (!agent) return
+    void stopExchange(agent, connectionId).catch((e: Error) =>
+      agent.config.logger.warn(`[VRC:LateStep] stop not sent: ${e.message}`)
+    )
+  }, [agent, connectionId])
 
   // Check if this connection is a witness connection by matching connectionId
   const _isWitnessConnection = connectedWitness?.connectionId === connectionId
@@ -331,6 +377,17 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
   // disappears: the person is asked first, and their text and reply are put back if they would rather not.
   const chatEvents = useChatEvents(connectionId)
   const timerOn = useMemo(() => (chatEvents ? (timerOf(chatEvents)?.expiresIn ?? 0) > 0 : false), [chatEvents])
+  // The chat on screen now, none once the screen has gone. A deep link or a message wake can change the chat under
+  // this screen while a send is out, and the person can leave it.
+  const chatOnScreen = useRef<string | undefined>(connectionId)
+  useEffect(() => {
+    chatOnScreen.current = connectionId
+    return () => {
+      chatOnScreen.current = undefined
+    }
+  }, [connectionId])
+  // Failed sends kept as drafts, one at a time: each reads what the last one wrote, so two can't lose one.
+  const keepingNotSent = useRef<Promise<void>>(Promise.resolve())
   const onSend = useCallback(
     async (messages: IMessage[]) => {
       // gifted-chat has just reset the field, to a hand-over's text if one was still on: empty it either way.
@@ -338,8 +395,49 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
       if (!agent) return
       const message = messages[0]
       const inReplyTo = message.replyMessage?._id
+      // The field was emptied above, and a chat event that failed is stored nowhere (send.ts), so the words are only
+      // here. They stay with the chat they were written for: never in another contact's field, where Send would give
+      // them to that contact. With that chat gone from the screen, the notice says which chat and where the words are.
+      const notSent = async (error: unknown) => {
+        // The kind only: an agent's or transport's words can name the contact.
+        agent.config?.logger?.warn(`[Chat] a message was not sent: ${failureCategory(error)}`)
+        if (chatOnScreen.current === connectionId) {
+          Toast.show({ type: ToastType.Error, text1: t('Chat.MessageNotSent') })
+          composer.putBack(message.text)
+          if (message.replyMessage) setReplyTarget((current) => current ?? (message.replyMessage as ReplyMessage))
+          return
+        }
+        const keep = keepingNotSent.current.then(async () => {
+          const kept = await loadChatDraft(agent, connectionId)
+          await saveChatDraft(agent, connectionId, kept ? `${message.text}\n${kept}` : message.text)
+        })
+        keepingNotSent.current = keep.catch(() => undefined)
+        try {
+          await keep
+          Toast.show({
+            type: ToastType.Error,
+            text1: t('Chat.MessageNotSentKept', { name: theirLabel, interpolation: { escapeValue: false } }),
+            // About 20 words, and the person may be looking elsewhere. Missed, it costs a moment's confusion: the words
+            // are in that chat's draft.
+            visibilityTime: 8000,
+          })
+        } catch (keepError) {
+          agent.config?.logger?.warn(`[Chat] a message not sent was not kept: ${failureCategory(keepError)}`)
+          Toast.show({
+            type: ToastType.Error,
+            text1: t('Chat.MessageNotSentLost', { name: theirLabel, interpolation: { escapeValue: false } }),
+            // Longer than the one above: missed, this loss is silent. This toast is the only record of it.
+            visibilityTime: 15_000,
+          })
+        }
+      }
       const send = () =>
-        sendChatText(agent, connectionId, message.text, typeof inReplyTo === 'string' && inReplyTo ? { inReplyTo } : {})
+        sendChatText(
+          agent,
+          connectionId,
+          message.text,
+          typeof inReplyTo === 'string' && inReplyTo ? { inReplyTo } : {}
+        ).catch(notSent)
       if (timerOn && !(await counterpartySpeaksChat(agent, connectionId))) {
         const putBack = () => {
           composer.insert(message.text)
@@ -672,72 +770,118 @@ const Chat: React.FC<ChatProps> = ({ route }) => {
           onClosed={onPickerClosed}
         />
 
-        {/* VRC exchange flow loading overlay */}
-        {vrcFlowInProgress && (
+        {/* A remote step that arrived late: asked before anything is sent or signed (lateStep.ts) */}
+        {heldStep && !heldStep.dismissed && (
           <View style={styles.flowOverlay} pointerEvents="auto">
-            <View style={styles.flowOverlayContent}>
-              {vrcConfirmed ? (
-                <>
-                  <Text style={styles.flowOverlayText}>
-                    {theirLabel
-                      ? t('Chat.RelationshipConfirmedWith', { name: theirLabel })
-                      : t('Chat.RelationshipConfirmed')}
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={() => {
-                      onDismissConfirmation()
-                      const nav = navigation.getParent() ?? navigation
-                      ;(nav as any).navigate(TabStacks.ContactStack, { screen: Screens.Contacts })
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Chat.ViewContacts')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Chat.ViewContacts')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : vrcTimedOut ? (
-                <>
-                  <Text style={styles.flowOverlayTimeoutIcon}>⚠</Text>
-                  <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={() => {
-                      onDismissTimeout()
-                      const nav = navigation.getParent() ?? navigation
-                      ;(nav as any).navigate(Stacks.TabStack)
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Global.Dismiss')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : vrcWaitingOnPeer ? (
-                <>
-                  <Text style={styles.flowOverlayText}>{t('Relationship.WaitingForAnswer', { name: theirLabel })}</Text>
-                  <TouchableOpacity
-                    style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
-                    onPress={onDismissWaiting}
-                    accessibilityRole="button"
-                    accessibilityLabel={t('Global.Dismiss')}
-                  >
-                    <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
-                  {progressFraction > 0 && (
-                    <FlowProgressBar
-                      fraction={progressFraction}
-                      color={ColorPalette.brand.primary}
-                      complete={progressComplete}
-                    />
-                  )}
-                </>
-              )}
-            </View>
+            <ScrollView
+              style={styles.flowOverlayScroll}
+              contentContainerStyle={styles.flowOverlayScrollContent}
+              bounces={false}
+            >
+              <View style={styles.flowOverlayContent}>
+                <LateStepHeldCard
+                  name={theirLabel}
+                  held={heldStep}
+                  now={lateNow}
+                  onCheck={() => void onCheckReady()}
+                  onNotNow={() => lateStepStore.dismiss(connectionId)}
+                  onStop={() => lateStepStore.dismiss(connectionId, true)}
+                  busy={lateBusy}
+                  textColor="#333"
+                />
+              </View>
+            </ScrollView>
+          </View>
+        )}
+        {heldStep?.dismissed && (
+          <TouchableOpacity
+            style={[styles.lateStepBar, { backgroundColor: ColorPalette.brand.primary }]}
+            onPress={() => lateStepStore.reopen(connectionId)}
+            testID={testIdWithKey('LateStepFinishBar')}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('LateStep.WaitingBar', { name: theirLabel })}. ${t('LateStep.Finish')}`}
+          >
+            <Text style={styles.lateStepBarText}>
+              {t('LateStep.WaitingBar', { name: theirLabel, interpolation: { escapeValue: false } })} ·{' '}
+              {t('LateStep.Finish')}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {/* VRC exchange flow loading overlay (a held step's card takes its place until both people are here) */}
+        {vrcFlowInProgress && !heldStep && (
+          <View style={styles.flowOverlay} pointerEvents="auto">
+            <ScrollView
+              style={styles.flowOverlayScroll}
+              contentContainerStyle={styles.flowOverlayScrollContent}
+              bounces={false}
+            >
+              <View style={styles.flowOverlayContent}>
+                {vrcConfirmed ? (
+                  <>
+                    <Text style={styles.flowOverlayText}>
+                      {theirLabel
+                        ? t('Chat.RelationshipConfirmedWith', { name: theirLabel })
+                        : t('Chat.RelationshipConfirmed')}
+                    </Text>
+                    <TouchableOpacity
+                      style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
+                      onPress={() => {
+                        onDismissConfirmation()
+                        const nav = navigation.getParent() ?? navigation
+                        ;(nav as any).navigate(TabStacks.ContactStack, { screen: Screens.Contacts })
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('Chat.ViewContacts')}
+                    >
+                      <Text style={styles.flowOverlayDismissText}>{t('Chat.ViewContacts')}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : vrcTimedOut ? (
+                  <>
+                    <Text style={styles.flowOverlayTimeoutIcon}>⚠</Text>
+                    <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
+                    <TouchableOpacity
+                      style={[styles.flowOverlayDismissButton, { backgroundColor: ColorPalette.brand.primary }]}
+                      onPress={() => {
+                        onDismissTimeout()
+                        const nav = navigation.getParent() ?? navigation
+                        ;(nav as any).navigate(Stacks.TabStack)
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel={t('Global.Dismiss')}
+                    >
+                      <Text style={styles.flowOverlayDismissText}>{t('Global.Dismiss')}</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : vrcWaitingOnPeer ? (
+                  <WaitingSinceCard
+                    name={theirLabel}
+                    since={waitingSince}
+                    now={lateNow}
+                    onWait={onDismissWaiting}
+                    onStop={onStopExchange}
+                    textColor="#333"
+                  />
+                ) : (
+                  <>
+                    <Text style={styles.flowOverlayText}>{vrcStatusText}</Text>
+                    {isPeerWaitStatus(vrcFlowStore.getStatus(connectionId)) && (
+                      <Text style={styles.flowOverlayNote} testID={testIdWithKey('VrcFlowKeepOpen')}>
+                        {t('LateStep.KeepOpen', { name: theirLabel, interpolation: { escapeValue: false } })}
+                      </Text>
+                    )}
+                    {progressFraction > 0 && (
+                      <FlowProgressBar
+                        fraction={progressFraction}
+                        color={ColorPalette.brand.primary}
+                        complete={progressComplete}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
+            </ScrollView>
           </View>
         )}
       </View>
@@ -753,6 +897,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
+  // At the largest text sizes a card is taller than the page: it scrolls, and starts at the top, instead of
+  // spilling off both ends with its buttons out of reach.
+  flowOverlayScroll: { alignSelf: 'stretch' },
+  flowOverlayScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 16 },
   flowOverlayContent: {
     backgroundColor: 'white',
     borderRadius: 16,
@@ -785,6 +933,26 @@ const styles = StyleSheet.create({
   flowOverlayDismissText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  flowOverlayNote: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#555',
+    textAlign: 'center',
+  },
+  lateStepBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    zIndex: 900,
+  },
+  lateStepBarText: {
+    color: '#FFFFFF',
+    fontSize: 15,
     fontWeight: '600',
   },
 })
