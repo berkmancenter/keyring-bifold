@@ -157,11 +157,15 @@ export function isTriggerLink(text: string): boolean {
  * read, and a code that cannot be used says why (expired, can't be used, …).
  * Either way nothing is sent and nothing is logged. A sign-in the reader
  * accepts goes to the sign-in screen instead (`signInToOpen`).
+ *
+ * The reads here claim no channel: this routing serves a scan, a paste and a
+ * deep link alike and is not told which, and the reader's result never
+ * depends on it.
  */
 function triggerLinkError(text: string): KeyringLinkError {
   let ui: Exclude<TriggerUi, 'pass-on'> = 'update'
   if (triggerLinkSignInEnabled()) {
-    const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+    const action = triggerAction(readTrigger(text))
     if (action.kind === 'say' && action.ui !== 'pass-on') ui = action.ui
   }
   return new KeyringLinkError(TRIGGER_UI_MESSAGES[ui], undefined, TRIGGER_UI_MESSAGE_KEYS[ui])
@@ -174,7 +178,7 @@ function triggerLinkError(text: string): KeyringLinkError {
  */
 function signInToOpen(text: string): boolean {
   if (!triggerLinkSignInEnabled()) return false
-  const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+  const action = triggerAction(readTrigger(text))
   return action.kind === 'proceed' && action.flow === 'sign-in'
 }
 
@@ -184,7 +188,7 @@ function signInToOpen(text: string): boolean {
  * sent until the person continues on that screen.
  */
 function vtaClaimToOpen(text: string): boolean {
-  const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+  const action = triggerAction(readTrigger(text))
   return action.kind === 'proceed' && action.flow === 'vta-claim'
 }
 
@@ -196,7 +200,7 @@ function vtaClaimToOpen(text: string): boolean {
  */
 function sharedConnectToOpen(text: string): boolean {
   if (!isSharedConnectEnabled()) return false
-  const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+  const action = triggerAction(readTrigger(text))
   return action.kind === 'proceed' && action.flow === 'shared-connect'
 }
 

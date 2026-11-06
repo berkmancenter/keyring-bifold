@@ -56,7 +56,7 @@ export async function previewSharedConnect(
   link: string,
   options: { now?: number } = {}
 ): Promise<SharedConnectPreviewResult> {
-  const action = triggerAction(readTrigger(link, { channel: 'scan', now: options.now }))
+  const action = triggerAction(readTrigger(link, { now: options.now }))
   if (action.kind === 'say') return { kind: 'refused', ui: action.ui === 'pass-on' ? 'invalid' : action.ui }
   if (action.flow !== 'shared-connect') return { kind: 'refused', ui: 'update' }
   const trigger = action.trigger
