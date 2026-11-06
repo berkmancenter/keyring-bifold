@@ -19,7 +19,7 @@
  * @module trust-tasks/module/sharedConnectCeremony
  */
 
-import type { Agent } from '@credo-ts/core'
+import { TypedArrayEncoder, type Agent } from '@credo-ts/core'
 
 import { signDocumentProof } from '../documentProof'
 
@@ -50,11 +50,15 @@ export interface CeremonyMember {
 
 const B64URL = /^[A-Za-z0-9_-]{22}$/
 
-/** A 16-byte challenge as 22 characters of unpadded base64url: what `propose.id` is in this ceremony. */
+/**
+ * A 16-byte challenge as 22 characters of unpadded base64url: what `propose.id` is in this ceremony.
+ * Credo's encoder, not `Buffer#toString('base64url')`: the app's Buffer is the `buffer` package, which
+ * has no base64url and throws `TypeError: Unknown encoding` (Node's has it, so jest never saw this).
+ */
 export function newProposeId(randomBytes: (length: number) => Uint8Array): string {
   const bytes = randomBytes(16)
   if (bytes.length !== 16) throw new Error('newProposeId needs 16 random bytes')
-  return Buffer.from(bytes).toString('base64url')
+  return TypedArrayEncoder.toBase64Url(bytes)
 }
 
 export const isChallengeShaped = (value: unknown): value is string => typeof value === 'string' && B64URL.test(value)
