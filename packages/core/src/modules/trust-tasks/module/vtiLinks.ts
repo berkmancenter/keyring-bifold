@@ -151,6 +151,17 @@ export function isTriggerLink(text: string): boolean {
 }
 
 /**
+ * A link as it may be logged. A trigger link (a sign-in, an agent claim, a
+ * shared-connect code) is never logged as text: its contact, its handle and
+ * a shared-connect `_label` are the sender's, and a label is whatever they
+ * typed. Only its kind and length are. Any other link is returned unchanged.
+ */
+export function linkForLog(text: string): string {
+  const trimmed = text.trim()
+  return isTriggerLink(trimmed) ? `trigger link (${[...trimmed].length} chars)` : text
+}
+
+/**
  * What the scanner says of a trigger link. With sign-in off (the default) it
  * is the words the trigger-link spec gives a reader for a flow it does not
  * implement (outcome `update`), whatever the link. With it on, the link is

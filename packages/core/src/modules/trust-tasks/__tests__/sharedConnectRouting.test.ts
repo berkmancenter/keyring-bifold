@@ -1,7 +1,13 @@
 /** A shared-connect link through the scanner's router (plan WP1): behind the developer flag, to its own screen. */
 import { Screens } from '../../../types/navigators'
 import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
-import { keyringAgentLinkKind, MY_AGENT_SCREEN, myAgentLinkParams, routeKeyringAgentLink } from '../module/vtiLinks'
+import {
+  keyringAgentLinkKind,
+  linkForLog,
+  MY_AGENT_SCREEN,
+  myAgentLinkParams,
+  routeKeyringAgentLink,
+} from '../module/vtiLinks'
 
 import { sharedConnectLink } from './fixtures/sharedConnectFixtures'
 
@@ -65,5 +71,24 @@ describe('a shared-connect link', () => {
       await expect(routeKeyringAgentLink(link, {} as never, navigate)).rejects.toMatchObject({ messageKey })
       expect(navigate).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('the deep-link log line (WP12)', () => {
+  const SENTINEL = 'Zq-label-sentinel-7781'
+
+  it('names a trigger link by kind and length only: never its label, handle or contact', () => {
+    const link = sharedConnectLink({ exp: Math.floor(Date.now() / 1000) + 300, label: SENTINEL })
+    const fragment = new URLSearchParams(link.slice(link.indexOf('#') + 1))
+    const line = linkForLog(` ${link}\n`)
+    expect(line).toBe(`trigger link (${[...link].length} chars)`)
+    for (const secret of [SENTINEL, fragment.get('_id') as string, (fragment.get('_from') as string).slice(0, 30)]) {
+      expect(line).not.toContain(secret)
+    }
+  })
+
+  it('leaves any other link as it was', () => {
+    expect(linkForLog('https://example.org/oob?c_i=abc')).toBe('https://example.org/oob?c_i=abc')
+    expect(linkForLog('keyring://messages')).toBe('keyring://messages')
   })
 })
