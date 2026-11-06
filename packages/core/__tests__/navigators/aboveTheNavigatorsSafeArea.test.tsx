@@ -38,6 +38,20 @@ jest.mock('../../src/services/keychain', () => ({
   loadWalletKey: jest.fn().mockResolvedValue(true),
 }))
 
+// The one fake in this file, and it is named here rather than left to be found.
+// ActivityProvider does `const { lockOutUser } = useAuth()` (contexts/activity.tsx:74),
+// and AuthContext's default is null, so without an AuthProvider that destructure
+// throws before any safe-area question arises. RootStack has AuthProvider above it
+// (App.tsx:53), so supplying one is faithful; a minimal fake is used instead of the
+// real provider because AuthProvider opens the store and starts an agent, none of
+// which this file is about. Faking it costs no coverage of the defect being guarded:
+// useAuth is a plain useContext (contexts/auth.tsx:322) and cannot throw the
+// safe-area error.
+jest.mock('../../src/contexts/auth', () => ({
+  ...jest.requireActual('../../src/contexts/auth'),
+  useAuth: () => ({ lockOutUser: jest.fn(), walletSecret: undefined }),
+}))
+
 import { ActivityProvider } from '../../src/contexts/activity'
 import { BiometricConfirmationProvider } from '../../src/contexts/biometric-confirmation'
 import CredentialExchangeQueryModal from '../../src/modules/trust-tasks/components/CredentialExchangeQueryModal'
