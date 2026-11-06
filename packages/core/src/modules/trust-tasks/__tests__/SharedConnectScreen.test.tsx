@@ -111,6 +111,19 @@ describe('Connect', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('starts once however many times Connect is pressed before the screen changes', async () => {
+    const s = steps({ start: jest.fn(() => new Promise<never>(() => undefined)) })
+    const tree = await show(s)
+    const connect = tree.getByTestId(id(SharedConnectIds.connect))
+    await act(async () => {
+      // Three touches in one frame: no render in between.
+      fireEvent.press(connect)
+      fireEvent.press(connect)
+      fireEvent.press(connect)
+    })
+    expect(s.start).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['an expiry that passed meanwhile', { kind: 'refused', ui: 'expired' }, 'Scan.TriggerLinkExpired'],
     ['a failure', { kind: 'failed' }, 'SharedConnect.Failed'],

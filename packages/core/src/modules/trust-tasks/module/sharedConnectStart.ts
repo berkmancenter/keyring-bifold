@@ -93,6 +93,8 @@ export interface SharedConnectStartDeps {
 }
 
 const sessions = new Map<string, SharedConnectSession>()
+/** Starts under way or running, by enactment (the link's `_id`). */
+const starting = new Map<string, Promise<SharedConnectStartResult>>()
 
 /** The live session for an encounter, for retry and cancel from the screen. */
 export const getSharedConnectSession = (enactment: string): SharedConnectSession | undefined => sessions.get(enactment)
@@ -150,6 +152,30 @@ export async function startSharedConnect(
   const { preview, endpoint } = previewed
   // The relay must be a mediator named by DID: an https endpoint has no session to open yet (WP5).
   if (!endpoint.startsWith('did:')) return { kind: 'refused', ui: 'unreachable' }
+  // One start per code: a second tap, or a second scan of the same code, while
+  // the first is starting or its exchange runs, joins it. Two starts would mint
+  // two encounter DIDs and send two proposes, and the inviter accepts one per `_id`.
+  const key = preview.enactment
+  const pending = starting.get(key)
+  if (pending) return pending
+  const attempt = startEncounter(agent, preview, endpoint, now, deps)
+  starting.set(key, attempt)
+  void attempt.then((result) => {
+    const session = result.kind === 'started' ? sessions.get(key) : undefined
+    if (session) void session.finished.then(() => starting.delete(key))
+    else starting.delete(key)
+  })
+  return attempt
+}
+
+/** Mint the encounter DID, keep the record and run the ceremony. */
+async function startEncounter(
+  agent: Agent,
+  preview: SharedConnectPreview,
+  endpoint: string,
+  now: number,
+  deps: SharedConnectStartDeps
+): Promise<SharedConnectStartResult> {
   try {
     const mediator = await deps.resolveMediator(agent, endpoint)
     const myVid = await deps.createDid(agent, mediator, { tsp: preview.carriage === 'tsp' })

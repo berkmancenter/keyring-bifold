@@ -126,6 +126,26 @@ describe('startSharedConnect', () => {
     expect(d.run).toHaveBeenCalledWith(expect.anything(), (result as { encounter: object }).encounter, MEDIATOR)
   })
 
+  it('starts once per code: a second Connect or scan while the first is starting joins it', async () => {
+    const d = deps()
+    let release: () => void = () => undefined
+    d.run.mockImplementationOnce(() => new Promise<undefined>((resolve) => (release = () => resolve(undefined))))
+    const agent = agentWith()
+    const first = startSharedConnect(agent, sharedConnectLink(), { now: NOW, deps: d })
+    const second = startSharedConnect(agent, sharedConnectLink(), { now: NOW, deps: d })
+    // Let both get past reading the link before the first finishes starting.
+    await new Promise((resolve) => setImmediate(resolve))
+    release()
+    const [a, b] = await Promise.all([first, second])
+    expect(d.createDid).toHaveBeenCalledTimes(1)
+    expect(d.run).toHaveBeenCalledTimes(1)
+    expect(b).toBe(a)
+    expect(a).toMatchObject({ kind: 'started' })
+    // Once it has ended (here: no session was left running), the code can be started again.
+    await startSharedConnect(agent, sharedConnectLink(), { now: NOW, deps: d })
+    expect(d.createDid).toHaveBeenCalledTimes(2)
+  })
+
   it('reports failed when the relay cannot be reached', async () => {
     const d = deps()
     d.run.mockRejectedValueOnce(new Error('relay down'))

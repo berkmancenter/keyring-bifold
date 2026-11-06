@@ -138,8 +138,12 @@ export const SharedConnectFlow: React.FC<{
     show(handle.outcome)
   }
 
+  // Set by the first press of Connect, before anything else: a second touch in
+  // the same frame lands before the step changes and must not start again.
+  const pressed = useRef(false)
   const connect = async () => {
-    if (!link) return
+    if (!link || pressed.current) return
+    pressed.current = true
     setStep({ kind: 'connecting' })
     try {
       const result = await steps.start(link)
