@@ -45,6 +45,15 @@ beforeEach(() => {
 })
 afterEach(() => warnSpy.mockRestore())
 
+// test/tsp-vta-leg-on: this branch ships the switch off. Declared first, so no
+// describe below has set the switch yet: this is the module's own default.
+describe('the default on this branch', () => {
+  it('is off: a VTA or VTC that names TSP 1.0 is spoken to over TSP 1.0', async () => {
+    const agent = agentWith({ service: [{ type: TSP_SERVICE_TYPE, version: '1.0' }] })
+    expect(await chooseCarriage(agent, 'did:example:default', true)).toBe('tsp')
+  })
+})
+
 describe('reading a document', () => {
   it('finds TSPTransport as a bare string, the way vta-service writes it', () => {
     expect(documentAdvertisesTsp({ service: [{ type: 'TSPTransport' }] })).toBe(true)
@@ -97,6 +106,7 @@ describe('caching', () => {
 describe('the TSP 1.0 stopgap: upstream services over DIDComm v2', () => {
   let warn: jest.SpyInstance
   beforeEach(() => {
+    setPreferDidcommForUpstream(true)
     warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
   })
   afterEach(() => warn.mockRestore())
@@ -233,6 +243,7 @@ describe('the per-peer rule (cutover plan §6.2)', () => {
 })
 
 describe('the kill-switch (row 1)', () => {
+  beforeEach(() => setPreferDidcommForUpstream(true))
   // On by default: the stopgap's preference stays the shipped behaviour until
   // the release that turns it off.
   it('with the switch on, no probe starts, and nothing is said about probing', async () => {

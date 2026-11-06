@@ -19,7 +19,7 @@ jest.mock('@bifold/trust-tasks', () => {
     },
   }
 })
-const mockDecision = { next: 'probe' as 'probe' | 'tsp' }
+const mockDecision = { next: 'probe' as 'probe' | 'tsp' | 'didcomm' }
 jest.mock('../module/tspCapability', () => ({
   chooseCarriage: jest.fn(
     async (
@@ -230,5 +230,38 @@ describe('falling back from TSP 1.0 mid-session (§6.2, change 2)', () => {
     expect(sendTo).not.toHaveBeenCalled()
     expect(sent.filter((s) => s.endsWith(WRITE))).toEqual(['tsp:' + WRITE])
     expect(isFreshV1(await peerRevisionStore.get(AGENT))).toBe(false)
+  })
+})
+
+// test/tsp-vta-leg-on: one Release line per ask names the carriage that took it, by task type only.
+describe('the carriage line', () => {
+  let lines: string[]
+  let spy: jest.SpyInstance
+  beforeEach(() => {
+    lines = []
+    spy = jest.spyOn(console, 'warn').mockImplementation((m: unknown) => void lines.push(String(m)))
+  })
+  afterEach(() => spy.mockRestore())
+  const carriageLines = () => lines.filter((l) => l.startsWith('[carriage]'))
+
+  it('an ask over TSP 1.0 says "tsp 1.0", once, with no identifier', async () => {
+    mockDecision.next = 'tsp'
+    const { client, answer } = harness()
+    const asked = client.task(VTA_TASK.configShow, {}, 30_000)
+    await flush()
+    answer(VTA_TASK.configShow)
+    await asked
+    expect(carriageLines()).toEqual([`[carriage] vta ask ${VTA_TASK.configShow}: tsp 1.0`])
+    expect(carriageLines().join('\n')).not.toMatch(/did:/)
+  })
+
+  it('an ask over DIDComm says "didcomm", once', async () => {
+    mockDecision.next = 'didcomm'
+    const { client, answer } = harness()
+    const asked = client.task(VTA_TASK.configShow, {}, 30_000)
+    await flush()
+    answer(VTA_TASK.configShow)
+    await asked
+    expect(carriageLines()).toEqual([`[carriage] vta ask ${VTA_TASK.configShow}: didcomm`])
   })
 })
