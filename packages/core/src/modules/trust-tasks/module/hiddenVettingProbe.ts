@@ -13,7 +13,7 @@ import type { Agent } from '@credo-ts/core'
 import { e2eClocksSet } from '../../../utils/e2eClocks'
 
 import { getKeyed, listKeyed, putKeyed } from './keyedRecords'
-import { pcsErrorCode } from './pcsVtaPayloads'
+import { pcsRefusalCode } from './pcsVtaPayloads'
 import { vtaAgent } from './vtaAgent'
 
 const RECORD_TYPE = 'keyring/hidden-vetting-probe'
@@ -70,7 +70,7 @@ export async function askAgent(agent: Agent, probe: HiddenApplicationProbe): Pro
     if (!application) return 'answered with no application (not a refusal)'
     return `FOUND: ${Array.isArray(application.attestations) ? application.attestations.length : 0} attestation(s)`
   } catch (error) {
-    const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+    const code = pcsRefusalCode(error)
     if (code) return `REFUSED: ${code}`
     return `ERROR (not an answer): ${error instanceof Error ? error.message : String(error)}`
   }
