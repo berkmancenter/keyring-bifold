@@ -50,6 +50,10 @@ export type RoomsOperation =
  *   record of it (rights, host). The operation needs those ("Details not loaded").
  * - `noRight`: this member's rights in the room do not include it ("You can't post here").
  * - `communityUnreachable`: none of the member's communities answered for their rooms; try again later.
+ * - `noIdentity`: the phone holds a membership in the community but no identity it can sign in as there, so nothing
+ *   was asked of it; trying again does not help (IN-517).
+ * - `keysNotHeld`: the identity is on the phone but its keys are not yet: the agent hands them over when it next
+ *   connects, and trying again then helps.
  * - `tierNotYet`: served, but Keyring does not yet do it in a room of this tier, e.g. writing in an `attributed`
  *   room, whose records are sealed ("not available yet in this kind of room").
  */
@@ -66,6 +70,8 @@ export type RoomsReason =
   | 'detailsNotLoaded'
   | 'noRight'
   | 'communityUnreachable'
+  | 'noIdentity'
+  | 'keysNotHeld'
   | 'tierNotYet'
   // Never in this kind of room: files exist on attributed and private rooms only (upstream refuses them on open ones).
   | 'notOnThisTier'
@@ -121,6 +127,12 @@ export interface RoomSummary {
   /** The DID of the host serving this room. Unknown for a custody-only room. */
   host?: string
   standing: 'member' | 'lapsed' | 'removed'
+  /**
+   * False for a sealed room the community lists for this identity while the agent holds none of its keys as it: not
+   * joined yet. A community's re-invite does not re-admit to a room, and its posts, notes and files said "Couldn't
+   * read… Try again later" for ever (34VR-Y58H, 277.8, 11-03). Absent: joined, or not known to be otherwise.
+   */
+  joined?: false
 }
 
 /** The operations whose status also depends on the room: its source and this member's rights in it. */
@@ -155,6 +167,10 @@ export interface NoteSummary {
   /** Set when an AI agent wrote it under its person's membership. */
   byAgent?: boolean
   updatedAt?: string
+  /** When the host first stored the record; neither an edit nor a curation moves it. Only where an agent serves it. */
+  createdAt?: string
+  /** Who wrote the record's first version, as the host recorded it. Only where an agent serves it, never on a private room. */
+  createdBy?: Identity
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
@@ -208,6 +224,15 @@ export interface Note extends NoteSummary {
   body: InertText
   flags: InertFlags
   check: HostCheck
+  /** What the record says it is (trust-tasks-tf #1027). An open set: see `placeOf`. Only once it is read. */
+  kind?: string
+  /** The record it answers, in this room. */
+  inReplyTo?: { key: string; version?: number }
+  /** When its author says they wrote it, and last edited it: the author's claim, not an attested time. */
+  writtenAt?: string
+  editedAt?: string
+  /** A reaction whose body, as written and before it was made inert, a reader must not show. */
+  reactionRefused?: true
 }
 
 /** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */
@@ -402,7 +427,9 @@ export class RoomsRefused extends Error {
     public readonly operation: RoomsOperation,
     public readonly code: string,
     public readonly retryable: boolean,
-    detail?: string
+    detail?: string,
+    /** The agent's or community's own refusal, where this passes one on: what a log reads its reason from. */
+    public readonly refusal?: unknown
   ) {
     super(`${operation} was refused (${code})${detail ? `: ${detail}` : ''}`)
     this.name = 'RoomsRefused'
@@ -420,6 +447,12 @@ export class RoomsConflict extends Error {
   }
 }
 
+/** A community whose rooms are still to come: the screens say "Still loading…" under its name, and nothing of why. */
+export interface HeldBackCommunity {
+  communityDid: string
+  communityName?: InertText
+}
+
 export interface RoomsService {
   /** True for the fixture service: every screen it feeds shows the "Sample data" banner. */
   readonly isSample: boolean
@@ -433,6 +466,11 @@ export interface RoomsService {
   capabilities(options?: { refresh?: boolean }): Promise<RoomsCapabilities>
 
   listMyRooms(): Promise<RoomSummary[]>
+  /**
+   * The communities the last `listMyRooms` could not read for now because the community session was kept for another
+   * of this phone's identities: their rooms come with a read again (`onReadable`). Never why. None for the sample.
+   */
+  heldBack?(): HeldBackCommunity[]
   getRoom(roomId: string): Promise<Room>
   /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
   roomCapabilities(roomId: string): Promise<RoomCapabilities>
