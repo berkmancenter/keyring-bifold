@@ -36,9 +36,9 @@ import * as propose from '@openvtc/trust-tasks/vrc/relationships/propose/0.1/pay
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 import { getOrCreateRelationshipDid } from '../../vrc/vrc-manager'
 import { vrcFlowStore } from '../../vrc/witnessStatusStore'
+import { getTrustTasksService } from '../ceremony'
 import { digestMultibase, verifyDocumentProof } from '../documentProof'
-import { TrustTaskDocumentRepository } from '../services/TrustTaskDocumentRepository'
-import { extendedCode, rejectWith, TrustTasksService } from '../services/TrustTasksService'
+import { extendedCode, rejectWith } from '../services/TrustTasksService'
 
 import { didPrefix } from './didPrefix'
 import { issueSharedConnectVrc, vcIssuerId, vcSubjectId, verifySharedConnectVrc } from './sharedConnectCredential'
@@ -57,7 +57,6 @@ import {
   SHARED_CONNECT_SEND_ATTEMPTS,
 } from './sharedConnectDecisions'
 import { storeReceivedVrc } from './sharedConnectStore'
-import { TrustTasksModule } from './TrustTasksModule'
 import { ENCOUNTER_LOG_PREFIX, encounterKey, saveEncounter, type EncounterRecord } from './sharedConnectEncounter'
 
 /** What the session sends through. Resolves when the document has been handed to the carriage. */
@@ -100,12 +99,9 @@ export type SessionState = SessionOutcome | 'waiting'
 const nowSeconds = (d: SharedConnectDeps) => Math.floor(d.now() / 1000)
 
 export function defaultSharedConnectDeps(agent: Agent): SharedConnectDeps {
-  // Registered on first use, as getTrustTasksService does for the connection ceremony: the app registers the
-  // module at start-up (setupTrustTasksInbound), but a start must not depend on that having run first.
-  if (!agent.dependencyManager.container.isRegistered(TrustTaskDocumentRepository)) {
-    new TrustTasksModule().register(agent.dependencyManager)
-  }
-  const service = new TrustTasksService(agent.dependencyManager.resolve(TrustTaskDocumentRepository))
+  // Registered on first use, by the one helper the connection ceremony uses too. The app registers the module at
+  // start-up (setupTrustTasksInbound, before the agent is handed out), but a start must not depend on that order.
+  const service = getTrustTasksService(agent)
   return {
     now: () => Date.now(),
     randomBytes: (length) => agent.kms.randomBytes({ length }),
