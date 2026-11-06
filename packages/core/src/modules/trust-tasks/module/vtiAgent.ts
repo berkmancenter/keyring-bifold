@@ -89,8 +89,16 @@ const SUPPLEMENT = 'https://trusttasks.org/spec/vtc/join-requests/supplement/0.1
 const STATUS = 'https://trusttasks.org/spec/vtc/join-requests/status/0.1'
 const SELF_REMOVE = 'https://trusttasks.org/spec/vtc/members/self-remove/0.1'
 const ROOM_MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
-const ELECTIONS_LIST = 'https://trusttasks.org/spec/vtc/elections/list/0.3'
-const ELECTIONS_SHOW = 'https://trusttasks.org/spec/vtc/elections/show/0.2'
+/** A member's room offers there, at each version this client asks (`modules/rooms`, `OFFERS_LIST_TYPES`). */
+const ROOM_OFFERS_LISTS = ['0.4', '0.3', '0.2'].map((v) => `https://trusttasks.org/spec/vtc/rooms/offers/list/${v}`)
+/** The polls reads, at every version `polls/pollTasks` may send. @versionCoverage */
+const ELECTIONS_READS = [
+  'https://trusttasks.org/spec/vtc/elections/list/0.5',
+  'https://trusttasks.org/spec/vtc/elections/list/0.3',
+  'https://trusttasks.org/spec/vtc/elections/show/0.6',
+  'https://trusttasks.org/spec/vtc/elections/show/0.3',
+  'https://trusttasks.org/spec/vtc/elections/show/0.2',
+]
 const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
 /*
  * Every document `ask` sends is signed. `ask` carries only DIDComm and TSP,
@@ -119,7 +127,9 @@ const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
  *   each version this wallet speaks (`joinWire`).
  * - `STATUS` — `vtc/join-requests/status/0.1`, where the applicant's request stands.
  * - `ROOM_MEMBERSHIPS` — `vtc/rooms/memberships/list/0.1`, the member's rooms there (`modules/rooms`).
- * - `ELECTIONS_LIST`, `ELECTIONS_SHOW` — `vtc/elections/list/0.3` and `show/0.2`, the community's polls (`modules/polls`).
+ * - `ROOM_OFFERS_LISTS` — `vtc/rooms/offers/list`, the rooms offered to the member there. Left off until 277.11, so
+ *   read as a write: its answer, heard while another identity held the session, came back every 15 s.
+ * - `ELECTIONS_READS` — `vtc/elections/list` and `show`, at each version polls send, the community's polls (`modules/polls`).
  *
  * Everything else `ask` sends changes state and is a WRITE: the submit,
  * `SUPPLEMENT`, `WITHDRAW`, `SELF_REMOVE` above, and the vetter profile publish
@@ -133,9 +143,12 @@ export const VTI_READ_TASKS: ReadonlySet<string> = new Set([
   ...JOIN_MANIFEST_TYPES,
   STATUS,
   ROOM_MEMBERSHIPS,
-  ELECTIONS_LIST,
-  ELECTIONS_SHOW,
+  ...ROOM_OFFERS_LISTS,
+  ...ELECTIONS_READS,
 ])
+
+/** What a Trust Task's answer adds to its type. */
+const RESPONSE_SUFFIX = '#response'
 
 /** Whether `type` is a read `ask` may send again over DIDComm after TSP silence (see `VTI_READ_TASKS`). */
 export function isVtiReadTask(type: string): boolean {
@@ -149,6 +162,14 @@ export function isVtiReadTask(type: string): boolean {
  * vtaAgent's `GRANT_HOLD_MS`.
  */
 export const VTI_ANSWER_HOLD_MS = 60000
+
+/**
+ * For this long after a session opens, a reply that names no thread is not taken as an answer by its type alone
+ * (`askAnswered`), whether or not it names a time: the mediator flushes what it held the moment the socket opens, and
+ * the fixed 2 s wait this replaces kept every such reply from any ask. Sign-in no longer waits this out before an ask
+ * may go; only that one kind of reply does. A reply naming its thread is never held back.
+ */
+export const VTI_BACKLOG_GRACE_MS = 2000
 
 /** A task's name without the host and the version: `vtc/join-requests/submit`. */
 const taskName = (type: string) => type.replace(/^https?:\/\/[^/]+\/(spec\/)?/, '').replace(/\/[\d.]+$/, '')
@@ -183,6 +204,14 @@ export class VtiSentNoAnswer extends Error {
  * 10-31).
  */
 export const VTI_FOREGROUND_CLAIM_MS = 90_000
+
+/**
+ * How many times running a background connect as one identity is refused by that claim alone before the claim gives
+ * it the next turn. A phone in two communities whose polls kept signing in as one identity refused the other's rooms
+ * listing every 30 s for as long as the app was open (34VR-Y58H, 277.8, 11-03). A step's hold, or an ordinary connect
+ * waiting for the session, still refuses it every time: only the claim an ordinary connect leaves behind gives way.
+ */
+export const VTI_TURN_AFTER_REFUSALS = 2
 
 /** How long a hold (`holding`) keeps others waiting when its caller names no time: a stuck hold must not freeze sign-ins. */
 export const VTI_HOLD_MAX_MS = 10 * 60_000
@@ -745,12 +774,50 @@ class VtiAgentController {
       return undefined
     }
     if (type === PROBLEM_REPORT) return undefined
+    // Within the grace after a session opens, no reply naming no thread answers by type, timed or not: what the
+    // mediator flushes then was written before, and a timed one's 5 s slop could still read as fresh (as the fixed wait
+    // this replaces kept every such reply from any ask). A real one that early waits out its ask's clock.
     const fresh = (entry: AskEntry) =>
-      typeof plaintext.created_time !== 'number' || plaintext.created_time * 1000 >= entry.lastSentAt - 5000
+      this.now() - this.openedAt >= VTI_BACKLOG_GRACE_MS &&
+      (typeof plaintext.created_time !== 'number' || plaintext.created_time * 1000 >= entry.lastSentAt - 5000)
+    // By type alone only for this session's own asks: one kept across a switch is another identity's, and a reply naming
+    // no thread can't say it is for that one.
     const candidates = [...this.asks.values()]
-      .filter((entry) => !entry.answer && answersTask(entry) && fresh(entry))
+      .filter((entry) => entry.did === this.state.did && !entry.answer && answersTask(entry) && fresh(entry))
       .sort((a, b) => a.sentAt - b.sentAt)
     return candidates.find((entry) => entry.waiters.length) ?? candidates[0]
+  }
+
+  /**
+   * A `#response` a persona's listener heard while the shared session is signed in as another identity. The session
+   * moved on before the answer came, so nothing collects as that persona: left on the mediator, it came back at every
+   * drain (15 s) until the session's next turn as the persona (277.8, SHARED-SESSION-ORPHAN-REPLY).
+   *
+   * - 'answered': the ask it threads on, sent as that persona, is given it, as `deliver` gives it.
+   * - 'orphan': it threads on no ask, and answers a read (`VTI_READ_TASKS`): nothing waits for it and the read is asked
+   *   again, so it may be dropped.
+   * - undefined: anything else stays the shared session's. A request, a refusal, a reply naming no thread (matched by
+   *   type, which a listener must not guess at), an ask of another identity, or an unclaimed answer to a write, whose
+   *   only copy this may be (276.10: a vetting request taken by a listener was lost).
+   *
+   * Not a pure check, though it reads like one: it lets go of expired holds first, whatever it returns. That is only
+   * time-based housekeeping on the holds.
+   */
+  answerFromListener(did: string, received: DidCommV2PlaintextMessage): 'answered' | 'orphan' | undefined {
+    const plaintext = unwrapBindingEnvelope(received)
+    const type = String(plaintext.type ?? '')
+    if (!type.endsWith(RESPONSE_SUFFIX)) return undefined
+    const threadId = (plaintext.body as { threadId?: unknown } | undefined)?.threadId
+    const threaded = [threadId, plaintext.thid, plaintext.pthid].some((id) => typeof id === 'string' && id.length > 0)
+    if (!threaded) return undefined
+    this.dropExpiredHolds()
+    const entry = this.askAnswered(plaintext)
+    if (entry) {
+      if (entry.did !== did) return undefined
+      this.settle(entry, plaintext)
+      return 'answered'
+    }
+    return isVtiReadTask(type.slice(0, -RESPONSE_SUFFIX.length)) ? 'orphan' : undefined
   }
 
   /** Hand an answer to whoever waits on the ask, or keep it for the next caller. */
@@ -818,6 +885,7 @@ class VtiAgentController {
       .filter(
         (entry) =>
           entry.answer &&
+          entry.did === this.state.did &&
           entry.communityDid === communityDid &&
           entry.type === type &&
           (!requestId || entry.id === requestId)
@@ -922,8 +990,12 @@ class VtiAgentController {
   private readonly holdWatchers = new Set<() => void>()
   /** The DID an ordinary connect last signed in as, and until when a background one leaves it (`VTI_FOREGROUND_CLAIM_MS`). */
   private claim?: { did: string; until: number }
+  /** How many times running each identity's background connect was refused by the claim alone (`VTI_TURN_AFTER_REFUSALS`). */
+  private readonly refusedByClaim = new Map<string, number>()
   /** For tests: the clock holds and claims are read by. */
   now: () => number = () => Date.now()
+  /** When the current session's socket opened (`VTI_BACKLOG_GRACE_MS`). */
+  private openedAt = 0
 
   /** The live holds; one past its time is dropped, and said once. */
   private liveHolds(): SessionHold[] {
@@ -942,13 +1014,14 @@ class VtiAgentController {
    * What stops a connect as `did` from going ahead now: `wait` until the holds named end, `refuse` with
    * `VtiSessionHeld`, or nothing. An ordinary connect waits only for another DID's ordinary hold — a background one is
    * a poll and gives way. A background connect waits for another DID's background hold, and is refused by anything an
-   * ordinary caller holds, waits for, or signed in as within `VTI_FOREGROUND_CLAIM_MS`. No DID (a new identity) never
-   * switches an open session, so nothing stops it then.
+   * ordinary caller holds, waits for, or signed in as within `VTI_FOREGROUND_CLAIM_MS` — that last one only until the
+   * same identity has been refused by it `VTI_TURN_AFTER_REFUSALS` times running (`byClaim`): then it is its turn. No
+   * DID (a new identity) never switches an open session, so nothing stops it then.
    */
   private blockerFor(
     did: string | undefined,
     background: boolean
-  ): { wait: SessionHold } | { refuse: VtiSessionHeld } | undefined {
+  ): { wait: SessionHold } | { refuse: VtiSessionHeld; byClaim?: true } | undefined {
     const holds = this.liveHolds().filter((h) => h.did !== did)
     const ordinary = holds.find((h) => !h.background)
     if (!background) return ordinary ? { wait: ordinary } : undefined
@@ -961,9 +1034,10 @@ class VtiAgentController {
       this.claim.did !== did &&
       this.claim.did === sessionDid &&
       this.claim.until > this.now() &&
-      this.session
+      this.session &&
+      (!did || (this.refusedByClaim.get(did) ?? 0) < VTI_TURN_AFTER_REFUSALS)
     )
-      return { refuse: new VtiSessionHeld(this.claim.did, 'signed in for a step just now') }
+      return { refuse: new VtiSessionHeld(this.claim.did, 'signed in for a step just now'), byClaim: true }
     const polling = holds.find((h) => h.background)
     return polling ? { wait: polling } : undefined
   }
@@ -1010,13 +1084,23 @@ class VtiAgentController {
    * `VtiSessionHeld` when one holds the session or waits for it, and switched away from (its asks fail) when an
    * ordinary connect comes while it runs — but other polls wait for it, so one persona's asks run together and the
    * session switches once per persona, not once per ask.
+   *
+   * `claims: false`: an ordinary hold that leaves no claim (`VTI_FOREGROUND_CLAIM_MS`) behind it. A screen's listing
+   * read (the polls) is the person's, so it does not give way while it runs, but it is no step to protect after: each
+   * one renewed the claim, and kept another community's reads from the session while the screen was open (11-03).
    */
   async holding<T>(
     agent: Agent,
     mediatorDid: string | undefined,
     persona: VtiPersona,
     fn: (did: string) => Promise<T>,
-    opts: { peerRevisionStore?: TspPeerRevisionStore; reason?: string; maxMs?: number; background?: boolean } = {}
+    opts: {
+      peerRevisionStore?: TspPeerRevisionStore
+      reason?: string
+      maxMs?: number
+      background?: boolean
+      claims?: boolean
+    } = {}
   ): Promise<T> {
     const background = opts.background === true
     const key = Symbol(persona.did)
@@ -1033,7 +1117,8 @@ class VtiAgentController {
         agent,
         mediatorDid,
         { persona, peerRevisionStore: opts.peerRevisionStore, background },
-        { key, hold }
+        { key, hold },
+        opts.claims !== false
       )
     try {
       return await fn(persona.did)
@@ -1085,7 +1170,8 @@ class VtiAgentController {
     agent: Agent,
     mediatorDid: string | undefined,
     options: Parameters<VtiAgentController['connect']>[2] = {},
-    take?: { key: symbol; hold: () => SessionHold }
+    take?: { key: symbol; hold: () => SessionHold },
+    claims = true
   ): Promise<void> {
     const wantedDid = options.persona?.did ?? options.identity?.did
     const background = options.background === true
@@ -1098,7 +1184,11 @@ class VtiAgentController {
         // Checked after the earlier sign-in settles, and nothing awaited between this and `connecting` being set.
         const blocker = this.blockerFor(wantedDid, background)
         if (!blocker) break
-        if ('refuse' in blocker) throw blocker.refuse
+        if ('refuse' in blocker) {
+          if ('byClaim' in blocker && wantedDid)
+            this.refusedByClaim.set(wantedDid, (this.refusedByClaim.get(wantedDid) ?? 0) + 1)
+          throw blocker.refuse
+        }
         if (!saidWaiting) {
           saidWaiting = true
           releaseWarn(
@@ -1121,7 +1211,13 @@ class VtiAgentController {
     } finally {
       if (this.connecting === attempt) this.connecting = undefined
     }
-    if (!background && wantedDid) this.claim = { did: wantedDid, until: this.now() + VTI_FOREGROUND_CLAIM_MS }
+    if (!background && wantedDid && claims) {
+      // Nobody else's refusals are cleared here, by a renewal or by a new claim: the count is the waiter's, and another
+      // claim only makes the wait longer. It starts afresh when that identity gets through, below.
+      this.claim = { did: wantedDid, until: this.now() + VTI_FOREGROUND_CLAIM_MS }
+    }
+    // Its turn came, or it was never refused: counted afresh from here.
+    if (wantedDid) this.refusedByClaim.delete(wantedDid)
     // Nothing awaited since the attempt settled: a caller that waited on it sees this hold when it looks.
     if (take && this.state.did === wantedDid && this.isConnected) {
       this.holds.set(take.key, take.hold())
@@ -1228,9 +1324,12 @@ class VtiAgentController {
       this.set({ signingInAs: did })
       await session.start()
       step('socket open')
-      // Discard any stale backlog the mediator flushes on live delivery before
-      // a request could have a reply (see VtaClient.connect).
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      // No pause here for the backlog the mediator flushes on live delivery: every message goes through `deliver`
+      // whenever it comes, and an answer reaches its ask by its thread id (`askAnswered`). The one reply that could be
+      // mistaken for a fresh answer — one naming no thread and no time — is not matched by type for
+      // `VTI_BACKLOG_GRACE_MS` after this. The fixed 2 s this used to wait for every sign-in (2.002-2.030 s on 35 of
+      // 36 sign-ins, 277.12) delayed each one, several in a row at launch.
+      this.openedAt = this.now()
       this.session = session
       const peerLeg = getPeerLegCarriage()
       if (peerLeg === 'tsp' && !tspSession) {
@@ -1261,9 +1360,11 @@ class VtiAgentController {
   async disconnect(): Promise<void> {
     await this.session?.stop()
     this.session = undefined
-    // What this session asked can no longer be answered on it. A caller still
-    // waiting runs out its own clock, as before.
-    this.asks.clear()
+    // What this session asked can no longer be answered on it, but its answer can still come: a switch to another
+    // identity leaves that identity's listener hearing it (`answerFromListener`). So an ask a caller still waits on stays
+    // until the caller's own clock ends. Cleared, the answer was dropped as answering nothing and the caller waited out
+    // its clock for it (277.11). Nothing else stays.
+    for (const [id, entry] of this.asks) if (!entry.waiters.length) this.asks.delete(id)
     this.tsp = undefined
     this.persona = undefined
     this.set({

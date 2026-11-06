@@ -7,6 +7,7 @@ import {
 } from '../real/agentRoomsService'
 import { OFFERS_LIST_TYPES, ROOMS_TASK } from '../real/wire'
 import { PREVIEW_TOKEN_TTL_MS, RoomsPreviewExpired, RoomsRefused, RoomsUnavailable } from '../types'
+import { logRef } from '../roomsLogWords'
 
 const COMMUNITY: RoomsCommunity = { did: 'did:webvh:community:a', personaDid: 'did:key:persona-a' }
 const OPEN_ROOM = 'did:webvh:room:open1'
@@ -234,11 +235,14 @@ describe('AgentRoomsService offers', () => {
     const s = setup({ offers: [offer(OPEN_ROOM, 'open', 'open'), offer(SEALED_ROOM, 'attributed', 'accepted')] })
     const answer = s.agentTask.getMockImplementation()!
     s.agentTask.mockImplementation(async (type: string, payload: Record<string, unknown>) => {
-      if (type === ROOMS_TASK.keysList02) throw new Error('the agent did not answer')
+      if (type === ROOMS_TASK.keysList02) throw new Error('the agent did not answer for did:key:persona-a')
       return answer(type, payload)
     })
     expect((await s.service.listOffers()).map((x) => x.roomId)).toEqual([OPEN_ROOM])
     expect(s.b.warn).toHaveBeenCalledWith(expect.stringContaining(`whether ${SEALED_ROOM} was joined is unknown`))
+    // Why the agent did not list them, by kind alone: its words named an identity (#903 review).
+    expect(s.b.warn).toHaveBeenCalledWith('rooms: the agent did not list the rooms it holds: failed')
+    expect((s.b.warn as jest.Mock).mock.calls.join('\n')).not.toContain('persona-a')
 
     // Control: the agent answers, and holds none: accepted elsewhere, not joined, so it is offered.
     s.agentTask.mockImplementation(answer)
@@ -505,17 +509,19 @@ describe('AgentRoomsService offers', () => {
     })
   })
 
-  it('passes the community’s refusal on by its code', async () => {
+  it('passes the community’s refusal on by its code, and the refusal itself', async () => {
+    const refusal = taskRefusal('offerExpired')
     const { service } = setup({
       offers: [offer(OPEN_ROOM, 'open', 'open')],
       accept: () => {
-        throw taskRefusal('offerExpired')
+        throw refusal
       },
     })
     const err = await service
       .acceptOffer((await service.previewOffer(offerIdOf(COMMUNITY.did, OPEN_ROOM))).token)
       .catch((e) => e)
     expect(err).toMatchObject({ name: 'RoomsRefused', code: 'offerExpired', retryable: false })
+    expect(err.refusal).toBe(refusal)
   })
 
   it('passes a transport failure on unchanged, not as a refusal', async () => {
@@ -549,6 +555,37 @@ describe('AgentRoomsService offers', () => {
     )
     expect(await s.service.acceptOffer(preview.token)).toEqual({ roomId: SEALED_ROOM })
     expect(s.calls).not.toContain(ROOMS_TASK.keysWelcome)
+  })
+
+  // By the agent's source, it answers alreadyJoined for a repeat of the same Welcome and for a group kept from before a
+  // removal. The accept goes on either way, so only this line tells a report which it may have been.
+  it('logs whether the Welcome was used, by kind alone: a group already held is not a join', async () => {
+    const used = setup({ offers: [offer(SEALED_ROOM, 'attributed', 'open')] })
+    await used.service.acceptOffer((await used.service.previewOffer(offerIdOf(COMMUNITY.did, SEALED_ROOM))).token)
+    const usedLines = (used.b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(used.calls).toContain(ROOMS_TASK.keysWelcome)
+    expect(usedLines.filter((line) => line.includes('Welcome:'))).toEqual([
+      `rooms: ${logRef(SEALED_ROOM)} Welcome: joined`,
+    ])
+
+    // Long enough that logRef shortens it: a short id reads the same whole.
+    const LONG_ROOM = 'did:webvh:QmcSLGfx8V7PJNheJJSXN6HxihM6NNLUXw8TWx8bBDbhz3:dids.example:room'
+    const held = setup({
+      offers: [offer(LONG_ROOM, 'attributed', 'open')],
+      welcome: () => {
+        throw new FakeRefusal('taskFailed', {
+          code: 'rooms/keys/welcome:alreadyJoined',
+          message: 'this VTA already holds group state for did:key:persona-a',
+        })
+      },
+    })
+    await held.service.acceptOffer((await held.service.previewOffer(offerIdOf(COMMUNITY.did, LONG_ROOM))).token)
+    const heldLines = (held.b.warn as jest.Mock).mock.calls.map(([line]) => String(line))
+    expect(heldLines.filter((line) => line.includes('Welcome:'))).toEqual([
+      `rooms: ${logRef(LONG_ROOM)} Welcome: not used, the agent already holds a group for this room`,
+    ])
+    expect(heldLines.join('\n')).not.toMatch(/persona-a|group state/)
+    expect(heldLines.join('\n')).not.toContain(LONG_ROOM)
   })
 
   it('finishes a join another surface handed the Welcome to first, and reports any other join failure', async () => {
@@ -732,6 +769,10 @@ describe('a community the session is kept from for now', () => {
   it("lists the asked community's offers as none for now, and says once when it can be read again", async () => {
     const s = keptSetup()
     await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
+    // Said by kind alone: never the hold's reason beside the community (34VR-Y58H, 11-03).
+    expect(s.b.warn).toHaveBeenCalledWith(
+      `rooms: ${COMMUNITY.did} did not list its offers: the session is kept for another identity`
+    )
     // A second listing skipped meanwhile waits on the same wait.
     await expect(s.service.listOffers(COMMUNITY.did)).resolves.toEqual([])
     expect(s.sessionFree).toHaveBeenCalledTimes(1)

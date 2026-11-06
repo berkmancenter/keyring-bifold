@@ -40,6 +40,8 @@ import { releaseWarn } from './releaseLog'
 import { isTspFrameUnopenable } from './tspFrameUnopenable'
 import { vtaAgent } from './vtaAgent'
 import { unwrapBindingEnvelope, vtiAgent } from './vtiAgent'
+import { healSharedIdentities } from './sharedIdentity'
+import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import {
   advertisedMediatorDid,
@@ -366,7 +368,8 @@ export function startIdentityListeners(agent: Agent, options: IdentityListenersO
  * itself), which a listener does not run. Taken here, it was acknowledged and lost: on 276.10 a vetter's phone heard
  * an applicant's vetting request on its listener while another community held the shared session, and the request
  * never reached the desk. So it is left on the mediator, and a screen serving that identity is told, to sign the
- * shared session in as it; the mediator delivers it there.
+ * shared session in as it; the mediator delivers it there. The one exception is an answer the shared session itself
+ * asked for (`vtiAgent.answerFromListener`), which has an owner here.
  */
 export async function keepFromListener(
   agent: Agent,
@@ -383,6 +386,15 @@ export async function keepFromListener(
   const sayIt = owned || !leftNoted.has(noteKey)
   if (sayIt) releaseWarn(`[VTI] listener for ${who}: received ${kind} (${via})`)
   if (!owned) {
+    // An answer the shared session asked for, as this identity, before it moved on: given to the ask that waits, or
+    // dropped if nothing does and it answers a read. Returning acknowledges it, so it stops coming back at each drain.
+    const answer = vtiAgent.answerFromListener(persona.did, received)
+    if (answer) {
+      releaseWarn(
+        `[VTI] listener for ${who}: ${kind} ${answer === 'answered' ? 'given to the ask waiting for it' : 'answers no ask: dropped'}`
+      )
+      return
+    }
     if (sayIt) {
       if (leftNoted.size >= LEFT_NOTED_MAX) leftNoted.clear()
       leftNoted.add(noteKey)
@@ -461,6 +473,17 @@ export function defaultListenerFactory(agent: Agent, configuredMediatorDid: stri
 export function useVtiIdentityListeners(agent: Agent | undefined, mediatorDid: string | undefined): void {
   useEffect(() => {
     if (!agent) return
+    // A phone that filed a community's cards under an identity kept for another community has no identity for the
+    // first: it is kept for it now, in place, once per start (sharedIdentity, IN-517). Never in the way of listening.
+    void healSharedIdentities(new GenericRecordsIdentityStore(agent), new GenericRecordsCommunityStore(agent))
+      .then((kept) => {
+        if (kept) agent.config?.logger?.info?.(`[VTI] identities kept for a second community: ${kept}`)
+      })
+      .catch((error: unknown) =>
+        agent.config?.logger?.warn?.(
+          `[VTI] identities for a second community not checked (${error instanceof Error ? error.name : 'error'})`
+        )
+      )
     const stop = startIdentityListeners(agent, { mediatorDid })
     return () => {
       void stop()

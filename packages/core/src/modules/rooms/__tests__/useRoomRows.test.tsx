@@ -221,6 +221,64 @@ describe('rooms as Messages rows', () => {
     expect(list.result.current.rows.rows[0].lastActivityAt?.toISOString()).toBe(note('n2', 2).updatedAt)
   })
 
+  describe('a record shown nowhere is not what the row says', () => {
+    const reaction = (key: string, version: number) =>
+      ({ ...note(key, version), kind: 'reaction', inReplyTo: { key: 'n1' }, updatedAt: at(version) }) as NoteSummary
+    const at = (version: number) => new Date(Date.UTC(2026, 10, 4, 9, version)).toISOString()
+    const message = (key: string, version: number, over: object = {}) =>
+      ({ ...note(key, version), updatedAt: at(version), ...over }) as NoteSummary
+
+    test('a newest reaction: the row says the last thing that is not one, at its time', async () => {
+      const notes = { planning: [message('n1', 1), reaction('r1', 2), reaction('r2', 3)] }
+      const s = serviceWith([room('planning')], notes, { n1: chat('Hello'), r1: '👍', r2: '🎉' })
+      const { list } = mount(s)
+      await flush()
+      expect(list.result.current.rows.rows[0].lastPost?.text).toBe('Hello')
+      expect(list.result.current.rows.rows[0].lastActivityAt?.toISOString()).toBe(at(1))
+      expect(s.readNote).toHaveBeenCalledTimes(3)
+    })
+
+    test('only reactions: the row says nothing of them', async () => {
+      const notes = { planning: [reaction('r1', 1)] }
+      const s = serviceWith([room('planning')], notes, { r1: '👍' })
+      const { list } = mount(s)
+      await flush()
+      expect(list.result.current.rows.rows[0].lastPost).toBeUndefined()
+    })
+
+    test('a reaction after a message read before leaves the row as it was', async () => {
+      const notes: Record<string, NoteSummary[]> = { planning: [message('n1', 1)] }
+      const s = serviceWith([room('planning')], notes, { n1: chat('Hello'), r1: '👍' })
+      const { list } = mount(s)
+      await flush()
+      notes.planning.push(reaction('r1', 2))
+      await act(async () => refreshRoomRows())
+      expect(list.result.current.rows.rows[0].lastPost?.text).toBe('Hello')
+      expect(list.result.current.rows.rows[0].lastActivityAt?.toISOString()).toBe(at(1))
+    })
+
+    test('the message the row quotes, taken back: the row stops quoting it', async () => {
+      const notes: Record<string, NoteSummary[]> = { planning: [message('n1', 1)] }
+      const bodies: Record<string, string> = { n1: chat('Taken back') }
+      const s = serviceWith([room('planning')], notes, bodies)
+      const { list } = mount(s)
+      await flush()
+      expect(list.result.current.rows.rows[0].lastPost?.text).toBe('Taken back')
+      notes.planning[0] = message('n1', 2, { kind: 'message' })
+      bodies.n1 = ''
+      await act(async () => refreshRoomRows())
+      expect(list.result.current.rows.rows[0].lastPost).toBeUndefined()
+    })
+
+    test('reads a few records at most to find it', async () => {
+      const notes = { planning: Array.from({ length: 9 }, (_, i) => reaction(`r${i}`, i + 1)) }
+      const s = serviceWith([room('planning')], notes, {})
+      mount(s)
+      await flush()
+      expect(s.readNote).toHaveBeenCalledTimes(5)
+    })
+  })
+
   test('every two minutes only while Messages is in view; on coming back to the app, not within a minute', async () => {
     const s = serviceWith([room('planning')], { planning: [note('n1', 1)] })
     mount(s)
@@ -443,6 +501,22 @@ describe('a room not read yet', () => {
     expect(armed.mock.calls.filter(([, ms]) => (ROWS_RETRY_MS as readonly unknown[]).includes(ms))).toHaveLength(0)
     armed.mockRestore()
     expect(jest.getTimerCount()).toBe(0)
+  })
+})
+
+// 34VR-Y58H (277.8, 11-03): a room listed for a re-invited identity whose keys the agent does not hold read as
+// "reading" on every poll, and its read failed each time. Not joined, it is not read, and says so.
+describe('a room not joined yet', () => {
+  test('is never read, nor shown as reading, and is not counted as unread (control: a joined room beside it reads)', async () => {
+    const s = serviceWith([room('first', { tier: 'attributed', joined: false }), room('planning')], {
+      planning: [note('n1', 1)],
+    })
+    const { list } = mount(s)
+    await flush()
+    const rows = list.result.current.rows.rows as readonly { roomId: string; reading?: boolean; notJoined?: boolean }[]
+    expect(rows.find((r) => r.roomId.endsWith('first'))).toMatchObject({ notJoined: true })
+    expect(rows.find((r) => r.roomId.endsWith('first'))?.reading).toBeUndefined()
+    expect(s.listNotes.mock.calls.map(([roomId]) => String(roomId))).toEqual([expect.stringMatching(/planning$/)])
   })
 })
 
@@ -720,12 +794,19 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     const lines: string[] = []
     renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
     await flush()
-    expect(lines).toEqual([expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/)])
+    // Why the room did not read, by kind: a row "reading" for a whole report said nothing of why (34VR-Y58H, 11-03).
+    expect(lines).toEqual([
+      expect.stringMatching(/^\[Rooms:rows\] .+ of .+ not read: failed$/),
+      expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/),
+    ])
+    expect(lines[0]).not.toContain('agent not ready')
 
     s.listMyRooms.mockRejectedValueOnce(new Error('community unreachable'))
     await step(ROWS_RETRY_MS[0])
-    expect(lines[1]).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
+    // Found by what it says, not where it sits: a line added before it must not move this test.
+    const notListed = lines.find((line) => line.includes('the rooms were not listed'))
+    expect(notListed).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
     // The cause is the service's own line; this one never repeats the error's words.
-    expect(lines[1]).not.toContain('unreachable')
+    expect(notListed).not.toContain('unreachable')
   })
 })
