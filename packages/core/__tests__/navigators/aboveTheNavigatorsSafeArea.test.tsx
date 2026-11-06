@@ -1,0 +1,143 @@
+/**
+ * Nothing RootStack mounts above the navigators may read a safe area.
+ *
+ * React Navigation's navigators wrap their screens in SafeAreaProviderCompat, so
+ * anything rendered *under* a navigator can call useSafeAreaInsets(). The
+ * components RootStack renders beside MainStack cannot: they sit above every
+ * navigator, and nothing wraps that point in a SafeAreaProvider. A hook read
+ * there throws "No safe area value available" on every render -- before any
+ * early return, because hooks always run -- and the app dies at main-stack
+ * mount. That is exactly what #937 did and #949 fixed.
+ *
+ * Two reasons this is a guard rather than a repeat of that fix's test:
+ *
+ *  1. `core/jestSetup.js` mocks react-native-safe-area-context with the
+ *     library's own jest mock, which returns fixed insets and never throws, so
+ *     no ordinary suite on any branch can see this class of defect. This file
+ *     unmocks it and uses the real module.
+ *  2. The source check below pins the SET of components in that position. A new
+ *     provider or modal added beside MainStack fails this file until someone
+ *     adds it to the mount rows, so the next one is caught by CI rather than by
+ *     a phone.
+ *
+ * What it does NOT cover: anything under MainStack. That is not an omission --
+ * those screens are inside the navigators, which supply a provider, so the hook
+ * is legitimate there.
+ */
+
+jest.unmock('react-native-safe-area-context')
+
+import { render } from '@testing-library/react-native'
+import fs from 'fs'
+import path from 'path'
+import React from 'react'
+
+import { BasicAppContext } from '../helpers/app'
+
+jest.mock('../../src/services/keychain', () => ({
+  loadWalletKey: jest.fn().mockResolvedValue(true),
+}))
+
+import { ActivityProvider } from '../../src/contexts/activity'
+import { BiometricConfirmationProvider } from '../../src/contexts/biometric-confirmation'
+import CredentialExchangeQueryModal from '../../src/modules/trust-tasks/components/CredentialExchangeQueryModal'
+import ContinuityCheckModal from '../../src/modules/vrc/components/ContinuityCheckModal'
+import LateStepReadyModal from '../../src/modules/vrc/components/LateStepReadyModal'
+import LocalityPreflightModal from '../../src/modules/vrc/components/LocalityPreflightModal'
+import RelationshipProposalModal from '../../src/modules/vrc/components/RelationshipProposalModal'
+
+/**
+ * Everything RootStack renders inside `if (shouldRenderMainStack && agent)`:
+ * the provider chain and MainStack's siblings. MainStack itself is in the list
+ * because it is in that position in the source; it is not mounted here, since
+ * everything inside it is under a navigator and so has a provider.
+ */
+const ABOVE_THE_NAVIGATORS = [
+  'ActivityProvider',
+  'AgentProvider',
+  'BiometricConfirmationProvider',
+  'ContinuityCheckModal',
+  'CredentialExchangeQueryModal',
+  'LateStepReadyModal',
+  'LocalityPreflightModal',
+  'MainStack',
+  'OpenIDCredentialRecordProvider',
+  'RelationshipProposalModal',
+  'VrcNameCacheProvider',
+  'WitnessConnectionProvider',
+]
+
+/** The JSX element names RootStack uses in its main-stack branch, deduplicated and sorted. */
+const elementsInTheMainStackBranch = (): string[] => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/navigators/RootStack.tsx'), 'utf8')
+  const opens = source.indexOf('if (shouldRenderMainStack && agent) {')
+  const closes = source.indexOf('return <OnboardingStack', opens)
+  expect(opens).toBeGreaterThan(-1)
+  expect(closes).toBeGreaterThan(opens)
+  const branch = source.slice(opens, closes)
+  return [...new Set([...branch.matchAll(/<([A-Z][A-Za-z0-9_]*)/g)].map((m) => m[1]))].sort()
+}
+
+describe('what RootStack mounts above the navigators', () => {
+  it('is exactly the set this file knows about', () => {
+    // If this fails because something was added beside MainStack, add it to
+    // ABOVE_THE_NAVIGATORS *and* give it a mount row below. Deleting it from the
+    // list alone restores the green and removes the guard.
+    expect(elementsInTheMainStackBranch()).toEqual(ABOVE_THE_NAVIGATORS)
+  })
+
+  it('is tested against the real safe-area module, not the jest mock', () => {
+    // Guards the guard. Under core/jestSetup.js's global mock every row below
+    // would pass whatever the components did, because the mock never throws.
+    // A plain require, NOT jest.requireMock: requireMock returns the mock
+    // registry's entry by design, so it reports a mock whether or not
+    // jest.unmock took effect and this could never fail.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSafeAreaInsets } = require('react-native-safe-area-context')
+    expect(jest.isMockFunction(useSafeAreaInsets)).toBe(false)
+  })
+
+  // One row each, rather than one row for all of them: a single row would say
+  // only that something in the set throws, and the next person would have to
+  // bisect it by hand.
+  describe.each([
+    ['RelationshipProposalModal', RelationshipProposalModal],
+    ['LateStepReadyModal', LateStepReadyModal],
+    ['ContinuityCheckModal', ContinuityCheckModal],
+    ['LocalityPreflightModal', LocalityPreflightModal],
+    ['CredentialExchangeQueryModal', CredentialExchangeQueryModal],
+  ])('%s', (_name, Component) => {
+    it('mounts with no safe-area provider in scope', () => {
+      // BasicAppContext carries the container, the three agent-backed providers
+      // and the network context, and -- as #949's test established -- no
+      // SafeAreaProvider. So this is the position RootStack mounts it in.
+      expect(() =>
+        render(
+          <BasicAppContext>
+            <ActivityProvider>
+              <BiometricConfirmationProvider>
+                <Component />
+              </BiometricConfirmationProvider>
+            </ActivityProvider>
+          </BasicAppContext>
+        )
+      ).not.toThrow()
+    })
+  })
+
+  it('mounts the biometric provider and its sheet with no safe-area provider in scope', () => {
+    // The provider renders BiometricConfirmationModal unconditionally, which is
+    // how #937 put a hook read in this position in the first place.
+    expect(() =>
+      render(
+        <BasicAppContext>
+          <ActivityProvider>
+            <BiometricConfirmationProvider>
+              <></>
+            </BiometricConfirmationProvider>
+          </ActivityProvider>
+        </BasicAppContext>
+      )
+    ).not.toThrow()
+  })
+})
