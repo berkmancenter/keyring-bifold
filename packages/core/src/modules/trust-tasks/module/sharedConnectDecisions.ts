@@ -42,7 +42,9 @@ export const SHARED_CONNECT_VRC_PROFILE: VrcProfile = {
 /**
  * Decision 1, whether the flow uses `propose/0.1` and `issue/0.1` unchanged
  * with a `ceremony` member on every step. Default: yes. The ceremony
- * definition is not published, so no `definitionDigest` is sent (plan D7).
+ * definition is not published, so neither it nor a `definitionDigest` is sent
+ * (plan D7; the envelope schema requires the digest with the definition).
+ * Kept for when it is.
  */
 export const SHARED_CONNECT_CEREMONY_DEFINITION = 'https://trusttasks.org/ceremony/shared-connect/0.1'
 

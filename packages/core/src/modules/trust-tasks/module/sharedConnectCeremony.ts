@@ -11,8 +11,10 @@
  * are the encounter VIDs, in band.
  *
  * Pure apart from {@link signSharedConnectDocument}, which asks the agent's
- * KMS for the signature. No `definitionDigest` is sent until the definition is
- * published (plan D7).
+ * KMS for the signature. The `ceremony` member is `{enactment, step}`, `step` a
+ * string naming the request and its response (registry framework 0.5/0.6:
+ * `step` is a string, and `definition` requires `definitionDigest`), so no
+ * `definition` is sent until a published one has a digest (plan D7).
  *
  * @module trust-tasks/module/sharedConnectCeremony
  */
@@ -21,15 +23,29 @@ import type { Agent } from '@credo-ts/core'
 
 import { signDocumentProof } from '../documentProof'
 
-import { SHARED_CONNECT_CEREMONY_DEFINITION, SHARED_CONNECT_PROOF_SIGNER } from './sharedConnectDecisions'
+import { SHARED_CONNECT_PROOF_SIGNER } from './sharedConnectDecisions'
 
 /** The six steps, numbered as in the plan's table. */
 export type SharedConnectStep = 1 | 2 | 3 | 4 | 5 | 6
 
+/**
+ * The step each document belongs to, as the `ceremony` member names it: a
+ * request and its response share one step (Trust Tasks SPEC §4.11.2), so the
+ * six documents are three steps, the names the in-process rungs' independent
+ * inviter uses.
+ */
+export const SHARED_CONNECT_STEP_NAMES: Record<SharedConnectStep, string> = {
+  1: 'propose',
+  2: 'propose',
+  3: 'issue-inviter',
+  4: 'issue-inviter',
+  5: 'issue-responder',
+  6: 'issue-responder',
+}
+
 export interface CeremonyMember {
   enactment: string
-  step: SharedConnectStep
-  definition: string
+  step: string
 }
 
 const B64URL = /^[A-Za-z0-9_-]{22}$/
@@ -44,7 +60,7 @@ export function newProposeId(randomBytes: (length: number) => Uint8Array): strin
 export const isChallengeShaped = (value: unknown): value is string => typeof value === 'string' && B64URL.test(value)
 
 export function ceremonyMember(enactment: string, step: SharedConnectStep): CeremonyMember {
-  return { enactment, step, definition: SHARED_CONNECT_CEREMONY_DEFINITION }
+  return { enactment, step: SHARED_CONNECT_STEP_NAMES[step] }
 }
 
 export interface SharedConnectDocumentInput {

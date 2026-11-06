@@ -12,7 +12,6 @@ import {
   signSharedConnectDocument,
 } from '../module/sharedConnectCeremony'
 import {
-  SHARED_CONNECT_CEREMONY_DEFINITION,
   SHARED_CONNECT_FLOW_OWNER,
   SHARED_CONNECT_PROOF_SIGNER,
   SHARED_CONNECT_TSP_REVISION,
@@ -61,7 +60,7 @@ describe('a document', () => {
     issuedAt: '2027-01-15T08:00:00Z',
   })
 
-  it('carries the thread, the in-band VIDs and the ceremony member, and no definitionDigest', () => {
+  it('carries the thread, the in-band VIDs and the ceremony member: {enactment, step} with a string step, no definition', () => {
     expect(doc).toEqual({
       id: PROPOSE_ID,
       type: 'https://trusttasks.org/spec/vrc/relationships/propose/0.1',
@@ -69,10 +68,15 @@ describe('a document', () => {
       issuer: ME,
       recipient: THEM,
       issuedAt: '2027-01-15T08:00:00Z',
-      ceremony: { enactment: ENACTMENT, step: 1, definition: SHARED_CONNECT_CEREMONY_DEFINITION },
+      ceremony: { enactment: ENACTMENT, step: 'propose' },
       payload: { relationshipDid: 'did:peer:0z6Mk' },
     })
-    expect(ceremonyMember(ENACTMENT, 3)).not.toHaveProperty('definitionDigest')
+    expect(ceremonyMember(ENACTMENT, 3)).toEqual({ enactment: ENACTMENT, step: 'issue-inviter' })
+    expect(ceremonyMember(ENACTMENT, 6)).toEqual({ enactment: ENACTMENT, step: 'issue-responder' })
+    // Registry framework 0.5/0.6: `definition` requires `definitionDigest`, and the member is closed.
+    for (const step of [1, 2, 3, 4, 5, 6] as const) {
+      expect(Object.keys(ceremonyMember(ENACTMENT, step)).sort()).toEqual(['enactment', 'step'])
+    }
   })
 
   describe('as it arrives', () => {
