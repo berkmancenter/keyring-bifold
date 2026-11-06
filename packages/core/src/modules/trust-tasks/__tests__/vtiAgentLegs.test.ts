@@ -138,8 +138,11 @@ beforeEach(async () => {
 // first VTI_BACKLOG_GRACE_MS after a sign-in (#942): the threadless case is vtiAgentAnswers.test.ts's.
 const threadOf = (doc: { threadId?: string; id?: string } | undefined) => doc?.threadId ?? doc?.id
 const lastDidcommThread = (session: { didcomm: unknown[] }) =>
-  threadOf((session.didcomm.at(-1) as { body?: { threadId?: string; id?: string } } | undefined)?.body)
-const lastTspThread = () => threadOf(mockPacked.at(-1) as { threadId?: string; id?: string } | undefined)
+  threadOf(
+    (session.didcomm[session.didcomm.length - 1] as { body?: { threadId?: string; id?: string } } | undefined)?.body
+  )
+const lastTspThread = () =>
+  threadOf(mockPacked[mockPacked.length - 1] as { threadId?: string; id?: string } | undefined)
 
 describe('the community leg', () => {
   it('greets a community again as a new persona', async () => {
