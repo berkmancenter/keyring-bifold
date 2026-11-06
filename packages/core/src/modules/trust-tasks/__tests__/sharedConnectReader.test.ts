@@ -306,6 +306,14 @@ describe('the scanner, with the switch off and on (no confirm screen yet: WP3)',
     expect(await words(sharedConnectLink({ from, now: now(), exp: now() - 600 }))).toBe(TRIGGER_UI_MESSAGES.update)
   })
 
+  it('on, a code it reads is still "update": there is no confirm screen yet (WP3 sends it there)', async () => {
+    setSharedConnectEnabled(true)
+    const link = sharedConnectLink({ from: peer2([tspService()]), now: now() })
+    expect(readSharedConnect(link).outcome).toBe('offer')
+    expect(await words(link)).toBe(TRIGGER_UI_MESSAGES.update)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it('on: a refused code says why', async () => {
     setSharedConnectEnabled(true)
     const from = peer2([tspService()])
@@ -323,7 +331,7 @@ describe('WP12: nothing the sender wrote reaches the log', () => {
   it('a trigger link is logged by kind and length only', () => {
     const from = peer2([tspService()])
     const link = sharedConnectLink({ from, now: NOW, label: SENTINEL })
-    const line = linkForLog(link)
+    const line = linkForLog(` ${link}\n`)
     expect(line).toBe(`trigger link (${[...link].length} chars)`)
     for (const secret of [SENTINEL, from, from.slice(0, 30)]) expect(line).not.toContain(secret)
     // Any other link is logged as before.

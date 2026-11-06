@@ -157,7 +157,8 @@ export function isTriggerLink(text: string): boolean {
  * typed. Only its kind and length are. Any other link is returned unchanged.
  */
 export function linkForLog(text: string): string {
-  return isTriggerLink(text.trim()) ? `trigger link (${[...text].length} chars)` : text
+  const trimmed = text.trim()
+  return isTriggerLink(trimmed) ? `trigger link (${[...trimmed].length} chars)` : text
 }
 
 /**

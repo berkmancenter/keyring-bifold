@@ -473,7 +473,8 @@ export function readTrigger(
     const allowed = flow.allowedVidTypes
     if (allowed !== 'any' && !allowed.includes(`did:${fields._from.split(':')[1]}`)) return reject('from-not-allowed')
     if (flow.expRequired && exp === null) return reject('missing-exp')
-    // The flow's own budget and expiry horizon (#86).
+    // The flow's own budget and expiry horizon (#86). Both read 'invalid' (not listed in UI_FOR_REASON):
+    // the code is malformed for its flow, neither out of date ('update') nor expired.
     if (flow.maxLength !== undefined && [...text].length > flow.maxLength) return reject('over-flow-budget')
     if (flow.maxExpAheadSeconds !== undefined && exp !== null && exp - now > flow.maxExpAheadSeconds + skew) {
       return reject('exp-too-far')
