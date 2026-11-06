@@ -731,6 +731,27 @@ describe('signing in: no fixed wait, and a stale reply naming no thread answers 
     expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
   })
 
+  // The one threadless reply a community sends: its unrouted error, when it could not read the document at all
+  // (trust-tasks-rs builds it with no thread: there is no request to respond to). It refuses any ask's type. Within the
+  // grace it may be a stale one flushed from the mediator, so it waits; past it, it is the community's refusal.
+  it("a community's unrouted error — no thread, no time — is held back within the grace and refuses after it", async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-6')
+    const unrouted = {
+      id: 'urn:uuid:unrouted',
+      type: 'https://trusttasks.org/spec/trust-task-error/0.1',
+      from: C,
+      body: { payload: { code: 'malformed', message: 'could not parse the document' } },
+    }
+    session.onMessage(unrouted)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage({ ...unrouted, id: 'urn:uuid:unrouted-2' })
+    expect(await answer).toMatchObject({ type: 'https://trusttasks.org/spec/trust-task-error/0.1' })
+  })
+
   it('a reply naming its thread answers at once, within the grace (control)', async () => {
     const opened = Date.now()
     vtiAgent.now = () => opened
