@@ -1,0 +1,4 @@
+Copied unchanged from trustoverip/dtgwg-trust-tasks-tf origin/main 6b0243b22 (external/ clone, fetched 2026-11-05):
+specs/_framework/0.2/framework.schema.json, specs/_framework/0.3/framework.schema.json,
+specs/_framework/0.5/trust-task.schema.json, specs/vrc/relationships/{propose,issue}/0.1/payload.schema.json.
+Test-branch fixture for the shared-connect rungs only.
