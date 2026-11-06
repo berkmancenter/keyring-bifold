@@ -68,7 +68,9 @@ describe('the confirm step', () => {
     const tree = await show(steps())
     const rowOf = (node: ReactTestInstance) => {
       let at = node.parent
-      while (at && at.type !== 'View') at = at.parent
+      // `type` is declared ElementType, which TypeScript says can't equal 'View'; a host View carries the string
+      // 'View' at runtime. The throw below keeps the row honest if no View is found.
+      while (at && (at.type as unknown) !== 'View') at = at.parent
       if (!at) throw new Error('no row')
       return at
     }
