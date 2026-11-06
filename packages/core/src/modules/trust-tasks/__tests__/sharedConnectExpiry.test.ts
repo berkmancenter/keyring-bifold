@@ -22,7 +22,7 @@ jest.mock('react-native-localize', () => ({
 const uses24HourClock = RNLocalize.uses24HourClock as jest.Mock
 
 const t = ((key: string, options?: { time?: string; when?: string }) =>
-  `${key}(${options?.time ?? options?.when ?? ''})`) as TFunction
+  `${key}(${options?.time ?? options?.when ?? ''})`) as unknown as TFunction
 
 const seconds = (date: Date): number => date.getTime() / 1000
 
