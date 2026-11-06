@@ -121,7 +121,8 @@ describe('the scanner session', () => {
     expect(doc.threadId).toBe(doc.id)
     expect(doc.issuer).toBe(MY_VID)
     expect(doc.recipient).toBe(THEIR_VID)
-    expect(doc.ceremony).toMatchObject({ enactment: ENCOUNTER_ID, step: 1 })
+    // {enactment, step}: a string step and no `definition`, as the registry envelope requires.
+    expect(doc.ceremony).toEqual({ enactment: ENCOUNTER_ID, step: 'propose' })
     expect(doc.proof).toBeDefined()
     expect(doc.payload).toEqual({ relationshipDid: MY_REL, witnessed: false })
   })
@@ -133,10 +134,10 @@ describe('the scanner session', () => {
     await session.handle(inviter.response)
     await session.handle(inviter.issue)
     // step 4 receipt then step 5 issue
-    expect(sent.map((d) => [d.type, (d.ceremony as { step: number }).step])).toEqual([
-      [propose.TYPE_URI, 1],
-      [`${issue.TYPE_URI}#response`, 4],
-      [issue.TYPE_URI, 5],
+    expect(sent.map((d) => [d.type, (d.ceremony as { step: string }).step])).toEqual([
+      [propose.TYPE_URI, 'propose'],
+      [`${issue.TYPE_URI}#response`, 'issue-inviter'],
+      [issue.TYPE_URI, 'issue-responder'],
     ])
     expect(sent.every((d) => d.threadId === sent[0].id && d.proof)).toBe(true)
     expect((sent[1].payload as { vrcDigestMultibase: string }).vrcDigestMultibase).toBe(digestMultibase(inviter.vc))

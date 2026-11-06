@@ -38,7 +38,11 @@ import {
   createTspEncounterCarriage,
   type EncounterRelaySession,
 } from '../../../src/modules/trust-tasks/module/sharedConnectCarriage'
-import type { EncounterRecord } from '../../../src/modules/trust-tasks/module/sharedConnectEncounter'
+import {
+  createEncounterDid,
+  saveEncounter,
+  type EncounterRecord,
+} from '../../../src/modules/trust-tasks/module/sharedConnectEncounter'
 import {
   setSharedConnectEnabled,
   setSharedConnectLabelEnabled,
@@ -71,7 +75,7 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
   beforeAll(async () => {
     jest.spyOn(Date, 'now').mockRestore()
     agent = new Agent({
-      config: { label: 'shared-connect-rungs' },
+      config: {},
       dependencies: agentDependencies,
       modules: {
         w3cCredentials: new W3cCredentialsModule({ documentLoader: createVrcDocumentLoader }),
@@ -132,9 +136,28 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       await carriage.start()
       await live.session.start()
     }
+    // startSharedConnect reports any failure as `failed` and logs only an error name: keep the error itself, so a
+    // rung that fails to start says why.
+    const errors: unknown[] = []
+    const kept =
+      <A extends unknown[], R>(step: string, f: (...args: A) => Promise<R>) =>
+      async (...args: A): Promise<R> => {
+        try {
+          return await f(...args)
+        } catch (error) {
+          errors.push(`${step}: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
+          throw error
+        }
+      }
     const result = await startSharedConnect(agent, link, {
-      deps: { resolveMediator: async () => MEDIATOR, run },
+      deps: {
+        resolveMediator: async () => MEDIATOR,
+        createDid: kept('createDid', createEncounterDid),
+        save: kept('save', saveEncounter),
+        run: kept('run', run),
+      },
     })
+    if (result.kind === 'failed') throw new Error(`the start failed:\n${errors.join('\n')}`)
     const deliver = async (bytes: Uint8Array) => {
       await live.onTspFrame?.(bytes)
     }

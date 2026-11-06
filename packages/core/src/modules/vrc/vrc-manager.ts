@@ -371,10 +371,7 @@ export async function buildVrcCredential(
         // extractSignedContent only strips evidence/proof, so the context
         // can't be appended after signing without invalidating the
         // hardware signature.
-        '@context': selectCredentialContexts({ useVc20, useDi }, [
-          REGISTRY_DTG_CONTEXT_URL,
-          ...evidenceContexts,
-        ]),
+        '@context': selectCredentialContexts({ useVc20, useDi }, [REGISTRY_DTG_CONTEXT_URL, ...evidenceContexts]),
         type: ['VerifiableCredential', 'DTGCredential', 'RelationshipCredential'],
         // Bare DID string per DTG spec — contact info rides in the RCard instead
         issuer: myRelationshipDid,
