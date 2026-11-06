@@ -78,7 +78,12 @@ export type TriggerFlow = {
    * shared-connect, so its code still scans at QR version 25 or below.
    */
   maxLength?: number
-  /** How far ahead of now `_exp` may lie, in seconds (#86: 7 days for a link). */
+  /**
+   * How far ahead of now `_exp` may lie, in seconds: for shared-connect the
+   * longest #86 allows, 7 days (a link; a code on screen gets 10 minutes from
+   * its inviter). The same however the code arrived: the reader never reads
+   * the channel.
+   */
   maxExpAheadSeconds?: number
   /**
    * Whether the flow reads `_label` (#86's proposed fifth reserved name): a

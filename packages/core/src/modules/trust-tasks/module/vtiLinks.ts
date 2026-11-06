@@ -162,12 +162,14 @@ export function linkForLog(text: string): string {
 }
 
 /**
- * A scanned trigger link, read with the scanner's config: the shipping one,
- * or with the shared-connect developer switch on, that flow added.
+ * A trigger link, read with the scanner's config: the shipping one, or with
+ * the shared-connect developer switch on, that flow added. No channel is
+ * claimed: this routing serves a scan, a paste and a deep link alike and is
+ * not told which, and the reader's result never depends on it.
  */
 function scannedTriggerAction(text: string) {
   const config = activeTriggerConfig()
-  return triggerAction(readTrigger(text, { channel: 'scan', config }), config)
+  return triggerAction(readTrigger(text, { config }), config)
 }
 
 /**
