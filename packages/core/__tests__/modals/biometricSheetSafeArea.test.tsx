@@ -44,7 +44,11 @@ describe('the biometric sheet outside a safe-area provider', () => {
     // Guards the guard: if the global mock were still in place, every row below
     // would pass whatever the component did. The real module throws when no
     // provider is in scope; the mock never does.
-    const { useSafeAreaInsets } = jest.requireMock('react-native-safe-area-context')
+    // A plain require, NOT jest.requireMock: requireMock deliberately returns the
+    // mock registry's entry, so it reports a mock whether or not jest.unmock took
+    // effect and the guard could never pass.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { useSafeAreaInsets } = require('react-native-safe-area-context')
     expect(jest.isMockFunction(useSafeAreaInsets)).toBe(false)
   })
 
