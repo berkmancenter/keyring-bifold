@@ -1212,7 +1212,8 @@
     "VtaDevices": "My devices",
     "VtaNewPhoneOffer": "Your other devices",
     "SignIn": "Sign in",
-    "VtaClaim": "Set up your agent"
+    "VtaClaim": "Set up your agent",
+    "SharedConnect": "Connect from a code"
   },
   "Loading": {
     "TakingTooLong": "This is taking longer than usual. You can return to home or continue waiting.",
@@ -3440,5 +3441,31 @@
     "VoteLaterKeeps": "Vote later keeps your ticket. The poll shows “Ticket ready” in the list until you vote.",
     "BackToCommunity": "Back to the community",
     "CertifiedOn": "Certified by the community on {{date}}"
+  },
+  "SharedConnect": {
+    "Title": "Connect with this person?",
+    "Body": "Someone shared this code so you can connect. Nothing is sent until you tap Connect.",
+    "NameLabel": "Name they gave",
+    "NoName": "No name given",
+    "NameUnverified": "Not checked: anyone can type any name.",
+    "IdLabel": "Their ID",
+    "RelayLabel": "Through",
+    "NoRelayHost": "A relay with no web address",
+    "ExpiresLabel": "Code expires",
+    "ExpiresDays_one": "in {{count}} day",
+    "ExpiresDays_other": "in {{count}} days",
+    "ExpiresHours_one": "in {{count}} hour",
+    "ExpiresHours_other": "in {{count}} hours",
+    "ExpiresMinutes_one": "in {{count}} minute",
+    "ExpiresMinutes_other": "in {{count}} minutes",
+    "ExpiresSoon": "in less than a minute",
+    "ExpiredShort": "Expired",
+    "Connect": "Connect",
+    "Cancel": "Cancel",
+    "Done": "Done",
+    "Connecting": "Connecting…",
+    "Started": "Connecting. Keep the app open until it finishes.",
+    "Failed": "Couldn't connect. Ask for a new code and try again.",
+    "NotBuilt": "This version of the app can't connect from a code yet. Nothing was sent."
   }
 }

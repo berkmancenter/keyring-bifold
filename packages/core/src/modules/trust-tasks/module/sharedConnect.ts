@@ -182,3 +182,33 @@ export function didPrefix(did: string, length = 12): string {
   if (!m) return did.slice(0, length)
   return m[2].length > length ? `${m[1]}${m[2].slice(0, length)}…` : did
 }
+
+/**
+ * What Connect does: starts the exchange (WP4 to WP8, not in this module).
+ * Registered by the code that carries it; with none registered, the confirm
+ * screen says this version cannot connect yet and sends nothing. Resolves
+ * once the first document is on its way; throws when it could not start.
+ */
+export type SharedConnectStarter = (offer: SharedConnectOffer) => Promise<void>
+
+let starter: SharedConnectStarter | undefined
+
+/** Register (or, with undefined, clear) what Connect starts. */
+export function registerSharedConnectStarter(start: SharedConnectStarter | undefined): void {
+  starter = start
+}
+
+export const sharedConnectStarter = (): SharedConnectStarter | undefined => starter
+
+/**
+ * How long a code has left, as a localization key and count: days, hours or
+ * minutes, rounded down, and "less than a minute" below one. Undefined once
+ * it has expired.
+ */
+export function timeLeftWords(seconds: number): { key: string; count?: number } | undefined {
+  if (seconds <= 0) return undefined
+  if (seconds >= 86_400) return { key: 'SharedConnect.ExpiresDays', count: Math.floor(seconds / 86_400) }
+  if (seconds >= 3_600) return { key: 'SharedConnect.ExpiresHours', count: Math.floor(seconds / 3_600) }
+  if (seconds >= 60) return { key: 'SharedConnect.ExpiresMinutes', count: Math.floor(seconds / 60) }
+  return { key: 'SharedConnect.ExpiresSoon' }
+}
