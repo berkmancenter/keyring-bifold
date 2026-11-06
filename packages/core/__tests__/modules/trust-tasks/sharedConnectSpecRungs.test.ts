@@ -172,6 +172,19 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       // An XRFI, the propose, the receipt for the inviter's issue, and Keyring's own issue.
       expect(run.sent.length).toBeGreaterThanOrEqual(4)
     })
+
+    test('the VRC Keyring issues, as the inviter receives it: VC 2.0, eddsa-jcs-2022, no validUntil, about the inviter', async () => {
+      const inviter = new Inviter(RELAY)
+      const run = await connect(inviter)
+      await run.pump()
+      const enactment = (run.result as { encounter: EncounterRecord }).encounter.enactment
+      const vc = inviter.enactments.get(enactment)?.theirVrc as Record<string, unknown>
+      // The inviter already verified its JCS proof under the issuer ('vc-proof' would have dropped it).
+      expect(vc['@context']).toEqual(expect.arrayContaining(['https://www.w3.org/ns/credentials/v2']))
+      expect((vc.proof as { cryptosuite?: string }).cryptosuite).toBe('eddsa-jcs-2022')
+      expect(vc).not.toHaveProperty('validUntil')
+      expect((vc.credentialSubject as { id?: string }).id).toBe(inviter.relDid)
+    })
   })
 
   describe('negative', () => {
@@ -235,6 +248,15 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       await run.pump()
       expect(outcome(run)).toBe('completed')
       expect(inviter.events).toContain('receipt:matched')
+    })
+
+    test('GAP: an inviter ceremony member the registry rejects (definition without definitionDigest) is accepted', async () => {
+      // Keyring is lenient inbound: the envelope schema is not checked on what arrives (#853). Pinned so that
+      // tightening it shows here on purpose.
+      const inviter = new Inviter(RELAY, undefined, { definitionWithoutDigest: true })
+      const run = await connect(inviter)
+      await run.pump()
+      expect(outcome(run)).toBe('completed')
     })
 
     test('two Connects on one code send one propose: the inviter never sees the code spent twice', async () => {

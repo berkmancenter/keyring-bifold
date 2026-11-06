@@ -1,6 +1,7 @@
 /**
- * TEST BRANCH ONLY: an independent shared-connect INVITER, written from the specifications, NOT from Keyring's
- * code, so that where Keyring and the spec disagree the rungs fail. It imports nothing from Keyring:
+ * An independent shared-connect INVITER for the rungs (sharedConnectSpecRungs.test.ts), written from the
+ * specifications, NOT from Keyring's code, so that where Keyring and the spec disagree the rungs fail. It imports
+ * nothing from Keyring. Its schemas are ahead of the repository's pin on purpose: see ./schemas/SOURCE.txt.
  *
  * - the flow and the link: trust-tasks #1034 and dtgwg-vti-spec#86, both as revised 2026-11-05
  *   (`_from` = a fresh did:peer:2, `_id` 16 random bytes, `_exp`, `_type=/vti/flow/shared-connect/0.1`,
