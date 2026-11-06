@@ -226,6 +226,8 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       const inviter = new Inviter(RELAY, undefined, { wrongKeyResponse: true })
       const run = await connect(inviter)
       await run.pump()
+      // Reached the step under test: the inviter took Keyring's propose and answered it.
+      expect(inviter.events).toContain('propose:accepted')
       expect(outcome(run)).not.toBe('completed')
       expect(inviter.events).not.toContain('issue:stored')
     })
@@ -234,6 +236,7 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       const inviter = new Inviter(RELAY, undefined, { wrongEnactment: true })
       const run = await connect(inviter)
       await run.pump()
+      expect(inviter.events).toContain('propose:accepted')
       expect(outcome(run)).not.toBe('completed')
       expect(inviter.events).not.toContain('issue:stored')
     })
@@ -243,6 +246,7 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       const before = (await agent.w3cCredentials.getAll()).length
       const run = await connect(inviter)
       await run.pump()
+      expect(inviter.events).toContain('propose:accepted')
       expect(outcome(run)).not.toBe('completed')
       expect((await agent.w3cCredentials.getAll()).length).toBe(before)
     })
@@ -251,6 +255,9 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       const inviter = new Inviter(RELAY, undefined, { receiptWrongDigest: true })
       const run = await connect(inviter)
       await run.pump()
+      // Reached the step under test: Keyring's own VRC got to the inviter, whose receipt is the wrong one.
+      expect(inviter.events).toContain('issue:stored')
+      expect(inviter.events).toContain('receipt:matched')
       expect(outcome(run)).not.toBe('completed')
     })
 
