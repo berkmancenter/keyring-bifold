@@ -22,7 +22,13 @@ import type { Agent } from '@credo-ts/core'
 import { didPrefix } from './didPrefix'
 import { chooseEncounterCarriage } from './sharedConnectCarriage'
 import { SharedConnectSession } from './sharedConnect'
-import { createEncounterDid, ENCOUNTER_LOG_PREFIX, saveEncounter, type EncounterRecord } from './sharedConnectEncounter'
+import {
+  createEncounterDid,
+  ENCOUNTER_LOG_PREFIX,
+  getEncounter,
+  saveEncounter,
+  type EncounterRecord,
+} from './sharedConnectEncounter'
 import { resolveInviter, type InviterCarriage } from './sharedConnectInviter'
 import { readTrigger, triggerAction, type TriggerUi } from './triggerLink'
 import { resolveVtiMediator, type VtiMediatorEndpoints } from './VtiMediatorTransport'
@@ -88,11 +94,16 @@ export interface SharedConnectStartDeps {
   resolveMediator: (agent: Agent, mediatorDid: string) => Promise<VtiMediatorEndpoints>
   createDid: typeof createEncounterDid
   save: typeof saveEncounter
+  /** The kept encounter for a link's `_id`, if there is one. */
+  find: typeof getEncounter
   /** Open the carriage and run the ceremony for a saved encounter; resolves once `propose` is on its way. */
   run: (agent: Agent, encounter: EncounterRecord, mediator: VtiMediatorEndpoints) => Promise<void>
 }
 
 const sessions = new Map<string, SharedConnectSession>()
+
+/** Starts under way, by `_id`: a second tap or scan of the same code joins the first instead of starting again. */
+const starting = new Map<string, Promise<SharedConnectStartResult>>()
 
 /** The live session for an encounter, for retry and cancel from the screen. */
 export const getSharedConnectSession = (enactment: string): SharedConnectSession | undefined => sessions.get(enactment)
@@ -128,6 +139,7 @@ const defaultDeps: SharedConnectStartDeps = {
   resolveMediator: resolveVtiMediator,
   createDid: createEncounterDid,
   save: saveEncounter,
+  find: getEncounter,
   run: runEncounter,
 }
 
@@ -137,6 +149,11 @@ const defaultDeps: SharedConnectStartDeps = {
  * never used), then the encounter DID is minted on the inviter's own mediator
  * (which avoids the cross-operator TSP failure, plan §3.3) and the encounter
  * is kept. Throws nothing the caller must handle: a failure is `failed`.
+ *
+ * The exchange starts once per code (`_id`): a second call while the first is
+ * under way gets the first's result; a code whose encounter is kept is not
+ * started again (it joins the live session, or is refused as spent), unless
+ * the earlier attempt failed before anything was proposed.
  */
 export async function startSharedConnect(
   agent: Agent,
@@ -150,6 +167,34 @@ export async function startSharedConnect(
   const { preview, endpoint } = previewed
   // The relay must be a mediator named by DID: an https endpoint has no session to open yet (WP5).
   if (!endpoint.startsWith('did:')) return { kind: 'refused', ui: 'unreachable' }
+  // Check and claim the code in one synchronous step, so two calls cannot both pass.
+  const joined = starting.get(preview.enactment)
+  if (joined) return joined
+  const attempt = beginEncounter(agent, deps, preview, endpoint, now)
+  starting.set(preview.enactment, attempt)
+  try {
+    return await attempt
+  } finally {
+    starting.delete(preview.enactment)
+  }
+}
+
+async function beginEncounter(
+  agent: Agent,
+  deps: SharedConnectStartDeps,
+  preview: SharedConnectPreview,
+  endpoint: string,
+  now: number
+): Promise<SharedConnectStartResult> {
+  try {
+    const kept = await deps.find(agent, preview.enactment)
+    if (kept && kept.state !== 'failed') {
+      // Already started: the live session is joined, a finished or restarted one is spent.
+      return sessions.has(kept.enactment) ? { kind: 'started', encounter: kept } : { kind: 'refused', ui: 'invalid' }
+    }
+  } catch {
+    // An unreadable store does not block the first attempt.
+  }
   try {
     const mediator = await deps.resolveMediator(agent, endpoint)
     const myVid = await deps.createDid(agent, mediator, { tsp: preview.carriage === 'tsp' })
@@ -164,7 +209,13 @@ export async function startSharedConnect(
       createdAt: new Date(now * 1000).toISOString(),
     }
     await deps.save(agent, encounter)
-    await deps.run(agent, encounter, mediator)
+    try {
+      await deps.run(agent, encounter, mediator)
+    } catch (runError) {
+      // Nothing was proposed that anyone waits on: mark it so the same code can be tried again.
+      await deps.save(agent, { ...encounter, state: 'failed' }).catch(() => undefined)
+      throw runError
+    }
     return { kind: 'started', encounter }
   } catch (error) {
     // The error's name only: its message may carry a DID or an endpoint the inviter chose.

@@ -39,4 +39,17 @@ describe('buildVrcCredential with the shared-connect profile', () => {
     expect(credential.validUntil).toBeDefined()
     expect(credential['@context']).toHaveLength(3)
   })
+
+  it('never consults the legacy vrc:rceVersion announcement, so a peer that never sends it still gets VCDM 2.0', async () => {
+    const resolve = agent.dependencyManager.resolve as jest.Mock
+    resolve.mockClear()
+    const { credential } = await buildVrcCredential(agent, MINE, THEIRS, SHARED_CONNECT_VRC_PROFILE)
+    expect(resolve).not.toHaveBeenCalled()
+    expect(credential['@context'][0]).toBe('https://www.w3.org/ns/credentials/v2')
+  })
+
+  it('control: without a profile, a peer that never announced an RCE version gets VC 1.1', async () => {
+    const { credential } = await buildVrcCredential(agent, MINE, THEIRS)
+    expect(credential['@context'][0]).not.toBe('https://www.w3.org/ns/credentials/v2')
+  })
 })

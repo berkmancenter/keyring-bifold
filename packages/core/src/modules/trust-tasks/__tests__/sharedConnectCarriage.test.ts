@@ -60,7 +60,7 @@ describe('TSP encounter carriage', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockGreet.mockResolvedValue({ bytes: new Uint8Array([1]) })
-    mockPack.mockResolvedValue({ bytes: new Uint8Array([2, 2]), revision: 'rev3' })
+    mockPack.mockResolvedValue({ bytes: new Uint8Array([2, 2]), revision: 'v1' })
   })
 
   it('forms the relationship once, routed back to us, before the first and only the first document', async () => {
@@ -72,6 +72,16 @@ describe('TSP encounter carriage', () => {
     expect(mockGreet).toHaveBeenCalledTimes(1)
     expect(mockGreet.mock.calls[0].slice(1, 4)).toEqual([MY, THEIR, ['did:peer:2.mediator', MY]])
     expect(relay.sendTspFrame.mock.calls.map((c) => c[0].length)).toEqual([1, 2, 2])
+  })
+
+  it('packs TSP 1.0 (v1) on every send, the relationship-forming invite included', async () => {
+    const { options } = rig()
+    const carriage = createTspEncounterCarriage(options)
+    await carriage.start()
+    await carriage.send({ type: 'a/b/c/0.1' })
+    await carriage.send({ type: 'a/b/c/0.1' })
+    expect(mockGreet.mock.calls[0][4]).toBe('v1')
+    expect(mockPack.mock.calls.map((c) => c[4])).toEqual(['v1', 'v1'])
   })
 
   it('hands on a document from the inviter and drops a control frame or another sender', async () => {

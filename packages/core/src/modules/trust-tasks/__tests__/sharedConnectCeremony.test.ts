@@ -12,7 +12,6 @@ import {
   signSharedConnectDocument,
 } from '../module/sharedConnectCeremony'
 import {
-  SHARED_CONNECT_CEREMONY_DEFINITION,
   SHARED_CONNECT_FLOW_OWNER,
   SHARED_CONNECT_PROOF_SIGNER,
   SHARED_CONNECT_TSP_REVISION,
@@ -61,7 +60,7 @@ describe('a document', () => {
     issuedAt: '2027-01-15T08:00:00Z',
   })
 
-  it('carries the thread, the in-band VIDs and the ceremony member, and no definitionDigest', () => {
+  it('carries the thread, the in-band VIDs and a ceremony member of enactment and step only', () => {
     expect(doc).toEqual({
       id: PROPOSE_ID,
       type: 'https://trusttasks.org/spec/vrc/relationships/propose/0.1',
@@ -69,10 +68,11 @@ describe('a document', () => {
       issuer: ME,
       recipient: THEM,
       issuedAt: '2027-01-15T08:00:00Z',
-      ceremony: { enactment: ENACTMENT, step: 1, definition: SHARED_CONNECT_CEREMONY_DEFINITION },
+      ceremony: { enactment: ENACTMENT, step: 1 },
       payload: { relationshipDid: 'did:peer:0z6Mk' },
     })
-    expect(ceremonyMember(ENACTMENT, 3)).not.toHaveProperty('definitionDigest')
+    expect(ceremonyMember(ENACTMENT, 3)).toEqual({ enactment: ENACTMENT, step: 3 })
+    expect(Object.keys(doc.ceremony as object)).not.toContain('definition')
   })
 
   describe('as it arrives', () => {
@@ -82,9 +82,26 @@ describe('a document', () => {
       expect(encounterMismatch(doc, expected)).toBeUndefined()
     })
 
+    it('accepts a ceremony that names its definition together with the digest', () => {
+      const ceremony = { enactment: ENACTMENT, step: 1, definition: 'x', definitionDigest: 'uEi' }
+      expect(encounterMismatch({ ...doc, ceremony }, expected)).toBeUndefined()
+    })
+
     it.each([
       ['a different enactment', { ceremony: { enactment: 'other', step: 1 } }, 'enactment'],
       ['no ceremony member', { ceremony: undefined }, 'enactment'],
+      [
+        'a ceremony naming a definition without its digest',
+        { ceremony: { enactment: ENACTMENT, step: 1, definition: 'x' } },
+        'ceremony',
+      ],
+      [
+        'a ceremony with a member the schema does not have',
+        { ceremony: { enactment: ENACTMENT, step: 1, extra: 1 } },
+        'ceremony',
+      ],
+      ['a ceremony that is not an object', { ceremony: 'x' }, 'ceremony'],
+      ['a ceremony with no step', { ceremony: { enactment: ENACTMENT } }, 'ceremony'],
       ['a different thread', { threadId: 'other' }, 'thread'],
       ['a different recipient', { recipient: 'did:peer:2.else' }, 'recipient'],
       ['a different issuer', { issuer: 'did:peer:2.else' }, 'issuer'],
@@ -117,7 +134,7 @@ describe('the proof', () => {
 
 describe('the decisions awaiting Alberto sit at the plan defaults, in one file', () => {
   it('names each default', () => {
-    expect(SHARED_CONNECT_TSP_REVISION).toBe('rev3')
+    expect(SHARED_CONNECT_TSP_REVISION).toBe('1.0')
     expect(SHARED_CONNECT_FLOW_OWNER).toBe('core')
     expect(SHARED_CONNECT_VRC_PROFILE).toEqual({
       vc20: true,

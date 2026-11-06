@@ -83,7 +83,7 @@ const fromInviter = (propose0: Record<string, unknown>) => {
     issuer: THEIR_VID,
     recipient: MY_VID,
     issuedAt: '2026-11-05T00:00:00Z',
-    ceremony: { enactment: ENCOUNTER_ID, step, definition: 'https://trusttasks.org/ceremony/shared-connect/0.1' },
+    ceremony: { enactment: ENCOUNTER_ID, step },
     payload,
     proof: { signer: THEIR_VID },
   })

@@ -10,12 +10,11 @@
 import type { VrcProfile } from '../../vrc/vrc-manager'
 
 /**
- * Decision 2, the TSP revision Keyring packs toward ecosystem peers. Default:
- * `rev3`, what the codec packs today (`createTspCodec`); `1.0` is present in
- * the codec but unproven upstream, and the registry binding still cites Rev 2.
- * Answered by the counterparts' reply to Q2 (plan §9).
+ * Decision 2, the TSP revision Keyring packs on this path: 1.0 (Alberto, PR
+ * #853), the codec's `'v1'`. Sent on every frame, the XRFI included, because
+ * the codec packs Rev 3 unless told `'v1'`. Inbound frames of 1.0 are read.
  */
-export const SHARED_CONNECT_TSP_REVISION: 'rev3' | '1.0' = 'rev3'
+export const SHARED_CONNECT_TSP_REVISION = '1.0' as const
 
 /**
  * Decision 3, the key that signs each document's proof. Default
@@ -41,8 +40,10 @@ export const SHARED_CONNECT_VRC_PROFILE: VrcProfile = {
 
 /**
  * Decision 1, whether the flow uses `propose/0.1` and `issue/0.1` unchanged
- * with a `ceremony` member on every step. Default: yes. The ceremony
- * definition is not published, so no `definitionDigest` is sent (plan D7).
+ * with a `ceremony` member on every step: yes (Alberto). The definition is
+ * not published, so the member carries `{enactment, step}` only: `definition`
+ * without `definitionDigest` fails the envelope schema (plan D7). Not sent
+ * today; kept as the name to publish.
  */
 export const SHARED_CONNECT_CEREMONY_DEFINITION = 'https://trusttasks.org/ceremony/shared-connect/0.1'
 

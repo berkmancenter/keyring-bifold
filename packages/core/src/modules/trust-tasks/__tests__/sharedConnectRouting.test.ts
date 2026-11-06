@@ -1,7 +1,13 @@
 /** A shared-connect link through the scanner's router (plan WP1): behind the developer flag, to its own screen. */
 import { Screens } from '../../../types/navigators'
 import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
-import { keyringAgentLinkKind, MY_AGENT_SCREEN, myAgentLinkParams, routeKeyringAgentLink } from '../module/vtiLinks'
+import {
+  describeLinkForLog,
+  keyringAgentLinkKind,
+  MY_AGENT_SCREEN,
+  myAgentLinkParams,
+  routeKeyringAgentLink,
+} from '../module/vtiLinks'
 
 import { sharedConnectLink } from './fixtures/sharedConnectFixtures'
 
@@ -65,5 +71,15 @@ describe('a shared-connect link', () => {
       await expect(routeKeyringAgentLink(link, {} as never, navigate)).rejects.toMatchObject({ messageKey })
       expect(navigate).not.toHaveBeenCalled()
     })
+  })
+})
+
+describe('what is logged about a link', () => {
+  it('is its kind and length, never the link, the contact or the label', () => {
+    const link = `https://link.trustoverip.org/t#_from=did:peer:2.Vz6MkSECRET&_id=${'A'.repeat(22)}&_label=Ada%20Sentinel&_type=/vti/flow/shared-connect/0.1`
+    const logged = describeLinkForLog(link)
+    expect(logged).toBe(`kind triggerLink, ${link.length} characters`)
+    expect(logged).not.toContain('SECRET')
+    expect(logged).not.toContain('Sentinel')
   })
 })

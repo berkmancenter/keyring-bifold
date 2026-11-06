@@ -1,6 +1,6 @@
 /**
  * The local interop rung (plan WP13, local half): the scanner's session and
- * TSP carriage against a scripted fake inviter, over real TSP Rev 3 frames
+ * TSP carriage against a scripted fake inviter, over real TSP 1.0 frames
  * with real keys and the real codec. Proofs and credential signing are
  * stubbed (they need a KMS); everything else, relationship forming first, the
  * envelope, the identity rule and the six documents, is the real path. The
@@ -8,6 +8,7 @@
  */
 import { ed25519, x25519 } from '@noble/curves/ed25519.js'
 import { tsp } from '@bifold/trust-tasks'
+import { peekRevision } from '@openvtc/vti-tsp-js-v1'
 import * as issue from '@openvtc/trust-tasks/vrc/relationships/issue/0.1/payload'
 import * as propose from '@openvtc/trust-tasks/vrc/relationships/propose/0.1/payload'
 
@@ -76,12 +77,13 @@ it('completes the six documents over real TSP frames, forming the relationship f
   }
 
   const frames: { kind: 'control' | 'document'; type?: string }[] = []
+  const revisions: string[] = []
   const inviterReceived: Record<string, unknown>[] = []
   let deliverToScanner!: (bytes: Uint8Array) => Promise<void>
   const live = {} as { session: SharedConnectSession }
 
   const inviterSays = async (document: Record<string, unknown>) => {
-    const packed = await packTrustTaskForPeer(sessionOf(THEIRS), THEIRS.vid, MINE.vid, document)
+    const packed = await packTrustTaskForPeer(sessionOf(THEIRS), THEIRS.vid, MINE.vid, document, 'v1')
     await deliverToScanner(packed.bytes)
   }
   const base = (type: string, step: number, threadId: string, payload: unknown, id: string) => ({
@@ -91,7 +93,7 @@ it('completes the six documents over real TSP frames, forming the relationship f
     issuer: THEIRS.vid,
     recipient: MINE.vid,
     issuedAt: '2026-11-05T00:00:00Z',
-    ceremony: { enactment: ENCOUNTER_ID, step, definition: 'https://trusttasks.org/ceremony/shared-connect/0.1' },
+    ceremony: { enactment: ENCOUNTER_ID, step },
     payload,
     proof: { signer: THEIRS.vid },
   })
@@ -99,6 +101,9 @@ it('completes the six documents over real TSP frames, forming the relationship f
 
   // The fake inviter: what the relay delivers to it.
   const inviterInbox = async (bytes: Uint8Array) => {
+    // peekRevision refuses any MAJOR but 1, so a Rev 2 or Rev 3 frame would throw here.
+    const peeked = peekRevision(bytes)
+    revisions.push(`${peeked.major}.${peeked.minor}`)
     const opened = await unpackTrustTaskFromPeer(sessionOf(THEIRS), bytes, THEIRS.vid)
     if (!opened) return void frames.push({ kind: 'control' })
     const doc = opened.plaintext.body as Record<string, any>
@@ -175,4 +180,6 @@ it('completes the six documents over real TSP frames, forming the relationship f
     )
   ).toEqual(['XRFI', 'propose/0.1', 'issue/0.1#response', 'issue/0.1'])
   expect(stored).toEqual([theirVc])
+  // Every scanner frame, the XRFI first, is TSP 1.0 (the codec packs Rev 3 unless told 'v1').
+  expect(revisions).toEqual(['1.0', '1.0', '1.0', '1.0'])
 })

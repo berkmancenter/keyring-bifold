@@ -133,6 +133,13 @@ export function keyringAgentLinkKind(text: string): KeyringAgentLinkKind | undef
   return undefined
 }
 
+/**
+ * What may be logged about a link: its kind and its length, never the link itself (a trigger link carries `_from`,
+ * `_id` and perhaps `_label`; an invitation carries secrets).
+ */
+export const describeLinkForLog = (text: string): string =>
+  `kind ${keyringAgentLinkKind(text) ?? 'other'}, ${text.length} characters`
+
 /** The names a trigger link reserves in its fragment (dtgwg-vti-spec trigger links). */
 const TRIGGER_NAMES = ['_from', '_id', '_exp', '_type']
 

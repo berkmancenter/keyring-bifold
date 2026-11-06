@@ -27,7 +27,6 @@ import type { Agent } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import type { tsp } from '@bifold/trust-tasks'
 
-import { SHARED_CONNECT_TSP_REVISION } from './sharedConnectDecisions'
 import { ENCOUNTER_LOG_PREFIX, type EncounterRecord } from './sharedConnectEncounter'
 import type { EncounterTransport } from './sharedConnect'
 import { isTspFrameUnopenable } from './tspFrameUnopenable'
@@ -46,9 +45,8 @@ export interface EncounterCarriage extends EncounterTransport {
   stop(): Promise<void>
 }
 
-/** The carriage's TSP revision from the decision constant ('1.0' is the codec's 'v1'). */
-export const encounterTspRevision = (): tsp.TspRevision | undefined =>
-  SHARED_CONNECT_TSP_REVISION === '1.0' ? 'v1' : undefined
+/** The carriage's TSP revision: SHARED_CONNECT_TSP_REVISION (1.0), which is the codec's 'v1'. Always explicit, because the codec packs Rev 3 by default. */
+export const encounterTspRevision = (): tsp.TspRevision => 'v1'
 
 /** The mediator-session surface the carriages use, so tests can stand in for a relay. */
 export interface EncounterRelaySession {

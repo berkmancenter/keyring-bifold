@@ -33,6 +33,7 @@ const deps = () => ({
   resolveMediator: jest.fn(async () => MEDIATOR),
   createDid: jest.fn(async () => 'did:peer:2.mine'),
   save: jest.fn(async () => undefined),
+  find: jest.fn(async () => undefined),
   run: jest.fn(async () => undefined),
 })
 
@@ -103,6 +104,28 @@ describe('previewSharedConnect', () => {
   })
 })
 
+describe('a link over the 1,000-character budget', () => {
+  // Long-form did:peer:4 with TSP and DIDComm measured 1,033 to 1,216 characters (PR #853).
+  const longForm = `did:peer:4zQm${'Q'.repeat(44)}:z${'Q'.repeat(950)}`
+
+  it('is refused cleanly as invalid by the preview, with nothing resolved', async () => {
+    const agent = agentWith()
+    const link = sharedConnectLink({ from: longForm })
+    expect([...link].length).toBeGreaterThan(1000)
+    await expect(previewSharedConnect(agent, link, { now: NOW })).resolves.toEqual({ kind: 'refused', ui: 'invalid' })
+    expect(agent.dids.resolveDidDocument).not.toHaveBeenCalled()
+  })
+
+  it('is refused by Connect too, and nothing is minted or kept', async () => {
+    const d = deps()
+    await expect(
+      startSharedConnect(agentWith(), sharedConnectLink({ from: longForm }), { now: NOW, deps: d })
+    ).resolves.toEqual({ kind: 'refused', ui: 'invalid' })
+    expect(d.createDid).not.toHaveBeenCalled()
+    expect(d.save).not.toHaveBeenCalled()
+  })
+})
+
 describe('startSharedConnect', () => {
   it('mints an encounter DID on the inviter mediator and keeps the encounter', async () => {
     const d = deps()
@@ -124,6 +147,50 @@ describe('startSharedConnect', () => {
     })
     expect(d.save).toHaveBeenCalledWith(expect.anything(), (result as { encounter: object }).encounter)
     expect(d.run).toHaveBeenCalledWith(expect.anything(), (result as { encounter: object }).encounter, MEDIATOR)
+  })
+
+  describe('once per code', () => {
+    const keptRecord = (state: string) => ({ enactment: ENCOUNTER_ID, state }) as never
+
+    it('joins a second tap or scan that arrives while the first is under way', async () => {
+      const d = deps()
+      const agent = agentWith()
+      const link = sharedConnectLink()
+      const [a, b] = await Promise.all([
+        startSharedConnect(agent, link, { now: NOW, deps: d }),
+        startSharedConnect(agent, link, { now: NOW, deps: d }),
+      ])
+      expect(a).toEqual(b)
+      expect(d.createDid).toHaveBeenCalledTimes(1)
+      expect(d.run).toHaveBeenCalledTimes(1)
+      expect(d.save).toHaveBeenCalledTimes(1)
+    })
+
+    it('starts the same code again after the first call has finished only if nothing is kept for it', async () => {
+      const d = deps()
+      await startSharedConnect(agentWith(), sharedConnectLink(), { now: NOW, deps: d })
+      d.find.mockResolvedValueOnce(keptRecord('proposing'))
+      await expect(startSharedConnect(agentWith(), sharedConnectLink(), { now: NOW, deps: d })).resolves.toEqual({
+        kind: 'refused',
+        ui: 'invalid',
+      })
+      expect(d.run).toHaveBeenCalledTimes(1)
+      expect(d.createDid).toHaveBeenCalledTimes(1)
+    })
+
+    it('lets a code try again when the earlier attempt failed before anything was proposed', async () => {
+      const d = deps()
+      d.run.mockRejectedValueOnce(new Error('relay down'))
+      await expect(startSharedConnect(agentWith(), sharedConnectLink(), { now: NOW, deps: d })).resolves.toEqual({
+        kind: 'failed',
+      })
+      expect(d.save).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ state: 'failed' }))
+      d.find.mockResolvedValueOnce(keptRecord('failed'))
+      await expect(startSharedConnect(agentWith(), sharedConnectLink(), { now: NOW, deps: d })).resolves.toMatchObject({
+        kind: 'started',
+      })
+      expect(d.run).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('reports failed when the relay cannot be reached', async () => {

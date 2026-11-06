@@ -132,7 +132,8 @@ describe('with the developer flag on', () => {
 
   it('does not change what the other flows accept: a did:peer sign-in is refused for its method', () => {
     const link = `https://link.trustoverip.org/t#_from=${KEYRING_STYLE_DID}&_id=${ENCOUNTER_ID}&_exp=${NOW + 60}&_type=/vti/flow/sign-in/0.1`
-    expect(read(link)).toMatchObject({ outcome: 'reject', reason: 'from-not-allowed' })
+    // Flag on: the syntax step reads the did:peer, then the flow's own rule refuses it. Flag off it was unsupported-vid / update.
+    expect(read(link)).toEqual({ outcome: 'reject', reason: 'from-not-allowed', ui: 'invalid' })
   })
 })
 
@@ -151,10 +152,24 @@ describe('_label', () => {
     expect(read(sharedConnectLink({ label: 'Ada  Lovelace' }))).toMatchObject({ label: 'Ada Lovelace' })
   })
 
-  it('is refused when repeated', () => {
+  it('is dropped, and the link still reads, when repeated', () => {
     setSharedConnectLabelEnabled(true)
     const link = `${sharedConnectLink({ label: 'a' })}&_label=b`
-    expect(read(link)).toMatchObject({ outcome: 'reject', reason: 'repeated-param' })
+    const result = read(link)
+    expect(result).toMatchObject({ outcome: 'accept' })
+    expect(result).not.toHaveProperty('label')
+  })
+
+  it('is dropped, not cut, when too long', () => {
+    setSharedConnectLabelEnabled(true)
+    expect(read(sharedConnectLink({ label: 'a'.repeat(SHARED_CONNECT_LABEL_MAX + 1) }))).not.toHaveProperty('label')
+    expect(read(sharedConnectLink({ label: 'a'.repeat(SHARED_CONNECT_LABEL_MAX) }))).toHaveProperty('label')
+  })
+
+  it('is dropped, not cleaned, when it carries a control or bidirectional character', () => {
+    setSharedConnectLabelEnabled(true)
+    expect(read(sharedConnectLink({ label: 'Ada\u202eLovelace' }))).not.toHaveProperty('label')
+    expect(read(sharedConnectLink({ label: 'Ada\u0007' }))).not.toHaveProperty('label')
   })
 
   it('is left out when nothing printable remains', () => {
@@ -172,13 +187,13 @@ describe('_label', () => {
 describe('sanitizeLabel', () => {
   it.each([
     ['plain text', 'Ada Lovelace', 'Ada Lovelace'],
-    ['control characters', 'A\u0000d\u0007a\u007f', 'Ada'],
-    ['bidirectional overrides', 'abc‮def⁦', 'abcdef'],
-    ['zero-width characters', 'A​d‍a﻿', 'Ada'],
-    ['tabs and newlines become spaces', 'Ada\tLove\nlace', 'Ada Love lace'],
+    ['control characters', 'A\u0000d\u0007a\u007f', undefined],
+    ['bidirectional overrides', 'abc‮def⁦', undefined],
+    ['zero-width characters', 'A​d‍a﻿', undefined],
+    ['tabs and newlines', 'Ada\tLove\nlace', undefined],
     ['no-break and ideographic spaces', 'Ada 　Lovelace', 'Ada Lovelace'],
     ['edge whitespace', '   Ada   ', 'Ada'],
-    ['private use and tag characters', 'Ada\u{e0041}', 'Ada'],
+    ['private use and tag characters', 'Ada\u{e0041}', undefined],
     ['combining forms (normalised)', 'Adéla', 'Adéla'],
     ['an emoji', 'Ada 🙂', 'Ada 🙂'],
   ])('%s', (_, input, expected) => {
@@ -190,9 +205,9 @@ describe('sanitizeLabel', () => {
     expect(sanitizeLabel('​ ‮')).toBeUndefined()
   })
 
-  it('cuts to the limit in whole code points', () => {
-    const cut = sanitizeLabel('🙂'.repeat(200)) as string
-    expect([...cut]).toHaveLength(SHARED_CONNECT_LABEL_MAX)
+  it('drops a label over the limit, counting whole code points, and keeps one at the limit', () => {
+    expect(sanitizeLabel('🙂'.repeat(200))).toBeUndefined()
+    expect([...(sanitizeLabel('🙂'.repeat(SHARED_CONNECT_LABEL_MAX)) as string)]).toHaveLength(SHARED_CONNECT_LABEL_MAX)
   })
 })
 

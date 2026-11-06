@@ -312,10 +312,12 @@ function fromProblem(value: string, readsPeer: boolean): string | undefined {
 }
 
 /**
- * Make a sender-written display name safe to show: Unicode-normalised, control, format (including the bidirectional
- * overrides and zero-width characters), private-use and tag code points removed, every kind of space turned into one
- * plain space and runs of them collapsed, then cut to {@link SHARED_CONNECT_LABEL_MAX} code points. Returns
- * undefined when nothing is left. It is still unverified text: the screen says so, and nothing logs it.
+ * Make a sender-written display name safe to show. The label is unverified text from the link, so it is kept only
+ * when it is plainly a name: Unicode-normalised, every kind of space turned into one plain space with runs
+ * collapsed, edges trimmed. A label that carries a control, format (bidirectional override, zero-width), private-use
+ * or tag code point, or that is longer than {@link SHARED_CONNECT_LABEL_MAX} code points, is dropped whole, not
+ * cleaned up or cut: a name that had to be repaired is not one to show. Returns undefined when dropped or empty. It
+ * is still unverified text: the screen says so, and nothing logs it.
  */
 export function sanitizeLabel(raw: string): string | undefined {
   const out: string[] = []
@@ -328,15 +330,12 @@ export function sanitizeLabel(raw: string): string | undefined {
       (cp >= 0x2000 && cp <= 0x200a) ||
       cp === 0x202f ||
       cp === 0x205f ||
-      cp === 0x3000 ||
-      cp === 0x09 ||
-      cp === 0x0a ||
-      cp === 0x0d
+      cp === 0x3000
     if (isSpace) {
       out.push(' ')
       continue
     }
-    const dropped =
+    const unsafe =
       cp <= 0x1f ||
       (cp >= 0x7f && cp <= 0x9f) ||
       cp === 0xad ||
@@ -353,11 +352,12 @@ export function sanitizeLabel(raw: string): string | undefined {
       cp === 0xffff ||
       (cp >= 0xe0000 && cp <= 0xe007f) ||
       cp >= 0xf0000
-    if (!dropped) out.push(ch)
+    if (unsafe) return undefined
+    out.push(ch)
   }
   const collapsed = out.join('').replace(/ {2,}/g, ' ').trim()
-  const cut = [...collapsed].slice(0, SHARED_CONNECT_LABEL_MAX).join('').trim()
-  return cut === '' ? undefined : cut
+  if ([...collapsed].length > SHARED_CONNECT_LABEL_MAX) return undefined
+  return collapsed === '' ? undefined : collapsed
 }
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
@@ -484,9 +484,11 @@ export function readTrigger(
   const ignored: string[] = []
   const readLabel = isSharedConnectLabelEnabled()
   let rawLabel: string | undefined
+  let labelRepeated = false
   for (const [name, value] of pairs) {
     if (name === '_label' && readLabel) {
-      if (rawLabel !== undefined) return reject('repeated-param')
+      // A repeated label is dropped, not a reason to refuse the link: the label is a courtesy, never a requirement.
+      if (rawLabel !== undefined) labelRepeated = true
       rawLabel = value
     } else if (RESERVED.includes(name)) {
       if (name in fields) return reject('repeated-param')
@@ -557,7 +559,10 @@ export function readTrigger(
     task,
     ignored,
     // `_label` belongs to the shared-connect flow only; on any other it is unread.
-    ...(flow?.flow === SHARED_CONNECT_TRIGGER_FLOW.flow && rawLabel !== undefined && sanitizeLabel(rawLabel)
+    ...(flow?.flow === SHARED_CONNECT_TRIGGER_FLOW.flow &&
+    rawLabel !== undefined &&
+    !labelRepeated &&
+    sanitizeLabel(rawLabel)
       ? { label: sanitizeLabel(rawLabel) }
       : {}),
   }
