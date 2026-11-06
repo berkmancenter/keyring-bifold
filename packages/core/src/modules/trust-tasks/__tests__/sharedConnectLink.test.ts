@@ -162,6 +162,28 @@ describe('_label', () => {
     expect(read(sharedConnectLink({ label: '‮​' }))).not.toHaveProperty('label')
   })
 
+  // Labels written to deceive, percent-encoded in the link as a sender would: what reaches
+  // the screen is one plain line, with nothing that reorders or hides characters.
+  it.each([
+    ['a right-to-left override that would show "Ana bank" reversed', 'Ana \u202Eknab', 'Ana knab'],
+    ['a newline faking a second line', 'Ana\nYour bank (verified)', 'Ana Your bank (verified)'],
+    ['a line separator, dropped', 'Ana\u2028Support team', 'AnaSupport team'],
+    ['an isolate hiding a reordered run', 'Ana \u2067Bank\u2069', 'Ana Bank'],
+    ['zero-width characters splitting a word', 'B\u200Ba\u200Bnk', 'Bank'],
+  ])('shows %s as one plain line', (_, raw, shown) => {
+    setSharedConnectLabelEnabled(true)
+    const result = read(sharedConnectLink({ label: raw })) as { label?: string }
+    expect(result.label).toBe(shown)
+    // eslint-disable-next-line no-control-regex
+    expect(result.label).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2066-\u2069]/)
+  })
+
+  it('cuts a label longer than 64 characters rather than show it whole', () => {
+    setSharedConnectLabelEnabled(true)
+    const result = read(sharedConnectLink({ label: `Ana${' '.repeat(3)}${'x'.repeat(80)}` })) as { label?: string }
+    expect([...(result.label as string)]).toHaveLength(SHARED_CONNECT_LABEL_MAX)
+  })
+
   it('stays off when the flow itself is off, whatever the label flag says', () => {
     setSharedConnectEnabled(false)
     setSharedConnectLabelEnabled(true)
