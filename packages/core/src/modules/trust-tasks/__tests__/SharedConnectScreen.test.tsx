@@ -132,6 +132,19 @@ describe('Connect', () => {
     expect(text(tree, SharedConnectIds.resultMessage)).toHaveTextContent('SharedConnect.Started')
   })
 
+  it('starts once however many times Connect is pressed before the screen changes', async () => {
+    const start = jest.fn(() => new Promise<void>(() => undefined))
+    const tree = await show(sharedConnectLink({ from: FROM, now: NOW }), start)
+    const connect = tree.getByTestId(id(SharedConnectIds.connect))
+    await act(async () => {
+      // Three touches in one frame: no render in between.
+      fireEvent.press(connect)
+      fireEvent.press(connect)
+      fireEvent.press(connect)
+    })
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
   it('uses the registered starter by default', async () => {
     const start = jest.fn(async () => undefined)
     registerSharedConnectStarter(start)

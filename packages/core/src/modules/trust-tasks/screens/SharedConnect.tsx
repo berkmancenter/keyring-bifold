@@ -93,6 +93,10 @@ export const SharedConnectFlow: React.FC<SharedConnectFlowProps> = ({ link, star
   const [step, setStep] = useState<Step>(first)
   const [clock, setClock] = useState(now)
   const live = useRef(true)
+  // Set by the first press of Connect, before anything else: a second touch in
+  // the same frame lands before the step changes, and must not start the
+  // exchange again. One code, one start.
+  const pressed = useRef(false)
 
   useEffect(
     () => () => {
@@ -111,6 +115,8 @@ export const SharedConnectFlow: React.FC<SharedConnectFlowProps> = ({ link, star
   const expired = step.kind === 'confirm' && clock >= step.offer.exp
 
   const onConnect = async (offer: SharedConnectOffer) => {
+    if (pressed.current) return
+    pressed.current = true
     // Checked again here: the code may have run out while the screen was open.
     if (now() >= offer.exp) {
       setStep({ kind: 'ended', end: { kind: 'cantUse', ui: 'expired' } })
