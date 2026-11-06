@@ -165,10 +165,10 @@ export function isVtiReadTask(type: string): boolean {
 export const VTI_ANSWER_HOLD_MS = 60000
 
 /**
- * For this long after a session opens, a reply that names no thread and no time is not taken as an answer by its type
- * alone (`askAnswered`): the mediator flushes what it held the moment the socket opens, and such a reply can't say it
- * was written after the request. Sign-in no longer waits this out before an ask may go (it used to wait a fixed 2 s
- * for every sign-in); only that one kind of reply does.
+ * For this long after a session opens, a reply that names no thread is not taken as an answer by its type alone
+ * (`askAnswered`), whether or not it names a time: the mediator flushes what it held the moment the socket opens, and
+ * the fixed 2 s wait this replaces kept every such reply from any ask. Sign-in no longer waits this out before an ask
+ * may go; only that one kind of reply does. A reply naming its thread is never held back.
  */
 export const VTI_BACKLOG_GRACE_MS = 2000
 
@@ -820,10 +820,12 @@ class VtiAgentController {
       return undefined
     }
     if (type === PROBLEM_REPORT) return undefined
+    // Within the grace after a session opens, no reply naming no thread answers by type, timed or not: what the
+    // mediator flushes then was written before, and a timed one's 5 s slop could still read as fresh (as the fixed wait
+    // this replaces kept every such reply from any ask). A real one that early waits out its ask's clock.
     const fresh = (entry: AskEntry) =>
-      typeof plaintext.created_time === 'number'
-        ? plaintext.created_time * 1000 >= entry.lastSentAt - 5000
-        : this.now() - this.openedAt >= VTI_BACKLOG_GRACE_MS
+      this.now() - this.openedAt >= VTI_BACKLOG_GRACE_MS &&
+      (typeof plaintext.created_time !== 'number' || plaintext.created_time * 1000 >= entry.lastSentAt - 5000)
     // By type alone only for this session's own asks: one kept across a switch is another identity's, and a reply naming
     // no thread can't say it is for that one.
     const candidates = [...this.asks.values()]
