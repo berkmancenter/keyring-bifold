@@ -121,7 +121,7 @@ describe('the proof', () => {
 
 describe('the decisions awaiting Alberto sit at the plan defaults, in one file', () => {
   it('names each default', () => {
-    expect(SHARED_CONNECT_TSP_REVISION).toBe('rev3')
+    expect(SHARED_CONNECT_TSP_REVISION).toBe('1.0')
     expect(SHARED_CONNECT_FLOW_OWNER).toBe('core')
     expect(SHARED_CONNECT_VRC_PROFILE).toEqual({
       vc20: true,

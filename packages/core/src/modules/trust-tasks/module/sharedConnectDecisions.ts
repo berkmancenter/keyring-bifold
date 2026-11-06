@@ -10,12 +10,14 @@
 import type { VrcProfile } from '../../vrc/vrc-manager'
 
 /**
- * Decision 2, the TSP revision Keyring packs toward ecosystem peers. Default:
- * `rev3`, what the codec packs today (`createTspCodec`); `1.0` is present in
- * the codec but unproven upstream, and the registry binding still cites Rev 2.
- * Answered by the counterparts' reply to Q2 (plan §9).
+ * Decision 2, the TSP revision Keyring packs toward ecosystem peers: `1.0`
+ * (keyring-wallet #853, decided 2026-11-06: both counterparts send 1.0). The
+ * codec packs Rev 3 unless told `v1`, and a 1.0 reader (vti-tsp-js,
+ * affinidi-tsp) drops a Rev 3 frame without a word, so this path must pass
+ * `v1` on every send, the XRFI included. `rev3` stays selectable for a
+ * Keyring-to-Keyring test.
  */
-export const SHARED_CONNECT_TSP_REVISION: 'rev3' | '1.0' = 'rev3'
+export const SHARED_CONNECT_TSP_REVISION: 'rev3' | '1.0' = '1.0'
 
 /**
  * Decision 3, the key that signs each document's proof. Default

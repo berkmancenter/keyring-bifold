@@ -60,7 +60,17 @@ describe('TSP encounter carriage', () => {
   beforeEach(() => {
     jest.clearAllMocks()
     mockGreet.mockResolvedValue({ bytes: new Uint8Array([1]) })
-    mockPack.mockResolvedValue({ bytes: new Uint8Array([2, 2]), revision: 'rev3' })
+    mockPack.mockResolvedValue({ bytes: new Uint8Array([2, 2]), revision: 'v1' })
+  })
+
+  it("packs TSP 1.0 on every frame, the XRFI included: the codec's default is Rev 3, which a 1.0 reader drops", async () => {
+    const { options } = rig()
+    const carriage = createTspEncounterCarriage(options)
+    await carriage.start()
+    await carriage.send({ type: 'a/b/c/0.1' })
+    await carriage.send({ type: 'a/b/c/0.1' })
+    expect(mockGreet.mock.calls.map((c) => c[4])).toEqual(['v1'])
+    expect(mockPack.mock.calls.map((c) => c[4])).toEqual(['v1', 'v1'])
   })
 
   it('forms the relationship once, routed back to us, before the first and only the first document', async () => {

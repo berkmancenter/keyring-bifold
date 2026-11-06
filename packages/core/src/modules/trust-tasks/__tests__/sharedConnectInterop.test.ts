@@ -1,6 +1,6 @@
 /**
  * The local interop rung (plan WP13, local half): the scanner's session and
- * TSP carriage against a scripted fake inviter, over real TSP Rev 3 frames
+ * TSP carriage against a scripted fake inviter, over real TSP 1.0 frames
  * with real keys and the real codec. Proofs and credential signing are
  * stubbed (they need a KMS); everything else, relationship forming first, the
  * envelope, the identity rule and the six documents, is the real path. The
@@ -81,7 +81,7 @@ it('completes the six documents over real TSP frames, forming the relationship f
   const live = {} as { session: SharedConnectSession }
 
   const inviterSays = async (document: Record<string, unknown>) => {
-    const packed = await packTrustTaskForPeer(sessionOf(THEIRS), THEIRS.vid, MINE.vid, document)
+    const packed = await packTrustTaskForPeer(sessionOf(THEIRS), THEIRS.vid, MINE.vid, document, 'v1')
     await deliverToScanner(packed.bytes)
   }
   const base = (type: string, step: number, threadId: string, payload: unknown, id: string) => ({
