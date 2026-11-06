@@ -341,7 +341,8 @@
     "ForgotPINModalTitle": "Forgot your PIN? (FR)",
     "ForgotPINModalDescription": "For security purposes, you're unable to recover or reset your PIN. You will need to reinstall your wallet and add your credentials again. (FR)",
     "Loading": "Logging in (FR)",
-    "DeveloperMenuTrigger": "Informations sur l'application"
+    "DeveloperMenuTrigger": "Informations sur l'application",
+    "ConfirmActionEnterPIN": "Saisissez votre NIP Keyring pour confirmer."
   },
   "AttemptLockout": {
     "Title": "Votre portefeuille est temporairement verrouillé",
@@ -370,7 +371,14 @@
     "AllowBiometricsDesc": "Pour déverrouiller Keyring avec votre biométrie, permettrez la biométrie dans les paramètres de votre appareil.",
     "SetupBiometricsTitle": "La biométrie n'est pas activée",
     "SetupBiometricsDesc": "Pour déverrouiller Keyring avec votre biométrie, configurez votre biométrie dans les paramètres de votre appareil.",
-    "OpenSettings": "Ouvrir les paramètres"
+    "OpenSettings": "Ouvrir les paramètres",
+    "ConfirmWithKeyringPIN": "Confirmer avec le NIP Keyring",
+    "ConfirmPinNote": "La Biométrie est désactivée dans le Menu de Keyring : confirmez avec votre NIP Keyring.",
+    "ConfirmPinAfterMissingKey": "La Biométrie n'a pas pu être utilisée ici. Confirmez plutôt avec votre NIP Keyring.",
+    "ConfirmPinUnavailable": "La Biométrie est désactivée dans le Menu de Keyring, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez.",
+    "ConfirmPinNoBiometricsNote": "Ce téléphone n'a ni empreinte digitale ni déverrouillage par le visage configuré : confirmez avec votre NIP Keyring.",
+    "ConfirmPinUnavailableNoBiometrics": "Ce téléphone n'a ni empreinte digitale ni déverrouillage par le visage configuré, et Keyring ne peut pas vérifier votre NIP sur cet écran. Fermez Keyring, rouvrez-le avec votre NIP, puis réessayez.",
+    "ConfirmNobodyAsked": "Keyring n'a pas pu vous demander de confirmer, donc rien n'a été fait. Fermez Keyring, rouvrez-le, puis réessayez."
   },
   "ActivityHistory": {
     "Header": "Activity history(fr)",
@@ -1048,6 +1056,12 @@
     "Copy": "Copy contents (FR)",
     "CopiedSuccess": "Copied to clipboard (FR)",
     "CopiedError": "Unable to copy to clipboard (FR)"
+  },
+  "RemoteVrcNotify": {
+    "Ask": "Activez les notifications pour que les étapes de l'autre personne vous parviennent quand Keyring est fermé.",
+    "TurnOn": "Activer",
+    "NotNow": "Pas maintenant",
+    "Denied": "Les notifications sont désactivées pour Keyring. Vous pouvez les activer dans les Réglages du téléphone. D'ici là, gardez Keyring ouvert sur les deux téléphones jusqu'à la fin de l'échange."
   },
   "Record": {
     "Hide": "Masquer",
@@ -2897,6 +2911,36 @@
     "ChipAll": "Tout",
     "ChipPeople": "Personnes",
     "RoomsFailed": "Impossible de lire vos salons. Keyring réessaie bientôt."
+  },
+  "LateStep": {
+    "KeepOpenShare": "Keyring doit rester ouvert sur les deux téléphones jusqu'à la fin : les étapes de l'autre personne ne peuvent pas vous parvenir quand il est fermé.",
+    "KeepOpen": "Keyring doit rester ouvert sur les deux téléphones jusqu'à la fin. Les étapes de {{name}} ne peuvent pas vous parvenir quand il est fermé.",
+    "HeldTitleConnected": "{{name}} a accepté votre carte il y a {{minutes}} min",
+    "HeldTitleAccepted": "{{name}} a accepté il y a {{minutes}} min",
+    "HeldBody": "Keyring n'est peut-être plus ouvert de son côté. Pour terminer, il faut que vous soyez tous les deux sur cet écran, et {{unlock}} vous sera demandé.",
+    "NotReady": "{{name}} a répondu « pas maintenant ».",
+    "LateReady": "{{name}} a répondu être prêt, mais trop longtemps après votre demande. Vérifiez à nouveau quand vous serez tous les deux là.",
+    "CheckReady": "Vérifier que {{name}} est prêt",
+    "NotNow": "Pas maintenant",
+    "NotNowNote": "« Pas maintenant » garde la demande. Vous pourrez terminer plus tard depuis cette conversation.",
+    "AskingTitle": "Nous demandons à {{name}} s'il est prêt",
+    "AskingBody": "Rien n'est signé tant que {{name}} n'est pas aussi sur cet écran. Si Keyring est fermé sur son téléphone, cela attend qu'il l'ouvre.",
+    "AskedSeconds": "Demandé il y a {{seconds}} s",
+    "AskedMinutes": "Demandé il y a {{minutes}} min",
+    "StopForNow": "Arrêter pour l'instant",
+    "PeerTitle": "{{name}} veut terminer votre carte de relation maintenant",
+    "PeerBody": "Cela a commencé il y a {{minutes}} min. Restez sur cet écran le temps que cela se termine : quelques secondes, et {{unlock}} vous sera demandé.",
+    "ImReady": "Je suis prêt",
+    "PeerNotNowNote": "« Pas maintenant » prévient {{name}}. Chacun de vous peut réessayer depuis cette conversation.",
+    "WaitingSince": "Envoyé il y a {{minutes}} min. Keyring doit être ouvert sur les deux téléphones : cela reprendra quand {{name}} l'ouvrira, et Keyring vous demandera d'abord si cela fait longtemps.",
+    "WaitInBackground": "Attendre en arrière-plan",
+    "StopExchange": "Arrêter cet échange",
+    "StopNote": "« Arrêter » prévient {{name}}. Vous pourrez recommencer depuis cette conversation.",
+    "WaitingBar": "Votre carte de relation avec {{name}} est en attente",
+    "Finish": "Terminer",
+    "Stopped": "{{name}} a arrêté l'échange",
+    "UnlockIos": "Face ID",
+    "UnlockAndroid": "votre empreinte"
   },
   "Relationship": {
     "ResignUnavailable": "Signer à nouveau : vos cartes sont déjà signées avec du matériel sécurisé.",
