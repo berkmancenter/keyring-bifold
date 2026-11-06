@@ -235,6 +235,54 @@ describe('what the community answers instead', () => {
     expect(kept()).toEqual({ ...lapsedMembership, removal })
   })
 
+  // ac's review of #941: what the lock decides must decide what follows. The ask is a background hold and can sit a
+  // while; meanwhile the membership can go, be ended, or change cards (renewed, or joined again with a new
+  // application). A notMember about the membership as it was must then record nothing, forget no application, say
+  // nothing, and read as not due (so the retry pause holds).
+  it.each([
+    ['gone', (m: Map<string, VtiMembership>) => void m.delete(COMMUNITY)],
+    [
+      'ended by a removal notice',
+      (m: Map<string, VtiMembership>) =>
+        void m.set(COMMUNITY, {
+          ...(m.get(COMMUNITY) as VtiMembership),
+          removal: {
+            code: 'adminRemoved',
+            decidedBy: COMMUNITY,
+            decidedAt: '2026-11-05T20:59:00Z',
+            disposition: 'purge',
+            noticeId: 'n1',
+          },
+        }),
+    ],
+    [
+      'holding another card (renewed, or joined again)',
+      (m: Map<string, VtiMembership>) =>
+        void m.set(COMMUNITY, { ...(m.get(COMMUNITY) as VtiMembership), vmc: renewedCard }),
+    ],
+  ])('notMember about a membership %s by the time it comes: nothing recorded, nothing forgotten', async (_, change) => {
+    const community = fakeCommunityStore({ memberships: [structuredClone(lapsedMembership)] })
+    const ended = jest.fn(async () => undefined)
+    const removed = events(VTI_REMOVED_EVENT)
+    const outcome = await renewMembershipCards({
+      store: community.store,
+      persona,
+      communityDid: COMMUNITY,
+      ask: async () => {
+        change(community.memberships)
+        throw notMember()
+      },
+      checkCard: async () => undefined,
+      ended,
+      now: () => LAPSED,
+    })
+    removed.stop()
+    expect(outcome).toBe('notDue')
+    expect(ended).not.toHaveBeenCalled()
+    expect(removed.seen).toEqual([])
+    expect(community.memberships.get(COMMUNITY)?.removal?.code).not.toBe('notMember')
+  })
+
   it('reads only the renew task’s own notMember', () => {
     expect(isRenewNotMember(notMember())).toBe(true)
     expect(isRenewNotMember(new VtiRefusal('vtc/members/renew:notMember', ''))).toBe(true)

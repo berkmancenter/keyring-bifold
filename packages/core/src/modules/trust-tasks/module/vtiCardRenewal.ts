@@ -145,9 +145,13 @@ export async function renewMembershipCards(deps: RenewDeps): Promise<RenewOutcom
     answer = await deps.ask()
   } catch (e) {
     if (isRenewNotMember(e)) {
-      await withKeyLock(LOCK(communityDid, persona.did), async () => {
+      // Recorded only on the membership that was asked about, as it stood: one gone, ended, or holding a different
+      // card by now (renewed, or joined again) is not what this answer was about, and nothing below may follow from
+      // it — above all not forgetting the community's vetting application, which a new application would share.
+      const recorded = await withKeyLock(LOCK(communityDid, persona.did), async () => {
         const latest = await store.getMembership(communityDid, persona.did)
-        if (!latest || latest.personaDid !== persona.did || !isCurrentMembership(latest)) return
+        if (!latest || latest.personaDid !== persona.did || !isCurrentMembership(latest)) return false
+        if (latest.vmc?.id !== before.vmc?.id) return false
         await store.saveMembership({
           ...latest,
           removal: {
@@ -158,7 +162,12 @@ export async function renewMembershipCards(deps: RenewDeps): Promise<RenewOutcom
             noticeId: '',
           },
         })
+        return true
       })
+      if (!recorded) {
+        log('[VTI] card renewal: answered "not a member" about a membership that has changed since; nothing recorded')
+        return 'notDue'
+      }
       await deps.ended?.().catch(() => undefined)
       DeviceEventEmitter.emit(VTI_REMOVED_EVENT, { communityDid })
       log('[VTI] card renewal: the community holds no membership for this identity; recorded as ended')
@@ -208,6 +217,7 @@ export async function renewMembershipCards(deps: RenewDeps): Promise<RenewOutcom
     await store.saveMembership({
       ...latest,
       vmc,
+      // A copy of the card's own end, for the screens that read it; renewalDue reads the card's (`vmc.validUntil`).
       validUntil: typeof vmc.validUntil === 'string' ? vmc.validUntil : undefined,
       ...(role ? { roleVec: role, role: String(roleNameOf(role) ?? latest.role) } : {}),
       // "Member since" is when the membership began, not when its card was last renewed.
