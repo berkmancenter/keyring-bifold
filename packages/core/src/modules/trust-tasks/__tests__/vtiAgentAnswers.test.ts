@@ -699,9 +699,26 @@ describe('signing in: no fixed wait, and a stale reply naming no thread answers 
     expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
   })
 
-  it('within the grace, a reply naming no thread but a time after the request answers by its type (control)', async () => {
-    const { session, answer } = await askOn('did:webvh:p:no-wait-4')
-    session.onMessage(bare('urn:uuid:bare-timed', ['timed'], { created_time: Math.floor(Date.now() / 1000) + 1 }))
-    expect(await answer).toMatchObject({ body: { payload: { items: ['timed'] } } })
+  // ac's question on #942: a threadless refusal (the VTC's unrouted parse error) answers any ask by type, and a timed
+  // one within 5 s of the ask reads as fresh. Flushed on a quick drop and reconnect, it must not attach to a new ask.
+  it('within the grace, a reply naming no thread is held back even when it names a time; past it, it answers', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-4')
+    const timed = { created_time: Math.floor(opened / 1000) + 1 }
+    session.onMessage(bare('urn:uuid:bare-timed-early', ['early'], timed))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage(bare('urn:uuid:bare-timed-late', ['late'], timed))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
+  })
+
+  it('a reply naming its thread answers at once, within the grace (control)', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer } = await askOn('did:webvh:p:no-wait-5')
+    session.onMessage(didcommReply((session.didcomm as Sent[])[0], MEMBERSHIPS, { items: ['threaded'] }))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['threaded'] } } })
   })
 })
