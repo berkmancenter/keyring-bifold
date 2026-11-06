@@ -76,6 +76,21 @@ describe('ImportWallet: a picker that does not settle', () => {
     expect(alertSpy).not.toHaveBeenCalled()
   })
 
+  test('tapping again while the note shows: the note goes, then comes back after its own wait', async () => {
+    pickMock.mockImplementation(() => new Promise(() => undefined))
+    const { getByText, findByTestId, queryByTestId } = renderScreen()
+
+    fireEvent.press(getByText(ROW))
+    expect(await findByTestId(NOTE)).not.toBeNull()
+
+    fireEvent.press(getByText(ROW))
+    await waitFor(() => expect(queryByTestId(NOTE)).toBeNull())
+
+    expect(await findByTestId(NOTE)).not.toBeNull()
+    expect(pickMock).toHaveBeenCalledTimes(2)
+    expect(alertSpy).not.toHaveBeenCalled()
+  })
+
   test('a picker that returns (nothing chosen): no note afterwards, and no alert', async () => {
     pickMock.mockResolvedValue([])
     const { getByText, queryByTestId } = renderScreen()
