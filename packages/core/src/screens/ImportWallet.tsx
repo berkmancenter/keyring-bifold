@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
+import { Alert, BackHandler, Keyboard, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialIcons'
 import { pick, types } from 'react-native-document-picker'
@@ -11,6 +11,7 @@ import { useTheme } from '../contexts/theme'
 import { testIdWithKey } from '../utils/testable'
 import { ThemedText } from '../components/texts/ThemedText'
 import Button from '../components/buttons/Button'
+import { KeyboardSpace } from '../components/views/KeyboardPaddedView'
 import { ButtonType } from '../components/buttons/Button-api'
 
 interface ImportWalletProps {
@@ -286,11 +287,7 @@ const ImportWallet: React.FC<ImportWalletProps> = () => {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
+      <KeyboardSpace style={{ flex: 1 }} android={{ behavior: 'height', keyboardVerticalOffset: 20 }}>
         <ScrollView style={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.iconContainer}>
             <Assets.svg.walletImport width={80} height={80} fill={ColorPalette.brand.primary} />
@@ -366,7 +363,7 @@ const ImportWallet: React.FC<ImportWalletProps> = () => {
             </ThemedText>
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </SafeAreaView>
   )
 }
