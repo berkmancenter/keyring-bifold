@@ -115,7 +115,7 @@ jest.mock('../module/tspCapability', () => ({
 import { DeviceEventEmitter } from 'react-native'
 
 import { plainError } from '../screens/plainError'
-import { VTI_ANSWER_HOLD_MS, VtiSentNoAnswer, isVtiReadTask, vtiAgent } from '../module/vtiAgent'
+import { VTI_ANSWER_HOLD_MS, VTI_BACKLOG_GRACE_MS, VtiSentNoAnswer, isVtiReadTask, vtiAgent } from '../module/vtiAgent'
 import { VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
 import { OFFERS_LIST_TYPES } from '../../rooms/real/wire'
 
@@ -303,7 +303,7 @@ describe('an answer that comes after the session moved on', () => {
   const A = 'did:webvh:p:switch-a'
   const B = 'did:webvh:p:switch-b'
   const MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
-  // Longer than a sign-in, which here takes its real 2 s: an ask whose clock ended during the switch is the control's case below.
+  // Longer than a sign-in: an ask whose clock ended during the switch is the control's case below.
   const asked = async (type: string, timeoutMs = 15000) => {
     const session = await connectTo(FIRST, 'didcomm', A)
     const before = session.didcomm.length
@@ -645,5 +645,63 @@ describe('a document the agent completed is sent as it is', () => {
     unpackTrustTaskFromPeer.mockResolvedValueOnce(tspReply('urn:uuid:act-thread', PUT, { key: 'note/abc', version: 1 }))
     await session.onTspFrame?.(new Uint8Array([1]))
     expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+})
+
+// Rooms fix 2 (rooms-slow, 11-05): a sign-in waited a fixed 2 s after its socket opened (2.002-2.030 s on 35 of 36
+// sign-ins, 277.12), several in a row at launch. Answers reach their asks by thread; the one reply the wait kept from
+// being mistaken for a fresh answer — no thread, no time, flushed from the mediator's backlog — is held back by type
+// for VTI_BACKLOG_GRACE_MS instead, and nothing else waits.
+describe('signing in: no fixed wait, and a stale reply naming no thread answers nothing', () => {
+  const C = 'did:webvh:c:no-wait'
+  const MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
+  const bare = (id: string, items: string[], extra: Record<string, unknown> = {}) => ({
+    id,
+    type: `${MEMBERSHIPS}#response`,
+    from: C,
+    body: { payload: { items } },
+    ...extra,
+  })
+  const askOn = async (who: string) => {
+    const session = await connectTo(C, 'didcomm', who)
+    const answer = vtiAgent.ask(C, MEMBERSHIPS, {}, 3000)
+    let answered = false
+    void answer.then(() => (answered = true))
+    await until(() => session.didcomm.length === 1)
+    return { session, answer, answered: () => answered }
+  }
+  afterEach(() => {
+    vtiAgent.now = () => Date.now()
+  })
+
+  it('a sign-in is done once its socket opens: no fixed 2 s', async () => {
+    const started = Date.now()
+    await connectTo(C, 'didcomm', 'did:webvh:p:no-wait-1')
+    expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: 'did:webvh:p:no-wait-1' })
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('a reply naming no thread and no time, as the session opens, does not answer a fresh ask; its own answer does', async () => {
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-2')
+    session.onMessage(bare('urn:uuid:stale', ['stale']))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    session.onMessage(didcommReply((session.didcomm as Sent[])[0], MEMBERSHIPS, { items: ['fresh'] }))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['fresh'] } } })
+  })
+
+  it('past the grace, a reply naming no thread still answers by its type (control)', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer } = await askOn('did:webvh:p:no-wait-3')
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage(bare('urn:uuid:bare-late', ['late']))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
+  })
+
+  it('within the grace, a reply naming no thread but a time after the request answers by its type (control)', async () => {
+    const { session, answer } = await askOn('did:webvh:p:no-wait-4')
+    session.onMessage(bare('urn:uuid:bare-timed', ['timed'], { created_time: Math.floor(Date.now() / 1000) + 1 }))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['timed'] } } })
   })
 })

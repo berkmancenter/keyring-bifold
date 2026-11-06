@@ -163,6 +163,14 @@ export function isVtiReadTask(type: string): boolean {
  */
 export const VTI_ANSWER_HOLD_MS = 60000
 
+/**
+ * For this long after a session opens, a reply that names no thread and no time is not taken as an answer by its type
+ * alone (`askAnswered`): the mediator flushes what it held the moment the socket opens, and such a reply can't say it
+ * was written after the request. Sign-in no longer waits this out before an ask may go (it used to wait a fixed 2 s
+ * for every sign-in); only that one kind of reply does.
+ */
+export const VTI_BACKLOG_GRACE_MS = 2000
+
 /** A task's name without the host and the version: `vtc/join-requests/submit`. */
 const taskName = (type: string) => type.replace(/^https?:\/\/[^/]+\/(spec\/)?/, '').replace(/\/[\d.]+$/, '')
 
@@ -767,7 +775,9 @@ class VtiAgentController {
     }
     if (type === PROBLEM_REPORT) return undefined
     const fresh = (entry: AskEntry) =>
-      typeof plaintext.created_time !== 'number' || plaintext.created_time * 1000 >= entry.lastSentAt - 5000
+      typeof plaintext.created_time === 'number'
+        ? plaintext.created_time * 1000 >= entry.lastSentAt - 5000
+        : this.now() - this.openedAt >= VTI_BACKLOG_GRACE_MS
     // By type alone only for this session's own asks: one kept across a switch is another identity's, and a reply naming
     // no thread can't say it is for that one.
     const candidates = [...this.asks.values()]
@@ -982,6 +992,8 @@ class VtiAgentController {
   private readonly refusedByClaim = new Map<string, number>()
   /** For tests: the clock holds and claims are read by. */
   now: () => number = () => Date.now()
+  /** When the current session's socket opened (`VTI_BACKLOG_GRACE_MS`). */
+  private openedAt = 0
 
   /** The live holds; one past its time is dropped, and said once. */
   private liveHolds(): SessionHold[] {
@@ -1310,9 +1322,12 @@ class VtiAgentController {
       this.set({ signingInAs: did })
       await session.start()
       step('socket open')
-      // Discard any stale backlog the mediator flushes on live delivery before
-      // a request could have a reply (see VtaClient.connect).
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      // No pause here for the backlog the mediator flushes on live delivery: every message goes through `deliver`
+      // whenever it comes, and an answer reaches its ask by its thread id (`askAnswered`). The one reply that could be
+      // mistaken for a fresh answer — one naming no thread and no time — is not matched by type for
+      // `VTI_BACKLOG_GRACE_MS` after this. The fixed 2 s this used to wait for every sign-in (2.002-2.030 s on 35 of
+      // 36 sign-ins, 277.12) delayed each one, several in a row at launch.
+      this.openedAt = this.now()
       this.session = session
       const peerLeg = getPeerLegCarriage()
       if (peerLeg === 'tsp' && !tspSession) {
