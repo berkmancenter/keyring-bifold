@@ -1179,7 +1179,11 @@ class VtiAgentController {
     }
   }
 
-  /** Throws `VtiSignInResting` while `did`'s rest runs, unless the session is already open as it. */
+  /**
+   * Throws `VtiSignInResting` while `did`'s rest runs, unless the session is already open as it. A rest can outlive an
+   * open session: `noteSignIn` runs only when a sign-in named a DID, so a connect that named none can leave the session
+   * open as an identity whose rest, kept from an earlier launch, has not run out.
+   */
   private refuseIfResting(did: string): void {
     if (this.session?.isOpen && this.state.did === did) return
     const until = signInRestUntil(this.rests.get(did))
