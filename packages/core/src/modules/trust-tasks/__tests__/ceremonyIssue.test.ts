@@ -426,6 +426,50 @@ describe('the inbound issue leg (verify, store, receipt)', () => {
     expect(error.payload.code).toBe('vrc/relationships/issue:notAccepted')
   })
 
+  describe('a credential proofed eddsa-jcs-2022 (the shared-connect profile)', () => {
+    const jcsIssue = () =>
+      inboundIssue({
+        vrc: {
+          ...UNSIGNED_VRC,
+          issuer: 'did:peer:0zPeerRel',
+          credentialSubject: { id: 'did:peer:0zMyRel' },
+          proof: { ...STUB_PROOF, verificationMethod: 'did:peer:0zPeerRel#key-0' },
+        },
+      })
+    const connection = { id: 'conn-1', did: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' }
+
+    test('is verified by the document-proof verifier under the issuer, not Credo, stored and receipted', async () => {
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc, vrc } = jcsIssue()
+      mockedVerify.mockClear()
+      await deliver(fake.capturedHandlerRef, doc, connection)
+      expect(mockedVerify).toHaveBeenCalledWith(fake.agent, vrc, 'did:peer:0zPeerRel')
+      expect(fake.w3c.verifyCredential).not.toHaveBeenCalled()
+      expect(fake.storedCredentials).toHaveLength(1)
+      expect((fake.sentMessages[0].document as { type: string }).type).toBe(`${issue.TYPE_URI}#response`)
+    })
+
+    test('a JCS proof that fails is refused and nothing is stored', async () => {
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc } = jcsIssue()
+      // The envelope proof verifies; the credential's own proof does not.
+      mockedVerify.mockImplementation(
+        async (_a: unknown, document: Record<string, unknown>) => document.type === issue.TYPE_URI
+      )
+      try {
+        await deliver(fake.capturedHandlerRef, doc, connection)
+      } finally {
+        mockedVerify.mockImplementation(async () => true)
+      }
+      expect(fake.storedCredentials).toHaveLength(0)
+      expect((fake.sentMessages[0].document as { payload: { code: string } }).payload.code).toBe(
+        'vrc/relationships/issue:notAccepted'
+      )
+    })
+  })
+
   test('a proofless delivery is rejected by the pipeline (spec: request proof REQUIRED)', async () => {
     const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
     setupTrustTasksInbound(fake.agent)
