@@ -27,7 +27,7 @@ import { agentHomeScreen } from '../screens/agentHome'
 import { AgentHostConnectionError, looksLikeAgentHostQr, parseAgentHostQr } from './agentHostConnection'
 import { bareDid, classifyDid } from './classifyDid'
 import { sameIdentity } from './didScid'
-import { activeTriggerConfig } from './sharedConnect'
+import { activeTriggerConfig, readSharedConnect } from './sharedConnect'
 import {
   readTrigger,
   TRIGGER_UI_MESSAGE_KEYS,
@@ -376,7 +376,7 @@ export type MyAgentScreenName =
  * route's id): a second code scanned while one is on screen opens a new one,
  * and never shows the first one's code or result.
  */
-export type ScannedCodeDestination = { screen: 'SignIn' | 'VtaClaim'; link: string; scanId: string }
+export type ScannedCodeDestination = { screen: 'SignIn' | 'VtaClaim' | 'SharedConnect'; link: string; scanId: string }
 
 /** Where a link lands, inside the My Agent stack. */
 export type MyAgentDestination = MyAgentScreenName | ScannedCodeDestination
@@ -394,6 +394,8 @@ export const MY_AGENT_SCREEN: Record<MyAgentScreenName | ScannedCodeDestination[
   SignIn: Screens.SignIn,
   // An agent host's one-scan setup code, read and accepted.
   VtaClaim: Screens.VtaClaim,
+  // A shared-connect code, read and accepted (developer switch on).
+  SharedConnect: Screens.SharedConnect,
 }
 
 /**
@@ -598,7 +600,17 @@ export async function routeKeyringAgentLink(
       return routeBareDid(bareDid(trimmed) as string, agent, navigate)
     case 'otherDid':
       throw new KeyringLinkError(otherDidMessage(bareDid(trimmed) as string))
-    case 'triggerLink':
+    case 'triggerLink': {
+      // A shared-connect code (developer switch on): its confirm screen, or why
+      // it can't be used. Everything else goes on as before.
+      const shared = readSharedConnect(trimmed)
+      if (shared.outcome === 'offer') {
+        navigate({ screen: 'SharedConnect', link: trimmed, scanId: newScanId() })
+        return
+      }
+      if (shared.outcome === 'refuse') {
+        throw new KeyringLinkError(TRIGGER_UI_MESSAGES[shared.ui], undefined, TRIGGER_UI_MESSAGE_KEYS[shared.ui])
+      }
       if (signInToOpen(trimmed)) {
         navigate({ screen: 'SignIn', link: trimmed, scanId: newScanId() })
         return
@@ -608,6 +620,7 @@ export async function routeKeyringAgentLink(
         return
       }
       throw triggerLinkError(trimmed)
+    }
     default:
       throw new Error('not a Keyring agent link')
   }

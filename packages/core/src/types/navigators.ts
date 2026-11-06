@@ -94,6 +94,7 @@ export enum Screens {
   VtiJoin = 'Join',
   SignIn = 'Sign in to a community',
   VtaClaim = 'Set up your agent',
+  SharedConnect = 'Connect from a code',
   RoomsHome = 'Rooms',
   Room = 'Room',
   RoomOffer = 'Room offer',
@@ -193,6 +194,7 @@ export type MyAgentStackParams = {
   [Screens.SignIn]: { link: string; scanId: string } | undefined
   // The code, and the scan it came from (the route's id: each scan is its own screen).
   [Screens.VtaClaim]: { link: string; scanId: string } | undefined
+  [Screens.SharedConnect]: { link: string; scanId: string } | undefined
   [Screens.EditRCard]: { profileId: string } | undefined
   // Every room and offer the member has (rooms flag on only).
   [Screens.RoomsHome]: undefined

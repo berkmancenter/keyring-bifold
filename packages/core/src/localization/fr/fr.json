@@ -1132,7 +1132,8 @@
     "VtaAgentSettings": "Paramètres de l'agent",
     "Invited": "Rejoindre sur invitation",
     "Join": "Rejoindre une communauté",
-    "VtaClaim": "Configurer votre agent"
+    "VtaClaim": "Configurer votre agent",
+    "SharedConnect": "Se connecter avec un code"
   },
   "Loading": {
     "TakingTooLong": "Cela prend plus de temps que d'habitude. Vous pouvez retourner à l'accueil ou continuer à attendre.",
@@ -3377,5 +3378,31 @@
     "VoteLaterKeeps": "Voter plus tard garde votre ticket. Le sondage affiche « Ticket prêt » dans la liste jusqu'à ce que vous votiez.",
     "BackToCommunity": "Retour à la communauté",
     "CertifiedOn": "Certifié par la communauté le {{date}}"
+  },
+  "SharedConnect": {
+    "Title": "Se connecter avec cette personne ?",
+    "Body": "Quelqu'un a partagé ce code pour que vous puissiez vous connecter. Rien n'est envoyé avant que vous touchiez Se connecter.",
+    "NameLabel": "Nom indiqué",
+    "NoName": "Aucun nom indiqué",
+    "NameUnverified": "Non vérifié : n'importe qui peut saisir n'importe quel nom.",
+    "IdLabel": "Son identifiant",
+    "RelayLabel": "Par",
+    "NoRelayHost": "Un relais sans adresse web",
+    "ExpiresLabel": "Le code expire",
+    "ExpiresDays_one": "dans {{count}} jour",
+    "ExpiresDays_other": "dans {{count}} jours",
+    "ExpiresHours_one": "dans {{count}} heure",
+    "ExpiresHours_other": "dans {{count}} heures",
+    "ExpiresMinutes_one": "dans {{count}} minute",
+    "ExpiresMinutes_other": "dans {{count}} minutes",
+    "ExpiresSoon": "dans moins d'une minute",
+    "ExpiredShort": "Expiré",
+    "Connect": "Se connecter",
+    "Cancel": "Annuler",
+    "Done": "Terminé",
+    "Connecting": "Connexion…",
+    "Started": "Connexion en cours. Gardez l'application ouverte jusqu'à la fin.",
+    "Failed": "Connexion impossible. Demandez un nouveau code et réessayez.",
+    "NotBuilt": "Cette version de l'application ne peut pas encore se connecter avec un code. Rien n'a été envoyé."
   }
 }

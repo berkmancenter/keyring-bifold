@@ -288,7 +288,7 @@ describe('WP1 + WP2: readSharedConnect, what the confirm screen gets', () => {
   })
 })
 
-describe('the scanner, with the switch off and on (no confirm screen yet: WP3)', () => {
+describe('the scanner, with the switch off and on', () => {
   const now = () => Math.floor(Date.now() / 1000)
   const navigate = jest.fn()
   const words = async (link: string) => {
@@ -306,12 +306,13 @@ describe('the scanner, with the switch off and on (no confirm screen yet: WP3)',
     expect(await words(sharedConnectLink({ from, now: now(), exp: now() - 600 }))).toBe(TRIGGER_UI_MESSAGES.update)
   })
 
-  it('on, a code it reads is still "update": there is no confirm screen yet (WP3 sends it there)', async () => {
+  it('on, a code it reads opens its confirm screen (WP3; before it, "update")', async () => {
     setSharedConnectEnabled(true)
     const link = sharedConnectLink({ from: peer2([tspService()]), now: now() })
     expect(readSharedConnect(link).outcome).toBe('offer')
-    expect(await words(link)).toBe(TRIGGER_UI_MESSAGES.update)
-    expect(navigate).not.toHaveBeenCalled()
+    expect(await words(link)).toBe('navigated')
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ screen: 'SharedConnect', link }))
+    navigate.mockClear()
   })
 
   it('on: a refused code says why', async () => {
