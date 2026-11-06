@@ -237,9 +237,7 @@ export const SharedConnectFlow: React.FC<{
                   {step.preview.relayHost ?? t('SharedConnect.NoRelay')}
                 </ThemedText>
               </View>
-              <ThemedText testID={id(SharedConnectIds.expires)}>
-                {expiryText(step.preview.exp, t)}
-              </ThemedText>
+              <ThemedText testID={id(SharedConnectIds.expires)}>{expiryText(step.preview.exp, t)}</ThemedText>
             </View>
             <View style={styles.buttons}>
               <Button
