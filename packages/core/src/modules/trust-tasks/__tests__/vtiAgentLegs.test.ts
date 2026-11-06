@@ -132,6 +132,15 @@ beforeEach(async () => {
   for (const k of Object.keys(mockTspVia)) delete mockTspVia[k]
 })
 
+// A community's answer names the request's thread, as trust-tasks-rs `respond_with` writes it (SPEC §4.9): over DIDComm
+// on the message it answers (`thid`), over TSP in the document (`threadId`). A reply naming none answers only by its
+// type, and not in the first VTI_BACKLOG_GRACE_MS after a sign-in (#942), so these replies name theirs.
+const lastDidcommId = (session: { didcomm: unknown[] }) => (session.didcomm.at(-1) as { id?: string } | undefined)?.id
+const lastTspThread = () => {
+  const doc = mockPacked.at(-1) as { threadId?: string; id?: string } | undefined
+  return doc?.threadId ?? doc?.id
+}
+
 describe('the community leg', () => {
   it('greets a community again as a new persona', async () => {
     const community = 'did:webvh:c:greets'
@@ -141,7 +150,7 @@ describe('the community leg', () => {
       const timer = setInterval(() => {
         if (session.tsp.length >= 2) {
           clearInterval(timer)
-          session.onMessage({ type: 'https://t/ask/0.1#response', body: {} })
+          session.onMessage({ type: 'https://t/ask/0.1#response', body: { threadId: lastTspThread() } })
         }
       }, 5)
     }
@@ -239,7 +248,11 @@ describe('the community leg', () => {
     const reply = setInterval(() => {
       if (session.didcomm.length) {
         clearInterval(reply)
-        session.onMessage({ type: `${MANIFEST}#response`, body: { payload: { criteria: [] } } })
+        session.onMessage({
+          type: `${MANIFEST}#response`,
+          thid: lastDidcommId(session),
+          body: { payload: { criteria: [] } },
+        })
       }
     }, 5)
     const answer = await asked
@@ -262,7 +275,7 @@ describe('the community leg', () => {
     const timer = setInterval(() => {
       if (session.didcomm.length) {
         clearInterval(timer)
-        session.onMessage({ type: 'https://t/manifest/0.2#response', body: {} })
+        session.onMessage({ type: 'https://t/manifest/0.2#response', thid: lastDidcommId(session), body: {} })
       }
     }, 5)
     const answer = await vtiAgent.ask(community, 'https://t/manifest/0.2', {}, 2000)
@@ -313,7 +326,9 @@ describe('what a community is asked, and how', () => {
     const timer = setInterval(() => {
       if (session.didcomm.length) {
         clearInterval(timer)
-        session.onMessage(reply(session.didcomm[0] as { thid?: string }))
+        const sent = session.didcomm[0] as { id?: string; thid?: string }
+        const answer = reply(sent) as Record<string, unknown>
+        session.onMessage(answer.thid ? answer : { ...answer, thid: sent.id })
       }
     }, 5)
     const answer = await vtiAgent.ask(community, type, { hello: 'world' }, 2000)
