@@ -41,6 +41,23 @@ describe('the propose id', () => {
     expect(() => newProposeId(() => new Uint8Array(8))).toThrow()
   })
 
+  // The app's global Buffer is the `buffer` package, not Node's: it has no 'base64url' and throws
+  // "Unknown encoding". A live run on a device failed at Connect on exactly that. The swap below only
+  // reaches code that reads the global Buffer: an `import { Buffer }` in sharedConnectCeremony.ts would
+  // make this row pass whatever the encoder does.
+  it("is made without the app's Buffer, which has no base64url", () => {
+    const nodeBuffer = global.Buffer
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const AppBuffer = require('buffer/').Buffer as typeof Buffer
+    expect(() => AppBuffer.from([1]).toString('base64url' as BufferEncoding)).toThrow('Unknown encoding')
+    global.Buffer = AppBuffer
+    try {
+      expect(newProposeId(() => new Uint8Array(16).fill(255))).toBe('_____________________w')
+    } finally {
+      global.Buffer = nodeBuffer
+    }
+  })
+
   it.each(['', 'short', 'a'.repeat(23), '550e8400-e29b-41d4-a716-446655440000', 42, undefined])(
     'does not take %p for a challenge (a uuid is not one)',
     (value) => expect(isChallengeShaped(value)).toBe(false)
