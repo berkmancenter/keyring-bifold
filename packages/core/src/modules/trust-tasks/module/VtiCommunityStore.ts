@@ -81,14 +81,18 @@ export interface VtiMembership {
   memberVmcAckedAt?: string
 }
 
-/** What a community's removal notice said (vtc/members/removal-notice/0.1 payload). */
+/**
+ * What a community's removal notice said (vtc/members/removal-notice/0.1 payload), or, as `notMember`, that the
+ * community answered a card renewal saying it holds no membership for this identity (`vtiCardRenewal`): no notice
+ * came, so `noticeId` is empty and `decidedAt` is when the answer came.
+ */
 export interface VtiRemoval {
-  code: 'adminRemoved' | 'purged'
+  code: 'adminRemoved' | 'purged' | 'notMember'
   reason?: string
   decidedBy: string
   decidedAt: string
   disposition: 'purge' | 'tombstone' | 'historical'
-  /** The notice's document id. */
+  /** The notice's document id; empty for `notMember`. */
   noticeId: string
 }
 
