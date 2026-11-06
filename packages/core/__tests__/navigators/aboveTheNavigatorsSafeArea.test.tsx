@@ -125,18 +125,13 @@ describe('what RootStack mounts above the navigators', () => {
       // BasicAppContext carries the container, the three agent-backed providers
       // and the network context, and -- as #949's test established -- no
       // SafeAreaProvider. So this is the position RootStack mounts it in.
-      //
-      // Deliberately NOT wrapped in BiometricConfirmationProvider, although
-      // RootStack nests these inside it: that provider renders a modal of its
-      // own, so a fault in THAT would fail all five of these rows as well as
-      // its own, and six red rows would read as six findings instead of one.
-      // None of these five uses the biometric context, so leaving it out costs
-      // nothing and keeps each row about one component.
       expect(() =>
         render(
           <BasicAppContext>
             <ActivityProvider>
-              <Component />
+              <BiometricConfirmationProvider>
+                <Component />
+              </BiometricConfirmationProvider>
             </ActivityProvider>
           </BasicAppContext>
         )
