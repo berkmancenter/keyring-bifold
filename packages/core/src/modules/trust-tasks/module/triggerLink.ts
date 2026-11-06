@@ -72,6 +72,19 @@ export type TriggerFlow = {
   /** Whether Keyring carries the flow through. A known flow it does not is answered `update`. */
   implemented?: boolean
   testOnly?: boolean
+  /**
+   * The flow's own length budget, in code points, checked after the reader's
+   * cap (`maxLinkLength`). dtgwg-vti-spec#86 lets a flow set one: 1,000 for
+   * shared-connect, so its code still scans at QR version 25 or below.
+   */
+  maxLength?: number
+  /** How far ahead of now `_exp` may lie, in seconds (#86: 7 days for a link). */
+  maxExpAheadSeconds?: number
+  /**
+   * Whether the flow reads `_label` (#86's proposed fifth reserved name): a
+   * display name the sender typed. Returned as unverified text only.
+   */
+  readsLabel?: boolean
 }
 
 export type TriggerConfig = {
@@ -89,6 +102,8 @@ export type TriggerConfig = {
 export const TRIGGER_LINK_HOST = 'link.trustoverip.org'
 export const SIGN_IN_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/sign-in`
 export const VTA_CLAIM_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/vta-claim`
+/** Two people connecting from one code (dtgwg-vti-spec#86, a draft, not in the links chapter yet). */
+export const SHARED_CONNECT_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/shared-connect`
 
 /**
  * What Keyring reads. Sign-in is the one flow it carries through; an agent
@@ -123,6 +138,44 @@ export const KEYRING_TRIGGER_CONFIG: TriggerConfig = {
   ],
 }
 
+/**
+ * The shared-connect flow as Keyring reads it. Not in KEYRING_TRIGGER_CONFIG:
+ * the scanner adds it only with the developer switch on (`sharedConnect.ts`),
+ * so the shipping reader is unchanged. The contact is a self-certifying
+ * did:peer (numalgo 2, or long-form 4), resolved offline.
+ */
+export const SHARED_CONNECT_TRIGGER_FLOW: TriggerFlow = {
+  flow: 'shared-connect',
+  typeBase: SHARED_CONNECT_FLOW,
+  status: 'draft',
+  expRequired: true,
+  allowedVidTypes: ['did:peer'],
+  supported: { '0': [1] },
+  implemented: true,
+  maxLength: 1000,
+  maxExpAheadSeconds: 7 * 24 * 60 * 60,
+  readsLabel: true,
+}
+
+/** The longest `_label` shown, in code points (#86). A longer one is not shown at all, never cut. */
+export const TRIGGER_LABEL_MAX = 64
+
+/**
+ * Characters a label may not carry: controls, line and paragraph separators,
+ * and the bidirectional marks and overrides that can make a name read as
+ * another on screen. A label with any of them is not shown.
+ */
+// eslint-disable-next-line no-control-regex
+const LABEL_REFUSED = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/
+
+/** The label a flow reads, or undefined: missing, repeated, empty, too long, or carrying a refused character. */
+function readLabel(values: string[]): string | undefined {
+  if (values.length !== 1) return undefined
+  const text = values[0].trim()
+  if (text === '' || [...text].length > TRIGGER_LABEL_MAX || LABEL_REFUSED.test(text)) return undefined
+  return text
+}
+
 export type TriggerAccept = {
   outcome: 'accept'
   via: 'url'
@@ -133,6 +186,11 @@ export type TriggerAccept = {
   task: { uri: string; major: number; minor: number } | null
   /** `fragment.<name>` for each unknown name that begins with `_`, in document order. */
   ignored: string[]
+  /**
+   * `_label`, for a flow that reads it. Never verified: anyone can type any
+   * name, so a screen shows it as unverified. Never logged.
+   */
+  label?: { text: string; verified: false }
 }
 
 export type TriggerReject = { outcome: 'reject'; reason: string; ui: TriggerUi }
@@ -213,8 +271,24 @@ const METHOD_SYNTAX: Record<string, (msid: string) => boolean> = {
   key: (msid) => /^z[1-9A-HJ-NP-Za-km-z]+$/.test(msid),
 }
 
+/**
+ * did:peer, read only when a flow of the config names it as its contact
+ * (shared-connect): numalgo 2 (purpose-coded multibase keys and base64url
+ * services) and long-form numalgo 4 (hash, then the encoded document).
+ * Numalgo 0, 1 and 3 and short-form 4 do not carry a document to read
+ * offline, so they are refused. Without such a flow a did:peer stays
+ * `unsupported-vid`, as before.
+ */
+const PEER_SYNTAX = (msid: string): boolean =>
+  /^2(?:\.(?:[AEVID]z[1-9A-HJ-NP-Za-km-z]+|S[A-Za-z0-9_-]+))+$/.test(msid) ||
+  /^4z[1-9A-HJ-NP-Za-km-z]+:z[1-9A-HJ-NP-Za-km-z]+$/.test(msid)
+
+/** Whether any flow of the config takes a did:peer contact. */
+const readsPeer = (flows: TriggerFlow[]): boolean =>
+  flows.some((f) => Array.isArray(f.allowedVidTypes) && f.allowedVidTypes.includes('did:peer'))
+
 /** Why the contact cannot be read, or undefined when it reads. */
-function fromProblem(value: string): string | undefined {
+function fromProblem(value: string, peer = false): string | undefined {
   // Agent names are reserved, and refused before any syntax check.
   if (value.includes('/@')) return 'unsupported-vid'
   if (value === '') return 'bad-from'
@@ -224,7 +298,7 @@ function fromProblem(value: string): string | undefined {
   }
   const m = DID_CORE.exec(value)
   if (!m) return 'bad-from'
-  const syntax = METHOD_SYNTAX[m[1]]
+  const syntax = m[1] === 'peer' && peer ? PEER_SYNTAX : METHOD_SYNTAX[m[1]]
   if (!syntax) return 'unsupported-vid'
   return syntax(m[2]) ? undefined : 'bad-from'
 }
@@ -362,7 +436,7 @@ export function readTrigger(
 
   // 6. The contact.
   if (!('_from' in fields)) return reject('missing-from')
-  const problem = fromProblem(fields._from)
+  const problem = fromProblem(fields._from, readsPeer(flows))
   if (problem) return reject(problem)
 
   // 7. The handle and the expiry.
@@ -399,10 +473,22 @@ export function readTrigger(
     const allowed = flow.allowedVidTypes
     if (allowed !== 'any' && !allowed.includes(`did:${fields._from.split(':')[1]}`)) return reject('from-not-allowed')
     if (flow.expRequired && exp === null) return reject('missing-exp')
+    // The flow's own budget and expiry horizon (#86).
+    if (flow.maxLength !== undefined && [...text].length > flow.maxLength) return reject('over-flow-budget')
+    if (flow.maxExpAheadSeconds !== undefined && exp !== null && exp - now > flow.maxExpAheadSeconds + skew) {
+      return reject('exp-too-far')
+    }
   }
 
   // 10. The expiry, allowing for the phone's clock.
   if (exp !== null && exp + skew <= now) return reject('expired')
+
+  // `_label`, for a flow that reads it: then it is a known name, not an ignored one.
+  let label: TriggerAccept['label']
+  if (flow?.readsLabel) {
+    const text = readLabel(pairs.filter(([name]) => name === '_label').map(([, value]) => value))
+    if (text !== undefined) label = { text, verified: false }
+  }
 
   return {
     outcome: 'accept',
@@ -412,7 +498,8 @@ export function readTrigger(
     exp,
     flow: flow ? flow.flow : null,
     task,
-    ignored,
+    ignored: flow?.readsLabel ? ignored.filter((name) => name !== 'fragment._label') : ignored,
+    ...(label ? { label } : {}),
   }
 }
 
@@ -440,6 +527,12 @@ export type SelectionDocument = {
 export type SelectionConfig = {
   serviceTypeToBinding?: Record<string, string>
   consumer?: { supported?: string[]; preference?: string[] }
+  /**
+   * Whether an array `serviceEndpoint` (DID Core allows a set, and did:peer:2
+   * usually carries `[{uri}]`) is read, entry by entry. Sign-in does not, as
+   * before; shared-connect does.
+   */
+  readsArrayEndpoints?: boolean
 }
 
 /** Keyring reaches a sign-in's community over the Trust Task HTTPS binding only, for now. */
@@ -480,6 +573,33 @@ function endpointText(service: { endpoint?: unknown; serviceEndpoint?: unknown }
   return endpoint
 }
 
+/** The first usable endpoint of a service; with `arrays`, the first usable entry of an array endpoint. */
+function usableEndpoint(
+  service: { endpoint?: unknown; serviceEndpoint?: unknown },
+  arrays: boolean
+): string | undefined {
+  const endpoint = service.endpoint ?? service.serviceEndpoint
+  if (arrays && Array.isArray(endpoint)) {
+    for (const entry of endpoint) {
+      const text = endpointText({ endpoint: entry })
+      if (isCandidateEndpoint(text)) return text
+    }
+    return undefined
+  }
+  const text = endpointText(service)
+  return isCandidateEndpoint(text) ? text : undefined
+}
+
+/**
+ * A shared-connect contact is reached over TSP first, then DIDComm (#853 WP2):
+ * the preference the plan sets, flippable here.
+ */
+export const SHARED_CONNECT_SELECTION: SelectionConfig = {
+  serviceTypeToBinding: { TSPTransport: 'tsp', DIDCommMessaging: 'didcomm' },
+  consumer: { supported: ['tsp', 'didcomm'], preference: ['tsp', 'didcomm'] },
+  readsArrayEndpoints: true,
+}
+
 /**
  * How to reach a trigger's sender, from its VERIFIED DID document: services
  * are matched on type, never on id; the first usable one of a type wins; the
@@ -499,8 +619,8 @@ export function selectService(
   for (const service of document.services ?? []) {
     const binding = typeToBinding[service.type]
     if (!binding || !supported.includes(binding)) continue
-    const endpoint = endpointText(service)
-    if (!isCandidateEndpoint(endpoint)) continue
+    const endpoint = usableEndpoint(service, selection.readsArrayEndpoints === true)
+    if (endpoint === undefined) continue
     if (!(binding in firstByBinding)) firstByBinding[binding] = endpoint
   }
   for (const binding of preference) {

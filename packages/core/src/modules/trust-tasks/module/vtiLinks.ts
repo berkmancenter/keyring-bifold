@@ -27,6 +27,7 @@ import { agentHomeScreen } from '../screens/agentHome'
 import { AgentHostConnectionError, looksLikeAgentHostQr, parseAgentHostQr } from './agentHostConnection'
 import { bareDid, classifyDid } from './classifyDid'
 import { sameIdentity } from './didScid'
+import { activeTriggerConfig } from './sharedConnect'
 import {
   readTrigger,
   TRIGGER_UI_MESSAGE_KEYS,
@@ -150,6 +151,25 @@ export function isTriggerLink(text: string): boolean {
 }
 
 /**
+ * A link as it may be logged. A trigger link (a sign-in, an agent claim, a
+ * shared-connect code) is never logged as text: its contact, its handle and
+ * a shared-connect `_label` are the sender's, and a label is whatever they
+ * typed. Only its kind and length are. Any other link is returned unchanged.
+ */
+export function linkForLog(text: string): string {
+  return isTriggerLink(text.trim()) ? `trigger link (${[...text].length} chars)` : text
+}
+
+/**
+ * A scanned trigger link, read with the scanner's config: the shipping one,
+ * or with the shared-connect developer switch on, that flow added.
+ */
+function scannedTriggerAction(text: string) {
+  const config = activeTriggerConfig()
+  return triggerAction(readTrigger(text, { channel: 'scan', config }), config)
+}
+
+/**
  * What the scanner says of a trigger link. With sign-in off (the default) it
  * is the words the trigger-link spec gives a reader for a flow it does not
  * implement (outcome `update`), whatever the link. With it on, the link is
@@ -160,7 +180,7 @@ export function isTriggerLink(text: string): boolean {
 function triggerLinkError(text: string): KeyringLinkError {
   let ui: Exclude<TriggerUi, 'pass-on'> = 'update'
   if (triggerLinkSignInEnabled()) {
-    const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+    const action = scannedTriggerAction(text)
     if (action.kind === 'say' && action.ui !== 'pass-on') ui = action.ui
   }
   return new KeyringLinkError(TRIGGER_UI_MESSAGES[ui], undefined, TRIGGER_UI_MESSAGE_KEYS[ui])
@@ -173,7 +193,7 @@ function triggerLinkError(text: string): KeyringLinkError {
  */
 function signInToOpen(text: string): boolean {
   if (!triggerLinkSignInEnabled()) return false
-  const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+  const action = scannedTriggerAction(text)
   return action.kind === 'proceed' && action.flow === 'sign-in'
 }
 
@@ -183,7 +203,7 @@ function signInToOpen(text: string): boolean {
  * sent until the person continues on that screen.
  */
 function vtaClaimToOpen(text: string): boolean {
-  const action = triggerAction(readTrigger(text, { channel: 'scan' }))
+  const action = scannedTriggerAction(text)
   return action.kind === 'proceed' && action.flow === 'vta-claim'
 }
 
