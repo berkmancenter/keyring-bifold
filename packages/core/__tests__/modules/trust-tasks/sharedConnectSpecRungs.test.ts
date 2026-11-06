@@ -53,6 +53,7 @@ import {
 } from '../../../src/modules/trust-tasks/module/sharedConnectStart'
 import type { VtiMediatorEndpoints } from '../../../src/modules/trust-tasks/module/VtiMediatorTransport'
 import { createVrcDocumentLoader } from '../../../src/modules/vrc/createVrcDocumentLoader'
+import { RelationshipDidModule } from '../../../src/modules/vrc/module/RelationshipDidModule'
 
 const RELAY = 'did:web:relay.example.org'
 const MEDIATOR = { did: RELAY, wsEndpoint: 'wss://relay.example.org/ws' } as unknown as VtiMediatorEndpoints
@@ -78,7 +79,10 @@ describe('shared-connect rungs: Keyring as shipped vs an independent spec invite
       config: {},
       dependencies: agentDependencies,
       modules: {
+        // As the app's agent declares them (app/src/utils/bc-agent-modules.ts). The Trust Task store is not
+        // declared there: the session registers it on first use, which these rungs prove.
         w3cCredentials: new W3cCredentialsModule({ documentLoader: createVrcDocumentLoader }),
+        relationshipDid: new RelationshipDidModule(),
         askar: new AskarModule({
           askar,
           store: {

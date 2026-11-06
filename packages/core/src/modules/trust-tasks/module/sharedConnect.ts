@@ -57,6 +57,7 @@ import {
   SHARED_CONNECT_SEND_ATTEMPTS,
 } from './sharedConnectDecisions'
 import { storeReceivedVrc } from './sharedConnectStore'
+import { TrustTasksModule } from './TrustTasksModule'
 import { ENCOUNTER_LOG_PREFIX, encounterKey, saveEncounter, type EncounterRecord } from './sharedConnectEncounter'
 
 /** What the session sends through. Resolves when the document has been handed to the carriage. */
@@ -99,6 +100,11 @@ export type SessionState = SessionOutcome | 'waiting'
 const nowSeconds = (d: SharedConnectDeps) => Math.floor(d.now() / 1000)
 
 export function defaultSharedConnectDeps(agent: Agent): SharedConnectDeps {
+  // Registered on first use, as getTrustTasksService does for the connection ceremony: the app registers the
+  // module at start-up (setupTrustTasksInbound), but a start must not depend on that having run first.
+  if (!agent.dependencyManager.container.isRegistered(TrustTaskDocumentRepository)) {
+    new TrustTasksModule().register(agent.dependencyManager)
+  }
   const service = new TrustTasksService(agent.dependencyManager.resolve(TrustTaskDocumentRepository))
   return {
     now: () => Date.now(),
