@@ -13,10 +13,17 @@
  */
 import '../../helpers/realAskar'
 
-// One @credo-ts/core copy for this suite, as in sharedConnectRealKms.test.ts.
+// One @credo-ts/core copy for this suite, as in sharedConnectRealKms.test.ts. And one @credo-ts/askar: the TSP
+// adapter (@bifold/credo-tsp-adapter) reads the encounter key through AskarStoreManager from the root copy, so
+// the agent's AskarModule must be that copy too ("TypeInfo not known for AskarModuleConfig" otherwise).
 jest.mock('@credo-ts/core', () =>
   jest.requireActual(
     require.resolve('@credo-ts/core', { paths: [require('path').resolve(__dirname, '../../../../..')] })
+  )
+)
+jest.mock('@credo-ts/askar', () =>
+  jest.requireActual(
+    require.resolve('@credo-ts/askar', { paths: [require('path').resolve(__dirname, '../../../../..')] })
   )
 )
 
