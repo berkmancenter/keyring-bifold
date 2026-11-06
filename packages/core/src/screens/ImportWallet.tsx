@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, TouchableOpacity, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -7,8 +7,10 @@ import { pick, types } from 'react-native-document-picker'
 import RNFS from 'react-native-fs'
 
 import { useAgent } from '@bifold/react-hooks'
+import { TOKENS, useServices } from '../container-api'
 import { useTheme } from '../contexts/theme'
 import { testIdWithKey } from '../utils/testable'
+import { createPickWatcher, IMPORT_PICKER_SLOW_MS } from './importPickerWatch'
 import { ThemedText } from '../components/texts/ThemedText'
 import Button from '../components/buttons/Button'
 import { ButtonType } from '../components/buttons/Button-api'
@@ -26,10 +28,20 @@ const exitApp = () => {
 const ImportWallet: React.FC<ImportWalletProps> = () => {
   const { t } = useTranslation()
   const { agent } = useAgent()
+  const [logger] = useServices([TOKENS.UTIL_LOGGER])
   const { ColorPalette, TextTheme, Inputs, Assets, Spacing } = useTheme()
   const [password, setPassword] = useState('')
   const [selectedFile, setSelectedFile] = useState<string>('')
   const [isImporting, setIsImporting] = useState(false)
+  // IN-537: if the picker hasn't settled in IMPORT_PICKER_SLOW_MS, say what to do
+  // instead of staying silent (see importPickerWatch.ts).
+  const [pickerSlow, setPickerSlow] = useState(false)
+  const [pickWatcher] = useState(() =>
+    createPickWatcher(IMPORT_PICKER_SLOW_MS, setPickerSlow, (ms) =>
+      logger.warn(`ImportWallet: the file picker had not settled ${ms} ms after the tap`)
+    )
+  )
+  useEffect(() => () => pickWatcher.dispose(), [pickWatcher])
 
   const styles = StyleSheet.create({
     safeArea: {
@@ -106,12 +118,17 @@ const ImportWallet: React.FC<ImportWalletProps> = () => {
   })
 
   const handleSelectFile = async () => {
+    const { isCurrent, settle } = pickWatcher.start()
+
     try {
       const result = await pick({
         type: [types.allFiles],
         allowMultiSelection: true,
         copyTo: 'cachesDirectory',
       })
+
+      if (!isCurrent()) return
+      settle()
 
       if (result && result.length > 0) {
         const mainDbFile = result.find((f) => {
@@ -163,6 +180,8 @@ const ImportWallet: React.FC<ImportWalletProps> = () => {
         setSelectedFile(targetDbPath)
       }
     } catch (err: any) {
+      if (!isCurrent()) return
+      settle()
       if (err?.code !== 'DOCUMENT_PICKER_CANCELED') {
         // eslint-disable-next-line no-console
         console.error('Document picker error:', err)
@@ -315,6 +334,18 @@ const ImportWallet: React.FC<ImportWalletProps> = () => {
           <ThemedText style={styles.fileHelp}>
             Select all 3 backup files: .db, .db-shm, and .db-wal (hold to multi-select)
           </ThemedText>
+          {pickerSlow && (
+            <View
+              style={styles.infoCard}
+              testID={testIdWithKey('ImportPickerNotOpened')}
+              accessibilityLiveRegion="polite"
+            >
+              <Icon name="info-outline" size={22} color={ColorPalette.notification.infoIcon} style={styles.cardIcon} />
+              <ThemedText style={[styles.cardText, { color: ColorPalette.notification.infoText }]}>
+                {String(t('Settings.ImportWalletPickerNotOpened'))}
+              </ThemedText>
+            </View>
+          )}
 
           <ThemedText style={[styles.fieldLabel, { marginTop: Spacing.lg }]}>
             {String(t('Settings.ImportWalletPasswordLabel'))}
