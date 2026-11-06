@@ -50,6 +50,8 @@ interface Setup {
   head?: number
   /** The agent's answer to `rooms/keys/seal/0.2`. */
   seal?: (payload: Record<string, unknown>) => unknown
+  /** The agent cannot be asked what it serves. */
+  servedFails?: boolean
 }
 
 function setup(o: Setup = {}) {
@@ -126,7 +128,10 @@ function setup(o: Setup = {}) {
   let ids = 0
   const b: RoomsBackend = {
     agentLinked: () => true,
-    agentServedTypes: async () => o.served ?? SERVED,
+    agentServedTypes: async () => {
+      if (o.servedFails) throw new Error('no answer')
+      return o.served ?? SERVED
+    },
     agentTask,
     communities: async () => [COMMUNITY],
     communityTask,
@@ -144,6 +149,7 @@ function setup(o: Setup = {}) {
     service,
     agentTask,
     sendCompleted,
+    warn: b.warn as jest.Mock,
     advance: (ms: number) => {
       clock += ms
     },
@@ -235,16 +241,18 @@ describe('AgentRoomsService writes', () => {
     expect(err).toMatchObject({ key: 'note/abc', currentVersion: 5 })
   })
 
-  it('passes any other refusal from the host on by its code', async () => {
+  it('passes any other refusal from the host on by its code, and the refusal itself for a log to read', async () => {
+    const refusal = new FakeRefusal('taskFailed', { code: 'rooms/records/put:recordTooLarge' })
     const s = setup({
       host: () => {
-        throw new FakeRefusal('taskFailed', { code: 'rooms/records/put:recordTooLarge' })
+        throw refusal
       },
     })
     const preview = await s.service.prepareWrite(OPEN_ROOM, { title: '', body: 'big' })
     const err = await s.service.confirmWrite(preview.token).catch((e) => e)
     expect(err).toBeInstanceOf(RoomsRefused)
     expect(err).toMatchObject({ operation: 'write', code: 'recordTooLarge', retryable: false })
+    expect((err as RoomsRefused).refusal).toBe(refusal)
   })
 
   it('passes the agent’s refusal on and delivers nothing', async () => {
@@ -467,16 +475,18 @@ describe('AgentRoomsService curation', () => {
     ])
   })
 
-  it('passes the host’s refusal on by its code', async () => {
+  it('passes the host’s refusal on by its code, and the refusal itself', async () => {
+    const refusal = new FakeRefusal('taskFailed', { code: 'rooms/records/curate:alreadyRetracted' })
     const s = setup({
       host: () => {
-        throw new FakeRefusal('taskFailed', { code: 'rooms/records/curate:alreadyRetracted' })
+        throw refusal
       },
     })
     await expect(s.service.curate(OPEN_ROOM, 'note/abc', 'retract')).rejects.toMatchObject({
       name: 'RoomsRefused',
       operation: 'curate',
       code: 'alreadyRetracted',
+      refusal,
     })
   })
 
@@ -757,5 +767,75 @@ describe('writing to an attributed room', () => {
       key: postKey('post-1'),
       version: 1,
     })
+  })
+})
+
+describe('a write refused, said in the log by kind alone', () => {
+  const LONG_ROOM = 'did:webvh:QmRoomScidThatIsLong0123456789:first.example:room-dids:9381cab61f82'
+  const lines = (warn: jest.Mock) =>
+    warn.mock.calls.map(([line]) => String(line)).filter((l) => l.includes('a write to'))
+
+  it('refused on this phone: the room by short id and the reason, nothing sent', async () => {
+    const { service, warn, sendCompleted } = setup()
+    await expect(service.prepareWrite(READ_ONLY_ROOM, { title: '', body: 'Hi' })).rejects.toBeInstanceOf(
+      RoomsUnavailable
+    )
+    expect(lines(warn)).toEqual([
+      `rooms: a write to ${READ_ONLY_ROOM} was refused on this phone: unavailable (noRight)`,
+    ])
+    expect(sendCompleted).not.toHaveBeenCalled()
+  })
+
+  // The shape a VTA sends: vta-service-v0.72.0 room_oracle.rs:188 raises AppError::Conflict, and helpers.rs:193 answers
+  // it as `taskFailed` with `details.reason: "conflict"` and no task code; AppError prints "conflict: …" (read, not
+  // run). Only the message was in the 277.8 reports, so this is the case those reports were.
+  it('the agent refusing for two authority credentials, as an agent sends it: named, and not retryable', async () => {
+    const refusal = new FakeRefusal('taskFailed', { reason: 'conflict' })
+    refusal.message = `conflict: this VTA holds more than one AuthorityCredential issued by room \`${LONG_ROOM}\` to one persona; which one to attenuate from is not a question this can answer safely`
+    const { service, warn } = setup({
+      seal: () => {
+        throw refusal
+      },
+    })
+    const { token } = await service.prepareWrite(SEALED_ROOM, { title: '', body: 'Hi', idempotencyKey: 'post-9' })
+    const error = await service.confirmWrite(token).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RoomsRefused)
+    expect((error as RoomsRefused).retryable).toBe(false)
+    const [line] = lines(warn)
+    expect(line).toBe(
+      `rooms: a write to ${SEALED_ROOM} was not written: refused (taskFailed, conflict), two authority credentials`
+    )
+    expect(line).not.toContain('QmRoomScid')
+  })
+
+  // A task code, which no agent is known to send for this: kept as a precaution (roomsLogWords).
+  it('the same refusal carried as a task code: named, and not retryable', async () => {
+    const refusal = new FakeRefusal('taskFailed', { code: 'rooms/keys/seal:conflict' })
+    refusal.message = `conflict: this VTA holds more than one AuthorityCredential issued by room \`${LONG_ROOM}\` to one persona`
+    const { service, warn } = setup({
+      seal: () => {
+        throw refusal
+      },
+    })
+    const { token } = await service.prepareWrite(SEALED_ROOM, { title: '', body: 'Hi', idempotencyKey: 'post-9' })
+    const error = await service.confirmWrite(token).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RoomsRefused)
+    expect((error as RoomsRefused).retryable).toBe(false)
+    const [line] = lines(warn)
+    expect(line).toBe(`rooms: a write to ${SEALED_ROOM} was not written: refused (conflict), two authority credentials`)
+    // The agent's words name the room's whole DID; the line carries the kind only.
+    expect(line).not.toContain('QmRoomScid')
+  })
+
+  it('a failure that may pass is not called refused: it could not be prepared this time', async () => {
+    const { service, warn } = setup({ servedFails: true })
+    await expect(service.prepareWrite(OPEN_ROOM, { title: '', body: 'Hi' })).rejects.toThrow('no answer')
+    expect(lines(warn)).toEqual([`rooms: a write to ${OPEN_ROOM} could not be prepared: failed`])
+  })
+
+  it('a write that goes says nothing (control)', async () => {
+    const { service, warn } = setup()
+    await service.confirmWrite((await service.prepareWrite(OPEN_ROOM, { title: '', body: 'Hi' })).token)
+    expect(lines(warn)).toEqual([])
   })
 })

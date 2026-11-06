@@ -9,6 +9,7 @@
  *
  * @module rooms/roomsLogWords
  */
+import { refusalCode } from './real/wire'
 import { RoomsRefused, RoomsUnavailable } from './types'
 
 /** vtiAgent's `VtiSessionHeld`, by name, as the rooms backend and the persona inbox read it. */
@@ -22,6 +23,181 @@ export const logRef = (did: string | undefined): string =>
   !did ? 'none' : did.length <= 28 ? did : `${did.slice(0, 16)}…${did.slice(-8)}`
 
 /**
+ * The refusal codes a log line may repeat, and no others. A community writes a refusal's code and details as well as
+ * its message, so a code is only a kind while it is one this list knows: anything else reads as `other`, whatever it
+ * says. An unlisted code loses a word in a report, never more.
+ *
+ * **`refused (other)` in a report means a code missing from this list: find out what it was, and add it.** The list
+ * can't find its own gaps, because a code an agent sends and no specification declares reaches here only from a device.
+ * So regenerating the specifications' part must keep what is listed apart from it.
+ */
+const LOGGED_REFUSAL_CODES = new Set([
+  // The framework's own (trust-tasks-rs StandardCode, SPEC 8.3).
+  'malformedRequest',
+  'unsupportedType',
+  'unsupportedVersion',
+  'unsupportedExtension',
+  'expired',
+  'proofRequired',
+  'proofInvalid',
+  'permissionDenied',
+  'wrongRecipient',
+  'identityMismatch',
+  'idConflict',
+  'cancelled',
+  'taskFailed',
+  'unavailable',
+  'internalError',
+  'indeterminate',
+  // A room task's own: every code any version of the rooms and community rooms specifications declares (vti-specs-rooms
+  // at VTI 4614eabb9), and those their docs name beside them.
+  'aboveCeiling',
+  'actionNotHeld',
+  'admissionPending',
+  'alreadyAccepted',
+  'alreadyExists',
+  'alreadyJoined',
+  'alreadyMember',
+  'alreadyRetracted',
+  'authorNotPrincipal',
+  'blobNotFound',
+  'bodyInvalid',
+  'cannotOpen',
+  'capacityExceeded',
+  'chainTooDeep',
+  'chunkMismatch',
+  'chunkOutOfRange',
+  'commitInvalid',
+  'configNotActive',
+  'configNotFound',
+  'contended',
+  'credentialRequired',
+  'didNotOpen',
+  'digestMismatch',
+  'earlierRemovalRefused',
+  'emptyActions',
+  'entryNotPermitted',
+  'epochConflict',
+  'epochGap',
+  'epochMismatch',
+  'filesDisabled',
+  'forbidden',
+  'hostRefused',
+  'hostUnreachable',
+  'incomplete',
+  'invalidCombination',
+  'invalidCursor',
+  'invalidManifest',
+  'invalidParts',
+  'invalidRange',
+  'invalidSettings',
+  'issuerNotPrincipal',
+  'keyHolderRefused',
+  'keyHolderUnavailable',
+  'keyPackageInvalid',
+  'keyPackageNotExpected',
+  'keyPackageNotHeld',
+  'keyPackageRequired',
+  'lastAdmin',
+  'limitExceeded',
+  'listInvalid',
+  'locationMismatch',
+  'memberLimitsUnavailable',
+  'memberUsageUnavailable',
+  'noAuthority',
+  'noGroup',
+  'noKeyHolder',
+  'noList',
+  'nonSequential',
+  'noRetention',
+  'noSigningKey',
+  'notAhead',
+  'notAMember',
+  'notAppendOnly',
+  'notAttempted',
+  'notAvailable',
+  'notDelivered',
+  'notFound',
+  'notHeld',
+  'notInRoom',
+  'notInvited',
+  'notMember',
+  'notNominated',
+  'noTransferMode',
+  'notTheOwner',
+  'notWitnessed',
+  'offerExpired',
+  'offerWithdrawn',
+  'ownLeaf',
+  'principalAmbiguous',
+  'privateRoom',
+  'rateLimited',
+  'recordTooLarge',
+  'retentionConflict',
+  'retentionNotPermitted',
+  'roomNotFound',
+  'roomNotLive',
+  'roomStillLive',
+  'roomSubject',
+  'sealedRoomMint',
+  'sequenceConflict',
+  'stale',
+  'subjectBindingMissing',
+  'tierUnknown',
+  'tooManyUploads',
+  'typeNotActable',
+  'unknownEpoch',
+  'unknownStorageConfig',
+  'uploadKeyInUse',
+  'versionConflict',
+  'visibilityNotPermitted',
+  'welcomeInvalid',
+  'wrongState',
+  // Declared by no specification and not seen as a code. A test models the two-credential refusal as
+  // `rooms/keys/seal:conflict`. A VTA at vta-service-v0.72.0 sends `taskFailed` with `details.reason: "conflict"`
+  // instead (room_oracle.rs:188, helpers.rs:193, read, not run); that reads through LOGGED_REFUSAL_REASONS. 277.8's
+  // reports hold only the message. Listed as a precaution, should an agent ever send it as a code.
+  'conflict',
+  // Keyring's own, for a step that went wrong between a room's tasks.
+  'empty',
+  'fileTooLarge',
+  'joinFailed',
+  'roomKeptMoving',
+  'senderRefused',
+  'tooLarge',
+  'tooLong',
+  'welcomeMissing',
+])
+
+/**
+ * What a VTA says in `details.reason` when everything else reads `taskFailed` (vta-sdk `trust_task_reject_reasons`).
+ * It is the only thing that tells "no persona holds this room" (`not_found`) from "more than one does" (`conflict`).
+ */
+const LOGGED_REFUSAL_REASONS = new Set([
+  'not_found',
+  'conflict',
+  'gone',
+  'upstream_unavailable',
+  'no_matching_protocol',
+])
+
+const loggedCode = (code: string | undefined): string => (code && LOGGED_REFUSAL_CODES.has(code) ? code : 'other')
+
+/** A refusal's `details.reason`, where it is on the closed list; else nothing. */
+function loggedReason(e: unknown): string | undefined {
+  const reason = (e as { details?: { reason?: unknown } } | null | undefined)?.details?.reason
+  return typeof reason === 'string' && LOGGED_REFUSAL_REASONS.has(reason) ? reason : undefined
+}
+
+const refusedAs = (code: string, reason: string | undefined) =>
+  reason ? `refused (${code}, ${reason})` : `refused (${code})`
+
+/** A `VtiRefusal` by its closed code and reason. Its message is the community's and is never read here. */
+function refusalKind(e: Error): string {
+  return refusedAs(loggedCode(refusalCode(e)), loggedReason(e))
+}
+
+/**
  * Why a read failed, by kind only: no persona, step or task detail. The only form a line that names a community or room
  * may use. An error's own words can name an identity ("did:key:…'s agent is no longer linked"), and beside a
  * community that is the pairing the hold's rule forbids, whatever the error.
@@ -29,7 +205,8 @@ export const logRef = (did: string | undefined): string =>
 export function failureCategory(e: unknown): string {
   if (isSessionHeld(e)) return 'the session is kept for another identity'
   if (e instanceof RoomsUnavailable) return `unavailable (${e.reason})`
-  if (e instanceof RoomsRefused) return `refused (${e.code})`
+  if (e instanceof RoomsRefused) return refusedAs(loggedCode(e.code), loggedReason(e.refusal))
+  if (e instanceof Error && e.name === 'VtiRefusal') return refusalKind(e)
   if (e instanceof Error && e.name === 'VtiSentNoAnswer') return 'no answer yet'
   return e instanceof Error && e.name && e.name !== 'Error' ? e.name : 'failed'
 }
