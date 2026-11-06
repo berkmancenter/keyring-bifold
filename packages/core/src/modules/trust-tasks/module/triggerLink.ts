@@ -628,11 +628,22 @@ function endpointValueText(endpoint: unknown): unknown {
 }
 
 /**
- * A service's endpoint as a string: a plain string, the `uri` of an object
- * endpoint, or, for an array (the usual `did:peer:2` form, one entry per
- * transport), the first entry that is a usable endpoint.
+ * A service's endpoint as a string: a plain string, or the `uri` of an object
+ * endpoint. An array reads as no endpoint, as it always has: this is what
+ * `serviceEndpointOfType` reads for sign-in, the rooms door and the polls
+ * ballot box, which are unchanged.
  */
 function endpointText(service: { endpoint?: unknown; serviceEndpoint?: unknown }): unknown {
+  return endpointValueText(service.endpoint ?? service.serviceEndpoint)
+}
+
+/**
+ * The endpoint transport selection reads: as `endpointText`, and for an array
+ * (the usual `did:peer:2` form, one entry per transport), the first entry that
+ * is a usable endpoint. Only `selectService` reads it, and only shared-connect
+ * calls that.
+ */
+function selectionEndpointText(service: { endpoint?: unknown; serviceEndpoint?: unknown }): unknown {
   const endpoint = service.endpoint ?? service.serviceEndpoint
   if (Array.isArray(endpoint)) {
     for (const entry of endpoint) {
@@ -674,7 +685,7 @@ export function selectService(
     const types = Array.isArray(service.type) ? service.type : [service.type]
     const binding = types.map((type) => typeToBinding[type]).find((b) => b !== undefined)
     if (!binding || !supported.includes(binding)) continue
-    const endpoint = endpointText(service)
+    const endpoint = selectionEndpointText(service)
     if (!isCandidateEndpoint(endpoint)) continue
     if (!(binding in firstByBinding)) firstByBinding[binding] = endpoint
   }
