@@ -395,6 +395,8 @@ describe('shared-connect rungs (Keyring real code vs an independent spec inviter
       } catch (e) {
         mainVerdict = `threw:${(e as Error).name}`
       }
+      // eslint-disable-next-line no-console
+      console.log(`C5 connection-path verdict on an eddsa-jcs-2022 VRC: ${mainVerdict}`)
       expect(mainVerdict).not.toBe('valid')
       expect(await verifyInboundVrc(agent, vc, String(vc.issuer))).toBe(true)
     })
