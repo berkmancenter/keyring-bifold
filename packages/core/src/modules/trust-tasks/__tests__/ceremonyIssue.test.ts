@@ -28,6 +28,7 @@ import {
 } from '../ceremony'
 import { digestMultibase } from '../documentProof'
 import { TrustTaskMessage } from '../messages/TrustTaskMessage'
+import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 import { vrcFlowStore } from '../../vrc/witnessStatusStore'
 import { readOneClock } from '../../../../__tests__/helpers/oneClock'
@@ -437,6 +438,20 @@ describe('the inbound issue leg (verify, store, receipt)', () => {
         },
       })
     const connection = { id: 'conn-1', did: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' }
+    // The JCS path is behind the shared-connect switch: this handler serves every connection peer.
+    beforeEach(() => setSharedConnectEnabled(true))
+    afterEach(() => setSharedConnectEnabled(false))
+
+    test('with the shared-connect switch off, takes the Credo path as main does', async () => {
+      setSharedConnectEnabled(false)
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc, vrc } = jcsIssue()
+      mockedVerify.mockClear()
+      await deliver(fake.capturedHandlerRef, doc, connection)
+      expect(mockedVerify).not.toHaveBeenCalledWith(fake.agent, vrc, 'did:peer:0zPeerRel')
+      expect(fake.w3c.verifyCredential).toHaveBeenCalled()
+    })
 
     test('is verified by the document-proof verifier under the issuer, not Credo, stored and receipted', async () => {
       const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
