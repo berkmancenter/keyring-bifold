@@ -18,6 +18,15 @@
  * at the keyboard's own height, and so that `keepVisible` points of the view
  * stay above it.
  *
+ * Two things a caller should know:
+ * - Until `measureInWindow` answers, the view is taken to reach the bottom of
+ *   the screen, so the padding is what the keyboard covers (still capped). For a
+ *   full-height view that is the true answer; a short view sitting high on the
+ *   screen gets too much until it is measured.
+ * - A view no taller than `keepVisible` gets no padding at all: it is left
+ *   under the keyboard rather than padded out of sight. It is meant for views
+ *   that fill the screen.
+ *
  * @module components/views/KeyboardPaddedView
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'

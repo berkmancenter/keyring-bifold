@@ -136,7 +136,8 @@ export interface RCardFormProps {
  * Room for the keyboard. On iOS the padding is capped at what the keyboard
  * covers: React Native's KeyboardAvoidingView, with a fixed 90-point offset,
  * padded this form away entirely on a first run (IN-525). Android keeps the
- * KeyboardAvoidingView it had.
+ * KeyboardAvoidingView it had: not because Android is immune (the padding
+ * rule is the same), but because nothing has shown it there.
  */
 const KeyboardSpace: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   Platform.OS === 'ios' ? (
