@@ -72,6 +72,16 @@ export type TriggerFlow = {
   /** Whether Keyring carries the flow through. A known flow it does not is answered `update`. */
   implemented?: boolean
   testOnly?: boolean
+  /**
+   * TEST BRANCH (shared-connect rungs): the flow's own length budget in code points
+   * (dtgwg-vti-spec#86 as revised 2026-11-05: "a flow may set its own budget"; 1,000
+   * for shared-connect). Checked after the reader's own cap.
+   */
+  maxLength?: number
+  /** TEST BRANCH: the furthest `_exp` may lie ahead of now, in seconds (#86: 7 days for a link). */
+  maxExpAheadSeconds?: number
+  /** TEST BRANCH: whether the flow reads `_label` (#86's proposed fifth name), returned as unverified text. */
+  readsLabel?: boolean
 }
 
 export type TriggerConfig = {
@@ -89,6 +99,8 @@ export type TriggerConfig = {
 export const TRIGGER_LINK_HOST = 'link.trustoverip.org'
 export const SIGN_IN_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/sign-in`
 export const VTA_CLAIM_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/vta-claim`
+/** TEST BRANCH: the person-to-person flow proposed in dtgwg-vti-spec#86 (revised 2026-11-05). */
+export const SHARED_CONNECT_FLOW = `https://${TRIGGER_LINK_HOST}/vti/flow/shared-connect`
 
 /**
  * What Keyring reads. Sign-in is the one flow it carries through; an agent
@@ -123,6 +135,33 @@ export const KEYRING_TRIGGER_CONFIG: TriggerConfig = {
   ],
 }
 
+/**
+ * TEST BRANCH: the shared-connect flow, kept OUT of KEYRING_TRIGGER_CONFIG so the
+ * shipping reader is unchanged; a caller opts in by passing this config.
+ * The contact is a self-certifying did:peer (numalgo 2, or long-form 4).
+ */
+export const SHARED_CONNECT_TRIGGER_CONFIG: TriggerConfig = {
+  ...KEYRING_TRIGGER_CONFIG,
+  flows: [
+    ...(KEYRING_TRIGGER_CONFIG.flows ?? []),
+    {
+      flow: 'shared-connect',
+      typeBase: SHARED_CONNECT_FLOW,
+      status: 'draft',
+      expRequired: true,
+      allowedVidTypes: ['did:peer'],
+      supported: { '0': [1] },
+      implemented: true,
+      maxLength: 1000,
+      maxExpAheadSeconds: 7 * 24 * 60 * 60,
+      readsLabel: true,
+    },
+  ],
+}
+
+/** #86's cap on `_label`; a longer one is not shown at all. */
+export const SHARED_CONNECT_LABEL_MAX = 64
+
 export type TriggerAccept = {
   outcome: 'accept'
   via: 'url'
@@ -133,6 +172,8 @@ export type TriggerAccept = {
   task: { uri: string; major: number; minor: number } | null
   /** `fragment.<name>` for each unknown name that begins with `_`, in document order. */
   ignored: string[]
+  /** TEST BRANCH: `_label` for a flow that reads it. Never verified: anyone can type any name. */
+  label?: { text: string; verified: false }
 }
 
 export type TriggerReject = { outcome: 'reject'; reason: string; ui: TriggerUi }
@@ -211,6 +252,11 @@ const METHOD_SYNTAX: Record<string, (msid: string) => boolean> = {
   },
   web: (msid) => msid.split(':').every((s) => SEGMENT.test(s)),
   key: (msid) => /^z[1-9A-HJ-NP-Za-km-z]+$/.test(msid),
+  // TEST BRANCH: did:peer numalgo 2 (purpose-coded multikeys and base64url services) and
+  // long-form numalgo 4 (hash:encoded document). Numalgo 0, 1, 3 and short-form 4 are not read.
+  peer: (msid) =>
+    /^2(?:\.(?:[AEVID]z[1-9A-HJ-NP-Za-km-z]+|S[A-Za-z0-9_-]+))+$/.test(msid) ||
+    /^4z[1-9A-HJ-NP-Za-km-z]+:z[1-9A-HJ-NP-Za-km-z]+$/.test(msid),
 }
 
 /** Why the contact cannot be read, or undefined when it reads. */
@@ -399,10 +445,23 @@ export function readTrigger(
     const allowed = flow.allowedVidTypes
     if (allowed !== 'any' && !allowed.includes(`did:${fields._from.split(':')[1]}`)) return reject('from-not-allowed')
     if (flow.expRequired && exp === null) return reject('missing-exp')
+    // TEST BRANCH: the flow's own budget and expiry horizon (#86).
+    if (flow.maxLength !== undefined && [...text].length > flow.maxLength) return reject('over-flow-budget')
+    if (flow.maxExpAheadSeconds !== undefined && exp !== null && exp - now > flow.maxExpAheadSeconds + skew)
+      return reject('exp-too-far')
   }
 
   // 10. The expiry, allowing for the phone's clock.
   if (exp !== null && exp + skew <= now) return reject('expired')
+
+  // TEST BRANCH: `_label`, unverified, only for a flow that reads it; over the cap it is not shown.
+  let label: TriggerAccept['label']
+  if (flow?.readsLabel) {
+    const raw = pairs.find(([name]) => name === '_label')?.[1]
+    if (raw !== undefined && raw.length > 0 && [...raw].length <= SHARED_CONNECT_LABEL_MAX) {
+      label = { text: raw, verified: false }
+    }
+  }
 
   return {
     outcome: 'accept',
@@ -413,6 +472,7 @@ export function readTrigger(
     flow: flow ? flow.flow : null,
     task,
     ignored,
+    ...(label ? { label } : {}),
   }
 }
 
@@ -473,11 +533,21 @@ export function isCandidateEndpoint(endpoint: unknown): endpoint is string {
   }
 }
 
-/** A service's endpoint as a string: a plain string, or the `uri` of an object endpoint. */
+/**
+ * A service's endpoint as a string: a plain string, or the `uri` of an object endpoint.
+ * TEST BRANCH: an array endpoint (the usual did:peer:2 form) reads as its first entry, string or `{uri}`.
+ */
 function endpointText(service: { endpoint?: unknown; serviceEndpoint?: unknown }): unknown {
-  const endpoint = service.endpoint ?? service.serviceEndpoint
-  if (endpoint && typeof endpoint === 'object' && !Array.isArray(endpoint)) return (endpoint as { uri?: unknown }).uri
+  let endpoint = service.endpoint ?? service.serviceEndpoint
+  if (Array.isArray(endpoint)) endpoint = endpoint[0]
+  if (endpoint && typeof endpoint === 'object') return (endpoint as { uri?: unknown }).uri
   return endpoint
+}
+
+/** TEST BRANCH: a shared-connect contact is reached over TSP first, then DIDComm (#853 WP2). */
+export const SHARED_CONNECT_SELECTION: SelectionConfig = {
+  serviceTypeToBinding: { TSPTransport: 'tsp', DIDCommMessaging: 'didcomm' },
+  consumer: { supported: ['tsp', 'didcomm'], preference: ['tsp', 'didcomm'] },
 }
 
 /**
