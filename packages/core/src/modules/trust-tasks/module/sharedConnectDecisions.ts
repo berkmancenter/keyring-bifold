@@ -87,3 +87,11 @@ export const SHARED_CONNECT_INVITE_TTL_SECONDS = 600
  * invite is answered again and the same propose is the same acceptance.
  */
 export const SHARED_CONNECT_INVITE_MAX_INVITES = 8
+
+/**
+ * The work one code may cost, in frames (§2.8's spam guard, the half the scanner and acceptance bounds above do not
+ * cover): every frame that reaches the code is counted, and written, before it is opened. Below this every propose
+ * costs the same work, so a failing code still looks like a spent one; at it every frame is dropped unopened, which
+ * is the same nothing every other drop shows. A whole exchange is under ten frames with its retries.
+ */
+export const SHARED_CONNECT_INVITE_MAX_FRAMES = 64

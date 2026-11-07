@@ -11,12 +11,16 @@ jest.mock('../module/keyedRecords', () => ({
   listKeyed: async () => [...mockKeyed.values()],
 }))
 
-import { readFileSync } from 'fs'
+import { readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 import * as propose from '@openvtc/trust-tasks/vrc/relationships/propose/0.1/payload'
 
-import { SHARED_CONNECT_EXP_GRACE_MS, SHARED_CONNECT_INVITE_MAX_INVITES } from '../module/sharedConnectDecisions'
+import {
+  SHARED_CONNECT_EXP_GRACE_MS,
+  SHARED_CONNECT_INVITE_MAX_FRAMES,
+  SHARED_CONNECT_INVITE_MAX_INVITES,
+} from '../module/sharedConnectDecisions'
 import { setSharedConnectEnabled, setSharedConnectInviteEnabled } from '../module/sharedConnectFlag'
 import {
   buildSharedConnectLink,
@@ -141,13 +145,22 @@ function rig(options: { record?: Partial<InviteRecord>; deps?: Partial<InviterDe
   }
 }
 
-/** Nothing went out and nothing moved: the shape of every silent drop. */
+/**
+ * Nothing went out and nothing moved: the shape of every silent drop. The one write a dropped frame causes is its own
+ * count against the code's work budget, written before it is opened: every write after `writesBefore` differs from
+ * the record before the act in `handled` alone.
+ */
 function expectSilent(r: ReturnType<typeof rig>, writesBefore: number) {
   expect(r.deps.sendAccept).not.toHaveBeenCalled()
   expect(r.ceremony.onProposal).not.toHaveBeenCalled()
   expect(r.ceremony.onProposalAgain).not.toHaveBeenCalled()
   expect(r.ceremony.onDocument).not.toHaveBeenCalled()
-  expect(r.persisted).toHaveLength(writesBefore)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const strip = ({ handled: _h, ...rest }: InviteRecord) => rest
+  const before = writesBefore > 0 ? strip(r.persisted[writesBefore - 1]) : undefined
+  const after = r.persisted.slice(writesBefore)
+  expect(after.length).toBeLessThanOrEqual(1)
+  for (const written of after) expect(strip(written)).toEqual(before)
 }
 
 beforeEach(() => {
@@ -202,8 +215,20 @@ describe('the code', () => {
     expect(() => newInviteEnactment(() => new Uint8Array(15))).toThrow()
     // The code, not its comments: the app's Buffer has no base64url (jest's Node Buffer does, so only this sees it).
     const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
-    const source = readFileSync(join(__dirname, '../module/sharedConnectInvite.ts'), 'utf8')
-    expect(code(source)).not.toMatch(/\bBuffer\b/)
+    // Every source this path runs through, not only the inviter's own file.
+    const moduleDir = join(__dirname, '../module')
+    const tspDir = join(__dirname, '../../../../../trust-tasks/src/tsp')
+    const sources = [
+      ...readdirSync(moduleDir)
+        .filter((f) => /^sharedConnect.*\.ts$/.test(f) || f === 'vtiTsp.ts')
+        .map((f) => join(moduleDir, f)),
+      ...readdirSync(tspDir)
+        .filter((f) => f.endsWith('.ts'))
+        .map((f) => join(tspDir, f)),
+    ]
+    expect(sources.length).toBeGreaterThan(10)
+    const withBuffer = sources.filter((file) => /\bBuffer\b/.test(code(readFileSync(file, 'utf8'))))
+    expect(withBuffer).toEqual([])
     expect(code('/** Buffer */ const x = Buffer.from([])')).toMatch(/\bBuffer\b/) // control: the check bites on code
   })
 })
@@ -393,7 +418,8 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     const writes = r.persisted.length
     await r.invite(scanner(SHARED_CONNECT_INVITE_MAX_INVITES + 1))
     expect(r.deps.sendAccept).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_INVITES)
-    expect(r.persisted).toHaveLength(writes)
+    expect(r.persisted).toHaveLength(writes + 1) // its frame count, and nothing else
+    expect(r.persisted[writes].invited).toHaveLength(SHARED_CONNECT_INVITE_MAX_INVITES)
     expect(r.inviter.snapshot().invited).toHaveLength(SHARED_CONNECT_INVITE_MAX_INVITES)
   })
 
@@ -445,6 +471,58 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     // Control: the restarted inviter does answer its accepted scanner's re-sent propose.
     await again.doc(scanner(1), proposeFrom(scanner(1)))
     expect(again.ceremony.onProposalAgain).toHaveBeenCalledTimes(1)
+  })
+
+  test(`the work budget: exactly ${SHARED_CONNECT_INVITE_MAX_FRAMES} frames are opened; the next is dropped unopened`, async () => {
+    const r = rig()
+    await r.inviter.start()
+    // One related scanner sending proposes the rule drops: each costs a proof check, and no slot would stop it.
+    await r.invite(scanner(1))
+    for (let n = 2; n <= SHARED_CONNECT_INVITE_MAX_FRAMES; n++)
+      await r.doc(scanner(1), proposeFrom(scanner(1), { recipient: scanner(7) }))
+    expect(r.deps.open).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES)
+    expect(r.deps.verifyProof).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES - 1)
+    const writes = r.persisted.length
+    await r.doc(scanner(1), proposeFrom(scanner(1)))
+    await r.invite(scanner(1))
+    expect(r.deps.open).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES)
+    expect(r.deps.verifyProof).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES - 1)
+    expect(r.ceremony.onProposal).not.toHaveBeenCalled()
+    expect(r.deps.sendAccept).toHaveBeenCalledTimes(1)
+    expect(r.persisted).toHaveLength(writes) // past the budget, nothing is written either
+  })
+
+  test('the work budget is in the stored record: a restarted inviter on a spent budget opens nothing', async () => {
+    const spent = rig({ record: { handled: SHARED_CONNECT_INVITE_MAX_FRAMES } })
+    await spent.inviter.start()
+    await spent.invite(scanner(1))
+    expect(spent.deps.open).not.toHaveBeenCalled()
+    // Control: one frame under the budget is opened.
+    const under = rig({ record: { handled: SHARED_CONNECT_INVITE_MAX_FRAMES - 1 } })
+    await under.inviter.start()
+    await under.invite(scanner(1))
+    expect(under.deps.open).toHaveBeenCalledTimes(1)
+  })
+
+  test('a whole exchange with every frame re-sent once is far inside the budget', () => {
+    // XRFI, propose, receipt and the scanner's issue, each sent twice: 8 frames of 64.
+    expect(SHARED_CONNECT_INVITE_MAX_FRAMES).toBeGreaterThanOrEqual(8 * 4)
+  })
+
+  test('a frame whose count cannot be written is not opened', async () => {
+    let fail = false
+    const r = rig({
+      deps: {
+        persist: jest.fn(async () => {
+          if (fail) throw new Error('store busy')
+        }),
+      },
+    })
+    await r.inviter.start()
+    fail = true
+    await r.invite(scanner(1))
+    expect(r.deps.open).not.toHaveBeenCalled()
+    expect(r.inviter.snapshot().handled ?? 0).toBe(0)
   })
 
   test('a count that cannot be written is not answered, and not counted', async () => {
@@ -522,7 +600,14 @@ describe('XRFI answered with XRFA', () => {
     r.events.length = 0
     await r.invite(scanner(1))
     await r.doc(scanner(1), proposeFrom(scanner(1)))
-    expect(r.events).toEqual(['persist:waiting:1:-', `xrfa:${scanner(1)}`, 'persist:proposed:1:accepted', 'onProposal'])
+    expect(r.events).toEqual([
+      'persist:waiting:0:-', // the invite's frame, counted before it is opened
+      'persist:waiting:1:-', // the scanner, counted before it is answered
+      `xrfa:${scanner(1)}`,
+      'persist:waiting:1:-', // the propose's frame, counted before it is opened
+      'persist:proposed:1:accepted', // the acceptance, written before the ceremony hears of it
+      'onProposal',
+    ])
   })
 })
 
@@ -601,6 +686,26 @@ describe('teardown', () => {
     r.runTimers(EXP * 1000)
     await r.flush()
     expect(r.inviter.state).toBe('expired')
+  })
+
+  test('a code that ends while a frame is being opened writes nothing more for it: one final write', async () => {
+    let release!: (f: InboundFrame) => void
+    const r = rig({
+      deps: {
+        open: jest.fn(() => new Promise<InboundFrame>((resolve) => (release = resolve))),
+      },
+    })
+    await r.inviter.start()
+    const handling = r.inviter.admit(new Uint8Array([1]))
+    await r.flush()
+    await r.inviter.cancel()
+    const writesAtEnd = r.persisted.length
+    release({ kind: 'invite', sender: scanner(1), digest: new Uint8Array(32).fill(5), revision: 'v1' })
+    await handling
+    expect(r.persisted).toHaveLength(writesAtEnd)
+    expect(r.persisted[writesAtEnd - 1].state).toBe('cancelled')
+    expect(r.inviter.snapshot().invited).toEqual([])
+    expect(r.deps.sendAccept).not.toHaveBeenCalled()
   })
 
   test('a frame being handled when the code ends sends nothing after the end', async () => {

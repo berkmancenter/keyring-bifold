@@ -16,10 +16,14 @@
  * evaluated, after the same work (open, proof check), whatever the outcome: a failing code is not answered faster or
  * differently from a valid but spent one, because neither is answered at all.
  *
- * The bound (§2.8's spam guard, decided 2026-11-07): relationship invites are answered for
- * at most {@link SHARED_CONNECT_INVITE_MAX_INVITES} distinct scanners and one propose is accepted. Both live in the
- * persisted record, so they hold for as long as the code does. A scanner re-sending uses no slot: its invite is
- * answered again, and the same propose (same sender, same id) is the same acceptance.
+ * The bounds (§2.8's spam guard, decided 2026-11-07), all in the persisted record:
+ *  - relationships: invites are answered for at most {@link SHARED_CONNECT_INVITE_MAX_INVITES} distinct scanners;
+ *  - acceptances: one propose is accepted. A scanner re-sending uses no slot: its invite is answered again, and the
+ *    same propose (same sender, same id) is the same acceptance;
+ *  - work: at most {@link SHARED_CONNECT_INVITE_MAX_FRAMES} frames are opened at all, whoever sends them. Each is
+ *    counted and written before it is opened; past the budget every frame is dropped unopened. Without this, a
+ *    re-sent invite or a stream of proposes (whose proofs are checked before the rule is read, for equal work) had
+ *    no ceiling.
  *
  * Teardown ({@link SharedConnectInviter.end}) is idempotent: expiry, cancel and completion all converge on it, the
  * first to arrive names the ending, and afterwards nothing survives: no timer, no listener, no relay session, and a
@@ -46,6 +50,7 @@ import { getKeyed, listKeyed, putKeyed } from './keyedRecords'
 import { isChallengeShaped } from './sharedConnectCeremony'
 import {
   SHARED_CONNECT_EXP_GRACE_MS,
+  SHARED_CONNECT_INVITE_MAX_FRAMES,
   SHARED_CONNECT_INVITE_MAX_INVITES,
   SHARED_CONNECT_INVITE_TTL_SECONDS,
   SHARED_CONNECT_INVITER_MEDIATOR_DID,
@@ -104,8 +109,10 @@ export interface InviteRecord {
   exp: number
   state: SharedConnectInviteState
   failure?: SharedConnectInviteFailure
-  /** The scanners whose relationship invite this code answered: the bound. */
+  /** The scanners whose relationship invite this code answered: the bound on relationships. */
   invited: string[]
+  /** Frames opened for this code, counted before each is opened: the bound on work. Absent on older records: 0. */
+  handled?: number
   /** The one accepted propose. Set once, never cleared. */
   accepted?: { theirVid: string; proposeId: string; revision?: tsp.TspRevision }
   createdAt: string
@@ -374,7 +381,19 @@ export class SharedConnectInviter {
       await this.cancel()
       return
     }
+    // The work budget: counted and written before the frame is opened, so neither a restart nor a write that fails
+    // lets a frame be opened uncounted. Past it, dropped unopened, like every other drop.
+    const r = this.record
+    const handled = r.handled ?? 0
+    if (handled >= SHARED_CONNECT_INVITE_MAX_FRAMES) return this.drop('frame (over the budget)')
+    r.handled = handled + 1
+    if (!(await this.writeOrDrop())) {
+      r.handled = handled
+      return
+    }
     const frame = await this.deps.open(bytes)
+    // The code may have ended while the frame was opened (expiry, cancel, the switch): nothing more is written or sent.
+    if (this.ended) return
     if (frame.kind === 'invite') return this.onInvite(frame)
     if (frame.kind === 'document') return this.onDocument(frame)
     // `none`: nothing for this code (an accept, a cancel, an unreadable frame). Dropped.
@@ -455,7 +474,7 @@ export class SharedConnectInviter {
   }
 
   /** Every refusal ends here: a log line with a reason class, and nothing sent. */
-  private drop(what: 'invite' | 'propose' | 'document' | 'frame (switched off)'): void {
+  private drop(what: 'invite' | 'propose' | 'document' | 'frame (switched off)' | 'frame (over the budget)'): void {
     this.log(`dropped a ${what}`)
   }
 
