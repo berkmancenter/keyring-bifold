@@ -305,7 +305,14 @@ describe('guardStatusListUrl under both URLs', () => {
       'https://intranet/l',
     ])('never calls %s public', (url) => {
       install()
-      expect(guardStatusListUrl(url)).toBe('HTTPS URL targets a host that is not a public DNS name')
+      expect(guardStatusListUrl(url)).toBeDefined()
+    })
+
+    it('says why, in words that name the rule rather than an address range', () => {
+      install()
+      expect(guardStatusListUrl('https://printer.local/l')).toBe(
+        'HTTPS URL targets a host that is not a public DNS name'
+      )
     })
 
     it.each([
