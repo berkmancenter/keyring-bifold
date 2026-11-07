@@ -25,7 +25,7 @@ import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore
 import { getKeyed, putKeyed } from './keyedRecords'
 import { PCS_VETTER_ERROR, VTC_VETTER_TASK, type PublishedConfig, type VetterStanding } from './pcsVetterTasks'
 import { HIDDEN_VETTING_EXT, type VtiCriterion } from './joinManifest'
-import { parametersToSend, pcsErrorCode } from './pcsVtaPayloads'
+import { parametersToSend, pcsRefusalCode } from './pcsVtaPayloads'
 import { vtaAgent } from './vtaAgent'
 import { VtiRefusal, vtiAgent } from './vtiAgent'
 
@@ -325,11 +325,7 @@ async function engineOf(client: VtaClient, contextId: string, community: string)
   try {
     return await client.showPcsVetter({ contextId, community })
   } catch (e) {
-    const raw = (e as { code?: unknown })?.code
-    const code =
-      (typeof raw === 'string' ? raw : undefined) ??
-      pcsErrorCode((e as { document?: unknown })?.document ?? e) ??
-      undefined
+    const code = pcsRefusalCode(e)
     if (code === PCS_VETTER_ERROR.vetterNotFound || code === 'notFound' || code?.endsWith(':notFound')) return undefined
     throw e
   }

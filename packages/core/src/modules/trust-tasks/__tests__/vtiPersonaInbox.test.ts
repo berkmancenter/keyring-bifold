@@ -81,6 +81,7 @@ jest.mock('../module/vtiVetting', () => ({
   VtiApplicant: jest.fn().mockImplementation(() => ({ receiveStatement: mockReceiveStatement })),
   isVettingRequest: () => false,
   closeExpiredParkedRequests: async () => undefined,
+  closeEndedHiddenApplications: async () => undefined,
 }))
 const mockReceiveNotice = jest.fn(async (): Promise<string> => 'ignored')
 jest.mock('../module/vtiCommunityNotices', () => ({

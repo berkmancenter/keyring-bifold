@@ -2282,7 +2282,7 @@
       "proof": "Détails : la signature de la déclaration n'a pas pu être vérifiée.",
       "noCard": "Détails : la déclaration est arrivée avant que ce téléphone envoie votre carte pendant cette session.",
       "legacyShape": "Détails : la déclaration est dans un ancien format que ce téléphone n'accepte plus. Demandez à votre vérificateur de mettre à jour son application et de vous vérifier à nouveau.",
-      "namedForPrivate": "Ce garant a envoyé une attestation qui le nomme, mais cette communauté procède à la vérification en privé, donc elle ne peut pas compter. Demandez-lui de rouvrir votre demande et de se porter garant en privé."
+      "namedForPrivate": "Ce vérificateur a envoyé une attestation qui le nomme, mais cette communauté procède à la vérification en privé, donc elle ne peut pas compter. Demandez-lui de rouvrir votre demande et de se porter garant en privé."
     },
     "CardRefused": "La carte du demandeur est arrivée, mais ce téléphone n'a pas pu l'accepter. La session est toujours ouverte ; il peut la renvoyer.",
     "CardRefusedReason": {
@@ -2380,10 +2380,13 @@
     "SubmissionDeferred": "La communauté demande davantage : {{needs}}. Votre demande reste ouverte — rassemblez ce qui manque et renvoyez-la, ou retirez-la.",
     "SubmissionPending": "Vous avez postulé — la communauté doit maintenant décider. Vous pouvez encore retirer votre candidature.",
     "SubmissionWithdrawn": "Vous avez retiré votre demande. Vous pouvez postuler à nouveau.",
+    "SubmissionWithdrawnPrivate": "Vous avez retiré votre demande. Pour postuler à nouveau, vous devrez redemander à un vérificateur.",
     "SubmissionDecided": "La communauté a statué sur votre demande ({{effect}}).",
     "SendAgain": "Renvoyer mes attestations",
     "Withdraw": "Retirer ma demande",
     "WithdrawNothingOpen": "Aucune demande ouverte à retirer — vous pouvez postuler.",
+    "WithdrawPrivateExplains": "Pour postuler à nouveau, vous devrez redemander à un vérificateur.",
+    "WithdrawStay": "Conserver ma demande",
     "ApplyRefused": "La communauté ne vous a pas admis.",
     "ApplyRefusedNeeds": "La communauté ne vous a pas admis. Elle demande : {{needs}}.",
     "AlreadyApplied": "Vous aviez déjà postulé à cette communauté — voici où en est cette candidature.",
