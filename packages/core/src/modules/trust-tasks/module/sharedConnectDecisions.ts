@@ -65,3 +65,25 @@ export const SHARED_CONNECT_FLOW_OWNER: 'core' | 'demo-profile' = 'core'
 export const SHARED_CONNECT_ANSWER_WAIT_MS = 2 * 60 * 1000
 export const SHARED_CONNECT_SEND_ATTEMPTS = 2
 export const SHARED_CONNECT_EXP_GRACE_MS = 5 * 60 * 1000
+
+/**
+ * Keyring as the inviter (plan WP9), decided by Alberto on 2026-11-07.
+ *
+ * The relay a code this phone shows names, by DID: the ic3 mediator, where the live interop runs worked
+ * (mediator.ic3.dev). The scanner mints its own encounter DID on this same relay, which avoids the cross-operator
+ * TSP failure (plan §3.3).
+ */
+export const SHARED_CONNECT_INVITER_MEDIATOR_DID =
+  'did:webvh:QmVeszezSFYBaALnaTpwAasz7C29Hgah7U6EeQWyazBUq5:dids.ic3.dev:ic3-mediator'
+
+/**
+ * How long a code lives, in seconds: ten minutes, the most a shown code may (plan §2.1). The screen may ask for less.
+ */
+export const SHARED_CONNECT_INVITE_TTL_SECONDS = 600
+
+/**
+ * The work one code may cost (§2.8's spam bound): relationship invites answered from at most this many distinct
+ * scanners, and one accepted propose. A scanner re-sending (a dropped socket, a re-scan) uses no new slot: its
+ * invite is answered again and the same propose is the same acceptance.
+ */
+export const SHARED_CONNECT_INVITE_MAX_INVITES = 8
