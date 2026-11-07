@@ -118,7 +118,10 @@ const renderedText = (tree: ReturnType<typeof render>) => {
   return out
 }
 
-const lastAlert = () => (Alert.alert as jest.Mock).mock.calls.at(-1) as [string, string, any[] | undefined]
+const lastAlert = () => {
+  const calls = (Alert.alert as jest.Mock).mock.calls
+  return calls[calls.length - 1] as [string, string, any[] | undefined]
+}
 const buttonTexts = (buttons?: any[]) => (buttons ?? []).map((b) => b.text)
 
 // Choose the three files and a password, then tap Import: the confirmation alert is the last one.
