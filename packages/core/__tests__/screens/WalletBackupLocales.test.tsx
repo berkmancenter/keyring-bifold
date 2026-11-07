@@ -6,8 +6,9 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
 import i18next from 'i18next'
 import React from 'react'
-import { Alert, Share } from 'react-native'
+import { Alert, Platform, Share } from 'react-native'
 import { pick } from 'react-native-document-picker'
+import RNFS from 'react-native-fs'
 
 import { translationResources } from '../../src/localization'
 import ExportWallet from '../../src/screens/ExportWallet'
@@ -123,6 +124,17 @@ const lastAlert = () => {
   return calls[calls.length - 1] as [string, string, any[] | undefined]
 }
 const buttonTexts = (buttons?: any[]) => (buttons ?? []).map((b) => b.text)
+
+// Type a matching password on Export and tap Export: the alert it ends on is the last one.
+const exportWithPassword = async () => {
+  const tree = render(<ExportWallet navigation={{}} />)
+  fireEvent.changeText(tree.getByTestId(testIdWithKey('ExportPassword')), 'pass phrase')
+  fireEvent.changeText(tree.getByTestId(testIdWithKey('ExportPasswordConfirm')), 'pass phrase')
+  await act(async () => {
+    fireEvent.press(tree.getByTestId(testIdWithKey('ExportButton')))
+  })
+  await waitFor(() => expect(Alert.alert).toHaveBeenCalled())
+}
 
 // Choose the three files and a password, then tap Import: the confirmation alert is the last one.
 const upToConfirm = async () => {
@@ -269,20 +281,37 @@ describe.each(['en', 'fr', 'pt-BR'])('the backup screens in %s', (lng) => {
     expect(lastAlert().slice(0, 2)).toEqual([s('ImportWalletPickErrorTitle'), s('ImportWalletPickError')])
   })
 
-  test("Export's alert buttons and its Downloads message are in this language", async () => {
+  test("Export's share alert button is in this language", async () => {
     jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction })
-    const tree = render(<ExportWallet navigation={{}} />)
-    fireEvent.changeText(tree.getByTestId(testIdWithKey('ExportPassword')), 'pass phrase')
-    fireEvent.changeText(tree.getByTestId(testIdWithKey('ExportPasswordConfirm')), 'pass phrase')
-    await act(async () => {
-      fireEvent.press(tree.getByTestId(testIdWithKey('ExportButton')))
-    })
-    await waitFor(() => expect(Alert.alert).toHaveBeenCalled())
+    await exportWithPassword()
     expect(buttonTexts(lastAlert()[2])).toEqual([s('WalletBackupOK')])
+  })
 
-    // The Android path's message (this suite runs as iOS): the count lands, with no placeholder left.
-    const downloads = tr('Settings.ExportWalletSavedToDownloads', { fileCount: 3 })
-    expect(downloads).toContain('3')
-    expect(downloads).not.toContain('{{')
+  test('with no agent, Export says so in this language', async () => {
+    mockAgent = undefined
+    await exportWithPassword()
+    expect(lastAlert().slice(0, 2)).toEqual([tr('Error.Problem'), s('WalletBackupAgentUnavailable')])
+  })
+
+  test('with the agent still starting, Export says so in this language', async () => {
+    mockAgent.isInitialized = false
+    await exportWithPassword()
+    expect(lastAlert().slice(0, 2)).toEqual([tr('Error.Problem'), s('WalletBackupAgentInitializing')])
+  })
+
+  test('on Android, the Downloads message counts the files in this language', async () => {
+    const os = jest.replaceProperty(Platform, 'OS', 'android')
+    try {
+      ;(RNFS.exists as jest.Mock).mockResolvedValue(true)
+      await exportWithPassword()
+      const [title, message, buttons] = lastAlert()
+      expect(title).toBe(tr('Global.Success'))
+      expect(message).toBe(tr('Settings.ExportWalletSavedToDownloads', { fileCount: 3 }))
+      expect(message).not.toContain('{{')
+      expect(buttonTexts(buttons)).toEqual([s('WalletBackupOK')])
+    } finally {
+      os.restore()
+      ;(RNFS.exists as jest.Mock).mockImplementation(async () => false)
+    }
   })
 })
