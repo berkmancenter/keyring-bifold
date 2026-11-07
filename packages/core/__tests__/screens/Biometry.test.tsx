@@ -2,10 +2,11 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native'
 import React from 'react'
 import { AuthContext } from '../../src/contexts/auth'
 import Biometry from '../../src/screens/Biometry'
+import { readFaceIdNotAllowed } from '../../src/components/inputs/BiometryControl'
 import { testIdWithKey } from '../../src/utils/testable'
 import authContext from '../contexts/auth'
 import { BasicAppContext } from '../helpers/app'
-import { Linking } from 'react-native'
+import { Linking, Platform } from 'react-native'
 import { testDefaultState } from '../contexts/store'
 import { StoreProvider } from '../../src/contexts/store'
 import { RESULTS, check, request } from 'react-native-permissions'
@@ -314,5 +315,73 @@ describe('Biometry Screen', () => {
     })
 
     expect(authContext.commitWalletToKeychain).toHaveBeenCalledTimes(1)
+  })
+})
+
+// IN-550: a phone with Face ID whose Keyring permission is off read as "biometrics not set up on this device", which
+// sent people to the wrong setting. react-native-permissions reads BLOCKED exactly then (Face ID present, the app not
+// allowed); a phone with none reads UNAVAILABLE.
+describe('Biometry Screen, when biometrics read as unavailable', () => {
+  const open = () =>
+    render(
+      <BasicAppContext>
+        <AuthContext.Provider value={authContext}>
+          <Biometry />
+        </AuthContext.Provider>
+      </BasicAppContext>
+    )
+
+  beforeEach(() => {
+    authContext.isBiometricsActive = jest.fn().mockResolvedValue(false)
+    mockedCheck.mockReset()
+    ;(Linking.openSettings as jest.Mock).mockClear()
+  })
+
+  test('says Keyring is not allowed to use Face ID, and opens Settings, when the phone has Face ID', async () => {
+    mockedCheck.mockResolvedValue(RESULTS.BLOCKED)
+    const tree = open()
+
+    expect(await tree.findByText('Biometry.NotAllowedText1')).toBeTruthy()
+    expect(tree.getByText('Biometry.NotAllowedText2')).toBeTruthy()
+    expect(tree.queryByText('Biometry.NotEnabledText1')).toBeNull()
+
+    fireEvent.press(tree.getByTestId(testIdWithKey('BiometryOpenSettings')))
+    expect(Linking.openSettings).toHaveBeenCalledTimes(1)
+  })
+
+  test('still says biometrics are not set up when the phone has none', async () => {
+    mockedCheck.mockResolvedValue(RESULTS.UNAVAILABLE)
+    const tree = open()
+
+    expect(await tree.findByText('Biometry.NotEnabledText1')).toBeTruthy()
+    await waitFor(() => expect(mockedCheck).toHaveBeenCalled())
+    expect(tree.queryByTestId(testIdWithKey('BiometryNotAllowed'))).toBeNull()
+  })
+
+  test('does not ask about the permission when biometrics are available', async () => {
+    authContext.isBiometricsActive = jest.fn().mockResolvedValue(true)
+    const tree = open()
+
+    expect(await tree.findByText('Biometry.EnabledText1')).toBeTruthy()
+    expect(mockedCheck).not.toHaveBeenCalled()
+    expect(tree.queryByTestId(testIdWithKey('BiometryNotAllowed'))).toBeNull()
+  })
+})
+
+describe('readFaceIdNotAllowed', () => {
+  test('is true on iOS only when the permission reads BLOCKED', async () => {
+    mockedCheck.mockResolvedValueOnce(RESULTS.BLOCKED)
+    expect(await readFaceIdNotAllowed()).toBe(true)
+    mockedCheck.mockResolvedValueOnce(RESULTS.UNAVAILABLE)
+    expect(await readFaceIdNotAllowed()).toBe(false)
+    mockedCheck.mockRejectedValueOnce(new Error('no handler'))
+    expect(await readFaceIdNotAllowed()).toBe(false)
+  })
+
+  test('is false on Android, which has no per-app biometrics permission', async () => {
+    const os = jest.replaceProperty(Platform, 'OS', 'android')
+    mockedCheck.mockResolvedValue(RESULTS.BLOCKED)
+    expect(await readFaceIdNotAllowed()).toBe(false)
+    os.restore()
   })
 })
