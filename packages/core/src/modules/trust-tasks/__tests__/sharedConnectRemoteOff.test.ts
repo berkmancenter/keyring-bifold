@@ -5,8 +5,10 @@
  */
 import {
   isSharedConnectEnabled,
+  isSharedConnectInviteEnabled,
   isSharedConnectLabelEnabled,
   setSharedConnectEnabled,
+  setSharedConnectInviteEnabled,
   setSharedConnectLabelEnabled,
 } from '../module/sharedConnectFlag'
 import { SHARED_CONNECT_REMOTE_OFF } from '../module/sharedConnectRemoteOff'
@@ -20,13 +22,15 @@ const live = () => sharedConnectLink({ exp: Math.floor(Date.now() / 1000) + 300 
 
 afterEach(() => {
   SHARED_CONNECT_REMOTE_OFF.connect = false
+  SHARED_CONNECT_REMOTE_OFF.invite = false
+  setSharedConnectInviteEnabled(false)
   setSharedConnectEnabled(false)
   setSharedConnectLabelEnabled(false)
 })
 
 describe('the remote off for connecting from a shared code', () => {
   it('is not set in this release', () => {
-    expect(SHARED_CONNECT_REMOTE_OFF.connect).toBe(false)
+    expect(SHARED_CONNECT_REMOTE_OFF).toEqual({ connect: false, invite: false })
   })
 
   it('beats a saved "on", and the label switch with it', () => {
@@ -87,5 +91,58 @@ describe('the remote off for connecting from a shared code', () => {
     const navigate = jest.fn()
     await routeKeyringAgentLink(live(), { dids: { resolve: jest.fn() } } as never, navigate)
     expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ screen: 'SharedConnect' }))
+  })
+})
+
+// Two independent remote offs (Alberto chose one for each switch). Each row of the pair passes with a wrong
+// implementation on its own; together they pin it: `invite` alone must leave the scanner working, and `connect`
+// must turn the inviter off through the inviter's own predicate.
+describe('the remote off for showing a code', () => {
+  const savedOn = () => {
+    setSharedConnectEnabled(true)
+    setSharedConnectInviteEnabled(true)
+  }
+
+  it('alone, turns "Show a code" off and leaves connecting from a shared code working', async () => {
+    savedOn()
+    SHARED_CONNECT_REMOTE_OFF.invite = true
+    expect(isSharedConnectInviteEnabled()).toBe(false)
+    expect(isSharedConnectEnabled()).toBe(true)
+    const navigate = jest.fn()
+    await routeKeyringAgentLink(live(), { dids: { resolve: jest.fn() } } as never, navigate)
+    expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ screen: 'SharedConnect' }))
+  })
+
+  it('the scanner’s remote off turns "Show a code" off too, read on the inviter’s own switch', () => {
+    savedOn()
+    SHARED_CONNECT_REMOTE_OFF.connect = true
+    expect(SHARED_CONNECT_REMOTE_OFF.invite).toBe(false)
+    expect(isSharedConnectInviteEnabled()).toBe(false)
+    expect(isSharedConnectEnabled()).toBe(false)
+  })
+
+  it('once lifted, a saved "on" is back, untouched', () => {
+    savedOn()
+    SHARED_CONNECT_REMOTE_OFF.invite = true
+    expect(isSharedConnectInviteEnabled()).toBe(false)
+    SHARED_CONNECT_REMOTE_OFF.invite = false
+    expect(isSharedConnectInviteEnabled()).toBe(true)
+  })
+
+  it('a saved "on" applied at a start-up under it is kept, and back once lifted', () => {
+    SHARED_CONNECT_REMOTE_OFF.invite = true
+    savedOn()
+    expect(isSharedConnectInviteEnabled()).toBe(false)
+    SHARED_CONNECT_REMOTE_OFF.invite = false
+    expect(isSharedConnectInviteEnabled()).toBe(true)
+  })
+
+  it('never turns "Show a code" on: a person’s own "off" stays off, set or lifted', () => {
+    setSharedConnectEnabled(true)
+    setSharedConnectInviteEnabled(false)
+    for (const remoteOff of [true, false]) {
+      SHARED_CONNECT_REMOTE_OFF.invite = remoteOff
+      expect(isSharedConnectInviteEnabled()).toBe(false)
+    }
   })
 })
