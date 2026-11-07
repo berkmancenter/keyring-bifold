@@ -115,8 +115,9 @@ export class SharedConnectInviterCeremony implements InviterCeremony {
       relationshipDid.startsWith('did:') &&
       (await this.deps.validate(propose.SPEC, document))
     if (!valid) {
+      // The acceptance is spent on it, so this code can never connect: say so (`rejected`), not a generic failure.
       this.log('accepted propose failed its schema or carried no relationship DID')
-      await this.inviter.fail('unknown')
+      await this.inviter.fail('rejected')
       return
     }
     this.proposeDoc = document
@@ -259,8 +260,9 @@ export class SharedConnectInviterCeremony implements InviterCeremony {
       await this.deps.retain(refusal, 'error').catch(() => undefined)
       await this.sendQuietly(refusal)
       this.log('issue refused')
+      // A refusal ends the exchange: it is said once and not repeated (nothing is read after `finish`).
       await this.finish('unknown')
-      return refusal
+      return null
     }
     await this.deps.storeVrc(vc as Record<string, unknown>)
     const receipt = await this.deps.sign(

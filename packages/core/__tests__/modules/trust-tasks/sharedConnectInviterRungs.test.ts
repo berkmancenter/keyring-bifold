@@ -241,6 +241,31 @@ describe('shared-connect inviter rungs: Keyring as shipped vs an independent spe
     })
   })
 
+  describe('decision 3: where Keyring binds its document proofs', () => {
+    test('every document Keyring sends is signed under its encounter VID, and a scanner accepting only that key completes', async () => {
+      const s = await show()
+      const scanner = await scanAndPropose(s, { strictVidProofs: true })
+      await answer(s, scanner, true)
+      expect(scanner.events).toEqual(['xrfa:adopted', 'response:accepted', 'issue:stored', 'receipt:matched'])
+      expect(scanner.received.length).toBeGreaterThanOrEqual(3) // #response, issue, receipt
+      for (const doc of scanner.received) {
+        const vm = String((doc.proof as { verificationMethod?: string }).verificationMethod)
+        expect(vm.startsWith(`${s.inviter.myVid}#`)).toBe(true)
+      }
+    })
+  })
+
+  describe('a proposal that cannot be used', () => {
+    test('an accepted propose with no relationship DID ends the code `rejected`: nobody is asked, nothing is sent', async () => {
+      const s = await show()
+      const scanner = await scanAndPropose(s, { proposeWithoutRelationshipDid: true })
+      await s.inviter.cancel() // the ending the ceremony started: wait for it
+      expect([s.inviter.state, s.inviter.failure]).toEqual(['failed', 'rejected'])
+      expect(vrcFlowStore.getProposalPrompt(s.key)).toBeUndefined()
+      expect(scanner.events).toEqual(['xrfa:adopted'])
+    })
+  })
+
   describe('§2.8: everything else is dropped without a word', () => {
     test('a propose with no relationship first: nothing comes back, nobody is asked', async () => {
       const s = await show()

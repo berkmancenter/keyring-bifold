@@ -60,6 +60,13 @@ export interface ScannerFaults {
   receiptWrongDigest?: boolean
   /** Every document after the propose (receipt, issue) is signed with a key that is not this VID's. */
   badProofLater?: boolean
+  /**
+   * Not a fault: accept a document's proof ONLY under the sending VID (decision 3 as Keyring took it), instead of
+   * either the VID or the inviter's relationship DID. With it, a Keyring that signed with its relationship DID fails.
+   */
+  strictVidProofs?: boolean
+  /** Send a propose whose payload has no relationship DID. */
+  proposeWithoutRelationshipDid?: boolean
 }
 
 export interface ReadLink {
@@ -92,6 +99,8 @@ export class Scanner {
   theirVrc?: Record<string, unknown>
   receiptMatched = false
   errors: string[] = []
+  /** Every document from the inviter that passed identity, thread, schema and proof, in arrival order. */
+  readonly received: Record<string, unknown>[] = []
   private heldIssue?: Record<string, unknown>
 
   constructor(
@@ -157,10 +166,13 @@ export class Scanner {
       recipient: this.inviter,
       issuedAt: new Date().toISOString(),
       ceremony: { enactment: this.faults.wrongEnactment ? b64u(random(16)) : this.link.id, step: 'propose' },
-      payload: { relationshipDid: this.relDid, witnessed: false },
+      payload: this.faults.proposeWithoutRelationshipDid
+        ? { witnessed: false }
+        : { relationshipDid: this.relDid, witnessed: false },
     })
     const problems = schemaProblems(doc)
-    if (problems.length) throw new Error(`our own propose fails the registry schema: ${problems.join('; ')}`)
+    if (problems.length && !this.faults.proposeWithoutRelationshipDid)
+      throw new Error(`our own propose fails the registry schema: ${problems.join('; ')}`)
     this.proposeFrameBytes = await this.packFor(doc)
     return this.proposeFrameBytes
   }
@@ -232,9 +244,11 @@ export class Scanner {
       if (problems.length) return drop(`schema:${problems.join(';')}`)
     }
     // A proof on every step (#1034), under the issuer VID (or the inviter's relationship DID, once known).
-    if (!verifyJcs(doc, sender) && !(this.theirRelationshipDid && verifyJcs(doc, this.theirRelationshipDid))) {
-      return drop('proof')
-    }
+    const underVid = verifyJcs(doc, sender)
+    const underRel =
+      !this.faults.strictVidProofs && !!this.theirRelationshipDid && verifyJcs(doc, this.theirRelationshipDid)
+    if (!underVid && !underRel) return drop('proof')
+    this.received.push(doc)
     if (isError) {
       const code = String((doc.payload as { code?: string }).code ?? '')
       this.errors.push(code)
