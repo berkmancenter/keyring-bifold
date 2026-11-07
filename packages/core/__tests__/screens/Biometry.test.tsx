@@ -1,4 +1,4 @@
-import { render, fireEvent, waitFor } from '@testing-library/react-native'
+import { act, render, fireEvent, waitFor } from '@testing-library/react-native'
 import React from 'react'
 import { AuthContext } from '../../src/contexts/auth'
 import Biometry from '../../src/screens/Biometry'
@@ -151,6 +151,9 @@ describe('Biometry Screen', () => {
     })
     const updatedToggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
     expect(updatedToggleButton.props.accessibilityState.checked).toBe(false)
+    // Turning Face ID off must never need Face ID.
+    expect(mockedProbe).not.toHaveBeenCalled()
+    expect(mockedCheck).not.toHaveBeenCalled()
   })
 
   test('can toggle on when biometrics available and permission is GRANTED', async () => {
@@ -320,6 +323,39 @@ describe('Biometry Screen', () => {
     expect(queryByText('Biometry.AllowBiometricsTitle')).toBeNull()
     expect(toggleButton.props.accessibilityState.checked).toBe(false)
     expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
+  test('while Face ID is being confirmed the switch is disabled, and a second tap does not start a second probe', async () => {
+    let finishProbe: (opened: boolean) => void = () => undefined
+    mockedProbe.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishProbe = resolve
+        })
+    )
+
+    const { findByTestId, findByText } = renderWithStore()
+
+    await findByText('Biometry.EnabledText1')
+    const toggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
+
+    fireEvent(toggleButton, 'press')
+    await waitFor(async () => {
+      const pending = await findByTestId(testIdWithKey('ToggleBiometrics'))
+      expect(pending.props.accessibilityState.disabled).toBe(true)
+    })
+    fireEvent(await findByTestId(testIdWithKey('ToggleBiometrics')), 'press')
+    expect(mockedProbe).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      finishProbe(true)
+    })
+    await waitFor(async () => {
+      const done = await findByTestId(testIdWithKey('ToggleBiometrics'))
+      expect(done.props.accessibilityState.checked).toBe(true)
+      expect(done.props.accessibilityState.disabled).toBe(false)
+    })
+    expect(mockedProbe).toHaveBeenCalledTimes(1)
   })
 
   // Control: without a Face ID biometry type, DENIED still goes through request().

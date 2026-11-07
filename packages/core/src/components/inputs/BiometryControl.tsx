@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Linking, Platform, ScrollView, StyleSheet, View, AppState, DeviceEventEmitter } from 'react-native'
 import { check, PERMISSIONS, PermissionStatus, request, RESULTS } from 'react-native-permissions'
@@ -36,6 +36,11 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
   const [biometryAvailable, setBiometryAvailable] = useState(false)
   const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | { title: string; description: string }>(null)
   const [notConfirmedPopup, setNotConfirmedPopup] = useState(false)
+  // While Face ID is being confirmed the switch is dimmed and ignores taps: it
+  // shows the check is running, and a second tap would start a second probe on
+  // the same keychain item and fail the first.
+  const [confirming, setConfirming] = useState(false)
+  const confirmingRef = useRef(false)
   const { ColorPalette, Assets, Spacing } = useTheme()
 
   const styles = StyleSheet.create({
@@ -186,10 +191,21 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
         // Turn on only if Face ID really opened it, so the wallet key is never
         // stored behind Face ID that cannot open it.
         if (Platform.OS === 'ios' && supported_type === BIOMETRY_TYPE.FACE_ID) {
-          const opened = await confirmBiometricKeychainAccess(
-            t('Biometry.UnlockPromptTitle'),
-            t('Biometry.UnlockPromptDescription')
-          )
+          if (confirmingRef.current) {
+            break
+          }
+          confirmingRef.current = true
+          setConfirming(true)
+          let opened = false
+          try {
+            opened = await confirmBiometricKeychainAccess(
+              t('Biometry.UnlockPromptTitle'),
+              t('Biometry.UnlockPromptDescription')
+            )
+          } finally {
+            confirmingRef.current = false
+            setConfirming(false)
+          }
           if (opened) {
             onBiometryToggle(newValue)
           } else if ((await check(BIOMETRY_PERMISSION)) === RESULTS.BLOCKED) {
@@ -257,7 +273,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
               isEnabled={biometryEnabled}
               isAvailable={true}
               toggleAction={toggleSwitch}
-              disabled={false}
+              disabled={confirming}
               enabledIcon="check"
               disabledIcon="close"
             />
