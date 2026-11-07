@@ -22,7 +22,11 @@ export type SharedConnectInviteState =
   /** `cancel()` ran, or the screen unmounted. */
   | 'cancelled'
 
-export type SharedConnectInviteFailure = 'declined' | 'relay' | 'send' | 'unknown'
+/**
+ * Why a code failed. `exhausted`: the code took as many frames as one code may (§2.8's work budget) and stopped
+ * answering; a new code is what the person needs.
+ */
+export type SharedConnectInviteFailure = 'declined' | 'relay' | 'send' | 'exhausted' | 'unknown'
 
 export interface SharedConnectInvite {
   /** The full trigger link; set from `waiting`. */

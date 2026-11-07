@@ -39,7 +39,7 @@ export function setSharedConnectLabelEnabled(enabled: boolean): void {
 }
 
 export function isSharedConnectLabelEnabled(): boolean {
-  return sharedConnectEnabled && sharedConnectLabelEnabled
+  return isSharedConnectEnabled() && sharedConnectLabelEnabled
 }
 
 /**
@@ -73,7 +73,10 @@ function inviteTurnedOff() {
   }
 }
 
-/** Whether "Show a code" is offered. Needs the shared-connect flow itself on too. */
+/**
+ * Whether "Show a code" is offered. Needs the shared-connect flow itself on too, read through
+ * {@link isSharedConnectEnabled} so that whatever turns the flow off (its switch, or a remote off) turns this off.
+ */
 export function isSharedConnectInviteEnabled(): boolean {
-  return sharedConnectEnabled && sharedConnectInviteEnabled
+  return isSharedConnectEnabled() && sharedConnectInviteEnabled
 }
