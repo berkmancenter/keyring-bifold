@@ -32,10 +32,23 @@ import { useDeveloperMode } from '../hooks/developer-mode'
 import { useLockout } from '../hooks/lockout'
 import usePreventScreenCapture from '../hooks/screen-capture'
 import { BifoldError } from '../types/error'
+import { WalletSecret } from '../types/security'
 import { testIdWithKey } from '../utils/testable'
 
 interface PINEnterProps {
   setAuthenticated: (status: boolean) => void
+}
+
+/**
+ * What kind of failure a biometric unlock was, without its words: they come from the keychain and the platform.
+ * The wording is what the platforms and react-native-keychain give; anything else is `other`, and shows the message.
+ */
+export const biometricFailureKind = (error: unknown): 'cancelled' | 'no key' | 'locked out' | 'other' => {
+  const message = String((error as Error)?.message ?? error)
+  if (/cancel/i.test(message)) return 'cancelled'
+  if (/missing key/i.test(message)) return 'no key'
+  if (/lockout|too many/i.test(message)) return 'locked out'
+  return 'other'
 }
 
 const PINEnter: React.FC<PINEnterProps> = ({ setAuthenticated }) => {
@@ -93,21 +106,33 @@ const PINEnter: React.FC<PINEnterProps> = ({ setAuthenticated }) => {
   }, [])
 
   const loadWalletCredentials = useCallback(async () => {
-    const walletSecret = await getWalletSecret()
-    if (walletSecret) {
-      // remove lockout notification
-      dispatch({
-        type: DispatchAction.LOCKOUT_UPDATED,
-        payload: [{ displayNotification: false }],
-      })
-      // reset login attempts if login is successful
-      dispatch({
-        type: DispatchAction.ATTEMPT_UPDATED,
-        payload: [{ loginAttempts: 0 }],
-      })
-      setAuthenticated(true)
+    // A failure here used to go nowhere: from the button, nothing was logged (IN-491, IN-452).
+    let walletSecret: WalletSecret | undefined
+    // Before the wait: a keychain read that never returns throws nothing, so only this shows it started.
+    logger.info('[PIN] biometric unlock: asking the keychain')
+    try {
+      walletSecret = await getWalletSecret()
+    } catch (error) {
+      // Only the kind: this path's messages are the keychain's, and don't belong in a report.
+      logger.warn(`[PIN] biometric unlock did not complete: ${biometricFailureKind(error)}`)
+      return
     }
-  }, [getWalletSecret, dispatch, setAuthenticated])
+    if (!walletSecret) {
+      logger.warn('[PIN] biometric unlock did not complete: no secret')
+      return
+    }
+    // remove lockout notification
+    dispatch({
+      type: DispatchAction.LOCKOUT_UPDATED,
+      payload: [{ displayNotification: false }],
+    })
+    // reset login attempts if login is successful
+    dispatch({
+      type: DispatchAction.ATTEMPT_UPDATED,
+      payload: [{ loginAttempts: 0 }],
+    })
+    setAuthenticated(true)
+  }, [getWalletSecret, dispatch, setAuthenticated, logger])
 
   useEffect(() => {
     // Only check biometrics if user has it enabled
@@ -131,7 +156,7 @@ const PINEnter: React.FC<PINEnterProps> = ({ setAuthenticated }) => {
 
         await loadWalletCredentials()
       } catch (error) {
-        logger.error('error checking biometrics / loading credentials', error as Error)
+        logger.error(`[PIN] could not check biometrics: ${biometricFailureKind(error)}`)
       }
     }
 
@@ -172,7 +197,10 @@ const PINEnter: React.FC<PINEnterProps> = ({ setAuthenticated }) => {
     async (PIN: string) => {
       try {
         setContinueEnabled(false)
+        // Before the wait, as above: this has hung with nothing logged (IN-491).
+        logger.info('[PIN] checking the PIN')
         const result = await checkWalletPIN(PIN)
+        logger.info('[PIN] PIN checked')
         if (store.loginAttempt.servedPenalty) {
           // once the user starts entering their PIN, unMark them as having served their
           // lockout penalty
@@ -253,6 +281,7 @@ const PINEnter: React.FC<PINEnterProps> = ({ setAuthenticated }) => {
       attemptLockout,
       inlineMessages,
       thresholdRules.increment,
+      logger,
     ]
   )
 
