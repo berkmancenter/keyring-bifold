@@ -25,7 +25,7 @@ export const SharedConnectIds = {
  */
 export const SharedConnectInviteIds = {
   screen: 'SharedConnectInvite',
-  qr: 'SharedConnectInviteQr',
+  qr: 'SharedConnectInviteQR',
   link: 'SharedConnectInviteLink',
   countdown: 'SharedConnectInviteCountdown',
   expiresAt: 'SharedConnectInviteExpiresAt',
@@ -40,5 +40,6 @@ export const SharedConnectInviteIds = {
   connected: 'SharedConnectInviteConnected',
   expired: 'SharedConnectInviteExpired',
   failed: 'SharedConnectInviteFailed',
+  cancelled: 'SharedConnectInviteCancelled',
   done: 'SharedConnectInviteDone',
 } as const
