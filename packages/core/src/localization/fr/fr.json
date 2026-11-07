@@ -2905,6 +2905,7 @@
     "Cancel": "Annuler",
     "Stop": "Arrêter",
     "Done": "Terminé",
+    "Off": "L'affichage d'un code est désactivé dans les paramètres développeur.",
     "ConsentTitle": "Demande de relation",
     "ConsentBody": "Quelqu'un qui a scanné votre code souhaite se connecter. Accepter échange des attestations de relation dans les deux sens.",
     "ConsentWho": "Qui est-ce ?",

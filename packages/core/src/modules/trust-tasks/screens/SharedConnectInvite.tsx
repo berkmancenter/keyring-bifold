@@ -47,6 +47,7 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { invitationShareContent } from '../../../utils/invitationLink'
 import { testIdWithKey } from '../../../utils/testable'
+import { isSharedConnectInviteEnabled } from '../module/sharedConnectFlag'
 import type { SharedConnectInvite, SharedConnectInviteFailure } from '../module/sharedConnectInviteTypes'
 
 import { expiryText } from './SharedConnect'
@@ -302,12 +303,45 @@ export const SharedConnectInviteView: React.FC<{
 /**
  * The screen in the Connect stack. `useInvite` is the hook that makes and runs
  * the code; it is passed in so the screen holds no protocol of its own.
+ *
+ * With the inviter switch off the hook is never mounted, so nothing starts (no
+ * code, no relay session), however the route was reached: the QR sheet hides
+ * its button, and this covers any other way in. The core checks the switch too.
  */
-export const makeSharedConnectInviteScreen = (useInvite: () => SharedConnectInvite): React.FC => {
+export const makeSharedConnectInviteScreen = (
+  useInvite: () => SharedConnectInvite,
+  enabled: () => boolean = isSharedConnectInviteEnabled
+): React.FC => {
+  const Running: React.FC<{ onClose: () => void }> = ({ onClose }) => (
+    <SharedConnectInviteView invite={useInvite()} onClose={onClose} />
+  )
   const SharedConnectInviteScreen: React.FC = () => {
-    const invite = useInvite()
     const navigation = useNavigation()
-    return <SharedConnectInviteView invite={invite} onClose={() => navigation.goBack()} />
+    const [on] = useState(enabled)
+    const close = () => navigation.goBack()
+    return on ? <Running onClose={close} /> : <SharedConnectInviteOff onClose={close} />
   }
   return SharedConnectInviteScreen
+}
+
+/** What the route shows with the switch off: that it is off, and Done. Nothing is made or sent. */
+const SharedConnectInviteOff: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  const { t } = useTranslation()
+  const { ColorPalette } = useTheme()
+  return (
+    <SafeAreaView
+      style={{ flex: 1, padding: 20, gap: 16, backgroundColor: ColorPalette.brand.primaryBackground }}
+      edges={['bottom', 'left', 'right']}
+      testID={id(Ids.off)}
+    >
+      <ThemedText>{t('SharedConnectInvite.Off')}</ThemedText>
+      <Button
+        title={t('SharedConnectInvite.Done')}
+        accessibilityLabel={t('SharedConnectInvite.Done')}
+        testID={id(Ids.done)}
+        buttonType={ButtonType.Primary}
+        onPress={onClose}
+      />
+    </SafeAreaView>
+  )
 }

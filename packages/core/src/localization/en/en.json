@@ -2969,6 +2969,7 @@
     "Cancel": "Cancel",
     "Stop": "Stop",
     "Done": "Done",
+    "Off": "Showing a code is turned off in Developer settings.",
     "ConsentTitle": "Relationship request",
     "ConsentBody": "Someone who scanned your code wants to connect. Accepting exchanges relationship credentials in both directions.",
     "ConsentWho": "Who is this?",

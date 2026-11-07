@@ -1355,6 +1355,7 @@
     "SharedConnectInviteFailed": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
     "SharedConnectInviteLink": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
     "SharedConnectInviteMinting": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
+    "SharedConnectInviteOff": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
     "SharedConnectInviteProposed": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
     "SharedConnectInviteQR": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],
     "SharedConnectInviteRenew": ["src/modules/trust-tasks/screens/SharedConnect.ids.ts"],

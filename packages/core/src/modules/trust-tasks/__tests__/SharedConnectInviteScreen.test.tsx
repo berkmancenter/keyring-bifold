@@ -13,7 +13,12 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import type { SharedConnectInvite } from '../module/sharedConnectInviteTypes'
 import { SharedConnectInviteIds as Ids } from '../screens/SharedConnect.ids'
-import { SharedConnectInviteView, clockOf, secondsLeft } from '../screens/SharedConnectInvite'
+import {
+  SharedConnectInviteView,
+  clockOf,
+  makeSharedConnectInviteScreen,
+  secondsLeft,
+} from '../screens/SharedConnectInvite'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 // The words with what was put into them, so the time left and the expiry can be read.
@@ -225,5 +230,33 @@ describe('how it ends', () => {
     expect(tree.getByTestId(id(Ids.failed))).toBeTruthy()
     expect(tree.getByText(words)).toBeTruthy()
     expect(tree.getByTestId(id(Ids.renew))).toBeTruthy()
+  })
+})
+
+// Alberto, 11-06: with the switch off, the button is gone AND nothing starts, however the screen was reached.
+describe('the route, by the inviter switch', () => {
+  const route = (enabled: boolean) => {
+    const useInvite = jest.fn(() => invite())
+    const Screen = makeSharedConnectInviteScreen(useInvite, () => enabled)
+    const tree = render(
+      <BasicAppContext>
+        <Screen />
+      </BasicAppContext>
+    )
+    return { tree, useInvite }
+  }
+
+  it('off: the hook is never mounted, so no code is made, and the screen says it is off', () => {
+    const { tree, useInvite } = route(false)
+    expect(useInvite).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(Ids.off))).toBeTruthy()
+    expect(tree.queryByTestId(id(Ids.qr))).toBeNull()
+  })
+
+  it('on: the hook runs and the code is shown', () => {
+    const { tree, useInvite } = route(true)
+    expect(useInvite).toHaveBeenCalled()
+    expect(tree.getByTestId(id(Ids.qr))).toBeTruthy()
+    expect(tree.queryByTestId(id(Ids.off))).toBeNull()
   })
 })
