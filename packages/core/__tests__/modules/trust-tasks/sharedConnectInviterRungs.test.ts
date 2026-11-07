@@ -318,6 +318,35 @@ describe('shared-connect inviter rungs: Keyring as shipped vs an independent spe
   })
 
   describe('the scanner side refused', () => {
+    test('a scanner VRC whose own proof fails is refused, and Keyring stores nothing', async () => {
+      const before = (await agent.w3cCredentials.getAll()).length
+      const s = await show()
+      const scanner = await scanAndPropose(s, { vcBadProof: true })
+      await answer(s, scanner, true)
+      expect(scanner.events).toEqual(['xrfa:adopted', 'response:accepted', 'issue:stored', 'error:notAccepted'])
+      expect(await agent.w3cCredentials.getAll()).toHaveLength(before)
+      expect(s.inviter.state).toBe('failed')
+    })
+
+    test('a receipt naming something Keyring never sent does not complete the exchange', async () => {
+      const s = await show()
+      const scanner = await scanAndPropose(s, { receiptWrongDigest: true })
+      await answer(s, scanner, true)
+      // The scanner's own VRC was good, so Keyring stored it and receipted it; its receipt for ours was not ours.
+      expect(scanner.events).toEqual(['xrfa:adopted', 'response:accepted', 'issue:stored', 'receipt:matched'])
+      expect(s.inviter.state).toBe('connecting')
+    })
+
+    test("a scanner's receipt and issue signed by a key that is not its VID are dropped: no receipt back, nothing stored", async () => {
+      const before = (await agent.w3cCredentials.getAll()).length
+      const s = await show()
+      const scanner = await scanAndPropose(s, { badProofLater: true })
+      await answer(s, scanner, true)
+      expect(scanner.events).toEqual(['xrfa:adopted', 'response:accepted', 'issue:stored'])
+      expect(await agent.w3cCredentials.getAll()).toHaveLength(before)
+      expect(s.inviter.state).toBe('connecting')
+    })
+
     test('a scanner VRC about someone else is refused in words the scanner can read, and Keyring stores nothing', async () => {
       const before = (await agent.w3cCredentials.getAll()).length
       const s = await show()

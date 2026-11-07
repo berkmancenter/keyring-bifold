@@ -54,6 +54,12 @@ export interface ScannerFaults {
   badProof?: boolean
   /** Our VRC names someone else as its subject. */
   vcSubjectWrong?: boolean
+  /** Our VRC's own proof is made with a key that is not our relationship DID's. */
+  vcBadProof?: boolean
+  /** Our receipt carries the digest of something the inviter never sent. */
+  receiptWrongDigest?: boolean
+  /** Every document after the propose (receipt, issue) is signed with a key that is not this VID's. */
+  badProofLater?: boolean
 }
 
 export interface ReadLink {
@@ -107,6 +113,10 @@ export class Scanner {
       receiverEncryptionKey: resolvePeer(this.inviter).agreement[0].key,
     })
     return packed.bytes
+  }
+
+  private signLater(doc: Record<string, unknown>) {
+    return this.faults.badProofLater ? signJcs(doc, random(32), `${this.vid}#key-2`) : this.signAsVid(doc)
   }
 
   private signAsVid(doc: Record<string, unknown>) {
@@ -257,7 +267,7 @@ export class Scanner {
       if (vc.validUntil !== undefined) return drop('vc-validUntil')
       this.theirVrc = vc
       this.events.push('issue:stored')
-      const receipt = this.signAsVid({
+      const receipt = this.signLater({
         id: b64u(random(16)),
         type: `${ISSUE}#response`,
         threadId: this.proposeId,
@@ -265,7 +275,7 @@ export class Scanner {
         recipient: this.inviter,
         issuedAt: new Date().toISOString(),
         ceremony: { enactment: this.link?.id, step: 'issue-inviter' },
-        payload: { vrcDigestMultibase: digestOf(vc) },
+        payload: { vrcDigestMultibase: this.faults.receiptWrongDigest ? digestOf({ nothing: true }) : digestOf(vc) },
       })
       return [await this.packFor(receipt), await this.packFor(this.ownIssue())]
     }
@@ -287,11 +297,11 @@ export class Scanner {
         validFrom: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
         credentialSubject: { id: this.faults.vcSubjectWrong ? this.relDid : this.theirRelationshipDid },
       },
-      this.relSk,
+      this.faults.vcBadProof ? random(32) : this.relSk,
       `${this.relDid}#${this.relDid.slice('did:peer:0'.length)}`
     )
     this.myVrcDigest = digestOf(vc)
-    return this.signAsVid({
+    return this.signLater({
       id: b64u(random(16)),
       type: ISSUE,
       threadId: this.proposeId,
