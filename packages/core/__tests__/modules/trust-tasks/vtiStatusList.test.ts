@@ -264,3 +264,68 @@ describe('checkStatusEntry', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * The guard under the phone's URL as well as jest's. React Native's own `URL` (0.81, Libraries/Blob/URL.js:126-197)
+ * reads `hostname` as a bare capture of the text: an address written another way (`0x7f.1`, `2130706433`,
+ * `0177.0.0.1`, `127.1`) stays as written, where Node's WHATWG URL turns it into dotted decimal, and `[::1]` reads as
+ * `[`. A guard that recognised only dotted-decimal and bracketed IPv6 spellings let each of those through on a phone.
+ * Whether a phone's own networking then reaches the address is not what these rows ask: they ask that the guard
+ * never calls such a host public, under either class.
+ */
+describe('guardStatusListUrl under both URLs', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { URL: DeviceURL } = jest.requireActual('react-native/Libraries/Blob/URL')
+  // core's tsconfig has no DOM lib, so `URL` is not typed as a property of globalThis.
+  const scope = globalThis as unknown as { URL: typeof URL }
+  const NodeURL = scope.URL
+  afterEach(() => {
+    scope.URL = NodeURL
+  })
+  const runtimes: [string, () => void][] = [
+    ['Node', () => undefined],
+    [
+      'React Native',
+      () => {
+        scope.URL = DeviceURL as typeof URL
+      },
+    ],
+  ]
+
+  describe.each(runtimes)('under %s', (_, install) => {
+    it.each([
+      'https://0x7f.1/l',
+      'https://2130706433/l',
+      'https://0177.0.0.1/l',
+      'https://127.1/l',
+      'https://[::1]/l',
+      'https://[fe80::1]/l',
+      'https://localhost/l',
+      'https://printer.local/l',
+      'https://intranet/l',
+    ])('never calls %s public', (url) => {
+      install()
+      expect(guardStatusListUrl(url)).toBe('HTTPS URL targets a host that is not a public DNS name')
+    })
+
+    it.each([
+      'https://community.example/v1/status-lists/revocation',
+      'https://COMMUNITY.example/l',
+      'HTTPS://community.example/l',
+      'https://community.example:8443/l',
+    ])('lets %s through', (url) => {
+      install()
+      expect(guardStatusListUrl(url)).toBeUndefined()
+    })
+
+    it('keeps the development opt-in as it was: plain HTTP to a local address only', () => {
+      install()
+      expect(guardStatusListUrl('http://10.0.2.2:8080/l', true)).toBeUndefined()
+      expect(guardStatusListUrl('https://10.0.2.2:8443/l', true)).toBeUndefined()
+      expect(guardStatusListUrl('http://10.0.2.2:8080/l')).toBe('URL is not HTTPS')
+      expect(guardStatusListUrl('http://community.example/l', true)).toBe(
+        'plain HTTP is only allowed to a local address'
+      )
+    })
+  })
+})
