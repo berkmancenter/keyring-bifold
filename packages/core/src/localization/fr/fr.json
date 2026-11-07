@@ -2900,6 +2900,7 @@
     "FailedRelay": "Keyring n'a pas pu joindre son service de messagerie. Vérifiez votre connexion, puis affichez un nouveau code.",
     "FailedSend": "Keyring n'a pas pu lui envoyer de message. Affichez un nouveau code pour réessayer.",
     "FailedExhausted": "Ce code ne fonctionne plus. Créez-en un nouveau.",
+    "FailedRejected": "Ce code n'a pas pu servir pour cette connexion. Créez un nouveau code et réessayez.",
     "FailedUnknown": "Cette personne ne répond plus. Elle a peut-être fermé son application.",
     "Cancelled": "Vous avez arrêté de partager ce code.",
     "NewCode": "Afficher un nouveau code",

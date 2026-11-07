@@ -2813,6 +2813,7 @@
     "FailedRelay": "O Keyring não conseguiu acessar o serviço de mensagens. Verifique sua conexão e mostre um novo código.",
     "FailedSend": "O Keyring não conseguiu enviar para essa pessoa. Mostre um novo código para tentar de novo.",
     "FailedExhausted": "Este código parou de funcionar. Crie um novo.",
+    "FailedRejected": "Este código não pôde ser usado para essa conexão. Crie um novo código e tente de novo.",
     "FailedUnknown": "A pessoa parou de responder. Talvez tenha fechado o app.",
     "Cancelled": "Você parou de compartilhar este código.",
     "NewCode": "Mostrar um novo código",

@@ -2964,6 +2964,7 @@
     "FailedRelay": "Keyring could not reach its message service. Check your connection, then show a new code.",
     "FailedSend": "Keyring could not send to them. Show a new code to try again.",
     "FailedExhausted": "This code stopped working. Make a new one.",
+    "FailedRejected": "This code couldn't be used for that connection. Make a new code and try again.",
     "FailedUnknown": "They stopped answering. They may have closed their app.",
     "Cancelled": "You stopped sharing this code.",
     "NewCode": "Show a new code",
