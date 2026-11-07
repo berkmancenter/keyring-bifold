@@ -153,9 +153,45 @@ describe('useSharedConnectInvite', () => {
     const late = new FakeInviter('B')
     const lateDeps = deps([new Promise<CreateInviteResult>((resolve) => (release = resolve))])
     const two = renderHook(() => useSharedConnectInvite({ deps: lateDeps }))
+    await waitFor(() => expect(lateDeps.create).toHaveBeenCalled()) // the code is being made
     two.unmount()
     await act(async () => release(showing(late)))
     await waitFor(() => expect(late.cancels).toBe(1))
+  })
+
+  test('a screen that leaves before a code is even started makes none', async () => {
+    const d = deps([showing(new FakeInviter('A'))])
+    const { unmount } = renderHook(() => useSharedConnectInvite({ deps: d }))
+    unmount()
+    await act(async () => new Promise((resolve) => setImmediate(resolve)))
+    expect(d.create).not.toHaveBeenCalled()
+  })
+
+  test('renew makes the new code only after the old one has finished ending', async () => {
+    const events: string[] = []
+    const first = new FakeInviter('A')
+    let finishTeardown!: () => void
+    first.cancel = async () => {
+      events.push('teardown:start')
+      await new Promise<void>((resolve) => (finishTeardown = resolve))
+      first.emit('cancelled')
+      events.push('teardown:done')
+    }
+    const second = new FakeInviter('B')
+    const d = deps([showing(first), showing(second)])
+    const create = d.create.getMockImplementation() as typeof d.create
+    d.create.mockImplementation(async (...args: Parameters<typeof d.create>) => {
+      events.push('create')
+      return create(...args)
+    })
+    const { result } = renderHook(() => useSharedConnectInvite({ deps: d }))
+    await waitFor(() => expect(result.current.link).toContain('_id=A'))
+    act(() => result.current.renew())
+    await act(async () => new Promise((resolve) => setImmediate(resolve)))
+    expect(events).toEqual(['create', 'teardown:start']) // the old code is ending; no new one is being made yet
+    await act(async () => finishTeardown())
+    await waitFor(() => expect(result.current.link).toContain('_id=B'))
+    expect(events).toEqual(['create', 'teardown:start', 'teardown:done', 'create'])
   })
 
   test('renew ends the old code and shows a fresh one', async () => {

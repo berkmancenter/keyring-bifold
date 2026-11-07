@@ -10,7 +10,9 @@
  *  - `renew()` ends the code and makes a fresh one (a new DID and `_id`).
  *
  * A code left `waiting` by an app that was closed while it showed is swept to `cancelled` on mount, so the store holds
- * no record that claims a code nobody listens on.
+ * no record that claims a code nobody listens on. The sweep never touches a code live in this process: the one the
+ * person is looking at is live until its screen unmounts, and unmounting ends it, so a remount shows a new code
+ * rather than finding the old one swept from under it.
  *
  * With the inviter switched off, nothing is made and the state is `cancelled`; the screen's own wrapper does not mount
  * this hook while the switch is off, so this is a backstop.
@@ -62,6 +64,8 @@ export function useSharedConnectInvite(
   const inviterRef = useRef<SharedConnectInviter | undefined>(undefined)
   /** Set when the current generation is cancelled or replaced: a code still being made is ended as soon as it shows. */
   const abandonedRef = useRef(false)
+  /** The previous code's teardown: a renewed code is made only after the old one has ended (relay closed, written). */
+  const teardownRef = useRef<Promise<void> | undefined>(undefined)
 
   useEffect(() => {
     if (!agent) return
@@ -71,6 +75,9 @@ export function useSharedConnectInvite(
     setView({ state: 'minting' })
     let unsubscribe: (() => void) | undefined
     const run = async () => {
+      // The old code first: on renew (or a remount) it is ended before a new one is made, never alongside it.
+      await teardownRef.current?.catch(() => undefined)
+      if (!current) return
       // Sweeping is housekeeping: a failure here must not stop a code from showing.
       await depsRef.current.sweep(agent).catch(() => 0)
       const made = await depsRef.current.create(agent, { ttlSeconds })
@@ -112,7 +119,7 @@ export function useSharedConnectInvite(
       unsubscribe?.()
       const inviter = inviterRef.current
       inviterRef.current = undefined
-      void inviter?.cancel()
+      teardownRef.current = inviter?.cancel()
     }
   }, [agent, generation, ttlSeconds])
 
