@@ -9,8 +9,13 @@
  * A module-level pair of switches, like `setTspCarriageEnabled` in
  * `ceremony.ts`: the app sets them from its developer settings at start-up.
  *
+ * A release can turn the flow off for everyone with SHARED_CONNECT_REMOTE_OFF
+ * (sharedConnectRemoteOff.ts), whatever was saved; it never turns it on.
+ *
  * @module trust-tasks/module/sharedConnectFlag
  */
+
+import { SHARED_CONNECT_REMOTE_OFF } from './sharedConnectRemoteOff'
 
 let sharedConnectEnabled = false
 let sharedConnectLabelEnabled = false
@@ -20,9 +25,9 @@ export function setSharedConnectEnabled(enabled: boolean): void {
   sharedConnectEnabled = enabled
 }
 
-/** Whether a shared-connect link is read and carried to its confirm screen. */
+/** Whether a shared-connect link is read and carried to its confirm screen: switched on, and not turned off remotely. */
 export function isSharedConnectEnabled(): boolean {
-  return sharedConnectEnabled
+  return sharedConnectEnabled && !SHARED_CONNECT_REMOTE_OFF.connect
 }
 
 /**
@@ -36,5 +41,5 @@ export function setSharedConnectLabelEnabled(enabled: boolean): void {
 }
 
 export function isSharedConnectLabelEnabled(): boolean {
-  return sharedConnectEnabled && sharedConnectLabelEnabled
+  return isSharedConnectEnabled() && sharedConnectLabelEnabled
 }
