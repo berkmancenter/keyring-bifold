@@ -14,6 +14,7 @@
 
 let sharedConnectEnabled = false
 let sharedConnectLabelEnabled = false
+let sharedConnectInviteEnabled = false
 
 /** Turn the shared-connect flow on or off (developer setting). */
 export function setSharedConnectEnabled(enabled: boolean): void {
@@ -37,4 +38,17 @@ export function setSharedConnectLabelEnabled(enabled: boolean): void {
 
 export function isSharedConnectLabelEnabled(): boolean {
   return sharedConnectEnabled && sharedConnectLabelEnabled
+}
+
+/**
+ * Keyring as the inviter: showing a code another wallet scans (plan WP9). Its own switch, off by default, turned
+ * on in an update once the live run against an independent scanner passes (Alberto, 2026-11-07).
+ */
+export function setSharedConnectInviteEnabled(enabled: boolean): void {
+  sharedConnectInviteEnabled = enabled
+}
+
+/** Whether "Show a code" is offered. Needs the shared-connect flow itself on too. */
+export function isSharedConnectInviteEnabled(): boolean {
+  return sharedConnectEnabled && sharedConnectInviteEnabled
 }
