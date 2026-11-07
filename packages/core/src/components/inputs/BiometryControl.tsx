@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Linking, Platform, Pressable, ScrollView, StyleSheet, View, AppState, DeviceEventEmitter } from 'react-native'
 import { check, PERMISSIONS, PermissionStatus, request, RESULTS } from 'react-native-permissions'
@@ -13,6 +13,7 @@ import { useTheme } from '../../contexts/theme'
 import { testIdWithKey } from '../../utils/testable'
 import { BifoldError } from '../../types/error'
 import { EventTypes } from '../../constants'
+import { confirmBiometricKeychainAccess } from '../../services/keychain'
 
 const BIOMETRY_PERMISSION = PERMISSIONS.IOS.FACE_ID
 
@@ -52,6 +53,12 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
   // this the screen said biometrics were not set up on the device, which sent people to the wrong setting (IN-550).
   const [faceIdNotAllowed, setFaceIdNotAllowed] = useState(false)
   const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | { title: string; description: string }>(null)
+  const [notConfirmedPopup, setNotConfirmedPopup] = useState(false)
+  // While Face ID is being confirmed the switch is dimmed and ignores taps: it
+  // shows the check is running, and a second tap would start a second probe on
+  // the same keychain item and fail the first.
+  const [confirming, setConfirming] = useState(false)
+  const confirmingRef = useRef(false)
   const { ColorPalette, Assets, Spacing } = useTheme()
 
   const styles = StyleSheet.create({
@@ -199,8 +206,46 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
         })
         break
       case RESULTS.DENIED:
-        // Has not been requested
-        await onRequestSystemBiometrics(newValue)
+        // On iOS, react-native-permissions reports DENIED for Face ID when the
+        // OS says Face ID is usable but the library's own "already requested"
+        // flag is missing. A reinstall wipes that flag while iOS keeps the
+        // app's Face ID grant, and then request() never resolves: it waits for
+        // the app to become active again after an alert that iOS never shows.
+        // So instead of request(), read back a throwaway Face ID-protected
+        // keychain item: iOS asks for permission if it never has, then scans.
+        // Turn on only if Face ID really opened it, so the wallet key is never
+        // stored behind Face ID that cannot open it.
+        if (Platform.OS === 'ios' && supported_type === BIOMETRY_TYPE.FACE_ID) {
+          if (confirmingRef.current) {
+            break
+          }
+          confirmingRef.current = true
+          setConfirming(true)
+          let opened = false
+          try {
+            opened = await confirmBiometricKeychainAccess(
+              t('Biometry.UnlockPromptTitle'),
+              t('Biometry.UnlockPromptDescription')
+            )
+          } finally {
+            confirmingRef.current = false
+            setConfirming(false)
+          }
+          if (opened) {
+            onBiometryToggle(newValue)
+          } else if ((await check(BIOMETRY_PERMISSION)) === RESULTS.BLOCKED) {
+            // Declined just now: say where to allow it, as for an earlier decline.
+            setSettingsPopupConfig({
+              title: t('Biometry.AllowBiometricsTitle'),
+              description: t('Biometry.AllowBiometricsDesc'),
+            })
+          } else {
+            // Cancelled, a failed scan, locked out, or no answer: still off, say so.
+            setNotConfirmedPopup(true)
+          }
+        } else {
+          await onRequestSystemBiometrics(newValue)
+        }
         break
       default:
         break
@@ -209,6 +254,13 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={['left', 'right', 'bottom']}>
+      {notConfirmedPopup && (
+        <DismissiblePopupModal
+          title={t('Biometry.NotConfirmedTitle')}
+          description={t('Biometry.NotConfirmedDesc')}
+          onDismissPressed={() => setNotConfirmedPopup(false)}
+        />
+      )}
       {settingsPopupConfig && (
         <DismissiblePopupModal
           title={settingsPopupConfig.title}
@@ -259,7 +311,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
               isEnabled={biometryEnabled}
               isAvailable={true}
               toggleAction={toggleSwitch}
-              disabled={false}
+              disabled={confirming}
               enabledIcon="check"
               disabledIcon="close"
             />
