@@ -37,6 +37,9 @@ export enum KeychainServices {
   Salt = 'secret.wallet.salt',
   Key = 'secret.wallet.key',
   LoginAttempt = 'wallet.loginAttempt',
+  // A throwaway item, written and read back once to confirm Face ID can open
+  // the keychain before Biometric Unlock is turned on. Never holds a secret.
+  BiometryProbe = 'wallet.biometryProbe',
 }
 
 export enum EventTypes {

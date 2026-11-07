@@ -10,10 +10,17 @@ import { testDefaultState } from '../contexts/store'
 import { StoreProvider } from '../../src/contexts/store'
 import { RESULTS, check, request } from 'react-native-permissions'
 import { getSupportedBiometryType } from 'react-native-keychain'
+import { confirmBiometricKeychainAccess } from '../../src/services/keychain'
 
 jest.mock('react-native-permissions', () => require('react-native-permissions/mock'))
 const mockedCheck = check as jest.MockedFunction<typeof check>
 const mockedRequest = request as jest.MockedFunction<typeof request>
+
+jest.mock('../../src/services/keychain', () => ({
+  ...jest.requireActual('../../src/services/keychain'),
+  confirmBiometricKeychainAccess: jest.fn(),
+}))
+const mockedProbe = confirmBiometricKeychainAccess as jest.MockedFunction<typeof confirmBiometricKeychainAccess>
 
 jest.spyOn(Linking, 'openSettings').mockImplementation(() => Promise.resolve())
 jest.mock('react-native-keychain', () => ({
@@ -58,6 +65,8 @@ describe('Biometry Screen', () => {
     mockedRequest.mockClear()
     mockedCheck.mockResolvedValue(RESULTS.DENIED) // DENIED essentially means available but user decision has not been made
     mockedRequest.mockResolvedValue(RESULTS.BLOCKED) // BLOCKED means user has actively rejected biometry use
+    mockedProbe.mockReset()
+    mockedProbe.mockResolvedValue(true)
   })
 
   test('renders correctly when biometry available', async () => {
@@ -256,7 +265,7 @@ describe('Biometry Screen', () => {
   // IN-551: after a reinstall, iOS keeps the app's Face ID grant but
   // react-native-permissions loses its "requested" flag, so check() says DENIED
   // and request() never resolves (it waits for an alert iOS never shows).
-  test('iOS Face ID with permission DENIED toggles on without calling request(), even when request() would never resolve', async () => {
+  test('iOS Face ID with permission DENIED toggles on once Face ID opens the probe item, without calling request(), even when request() would never resolve', async () => {
     mockedRequest.mockImplementation(() => new Promise(() => {}))
 
     const { findByTestId, findByText } = renderWithStore()
@@ -271,12 +280,17 @@ describe('Biometry Screen', () => {
       const updatedToggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
       expect(updatedToggleButton.props.accessibilityState.checked).toBe(true)
     })
+    expect(mockedProbe).toHaveBeenCalledTimes(1)
+    expect(mockedProbe).toHaveBeenCalledWith('Biometry.UnlockPromptTitle', 'Biometry.UnlockPromptDescription')
     expect(mockedCheck).toHaveBeenCalledTimes(1)
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
-  test('iOS Face ID with permission DENIED toggles on even when request() would answer BLOCKED (request() is not asked)', async () => {
-    const { findByTestId, findByText } = renderWithStore()
+  test('iOS Face ID with permission DENIED stays off and says where to allow it when the probe fails and Face ID now reads BLOCKED (declined just now)', async () => {
+    mockedProbe.mockResolvedValue(false)
+    mockedCheck.mockResolvedValueOnce(RESULTS.DENIED).mockResolvedValueOnce(RESULTS.BLOCKED)
+
+    const { findByTestId, findByText, queryByText } = renderWithStore()
 
     await findByText('Biometry.EnabledText1')
     const toggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
@@ -284,10 +298,27 @@ describe('Biometry Screen', () => {
     await waitFor(async () => {
       fireEvent(toggleButton, 'press')
     })
+    expect(await findByText('Biometry.AllowBiometricsTitle')).toBeTruthy()
+    expect(queryByText('Biometry.NotConfirmedTitle')).toBeNull()
+    expect(toggleButton.props.accessibilityState.checked).toBe(false)
+    expect(mockedRequest).not.toHaveBeenCalled()
+  })
+
+  test('iOS Face ID with permission DENIED stays off and says it was not turned on when the probe fails for another reason (cancel, failed scan, timeout)', async () => {
+    mockedProbe.mockResolvedValue(false)
+
+    const { findByTestId, findByText, queryByText } = renderWithStore()
+
+    await findByText('Biometry.EnabledText1')
+    const toggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
+
     await waitFor(async () => {
-      const updatedToggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
-      expect(updatedToggleButton.props.accessibilityState.checked).toBe(true)
+      fireEvent(toggleButton, 'press')
     })
+    expect(await findByText('Biometry.NotConfirmedTitle')).toBeTruthy()
+    expect(await findByText('Biometry.NotConfirmedDesc')).toBeTruthy()
+    expect(queryByText('Biometry.AllowBiometricsTitle')).toBeNull()
+    expect(toggleButton.props.accessibilityState.checked).toBe(false)
     expect(mockedRequest).not.toHaveBeenCalled()
   })
 
@@ -309,6 +340,7 @@ describe('Biometry Screen', () => {
       const updatedToggleButton = await findByTestId(testIdWithKey('ToggleBiometrics'))
       expect(updatedToggleButton.props.accessibilityState.checked).toBe(true)
     })
+    expect(mockedProbe).not.toHaveBeenCalled()
   })
 
   test('requests permission when permission is DENIED and the biometry type is not Face ID, and stays off when it becomes BLOCKED', async () => {
@@ -324,6 +356,7 @@ describe('Biometry Screen', () => {
     })
     expect(mockedRequest).toHaveBeenCalledTimes(1)
     expect(toggleButton.props.accessibilityState.checked).toBe(false)
+    expect(mockedProbe).not.toHaveBeenCalled()
   })
 
   test('can toggle on and correctly continue when biometrics is available and permission is GRANTED', async () => {
