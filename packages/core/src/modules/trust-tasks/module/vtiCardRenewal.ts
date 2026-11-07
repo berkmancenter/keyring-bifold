@@ -184,12 +184,19 @@ export async function renewMembershipCards(deps: RenewDeps): Promise<RenewOutcom
   if (!kept) return 'notDue'
   if (roleRefusal && roleRefusal !== 'missing')
     log(`[VTI] card renewal: the new role card was not kept (${roleRefusal}); the old one stays`)
-  log('[VTI] card renewal: new cards kept')
+  // The cards' dates only (no identities), so a live check can read before and after from the log.
+  const span = (card: Record<string, unknown> | undefined) => `${card?.validFrom ?? '?'}..${card?.validUntil ?? '?'}`
+  log(
+    `[VTI] card renewal: new cards kept (membership ${span(before.vmc)} -> ${span(vmc)}; role card ${
+      roleRefusal ? 'old one stays' : 'renewed'
+    })`
+  )
   DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
     communityDid,
     kinds: roleRefusal ? ['membership'] : ['membership', 'role'],
   })
-  await deps.acknowledge?.().catch(() => undefined)
+  const acknowledged = await deps.acknowledge?.().catch((e) => (e instanceof Error ? e.name : 'failed'))
+  log(`[VTI] card renewal: acknowledgement ${typeof acknowledged === 'string' ? acknowledged : 'not sent'}`)
   return 'renewed'
 }
 

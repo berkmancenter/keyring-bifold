@@ -112,10 +112,16 @@ describe('when a card is due', () => {
 
 describe('a lapsed card renewed', () => {
   it('keeps the new cards in place of the old, with Member since unchanged, then acknowledges and tells the vault', async () => {
-    const { deps, ask, checkCard, acknowledge, kept } = setup()
+    const log = jest.fn()
+    const { deps, ask, checkCard, acknowledge, kept } = setup({ log })
     const delivered = events(VTI_PERSONA_DELIVERIES_EVENT)
     await expect(renewMembershipCards(deps)).resolves.toBe('renewed')
     delivered.stop()
+    // What a live check reads before and after: the cards' dates and the acknowledgement's outcome, no identities.
+    expect(log.mock.calls.map(([line]) => line)).toEqual([
+      `[VTI] card renewal: new cards kept (membership ${membershipCard.validFrom}..${membershipCard.validUntil} -> ${renewedCard.validFrom}..${renewedCard.validUntil}; role card renewed)`,
+      '[VTI] card renewal: acknowledgement acknowledged',
+    ])
     expect(ask).toHaveBeenCalledTimes(1)
     expect(checkCard).toHaveBeenCalledWith(renewedCard, COMMUNITY)
     expect(checkCard).toHaveBeenCalledWith(renewedRole, COMMUNITY)
@@ -142,9 +148,13 @@ describe('a lapsed card renewed', () => {
     const checkCard = jest.fn(async (card: Record<string, unknown>) =>
       card.id === renewedRole.id ? 'proof' : undefined
     )
-    const { deps, kept } = setup({ checkCard: checkCard as never })
+    const log = jest.fn()
+    const { deps, kept } = setup({ checkCard: checkCard as never, log })
     await expect(renewMembershipCards(deps)).resolves.toBe('renewed')
     expect(kept()).toMatchObject({ vmc: renewedCard, roleVec: roleCard })
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/new cards kept \(membership .*; role card old one stays\)$/)
+    )
   })
 })
 
