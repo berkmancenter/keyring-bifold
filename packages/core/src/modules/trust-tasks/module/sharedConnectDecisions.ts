@@ -91,7 +91,15 @@ export const SHARED_CONNECT_INVITE_MAX_INVITES = 8
 /**
  * The work one code may cost, in frames (§2.8's spam guard, the half the scanner and acceptance bounds above do not
  * cover): every frame that reaches the code is counted, and written, before it is opened. Below this every propose
- * costs the same work, so a failing code still looks like a spent one; at it every frame is dropped unopened, which
- * is the same nothing every other drop shows. A whole exchange is under ten frames with its retries.
+ * costs the same work, so a failing code still looks like a spent one. The first frame past it is dropped unopened,
+ * which is the same nothing every other drop shows, and the code ends (`exhausted`) so the person is told to make a
+ * new one rather than watch a code that no longer answers.
+ *
+ * The number rests on the worst legitimate case, counting the frames that open to nothing too:
+ *   8 scanners × (XRFI + propose), each re-sent once                     32
+ *   the accepted scanner's receipt and issue, each re-sent once           4
+ *   every one of those delivered twice by the relay (VTI-24 duplicates)   ×2 → 72
+ *   frames that open to nothing (a cancel, an unreadable frame), say      8
+ * About 80; the budget leaves room above that and stays finite.
  */
-export const SHARED_CONNECT_INVITE_MAX_FRAMES = 64
+export const SHARED_CONNECT_INVITE_MAX_FRAMES = 128

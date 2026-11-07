@@ -21,7 +21,7 @@
  *  - acceptances: one propose is accepted. A scanner re-sending uses no slot: its invite is answered again, and the
  *    same propose (same sender, same id) is the same acceptance;
  *  - work: at most {@link SHARED_CONNECT_INVITE_MAX_FRAMES} frames are opened at all, whoever sends them. Each is
- *    counted and written before it is opened; past the budget every frame is dropped unopened. Without this, a
+ *    counted and written before it is opened; the first frame past the budget is dropped unopened and the code ends (`exhausted`). Without this, a
  *    re-sent invite or a stream of proposes (whose proofs are checked before the rule is read, for equal work) had
  *    no ceiling.
  *
@@ -385,7 +385,13 @@ export class SharedConnectInviter {
     // lets a frame be opened uncounted. Past it, dropped unopened, like every other drop.
     const r = this.record
     const handled = r.handled ?? 0
-    if (handled >= SHARED_CONNECT_INVITE_MAX_FRAMES) return this.drop('frame (over the budget)')
+    if (handled >= SHARED_CONNECT_INVITE_MAX_FRAMES) {
+      // Dropped unopened, like every other drop; and the code ends, so the screen can say "make a new code" instead
+      // of showing a code that will never answer again. A prober sees the same silence either way.
+      this.drop('frame (over the budget)')
+      await this.end('failed', 'exhausted')
+      return
+    }
     r.handled = handled + 1
     if (!(await this.writeOrDrop())) {
       r.handled = handled

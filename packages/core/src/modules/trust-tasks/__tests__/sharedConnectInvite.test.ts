@@ -473,7 +473,7 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     expect(again.ceremony.onProposalAgain).toHaveBeenCalledTimes(1)
   })
 
-  test(`the work budget: exactly ${SHARED_CONNECT_INVITE_MAX_FRAMES} frames are opened; the next is dropped unopened`, async () => {
+  test(`the work budget: exactly ${SHARED_CONNECT_INVITE_MAX_FRAMES} frames are opened; the next is dropped unopened and the code ends`, async () => {
     const r = rig()
     await r.inviter.start()
     // One related scanner sending proposes the rule drops: each costs a proof check, and no slot would stop it.
@@ -482,6 +482,7 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
       await r.doc(scanner(1), proposeFrom(scanner(1), { recipient: scanner(7) }))
     expect(r.deps.open).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES)
     expect(r.deps.verifyProof).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES - 1)
+    expect(r.inviter.state).toBe('waiting') // at the budget, still showing
     const writes = r.persisted.length
     await r.doc(scanner(1), proposeFrom(scanner(1)))
     await r.invite(scanner(1))
@@ -489,7 +490,16 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     expect(r.deps.verifyProof).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_FRAMES - 1)
     expect(r.ceremony.onProposal).not.toHaveBeenCalled()
     expect(r.deps.sendAccept).toHaveBeenCalledTimes(1)
-    expect(r.persisted).toHaveLength(writes) // past the budget, nothing is written either
+    // The first frame past it ends the code, so the screen can say "make a new code": one final write, the relay
+    // stopped, and nothing sent to anyone. The frame after that is dropped unopened by the end itself.
+    expect([r.inviter.state, r.inviter.failure]).toEqual(['failed', 'exhausted'])
+    expect(r.persisted).toHaveLength(writes + 1)
+    expect(r.persisted[writes]).toMatchObject({
+      state: 'failed',
+      failure: 'exhausted',
+      handled: SHARED_CONNECT_INVITE_MAX_FRAMES,
+    })
+    expect(r.deps.stopRelay).toHaveBeenCalledTimes(1)
   })
 
   test('the work budget is in the stored record: a restarted inviter on a spent budget opens nothing', async () => {
@@ -497,6 +507,7 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     await spent.inviter.start()
     await spent.invite(scanner(1))
     expect(spent.deps.open).not.toHaveBeenCalled()
+    expect(spent.inviter.failure).toBe('exhausted')
     // Control: one frame under the budget is opened.
     const under = rig({ record: { handled: SHARED_CONNECT_INVITE_MAX_FRAMES - 1 } })
     await under.inviter.start()
@@ -504,9 +515,14 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     expect(under.deps.open).toHaveBeenCalledTimes(1)
   })
 
-  test('a whole exchange with every frame re-sent once is far inside the budget', () => {
-    // XRFI, propose, receipt and the scanner's issue, each sent twice: 8 frames of 64.
-    expect(SHARED_CONNECT_INVITE_MAX_FRAMES).toBeGreaterThanOrEqual(8 * 4)
+  test('the budget sits above the worst legitimate case, frames that open to nothing included', () => {
+    // A static check on a constant: it documents the tally the number rests on (sharedConnectDecisions).
+    const scanners = SHARED_CONNECT_INVITE_MAX_INVITES * 2 * 2 // XRFI + propose each, each re-sent once
+    const ceremony = 2 * 2 // the accepted scanner's receipt and issue, each re-sent once
+    const duplicated = (scanners + ceremony) * 2 // the relay delivering every frame twice
+    const nothing = 8 // cancels, unreadable frames: counted before they are classified
+    expect(duplicated + nothing).toBe(80)
+    expect(SHARED_CONNECT_INVITE_MAX_FRAMES).toBeGreaterThan(duplicated + nothing)
   })
 
   test('a frame whose count cannot be written is not opened', async () => {
