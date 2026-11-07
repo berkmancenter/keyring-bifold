@@ -24,7 +24,12 @@ export interface BiometryControlProps {
   children?: React.ReactNode
 }
 
-const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBiometryToggle, recommend, children }) => {
+const BiometryControl: React.FC<BiometryControlProps> = ({
+  biometryEnabled,
+  onBiometryToggle,
+  recommend,
+  children,
+}) => {
   const { t } = useTranslation()
   const { isBiometricsActive } = useAuth()
   const [biometryAvailable, setBiometryAvailable] = useState(false)
@@ -53,7 +58,12 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
         setBiometryAvailable(res)
       })
       .catch((err) => {
-        const error = new BifoldError(t('Error.Title1050'), t('Error.Message1050'), (err as Error)?.message ?? err, 1050)
+        const error = new BifoldError(
+          t('Error.Title1050'),
+          t('Error.Message1050'),
+          (err as Error)?.message ?? err,
+          1050
+        )
         DeviceEventEmitter.emit(EventTypes.ERROR_ADDED, error)
       })
   }, [isBiometricsActive, t])
@@ -63,12 +73,17 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
       try {
         const active = await Keychain.getSupportedBiometryType()
         setBiometryAvailable(Boolean(active))
-      } catch(err) {
-        const error = new BifoldError(t('Error.Title1050'), t('Error.Message1050'), (err as Error)?.message ?? err, 1050)
+      } catch (err) {
+        const error = new BifoldError(
+          t('Error.Title1050'),
+          t('Error.Message1050'),
+          (err as Error)?.message ?? err,
+          1050
+        )
         DeviceEventEmitter.emit(EventTypes.ERROR_ADDED, error)
       }
     }
-    
+
     const appStateListener = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'active') {
         await checkBiometrics()
@@ -213,7 +228,10 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
           </View>
         </View>
         {recommend && biometryAvailable ? (
-          <ThemedText style={{ color: ColorPalette.grayscale.mediumGrey }} testID={testIdWithKey('BiometryRecommended')}>
+          <ThemedText
+            style={{ color: ColorPalette.grayscale.mediumGrey }}
+            testID={testIdWithKey('BiometryRecommended')}
+          >
             {t('Biometry.Recommended')}
           </ThemedText>
         ) : null}
