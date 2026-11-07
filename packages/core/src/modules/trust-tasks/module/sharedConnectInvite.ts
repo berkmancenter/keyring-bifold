@@ -400,7 +400,9 @@ export class SharedConnectInviter {
     }
     if (this.ended) return
     await this.deps.sendAccept(frame.sender, frame.digest, frame.revision).catch(() => undefined)
-    this.log(known ? 'invite answered again' : `invite answered (${r.invited.length} of ${SHARED_CONNECT_INVITE_MAX_INVITES})`)
+    this.log(
+      known ? 'invite answered again' : `invite answered (${r.invited.length} of ${SHARED_CONNECT_INVITE_MAX_INVITES})`
+    )
   }
 
   private async onDocument(frame: Extract<InboundFrame, { kind: 'document' }>): Promise<void> {
@@ -570,12 +572,20 @@ export type CreateInviteResult =
  */
 export async function createSharedConnectInvite(
   agent: Agent,
-  options: { ttlSeconds?: number; now?: () => number; deps?: Partial<CreateInviteDeps>; inviterDeps?: Partial<InviterDeps> } = {}
+  options: {
+    ttlSeconds?: number
+    now?: () => number
+    deps?: Partial<CreateInviteDeps>
+    inviterDeps?: Partial<InviterDeps>
+  } = {}
 ): Promise<CreateInviteResult> {
   if (!isSharedConnectInviteEnabled()) return { kind: 'off' }
   const deps = { ...defaultCreateDeps, ...options.deps }
   const now = options.now ?? (() => Date.now())
-  const ttl = Math.max(1, Math.min(Math.floor(options.ttlSeconds ?? SHARED_CONNECT_INVITE_TTL_SECONDS), SHARED_CONNECT_INVITE_TTL_SECONDS))
+  const ttl = Math.max(
+    1,
+    Math.min(Math.floor(options.ttlSeconds ?? SHARED_CONNECT_INVITE_TTL_SECONDS), SHARED_CONNECT_INVITE_TTL_SECONDS)
+  )
   let mediator: VtiMediatorEndpoints
   let myVid: string
   let identity: TspSessionIdentity

@@ -111,8 +111,10 @@ function rig(options: { record?: Partial<InviteRecord>; deps?: Partial<InviterDe
     frames.push(frame)
     return inviter.admit(new Uint8Array([1]))
   }
-  const invite = (sender: string) => admit({ kind: 'invite', sender, digest: new Uint8Array(32).fill(5), revision: 'v1' })
-  const doc = (sender: string, document: Record<string, unknown>) => admit({ kind: 'document', sender, document, revision: 'v1' })
+  const invite = (sender: string) =>
+    admit({ kind: 'invite', sender, digest: new Uint8Array(32).fill(5), revision: 'v1' })
+  const doc = (sender: string, document: Record<string, unknown>) =>
+    admit({ kind: 'document', sender, document, revision: 'v1' })
   const runTimers = (until: number) => {
     now = until
     for (const [id, t] of [...timers].sort((a, b) => a[1].at - b[1].at)) {
@@ -145,7 +147,7 @@ function expectSilent(r: ReturnType<typeof rig>, writesBefore: number) {
   expect(r.ceremony.onProposal).not.toHaveBeenCalled()
   expect(r.ceremony.onProposalAgain).not.toHaveBeenCalled()
   expect(r.ceremony.onDocument).not.toHaveBeenCalled()
-  expect(r.persisted.length).toBe(writesBefore)
+  expect(r.persisted).toHaveLength(writesBefore)
 }
 
 beforeEach(() => {
@@ -238,7 +240,10 @@ describe('the standing rule (§2.8)', () => {
     ['a sender with no relationship', { related: false }],
     ['an expired code', { nowSeconds: EXP + 1 }],
     ['a code already spent on another scanner', { accepted: { theirVid: scanner(2), proposeId: PROPOSE_ID } }],
-    ['a code spent on another propose of the same scanner', { accepted: { theirVid: scanner(1), proposeId: 'BBECAwQFBgcICQoLDA0ODw' } }],
+    [
+      'a code spent on another propose of the same scanner',
+      { accepted: { theirVid: scanner(1), proposeId: 'BBECAwQFBgcICQoLDA0ODw' } },
+    ],
   ])('drops %s', (_why, over) => {
     expect(proposeStanding({ ...base(), ...over } as StandingInput)).toBe('drop')
   })
@@ -274,16 +279,28 @@ describe('the choke point: every refusal is silent', () => {
 
   // Each case: a setup (which may form a relationship, and so send one XRFA), then the act under test. The mocks
   // are cleared between the two, so "nothing sent" is about the act alone.
-  type Case = [string, { setup?: (r: ReturnType<typeof rig>) => Promise<unknown>; act: (r: ReturnType<typeof rig>) => Promise<void> }]
+  type Case = [
+    string,
+    { setup?: (r: ReturnType<typeof rig>) => Promise<unknown>; act: (r: ReturnType<typeof rig>) => Promise<void> },
+  ]
   const related = (r: ReturnType<typeof rig>) => r.invite(scanner(1))
   test.each<Case>([
     ['a propose with no relationship first', { act: (r) => r.doc(scanner(1), proposeFrom(scanner(1))) }],
-    ['a propose whose proof fails', { setup: related, act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { badProof: true })) }],
+    [
+      'a propose whose proof fails',
+      { setup: related, act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { badProof: true })) },
+    ],
     [
       'a propose for another code',
-      { setup: related, act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { ceremony: { enactment: 'YOcGXOQTCHb5iz4T2JD2RQ' } })) },
+      {
+        setup: related,
+        act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { ceremony: { enactment: 'YOcGXOQTCHb5iz4T2JD2RQ' } })),
+      },
     ],
-    ['a propose to another recipient', { setup: related, act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { recipient: scanner(7) })) }],
+    [
+      'a propose to another recipient',
+      { setup: related, act: (r) => r.doc(scanner(1), proposeFrom(scanner(1), { recipient: scanner(7) })) },
+    ],
     [
       'a propose after _exp',
       {
@@ -348,7 +365,10 @@ describe('the choke point: every refusal is silent', () => {
     await r.doc(scanner(1), proposeFrom(scanner(1), { ceremony: { enactment: 'YOcGXOQTCHb5iz4T2JD2RQ' } })) // drop
     await r.doc(scanner(1), proposeFrom(scanner(1), { recipient: scanner(7) })) // drop
     await r.doc(scanner(1), proposeFrom(scanner(1))) // accept
-    await r.doc(scanner(1), proposeFrom(scanner(1), { id: 'BBECAwQFBgcICQoLDA0ODw', threadId: 'BBECAwQFBgcICQoLDA0ODw' })) // spent
+    await r.doc(
+      scanner(1),
+      proposeFrom(scanner(1), { id: 'BBECAwQFBgcICQoLDA0ODw', threadId: 'BBECAwQFBgcICQoLDA0ODw' })
+    ) // spent
     expect(r.deps.verifyProof).toHaveBeenCalledTimes(4)
   })
 
@@ -373,7 +393,7 @@ describe('the bound: 8 relationships, 1 connection, per code', () => {
     const writes = r.persisted.length
     await r.invite(scanner(SHARED_CONNECT_INVITE_MAX_INVITES + 1))
     expect(r.deps.sendAccept).toHaveBeenCalledTimes(SHARED_CONNECT_INVITE_MAX_INVITES)
-    expect(r.persisted.length).toBe(writes)
+    expect(r.persisted).toHaveLength(writes)
     expect(r.inviter.snapshot().invited).toHaveLength(SHARED_CONNECT_INVITE_MAX_INVITES)
   })
 
@@ -502,12 +522,7 @@ describe('XRFI answered with XRFA', () => {
     r.events.length = 0
     await r.invite(scanner(1))
     await r.doc(scanner(1), proposeFrom(scanner(1)))
-    expect(r.events).toEqual([
-      'persist:waiting:1:-',
-      `xrfa:${scanner(1)}`,
-      'persist:proposed:1:accepted',
-      'onProposal',
-    ])
+    expect(r.events).toEqual(['persist:waiting:1:-', `xrfa:${scanner(1)}`, 'persist:proposed:1:accepted', 'onProposal'])
   })
 })
 
@@ -524,7 +539,7 @@ describe('teardown', () => {
     await Promise.all([r.inviter.cancel(), r.inviter.cancel()])
     await r.inviter.cancel()
     expect(r.deps.stopRelay).toHaveBeenCalledTimes(1)
-    expect(r.persisted.length).toBe(writes + 1)
+    expect(r.persisted).toHaveLength(writes + 1)
     expect(r.persisted[r.persisted.length - 1].state).toBe('cancelled')
     expect(seen).toEqual(['cancelled'])
     expect(r.timers.size).toBe(0)
@@ -610,13 +625,19 @@ describe('teardown', () => {
 // ---- making a code --------------------------------------------------------------------------------------------
 
 describe('making a code', () => {
-  const relay = () => ({ start: jest.fn(async () => undefined), stop: jest.fn(async () => undefined), sendTspFrame: jest.fn() })
+  const relay = () => ({
+    start: jest.fn(async () => undefined),
+    stop: jest.fn(async () => undefined),
+    sendTspFrame: jest.fn(),
+  })
   const baseDeps = (r = relay()) => ({
     resolveMediator: jest.fn(async () => ({ did: 'did:webvh:relay', wsEndpoint: 'wss://relay' }) as never),
     createDid: jest.fn(async () => ME),
     tspIdentity: jest.fn(async () => ({}) as never),
     openRelay: jest.fn(async () => r),
-    persist: jest.fn(async (_a: unknown, rec: InviteRecord) => void mockKeyed.set(rec.enactment, JSON.parse(JSON.stringify(rec)))),
+    persist: jest.fn(
+      async (_a: unknown, rec: InviteRecord) => void mockKeyed.set(rec.enactment, JSON.parse(JSON.stringify(rec)))
+    ),
   })
 
   test('mints, writes, opens the relay, and shows the link; then cancels cleanly', async () => {
@@ -674,7 +695,11 @@ describe('making a code', () => {
 // ---- the switch -----------------------------------------------------------------------------------------------
 
 describe('the switch governs the function, not only the button', () => {
-  const relay = () => ({ start: jest.fn(async () => undefined), stop: jest.fn(async () => undefined), sendTspFrame: jest.fn() })
+  const relay = () => ({
+    start: jest.fn(async () => undefined),
+    stop: jest.fn(async () => undefined),
+    sendTspFrame: jest.fn(),
+  })
   const deps = (r = relay()) => ({
     resolveMediator: jest.fn(async () => ({ did: 'did:webvh:relay', wsEndpoint: 'wss://relay' }) as never),
     createDid: jest.fn(async () => ME),

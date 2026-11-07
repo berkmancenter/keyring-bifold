@@ -63,14 +63,22 @@ test("upstream's XRFI is read by the inviter, our XRFA is adopted, and the propo
   if (read.kind !== 'invite') return
 
   const accept = await answerInviteOverTsp(inviter, INVITER, SCANNER, read.digest, read.revision)
-  const opened = await v1Unpack(accept.bytes, { receiverDecryptionKey: sk.scannerEnc, senderSigningKey: pk.inviterSign })
+  const opened = await v1Unpack(accept.bytes, {
+    receiverDecryptionKey: sk.scannerEnc,
+    senderSigningKey: pk.inviterSign,
+  })
   expect(opened.control?.controlType).toBe('accept')
   expect(v1ResolveAccept(state, opened.control?.inReplyTo, invite.threadDigest)).toEqual({ action: 'adopt' })
   state = v1Transition(state, 'receiveAccept')
   expect(admitsApplicationMessage(state)).toBe(true)
 
   // With the relationship formed, the scanner proposes.
-  const document = { id: 'AAECAwQFBgcICQoLDA0ODw', type: 'https://trusttasks.org/spec/vrc/relationships/propose/0.1', issuer: SCANNER, recipient: INVITER }
+  const document = {
+    id: 'AAECAwQFBgcICQoLDA0ODw',
+    type: 'https://trusttasks.org/spec/vrc/relationships/propose/0.1',
+    issuer: SCANNER,
+    recipient: INVITER,
+  }
   const proposeFrame = await v1Pack(tsp.encodeTrustTaskEnvelope(document), SCANNER, INVITER, scannerKeys)
   expect(await openInviterFrame(inviter, INVITER, proposeFrame.bytes)).toMatchObject({
     kind: 'document',
@@ -84,7 +92,12 @@ test('control: an invite to ANOTHER VID, or a frame sealed to another key, is no
   const other = await v1PackInvite(SCANNER, 'did:peer:2.someone-else', { ...scannerKeys }, {})
   // Sealed to the inviter's key but addressed to another VID: opens, then fails the receiver check.
   expect(await openInviterFrame(inviter, INVITER, other.bytes)).toEqual({ kind: 'none' })
-  const sealedElsewhere = await v1PackInvite(SCANNER, INVITER, { senderSigningKey: sk.scannerSign, receiverEncryptionKey: pk.scannerEnc }, {})
+  const sealedElsewhere = await v1PackInvite(
+    SCANNER,
+    INVITER,
+    { senderSigningKey: sk.scannerSign, receiverEncryptionKey: pk.scannerEnc },
+    {}
+  )
   expect(await openInviterFrame(inviter, INVITER, sealedElsewhere.bytes)).toEqual({ kind: 'none' })
 })
 
