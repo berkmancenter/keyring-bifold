@@ -22,6 +22,12 @@
  * it expires is said in the app's language and the phone's 12/24-hour setting,
  * with the scanner's own `expiryText` (#954).
  *
+ * Its words, `SharedConnectInvite.*` in the localization files: the French and
+ * Brazilian Portuguese are MACHINE-DRAFTED and not yet read by a native
+ * speaker. They merged that way on Alberto's decision (2026-11-07); a native
+ * read is a condition for turning "Show a code" on for testers, not for
+ * merging. Whoever flips the inviter switch's default on checks it was done.
+ *
  * @module trust-tasks/screens/SharedConnectInvite
  */
 import Clipboard from '@react-native-clipboard/clipboard'
