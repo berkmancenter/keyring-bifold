@@ -16,7 +16,7 @@
  * evaluated, after the same work (open, proof check), whatever the outcome: a failing code is not answered faster or
  * differently from a valid but spent one, because neither is answered at all.
  *
- * The bound (§2.8's spam guard, Alberto 2026-11-07: "8 tries, 1 connection"): relationship invites are answered for
+ * The bound (§2.8's spam guard, decided 2026-11-07): relationship invites are answered for
  * at most {@link SHARED_CONNECT_INVITE_MAX_INVITES} distinct scanners and one propose is accepted. Both live in the
  * persisted record, so they hold for as long as the code does. A scanner re-sending uses no slot: its invite is
  * answered again, and the same propose (same sender, same id) is the same acceptance.
