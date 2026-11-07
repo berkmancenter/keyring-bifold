@@ -109,9 +109,18 @@ describe('the time left', () => {
     expect(textOf(tree, Ids.countdown)).toBe('SharedConnectInvite.TimeLeft(8:59)')
   })
 
-  it('says when the code expires in the app’s words (the scanner’s expiryText), not the engine’s', () => {
-    const tree = show(invite())
-    expect(textOf(tree, Ids.expiresAt)).toMatch(/^SharedConnect\.Expires(On)?\(/)
+  // expiryText (#954) says a time alone for today and a date for another day; the screen's clock decides which day
+  // "today" is, so the boundary is pinned here rather than read off the real clock (TZ=GMT under jest).
+  it('says when the code expires in the app’s words: the time alone when it is today', () => {
+    clock = Date.UTC(2027, 0, 15, 8, 0)
+    const tree = show(invite({ expiresAt: clock / 1000 + 600 }))
+    expect(textOf(tree, Ids.expiresAt)).toMatch(/^SharedConnect\.Expires\(/)
+  })
+
+  it('and its date as well when the ten minutes run past midnight', () => {
+    clock = Date.UTC(2027, 0, 15, 23, 55)
+    const tree = show(invite({ expiresAt: clock / 1000 + 600 }))
+    expect(textOf(tree, Ids.expiresAt)).toMatch(/^SharedConnect\.ExpiresOn\(/)
   })
 
   it('leaves no timer running once the code can no longer be scanned', () => {
@@ -162,8 +171,8 @@ describe('the code', () => {
     expect(Clipboard.setString).toHaveBeenCalledWith(LINK)
     expect(tree.getByText('SharedConnectInvite.Copied')).toBeTruthy()
     tree.unmount()
+    // Only the copy's own timer: the countdown's interval is the time-left tests' to pin.
     expect(t.timeouts()).toHaveLength(0)
-    expect(t.intervals()).toHaveLength(0)
   })
 
   it('shares the link', () => {

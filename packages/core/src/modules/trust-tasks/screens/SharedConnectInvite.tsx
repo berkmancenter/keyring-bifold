@@ -208,7 +208,7 @@ export const SharedConnectInviteView: React.FC<{
                 {t('SharedConnectInvite.TimeLeft', { time: clockOf(left) })}
               </ThemedText>
               <ThemedText style={styles.quiet} testID={id(Ids.expiresAt)}>
-                {expiryText(expiresAt, t)}
+                {expiryText(expiresAt, t, new Date(now()))}
               </ThemedText>
               <View style={styles.links}>
                 <Pressable
