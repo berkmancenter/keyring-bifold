@@ -70,6 +70,7 @@ const FAILURE_KEYS: Record<SharedConnectInviteFailure, string> = {
   declined: 'SharedConnectInvite.FailedDeclined',
   relay: 'SharedConnectInvite.FailedRelay',
   send: 'SharedConnectInvite.FailedSend',
+  exhausted: 'SharedConnectInvite.FailedExhausted',
   unknown: 'SharedConnectInvite.FailedUnknown',
 }
 

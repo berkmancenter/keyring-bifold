@@ -232,6 +232,7 @@ describe('how it ends', () => {
     ['declined', 'SharedConnectInvite.FailedDeclined'],
     ['relay', 'SharedConnectInvite.FailedRelay'],
     ['send', 'SharedConnectInvite.FailedSend'],
+    ['exhausted', 'SharedConnectInvite.FailedExhausted'],
     ['unknown', 'SharedConnectInvite.FailedUnknown'],
     [undefined, 'SharedConnectInvite.FailedUnknown'],
   ] as const)('failed (%s) says why', (failure, words) => {
