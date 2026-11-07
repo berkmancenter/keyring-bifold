@@ -24,7 +24,8 @@
  *   again (`reciprocateIfOwed`): the old one binds to the old card's digest.
  * - Refusals (a personhood policy that no longer admits the member, or
  *   `renew:notMember`, the community holding no membership for this identity):
- *   the card is kept as it is and asked again later. Nothing here records a
+ *   the card is kept as it is and asked again after `RENEW_RETRY_MS`, a pause
+ *   kept on the phone so it holds across restarts. Nothing here records a
  *   membership as ended; that stays with the community's removal notice.
  *   - no answer, a session another step holds, or a card that cannot be
  *     checked now: nothing changes, and it is asked again later.
@@ -35,6 +36,7 @@
  * @module trust-tasks/module/vtiCardRenewal
  */
 import type { Agent } from '@credo-ts/core'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useEffect } from 'react'
 import { DeviceEventEmitter } from 'react-native'
 
@@ -200,12 +202,53 @@ export async function renewMembershipCards(deps: RenewDeps): Promise<RenewOutcom
   return 'renewed'
 }
 
-/** The last attempt that changed nothing, per membership, this app run. */
-const lastTried = new Map<string, number>()
+/**
+ * Where the last attempt that changed nothing is kept, per membership (`<community>|<identity>` to a time), so the
+ * pause between attempts holds across app restarts: a card past day 20 stays due, and a refusal (`notMember` among
+ * them) records nothing on the membership, so without this every launch would ask again.
+ */
+export const RENEW_TRIED_KEY = 'keyring/vti-card-renewal-tried'
+
+export interface RenewTriedStore {
+  load: () => Promise<Record<string, number>>
+  save: (tried: Record<string, number>) => Promise<void>
+}
+
+const parseTried = (raw: unknown): Record<string, number> => {
+  try {
+    const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : undefined
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>).filter(
+        (e): e is [string, number] => typeof e[1] === 'number' && Number.isFinite(e[1])
+      )
+    )
+  } catch {
+    return {}
+  }
+}
+
+/** The phone's own store: unreadable or unwritable, it reads as nothing tried, and the next look may ask again. */
+export const storedRenewTries: RenewTriedStore = {
+  load: async () => {
+    try {
+      return parseTried(await AsyncStorage.getItem(RENEW_TRIED_KEY))
+    } catch {
+      return {}
+    }
+  },
+  save: async (tried) => {
+    try {
+      await AsyncStorage.setItem(RENEW_TRIED_KEY, JSON.stringify(tried))
+    } catch {
+      // Best effort: the pause then holds only until the next launch.
+    }
+  },
+}
 
 /** For tests. */
-export function resetCardRenewal(): void {
-  lastTried.clear()
+export async function resetCardRenewal(): Promise<void> {
+  await storedRenewTries.save({})
 }
 
 /**
@@ -224,6 +267,8 @@ export async function renewDueCards(
     renew?: (deps: RenewDeps) => Promise<RenewOutcome>
     /** Sends the renewal as `persona`; by default over the shared session in a background hold. */
     send?: (persona: VtiPersona, communityDid: string) => Promise<Record<string, unknown>>
+    /** The last attempts that changed nothing; by default kept on the phone (`storedRenewTries`). */
+    tries?: RenewTriedStore
   } = {}
 ): Promise<Record<string, RenewOutcome>> {
   const now = options.now ?? Date.now
@@ -247,12 +292,22 @@ export async function renewDueCards(
           peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
         }
       ))
+  const tries = options.tries ?? storedRenewTries
+  const before = await tries.load()
+  const memberships = await store.listMemberships().catch(() => [] as VtiMembership[])
+  // Only this phone's memberships are kept, so a membership gone from it takes its entry with it.
+  const tried: Record<string, number> = {}
+  for (const m of memberships) {
+    const key = `${m.communityDid}|${m.personaDid}`
+    if (before[key] !== undefined) tried[key] = before[key]
+  }
   const outcomes: Record<string, RenewOutcome> = {}
-  for (const membership of await store.listMemberships().catch(() => [] as VtiMembership[])) {
+  for (const membership of memberships) {
     if (!renewalDue(membership, now())) continue
     const key = `${membership.communityDid}|${membership.personaDid}`
-    const tried = lastTried.get(key)
-    if (tried !== undefined && now() - tried < RENEW_RETRY_MS) continue
+    const last = tried[key]
+    // A time ahead of the clock (the clock was set back) does not hold the pause.
+    if (last !== undefined && last <= now() && now() - last < RENEW_RETRY_MS) continue
     const persona = personas.find((p) => p.did === membership.personaDid)
     // An identity this phone cannot sign as, or one held through an agent no longer linked, waits.
     if (!persona || !canSignAs(persona) || (linked && persona.vtaDid && !linked.includes(persona.vtaDid))) continue
@@ -278,9 +333,10 @@ export async function renewDueCards(
       return 'noAnswer' as const
     })
     outcomes[key] = outcome
-    if (outcome === 'renewed') lastTried.delete(key)
-    else lastTried.set(key, now())
+    if (outcome === 'renewed') delete tried[key]
+    else tried[key] = now()
   }
+  if (JSON.stringify(tried) !== JSON.stringify(before)) await tries.save(tried)
   return outcomes
 }
 

@@ -5,6 +5,7 @@
  * is checked and kept in place of the old card, and nothing else ever drops or
  * replaces it.
  */
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { DeviceEventEmitter } from 'react-native'
 
 import { VTI_PERSONA_DELIVERIES_EVENT } from '../module/communityChanged'
@@ -15,6 +16,7 @@ import {
   renewDueCards,
   renewMembershipCards,
   RENEW_RETRY_MS,
+  RENEW_TRIED_KEY,
   resetCardRenewal,
   type RenewDeps,
 } from '../module/vtiCardRenewal'
@@ -305,5 +307,59 @@ describe('every card due on this phone', () => {
     await sweep(LAPSED + RENEW_RETRY_MS)
     expect(send).toHaveBeenCalledTimes(2)
     forget.mockRestore()
+  })
+})
+
+// ac's review of #973: a card past day 20 stays due, and a refusal records nothing on the membership, so a pause
+// kept only in memory let every launch ask again. The pause is kept on the phone.
+describe('the pause between attempts, across restarts', () => {
+  const KEY = `${COMMUNITY}|${PERSONA_DID}`
+  const stored = async () => JSON.parse((await AsyncStorage.getItem(RENEW_TRIED_KEY)) ?? '{}')
+  const sweep = (at: number, renew: jest.Mock, memberships: VtiMembership[] = [lapsedMembership]) =>
+    renewDueCards(fakeAgent().agent, {
+      store: fakeCommunityStore({ memberships: memberships.map((m) => structuredClone(m)) }).store,
+      identities: { listPersonas: async () => [persona] } as never,
+      now: () => at,
+      renew,
+      send: async () => ({}),
+    })
+
+  it('an attempt that changed nothing is kept on the phone', async () => {
+    await sweep(
+      LAPSED,
+      jest.fn(async () => 'refused')
+    )
+    expect(await stored()).toEqual({ [KEY]: LAPSED })
+  })
+
+  it('an attempt from an earlier run holds the pause after a restart, then the card is asked again', async () => {
+    // Only what the phone kept: nothing from this run's memory.
+    await AsyncStorage.setItem(RENEW_TRIED_KEY, JSON.stringify({ [KEY]: LAPSED }))
+    const renew = jest.fn(async () => 'refused')
+    await sweep(LAPSED + 60 * 60 * 1000, renew)
+    expect(renew).not.toHaveBeenCalled()
+    await sweep(LAPSED + RENEW_RETRY_MS, renew)
+    expect(renew).toHaveBeenCalledTimes(1)
+    expect(await stored()).toEqual({ [KEY]: LAPSED + RENEW_RETRY_MS })
+  })
+
+  it('a renewal clears its entry, and a membership gone from the phone takes its entry with it', async () => {
+    await AsyncStorage.setItem(RENEW_TRIED_KEY, JSON.stringify({ [KEY]: LAPSED - RENEW_RETRY_MS, 'gone|x': LAPSED }))
+    await sweep(
+      LAPSED,
+      jest.fn(async () => 'renewed')
+    )
+    expect(await stored()).toEqual({})
+  })
+
+  it('a time ahead of the clock, or what cannot be read, does not hold the pause', async () => {
+    const renew = jest.fn(async () => 'noAnswer')
+    await AsyncStorage.setItem(RENEW_TRIED_KEY, JSON.stringify({ [KEY]: LAPSED + 24 * 60 * 60 * 1000 }))
+    await sweep(LAPSED, renew)
+    await AsyncStorage.setItem(RENEW_TRIED_KEY, 'not json')
+    await sweep(LAPSED + RENEW_RETRY_MS * 2, renew)
+    await AsyncStorage.setItem(RENEW_TRIED_KEY, JSON.stringify({ [KEY]: 'yesterday' }))
+    await sweep(LAPSED + RENEW_RETRY_MS * 4, renew)
+    expect(renew).toHaveBeenCalledTimes(3)
   })
 })
