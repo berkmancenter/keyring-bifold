@@ -17,7 +17,7 @@ import { join } from 'path'
 import * as propose from '@openvtc/trust-tasks/vrc/relationships/propose/0.1/payload'
 
 import { SHARED_CONNECT_EXP_GRACE_MS, SHARED_CONNECT_INVITE_MAX_INVITES } from '../module/sharedConnectDecisions'
-import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
+import { setSharedConnectEnabled, setSharedConnectInviteEnabled } from '../module/sharedConnectFlag'
 import {
   buildSharedConnectLink,
   createSharedConnectInvite,
@@ -41,7 +41,12 @@ const T0 = 1_800_000_000_000 // ms
 const EXP = T0 / 1000 + 600
 const scanner = (n: number) => `did:peer:2.Ez6LSscanner${n}.Vz6Mkscanner${n}`
 const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn() }
-const agent = { config: { logger }, kms: { randomBytes: ({ length }: { length: number }) => new Uint8Array(length).fill(7) } } as never
+// Distinct bytes per call, as a KMS gives: two codes never share an `_id`.
+let randomCalls = 0
+const agent = {
+  config: { logger },
+  kms: { randomBytes: ({ length }: { length: number }) => new Uint8Array(length).fill(++randomCalls % 256) },
+} as never
 
 /** A propose as a conforming scanner sends it: every field the standing rule reads, right. */
 const proposeFrom = (sender: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -146,13 +151,18 @@ function expectSilent(r: ReturnType<typeof rig>, writesBefore: number) {
 beforeEach(() => {
   jest.clearAllMocks()
   mockKeyed.clear()
+  // The inviter runs only with both switches on; the switch's own tests turn them off.
+  setSharedConnectEnabled(true)
+  setSharedConnectInviteEnabled(true)
+})
+afterEach(() => {
+  setSharedConnectInviteEnabled(false)
+  setSharedConnectEnabled(false)
 })
 
 // ---- the code -------------------------------------------------------------------------------------------------
 
 describe('the code', () => {
-  afterEach(() => setSharedConnectEnabled(false))
-
   test("the link is one Keyring's own reader takes as shared-connect, with its _from, _id and _exp", () => {
     setSharedConnectEnabled(true)
     const link = buildSharedConnectLink({ from: ME, id: ENACTMENT, exp: EXP })
@@ -658,5 +668,122 @@ describe('making a code', () => {
       expect(mockKeyed.get(made.inviter.enactment)?.state).toBe('waiting')
       await made.inviter.cancel()
     }
+  })
+})
+
+// ---- the switch -----------------------------------------------------------------------------------------------
+
+describe('the switch governs the function, not only the button', () => {
+  const relay = () => ({ start: jest.fn(async () => undefined), stop: jest.fn(async () => undefined), sendTspFrame: jest.fn() })
+  const deps = (r = relay()) => ({
+    resolveMediator: jest.fn(async () => ({ did: 'did:webvh:relay', wsEndpoint: 'wss://relay' }) as never),
+    createDid: jest.fn(async () => ME),
+    tspIdentity: jest.fn(async () => ({}) as never),
+    openRelay: jest.fn(async () => r),
+    persist: jest.fn(async () => undefined),
+  })
+
+  test('on: a code starts (control)', async () => {
+    const d = deps()
+    const made = await createSharedConnectInvite(agent, { now: () => T0, deps: d })
+    expect(made.kind).toBe('showing')
+    expect(d.openRelay).toHaveBeenCalledTimes(1)
+    if (made.kind === 'showing') await made.inviter.cancel()
+  })
+
+  test.each([
+    ['the inviter switch off', () => setSharedConnectInviteEnabled(false)],
+    ['the shared-connect switch under it off', () => setSharedConnectEnabled(false)],
+  ])('%s: nothing starts: no DID minted, no relay login, nothing written', async (_why, off) => {
+    off()
+    const d = deps()
+    expect(await createSharedConnectInvite(agent, { now: () => T0, deps: d })).toEqual({ kind: 'off' })
+    expect(d.resolveMediator).not.toHaveBeenCalled()
+    expect(d.createDid).not.toHaveBeenCalled()
+    expect(d.openRelay).not.toHaveBeenCalled()
+    expect(d.persist).not.toHaveBeenCalled()
+  })
+
+  test('off: an inbound XRFI is ignored, unopened, and the code ends', async () => {
+    const r = rig()
+    await r.inviter.start()
+    setSharedConnectInviteEnabled(false)
+    jest.clearAllMocks()
+    await r.invite(scanner(1))
+    expect(r.deps.open).not.toHaveBeenCalled()
+    expect(r.deps.sendAccept).not.toHaveBeenCalled()
+    expect(r.inviter.state).toBe('cancelled')
+  })
+
+  test('a code rebuilt from its stored record while the switch is off answers nothing (no toggle event fires)', async () => {
+    const first = rig()
+    await first.inviter.start()
+    await first.invite(scanner(1))
+    const stored = first.persisted[first.persisted.length - 1]
+    await first.inviter.cancel()
+    setSharedConnectInviteEnabled(false) // already off when the rebuilt code starts: only the per-frame check stops it
+    const again = rig({ record: { ...stored, state: 'waiting' } })
+    await again.inviter.start()
+    await again.invite(scanner(1))
+    expect(again.deps.open).not.toHaveBeenCalled()
+    expect(again.deps.sendAccept).not.toHaveBeenCalled()
+    expect(again.inviter.state).toBe('cancelled')
+  })
+
+  test('off: an inbound propose is ignored too, even from a scanner already answered', async () => {
+    const r = rig()
+    await r.inviter.start()
+    await r.invite(scanner(1))
+    setSharedConnectInviteEnabled(false)
+    jest.clearAllMocks()
+    await r.doc(scanner(1), proposeFrom(scanner(1)))
+    expect(r.deps.open).not.toHaveBeenCalled()
+    expect(r.ceremony.onProposal).not.toHaveBeenCalled()
+  })
+
+  test.each([
+    ['its own switch', () => setSharedConnectInviteEnabled(false)],
+    ['the shared-connect switch', () => setSharedConnectEnabled(false)],
+  ])('turning %s off mid-session ends every live code at once: relay stopped, timers cleared', async (_why, off) => {
+    const r1 = relay()
+    const r2 = relay()
+    const a = await createSharedConnectInvite(agent, { now: () => T0, deps: deps(r1) })
+    const b = await createSharedConnectInvite(agent, { now: () => T0, deps: deps(r2) })
+    if (a.kind !== 'showing' || b.kind !== 'showing') throw new Error('codes did not start')
+    off()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect([a.inviter.state, b.inviter.state]).toEqual(['cancelled', 'cancelled'])
+    expect([r1.stop.mock.calls.length, r2.stop.mock.calls.length]).toEqual([1, 1])
+    expect(getSharedConnectInviter(a.inviter.enactment)).toBeUndefined()
+  })
+
+  test('control: setting the switch on again, or on while on, ends nothing', async () => {
+    const made = await createSharedConnectInvite(agent, { now: () => T0, deps: deps() })
+    if (made.kind !== 'showing') throw new Error('code did not start')
+    setSharedConnectInviteEnabled(true)
+    setSharedConnectEnabled(true)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(made.inviter.state).toBe('waiting')
+    await made.inviter.cancel()
+  })
+
+  test('switched off while the relay was logging in: it is closed once, and nothing shows', async () => {
+    const r = relay()
+    r.start.mockImplementation(async () => {
+      setSharedConnectInviteEnabled(false) // the person flips the switch while the socket connects
+    })
+    expect(await createSharedConnectInvite(agent, { now: () => T0, deps: deps(r) })).toEqual({ kind: 'off' })
+    expect(r.stop).toHaveBeenCalledTimes(1)
+  })
+
+  test('switched off before the relay was handed back: the relay that arrives late is closed, and nothing shows', async () => {
+    const r = relay()
+    const d = deps(r)
+    d.openRelay.mockImplementation(async () => {
+      setSharedConnectInviteEnabled(false) // the code ends while openRelay is still running: no handle to stop yet
+      return r
+    })
+    expect(await createSharedConnectInvite(agent, { now: () => T0, deps: d })).toEqual({ kind: 'off' })
+    expect(r.stop).toHaveBeenCalledTimes(1)
   })
 })

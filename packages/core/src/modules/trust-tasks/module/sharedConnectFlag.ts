@@ -18,7 +18,9 @@ let sharedConnectInviteEnabled = false
 
 /** Turn the shared-connect flow on or off (developer setting). */
 export function setSharedConnectEnabled(enabled: boolean): void {
+  const before = isSharedConnectInviteEnabled()
   sharedConnectEnabled = enabled
+  if (before && !isSharedConnectInviteEnabled()) inviteTurnedOff()
 }
 
 /** Whether a shared-connect link is read and carried to its confirm screen. */
@@ -45,7 +47,30 @@ export function isSharedConnectLabelEnabled(): boolean {
  * on in an update once the live run against an independent scanner passes (Alberto, 2026-11-07).
  */
 export function setSharedConnectInviteEnabled(enabled: boolean): void {
+  const before = isSharedConnectInviteEnabled()
   sharedConnectInviteEnabled = enabled
+  if (before && !isSharedConnectInviteEnabled()) inviteTurnedOff()
+}
+
+const offListeners = new Set<() => void>()
+
+/**
+ * Be told the moment the inviter goes from on to off (its own switch, or the shared-connect switch under it), so
+ * every code still showing ends at once. Returns the way to stop listening.
+ */
+export function onSharedConnectInviteTurnedOff(listener: () => void): () => void {
+  offListeners.add(listener)
+  return () => void offListeners.delete(listener)
+}
+
+function inviteTurnedOff() {
+  for (const listener of [...offListeners]) {
+    try {
+      listener()
+    } catch {
+      // one listener's failure does not keep the others on
+    }
+  }
 }
 
 /** Whether "Show a code" is offered. Needs the shared-connect flow itself on too. */

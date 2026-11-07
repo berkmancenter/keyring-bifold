@@ -51,6 +51,7 @@ import {
   SHARED_CONNECT_INVITER_MEDIATOR_DID,
 } from './sharedConnectDecisions'
 import { createEncounterDid, ENCOUNTER_LOG_PREFIX } from './sharedConnectEncounter'
+import { isSharedConnectInviteEnabled, onSharedConnectInviteTurnedOff } from './sharedConnectFlag'
 import type { SharedConnectInviteFailure, SharedConnectInviteState } from './sharedConnectInviteTypes'
 import { SHARED_CONNECT_FLOW, TRIGGER_LINK_HOST } from './triggerLink'
 import { isTspFrameUnopenable } from './tspFrameUnopenable'
@@ -239,6 +240,11 @@ export interface InviterDeps {
 
 const live = new Map<string, SharedConnectInviter>()
 
+// The switch governs the function, not only the button (Alberto, 2026-11-07): turned off, every live code ends now.
+onSharedConnectInviteTurnedOff(() => {
+  for (const inviter of [...live.values()]) void inviter.cancel()
+})
+
 /** The live inviter for a code, for the consent sheet and the screen. */
 export const getSharedConnectInviter = (enactment: string): SharedConnectInviter | undefined => live.get(enactment)
 
@@ -361,6 +367,13 @@ export class SharedConnectInviter {
 
   private async admitOne(bytes: Uint8Array): Promise<void> {
     if (this.ended) return // after the end: dropped, unopened
+    // Read on every frame, not only at the start: a code running while the switch is off (one rebuilt from its stored
+    // record, say) answers nothing. The frame is dropped unopened, and the code ends.
+    if (!isSharedConnectInviteEnabled()) {
+      this.drop('frame (switched off)')
+      await this.cancel()
+      return
+    }
     const frame = await this.deps.open(bytes)
     if (frame.kind === 'invite') return this.onInvite(frame)
     if (frame.kind === 'document') return this.onDocument(frame)
@@ -440,7 +453,7 @@ export class SharedConnectInviter {
   }
 
   /** Every refusal ends here: a log line with a reason class, and nothing sent. */
-  private drop(what: 'invite' | 'propose' | 'document'): void {
+  private drop(what: 'invite' | 'propose' | 'document' | 'frame (switched off)'): void {
     this.log(`dropped a ${what}`)
   }
 
@@ -547,6 +560,8 @@ const defaultCreateDeps: CreateInviteDeps = {
 
 export type CreateInviteResult =
   | { kind: 'showing'; inviter: SharedConnectInviter; link: string; exp: number }
+  /** The inviter is switched off: nothing was minted, logged in to or written. */
+  | { kind: 'off' }
   | { kind: 'failed'; failure: Extract<SharedConnectInviteFailure, 'relay' | 'unknown'> }
 
 /**
@@ -557,6 +572,7 @@ export async function createSharedConnectInvite(
   agent: Agent,
   options: { ttlSeconds?: number; now?: () => number; deps?: Partial<CreateInviteDeps>; inviterDeps?: Partial<InviterDeps> } = {}
 ): Promise<CreateInviteResult> {
+  if (!isSharedConnectInviteEnabled()) return { kind: 'off' }
   const deps = { ...defaultCreateDeps, ...options.deps }
   const now = options.now ?? (() => Date.now())
   const ttl = Math.max(1, Math.min(Math.floor(options.ttlSeconds ?? SHARED_CONNECT_INVITE_TTL_SECONDS), SHARED_CONNECT_INVITE_TTL_SECONDS))
@@ -603,12 +619,24 @@ export async function createSharedConnectInvite(
   })
   try {
     await inviter.start()
+    // Switched off while the DID was minted: end here, before any relay login.
+    if (!isSharedConnectInviteEnabled()) {
+      await inviter.cancel()
+      return { kind: 'off' }
+    }
     relayRef.current = await deps.openRelay(agent, myVid, mediator, {
       onTspFrame: (bytes) => inviter.admit(bytes),
       // This code speaks TSP: a DIDComm message to it is not read, and not answered.
       onMessage: async () => undefined,
     })
     await relayRef.current.start()
+    // Ended while the relay was opening (switched off, cancelled). If the end ran before the relay was handed back,
+    // it had nothing to stop: stop it here. If after, the end already stopped it and cleared the handle.
+    if (isTerminalInviteState(inviter.state)) {
+      await relayRef.current?.stop().catch(() => undefined)
+      relayRef.current = undefined
+      return isSharedConnectInviteEnabled() ? { kind: 'failed', failure: 'unknown' } : { kind: 'off' }
+    }
   } catch (error) {
     agent.config.logger.debug(
       `${ENCOUNTER_LOG_PREFIX} inviter could not open the relay: ${error instanceof Error ? error.name : 'error'}`
