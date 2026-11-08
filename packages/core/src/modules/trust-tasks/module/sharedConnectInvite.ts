@@ -47,7 +47,7 @@ import { verifyDocumentProof } from '../documentProof'
 
 import { didPrefix } from './didPrefix'
 import { getKeyed, listKeyed, putKeyed } from './keyedRecords'
-import { isChallengeShaped } from './sharedConnectCeremony'
+import { isChallengeShaped, SHARED_CONNECT_STEP_PROOF_PURPOSE } from './sharedConnectCeremony'
 import {
   SHARED_CONNECT_EXP_GRACE_MS,
   SHARED_CONNECT_INVITE_MAX_FRAMES,
@@ -59,7 +59,7 @@ import { createEncounterDid, ENCOUNTER_LOG_PREFIX } from './sharedConnectEncount
 import { isSharedConnectInviteEnabled, onSharedConnectInviteTurnedOff } from './sharedConnectFlag'
 import { SharedConnectInviterCeremony } from './sharedConnectInviterCeremony'
 import type { SharedConnectInviteFailure, SharedConnectInviteState } from './sharedConnectInviteTypes'
-import { SHARED_CONNECT_FLOW, TRIGGER_LINK_HOST } from './triggerLink'
+import { SHARED_CONNECT_FLOW, TRIGGER_LINK_HOST, uriHostAndPath } from './triggerLink'
 import { isTspFrameUnopenable } from './tspFrameUnopenable'
 import {
   answerInviteOverTsp,
@@ -91,7 +91,9 @@ export function buildSharedConnectLink(fields: { from: string; id: string; exp: 
   if (!LINK_SAFE.test(fields.from) || !isChallengeShaped(fields.id) || !Number.isInteger(fields.exp)) {
     throw new Error(`${ENCOUNTER_LOG_PREFIX} refusing to build a link from malformed fields`)
   }
-  const type = `${new URL(SHARED_CONNECT_FLOW).pathname}/${SHARED_CONNECT_FLOW_VERSION}`
+  const flow = uriHostAndPath(SHARED_CONNECT_FLOW)
+  if (!flow?.path) throw new Error(`${ENCOUNTER_LOG_PREFIX} refusing to build a link: the flow URI has no path`)
+  const type = `${flow.path}/${SHARED_CONNECT_FLOW_VERSION}`
   return `https://${TRIGGER_LINK_HOST}/t#_from=${fields.from}&_id=${fields.id}&_exp=${fields.exp}&_type=${type}`
 }
 
@@ -679,7 +681,8 @@ export async function createSharedConnectInvite(
       const packed = await answerInviteOverTsp(identity, myVid, theirVid, digest, revision)
       await relayRef.current?.sendTspFrame(packed.bytes)
     },
-    verifyProof: (document, signer) => verifyDocumentProof(agent, document, signer),
+    verifyProof: (document, signer) =>
+      verifyDocumentProof(agent, document, signer, { proofPurpose: SHARED_CONNECT_STEP_PROOF_PURPOSE }),
     sendDocument: async (theirVid, document, revision) => {
       const packed = await packTrustTaskForPeer(identity, myVid, theirVid, document, revision)
       if (!relayRef.current) throw new Error(`${ENCOUNTER_LOG_PREFIX} inviter relay is closed`)
