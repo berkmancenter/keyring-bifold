@@ -218,7 +218,7 @@ export function signJcs(
  */
 export function verifyJcs(doc: Record<string, unknown>, controller: string, expected: ProofPurpose): boolean {
   try {
-    const { proof, ...unsecured } = doc as { proof?: Record<string, unknown> }
+    const { proof, ...unsecured } = doc as { proof?: Record<string, unknown> } & Record<string, unknown>
     if (!proof || proof.type !== 'DataIntegrityProof' || proof.cryptosuite !== 'eddsa-jcs-2022') return false
     const { proofValue, ...config } = proof
     const vm = String(config.verificationMethod ?? '')
