@@ -134,7 +134,7 @@ function setup(o: Setup = {}) {
     )
     return { type, body: JSON.parse(unb64(String(payload.plaintext))) as Record<string, unknown> }
   }
-  return { service, agentTask, sendCompleted, state, tasks, sealedBody }
+  return { service, agentTask, sendCompleted, state, tasks, sealedBody, warn: b.warn as unknown as jest.Mock }
 }
 
 const expectNothingWritten = (s: ReturnType<typeof setup>) => {
@@ -146,6 +146,42 @@ const expectNothingWritten = (s: ReturnType<typeof setup>) => {
 const send = (s: ReturnType<typeof setup>, write: RecordWrite) => s.service.sendRecord(ROOM, write)
 
 describe('what a room lets its member write', () => {
+  it('says in the log which part of the rule decided, by the spec’s words only (control: each way it can go)', async () => {
+    const warnings = (s: ReturnType<typeof setup>) =>
+      (s.warn.mock.calls as string[][]).map(([line]) => line).filter((line) => line.includes('record members'))
+
+    const read = setup({ listed: ['kind', 'writtenAt', 'mood'] })
+    await read.service.recordFeaturesIn(ROOM)
+    await read.service.recordFeaturesIn(ROOM)
+    expect(warnings(read)).toEqual([
+      expect.stringMatching(/^rooms: \S+ record members read: lists kind,writtenAt \(\+1 other\); agent seals yes$/),
+      expect.stringMatching(
+        /^rooms: \S+ record members kept from this epoch: lists kind,writtenAt \(\+1 other\); agent seals yes$/
+      ),
+    ])
+    // A word the community chose is counted, never written out.
+    expect(warnings(read).join('\n')).not.toContain('mood')
+
+    const none = setup({ listed: undefined })
+    await none.service.recordFeaturesIn(ROOM)
+    expect(warnings(none)).toEqual([expect.stringMatching(/record members read: lists none; agent seals yes$/)])
+
+    const failed = setup({ profile: () => Promise.reject(new Error('timed out')) })
+    await failed.service.recordFeaturesIn(ROOM)
+    expect(warnings(failed)).toEqual([expect.stringMatching(/record members not read \([a-zA-Z]+\): lists none;/)])
+    expect(warnings(failed).join('\n')).not.toContain('timed out')
+
+    const noSeal = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysSeal03) })
+    await noSeal.service.recordFeaturesIn(ROOM)
+    expect(warnings(noSeal)).toEqual([expect.stringMatching(/; agent seals no$/)])
+
+    const noProfile = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysProfileRead) })
+    await noProfile.service.recordFeaturesIn(ROOM)
+    expect(warnings(noProfile)).toEqual([
+      expect.stringMatching(/record members not asked \(the agent reads no profile\): lists none;/),
+    ])
+  })
+
   it('control: reads what the profile lists, and that the agent seals it', async () => {
     const s = setup({ listed: ['kind', 'writtenAt'] })
     expect(await s.service.recordFeaturesIn(ROOM)).toEqual({

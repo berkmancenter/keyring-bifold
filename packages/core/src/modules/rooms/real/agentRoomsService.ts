@@ -74,6 +74,7 @@ import { OPEN_FILE_BYTES, openRoomFile, type OpenFileCopy } from './files/open'
 import { checkSender, type ResolveSender } from './files/sender'
 import { TextSenderCount } from './files/textSenderCount'
 import {
+  GOVERNED_BODY_MEMBERS,
   governedMembersIn,
   keptMembers,
   messageMembers,
@@ -1575,14 +1576,28 @@ export class AgentRoomsService implements RoomsService {
     const { community, host } = this.hostOf(room, 'write')
     const served = this.served?.types ?? []
     const canSeal = this.sealType(true) !== undefined
-    if (!served.includes(ROOMS_TASK.keysProfileRead)) return { listed: [], canSeal, unresolved: false }
+    // One line per decision, so a report says which part of the rule a refusal came from: the profile not read, read
+    // and listing nothing, or the agent not sealing. Governed members by name (the spec's words), any others counted.
+    const said = (how: string, features: RecordFeatures): RecordFeatures => {
+      const named = features.listed.filter((m) => (GOVERNED_BODY_MEMBERS as readonly string[]).includes(m))
+      const others = features.listed.length - named.length
+      this.backend.warn(
+        `rooms: ${logRef(room.roomId)} record members ${how}: lists ${named.length ? named.join(',') : 'none'}${
+          others ? ` (+${others} other)` : ''
+        }; agent seals ${features.canSeal ? 'yes' : 'no'}`
+      )
+      return features
+    }
+    if (!served.includes(ROOMS_TASK.keysProfileRead))
+      return said('not asked (the agent reads no profile)', { listed: [], canSeal, unresolved: false })
     const k = `${room.roomId}\n${host}\n${community.personaDid}`
     const epoch = await this.heldRooms().then(
       (held) => held.find((h) => h.roomId === room.roomId && (!h.member || h.member === community.personaDid))?.epoch,
       () => undefined
     )
     const kept = this.recordMembers.get(k)
-    if (kept && epoch !== undefined && kept.epoch === epoch) return { listed: kept.listed, canSeal, unresolved: false }
+    if (kept && epoch !== undefined && kept.epoch === epoch)
+      return said('kept from this epoch', { listed: kept.listed, canSeal, unresolved: false })
     try {
       const listed = parseProfileRecordMembers(
         await this.backend.agentTask(ROOMS_TASK.keysProfileRead, { roomId: room.roomId, host })
@@ -1591,9 +1606,9 @@ export class AgentRoomsService implements RoomsService {
         this.recordMembers.set(k, { epoch, listed })
         holdingOpened.add(this)
       }
-      return { listed, canSeal, unresolved: false }
-    } catch {
-      return { listed: [], canSeal, unresolved: true }
+      return said('read', { listed, canSeal, unresolved: false })
+    } catch (e) {
+      return said(`not read (${failureCategory(e)})`, { listed: [], canSeal, unresolved: true })
     }
   }
 
