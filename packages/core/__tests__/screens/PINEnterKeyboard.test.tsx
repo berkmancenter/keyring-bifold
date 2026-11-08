@@ -96,6 +96,8 @@ describe('the PIN screen when the keyboard opens', () => {
   // didn't. A cold start can bring the keyboard's report before the screen has laid itself out.
   it('and so it does when that report comes before the screen has laid itself out (a cold start)', async () => {
     const tree = open()
+    // Keep this wait: until the screen has mounted, its keyboard listener isn't subscribed, so the report below would
+    // reach no one and the row would pass without testing the order.
     await tree.findByTestId(testIdWithKey('Enter'))
     await reportKeyboardAtTop()
     await layOut(tree)
