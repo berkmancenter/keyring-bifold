@@ -975,7 +975,7 @@ export class AgentRoomsService implements RoomsService {
     for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
     for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
     for (const k of [...this.readsInFlight.keys()]) if (k.startsWith(prefix)) this.readsInFlight.delete(k)
-    for (const k of [...this.recordMembers.keys()]) if (k.startsWith(prefix)) this.recordMembers.delete(k)
+    for (const k of [...this.recordMembers.keys()]) if (k.startsWith(prefix)) this.recordMembers.delete(k) // tier-exempt(deletes stored records): an in-memory Map of room profiles read this run, not stored records
     // A read of the room still out answers its caller but is not kept, as at a lock (readRecord).
     this.drops++
   }
