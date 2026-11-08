@@ -72,7 +72,10 @@ import { createDidCommV1Carriage } from './module/DidCommV1Carriage'
 import { setupChatInbound } from '../chat/inbound'
 import { createDidCommV2Carriage } from './module/DidCommV2Carriage'
 import { createTspCarriage } from './module/TspCarriage'
+import { hasJcsProof, verifySharedConnectVrc } from './module/sharedConnectCredential'
+import { isSharedConnectEnabled } from './module/sharedConnectFlag'
 import { WITNESS_VERIFIED_TAG } from '../vrc/utils/witnessCredentialUtils'
+import { keepHold, LATE_STEP_MS, lateStepStore, minutesOf, queueWaitMs } from '../vrc/lateStep'
 
 import { TrustTasksModule } from './module/TrustTasksModule'
 import { trustTaskRegistry } from './registry'
@@ -457,10 +460,32 @@ async function openRelationshipExchange(agent: Agent, connectionId: string): Pro
 
   await service.retain(agent.context, document, 'request', connectionId)
   await sendTrustTaskDocument(agent, connectionId, document)
+  proposeSentAt.set(exchangeId, Date.now())
   agent.config.logger.info(`${LOG_PREFIX} propose sent (exchange ${exchangeId}) on connection ${connectionId}`)
   // Waiting on the counterparty's consent — another mediated round trip.
   vrcFlowStore.setDialect(connectionId, 'trust-tasks')
   vrcFlowStore.setStatus(connectionId, 'proposed', vrcFlowStore.isWitnessedFlow(connectionId))
+}
+
+/**
+ * When this phone sent each proposal, in this run: an acceptance that comes LATE_STEP_MS or more after it is
+ * held before signing, so Face ID never starts for someone who left long ago (IN-448, lateStep.ts).
+ */
+const proposeSentAt = new Map<string, number>()
+
+/** Deliver our VRC on an accepted exchange, and the R-Card with it (not on an upgrade: the profile went already). */
+export function deliverAfterAcceptance(agent: Agent, connectionId: string, exchangeId: string, upgrade: boolean): void {
+  // FIRE AND FORGET — the caller runs inside credo's inbound message processing, and the delivery may await the
+  // witness ceremony, whose responses arrive through that same processing: awaiting here deadlocks the ceremony
+  // against its own transport (the challenge sits queued behind this very handler until timeout).
+  void deliverVrcViaTrustTaskForExchange(agent, connectionId, exchangeId).catch((e: Error) =>
+    agent.config.logger.error(`${LOG_PREFIX} VRC delivery after acceptance failed: ${e.message}`)
+  )
+  if (!upgrade) {
+    void issueRCardForAcceptedExchange(agent, connectionId).catch((e: Error) =>
+      agent.config.logger.warn(`${LOG_PREFIX} R-Card issuance after acceptance failed: ${e.message}`)
+    )
+  }
 }
 
 // ---- upgrading a relationship on its existing connection --------------------
@@ -561,6 +586,7 @@ export async function upgradeRelationship(
   }
   await getTrustTasksService(agent).retain(agent.context, document, 'request', connectionId)
   await sendTrustTaskDocument(agent, connectionId, document)
+  proposeSentAt.set(exchangeId, Date.now())
   agent.config.logger.info(
     `${LOG_PREFIX} upgrade propose sent (exchange ${exchangeId}, ${options.witnessed ? 'witnessed' : 'resign'}) on ${connectionId}`
   )
@@ -1091,11 +1117,23 @@ export async function restorePendingProposals(agent: Agent): Promise<number> {
  * `trust-task-error` with `vrc/relationships/propose:declined` — the spec is
  * explicit that a decline is never a response with `accept: false`.
  */
+/**
+ * The answer to a proposal that came to a shared-connect code this phone showed: there is no connection, and the
+ * key is the encounter key (`enc:` + the code's `_id`). Registered by the inviter ceremony when it loads, so this
+ * module does not import it.
+ */
+type EncounterConsentHandler = (agent: Agent, key: string, accept: boolean) => Promise<void>
+let encounterConsent: EncounterConsentHandler | undefined
+export function setEncounterConsentHandler(handler: EncounterConsentHandler | undefined): void {
+  encounterConsent = handler
+}
+
 export async function respondToRelationshipProposal(
   agent: Agent,
   connectionId: string,
   accept: boolean
 ): Promise<void> {
+  if (connectionId.startsWith('enc:') && encounterConsent) return encounterConsent(agent, connectionId, accept)
   const logger = agent.config.logger
   const pending = pendingProposals.get(connectionId)
   pendingProposals.delete(connectionId)
@@ -1496,15 +1534,26 @@ async function handleInboundIssue(
       // Spec conformance (receiving party item 2): verify the credential's
       // OWN proof before storing it or returning a receipt. A credential that
       // does not even parse as a verifiable credential is the same refusal.
-      let credentialInstance: W3cJsonLdVerifiableCredential
-      try {
-        credentialInstance = JsonTransformer.fromJSON(vc, W3cJsonLdVerifiableCredential)
-      } catch {
-        return notAccepted('payload is not a well-formed verifiable credential')
-      }
-      const verification = await agent.w3cCredentials.verifyCredential({ credential: credentialInstance })
-      if (!verification.isValid) {
-        return notAccepted('credential proof did not verify')
+      if (hasJcsProof(vc)) {
+        // eddsa-jcs-2022 (the shared-connect credential profile): Credo's JSON-LD verifier has no such suite, so the
+        // proof is checked through the document-proof verifier under the issuer already bound above. Every other
+        // suite takes the Credo path below, unchanged. Only with the shared-connect switch on: this handler serves
+        // every connection peer, and the proof's own `cryptosuite`, which the sender sets, picks the verifier.
+        // With the switch off, or turned off remotely, a JCS credential is refused here rather than handed to Credo:
+        // the switch's "off" must not rest on a second verifier refusing a suite it does not know today.
+        if (!isSharedConnectEnabled()) return notAccepted('a JCS-proofed credential while shared-connect is off')
+        if (!(await verifySharedConnectVrc(agent, vc))) return notAccepted('credential proof did not verify')
+      } else {
+        let credentialInstance: W3cJsonLdVerifiableCredential
+        try {
+          credentialInstance = JsonTransformer.fromJSON(vc, W3cJsonLdVerifiableCredential)
+        } catch {
+          return notAccepted('payload is not a well-formed verifiable credential')
+        }
+        const verification = await agent.w3cCredentials.verifyCredential({ credential: credentialInstance })
+        if (!verification.isValid) {
+          return notAccepted('credential proof did not verify')
+        }
       }
 
       // Authority flip: store the delivered VRC (deduplicated by digest —
@@ -1908,22 +1957,26 @@ async function handleInboundProposeResponse(
     agent.config.logger.info(
       `${LOG_PREFIX} propose#response consumed; relationship established (exchange ${document.threadId ?? document.id})`
     )
-    // Proposer side of the authority flip: the exchange is accepted, deliver
-    // our VRC on its thread. FIRE AND FORGET — this handler runs inside
-    // credo's inbound message processing, and the delivery may await the
-    // witness ceremony, whose responses arrive through that same processing:
-    // awaiting here deadlocks the ceremony against its own transport (the
-    // challenge sits queued behind this very handler until timeout).
-    void deliverVrcViaTrustTaskForExchange(agent, context.connectionId, String(document.threadId ?? document.id)).catch(
-      (e: Error) => agent.config.logger.error(`${LOG_PREFIX} VRC delivery after acceptance failed: ${e.message}`)
-    )
-    // And the R-Card, on the legacy leg, with the acceptance as its trigger.
-    // Not on an upgrade: the profile was shared already.
-    if (!upgrade) {
-      void issueRCardForAcceptedExchange(agent, context.connectionId).catch((e: Error) =>
-        agent.config.logger.warn(`${LOG_PREFIX} R-Card issuance after acceptance failed: ${e.message}`)
+    // Proposer side of the authority flip: the exchange is accepted, deliver our VRC on its thread (and the
+    // R-Card, with the acceptance as its trigger). Unless the acceptance came late: then signing waits for both
+    // people (lateStep.ts), or Face ID starts on a phone whose person left long ago (IN-448).
+    const exchangeId = String(document.threadId ?? document.id)
+    const sentAt = proposeSentAt.get(exchangeId)
+    const waited = Math.max(queueWaitMs(), sentAt === undefined ? 0 : Date.now() - sentAt)
+    if (waited >= LATE_STEP_MS) {
+      agent.config.logger.info(
+        `${LOG_PREFIX} acceptance came ${minutesOf(waited)} min after the proposal: held for both people (exchange ${exchangeId})`
       )
+      lateStepStore.hold({ connectionId: context.connectionId, reason: 'accepted', waitedMs: waited })
+      lateStepStore.defer(context.connectionId, async () =>
+        deliverAfterAcceptance(agent, context.connectionId, exchangeId, upgrade)
+      )
+      await keepHold(agent, context.connectionId, waited, { reason: 'accepted', exchangeId, upgrade }).catch(
+        (e: Error) => agent.config.logger.warn(`${LOG_PREFIX} could not keep the hold across a restart: ${e.message}`)
+      )
+      return
     }
+    deliverAfterAcceptance(agent, context.connectionId, exchangeId, upgrade)
   }
 }
 
