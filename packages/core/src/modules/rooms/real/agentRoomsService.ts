@@ -736,7 +736,7 @@ export class AgentRoomsService implements RoomsService {
       statuses.write = {
         status: 'unavailable',
         reason: 'agentDoesNotServe',
-        detail: 'the agent does not serve rooms/keys/seal at a version that signs as the member',
+        detail: `the agent does not serve ${ROOMS_TASK.keysSeal02}`,
       }
     return statuses
   }
@@ -975,7 +975,7 @@ export class AgentRoomsService implements RoomsService {
     for (const k of [...this.opened.keys()]) if (k.startsWith(prefix)) this.opened.delete(k)
     for (const k of [...this.listed.keys()]) if (k.startsWith(prefix)) this.listed.delete(k)
     for (const k of [...this.readsInFlight.keys()]) if (k.startsWith(prefix)) this.readsInFlight.delete(k)
-    for (const k of [...this.recordMembers.keys()]) if (k.startsWith(prefix)) this.recordMembers.delete(k)
+    for (const k of [...this.recordMembers.keys()]) if (k.startsWith(prefix)) this.recordMembers.delete(k) // tier-exempt(deletes stored records): an in-memory Map of room profiles read this run, not stored records
     // A read of the room still out answers its caller but is not kept, as at a lock (readRecord).
     this.drops++
   }
@@ -1546,14 +1546,16 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * The `rooms/keys/seal` this agent takes for a body: the newest it serves. A body using a governed member goes at 0.3
-   * or not at all, since 0.2 refuses those members; any other body is the same at either version.
+   * The `rooms/keys/seal` this agent takes for a body. A body using a governed member goes at 0.3 or not at all, since
+   * 0.2 refuses those members. Any other body goes at 0.2 or not at all, exactly as on main before the writer's rule:
+   * an agent serving no 0.2 is refused, with the version named, rather than written to at 0.3 unwatched (Alberto,
+   * 11-08: "Keep posts on 0.2"). Moving plain posts to 0.3 is a decision for a watched run, not a fallback.
    *
    * @versionLadder rooms/keys/seal
    */
   private sealType(usesGoverned: boolean): string | undefined {
     const served = this.served?.types ?? []
-    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal03, ROOMS_TASK.keysSeal02]
+    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal02]
     return types.find((t) => served.includes(t))
   }
 
