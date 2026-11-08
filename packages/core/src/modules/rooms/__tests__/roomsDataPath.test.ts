@@ -466,10 +466,13 @@ describe('the rooms data path, against upstream schemas', () => {
 
 describe('with sending on: written through the real writer, then read back', () => {
   const ALL = ['kind', 'inReplyTo', 'writtenAt']
-  const sends = (sent: { type: string }[]) =>
-    sent.filter((s) =>
-      [ROOMS_TASK.keysSeal02, ROOMS_TASK.keysSeal03, ROOMS_TASK.keysAct09, ROOMS_TASK.recordsPut03].includes(s.type)
-    )
+  const WRITE_TASKS: string[] = [
+    ROOMS_TASK.keysSeal02,
+    ROOMS_TASK.keysSeal03,
+    ROOMS_TASK.keysAct09,
+    ROOMS_TASK.recordsPut03,
+  ]
+  const sends = (sent: { type: string }[]) => sent.filter((s) => WRITE_TASKS.includes(s.type))
 
   test('a message, a reply to it and a reaction, each sealed at 0.3 and put at 0.3, read back as the room shows them', async () => {
     const rooms = twoCommunities()
