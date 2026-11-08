@@ -223,10 +223,11 @@ describe('sending is off', () => {
     expect(setup({ listed: ALL }).service.recordSendingOn()).toBe(true)
   })
 
-  it('the real backend does not switch it on', () => {
+  it('the real backend takes it from the release’s switch on each ask, never from a value of its own', () => {
     const source = readFileSync(join(__dirname, '../real/agentRoomsBackend.ts'), 'utf8')
     expect(source).toContain('resolveSender') // control: this is the file that builds the real backend
-    expect(source).not.toContain('recordSending')
+    expect(source).toMatch(/get recordSending\(\)\s*\{\s*return isRoomRecordSendingOn\(\)/)
+    expect(source).not.toMatch(/recordSending:/)
   })
 })
 

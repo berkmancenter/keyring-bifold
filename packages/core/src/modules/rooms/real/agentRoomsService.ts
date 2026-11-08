@@ -182,9 +182,10 @@ export interface RoomsBackend {
    */
   resolveSender?: ResolveSender
   /**
-   * Lets `sendRecord` send. Only tests set it: signing new content needs a maintainer's word on the finished change.
+   * Lets `sendRecord` send. The real backend reads it from the release's switch (`recordSendingSwitch.ts`) each time it
+   * is asked, so a release that turns sending off has it off everywhere; tests set it themselves.
    */
-  recordSending?: boolean
+  readonly recordSending?: boolean
 }
 
 /** The picked file, and the room host's HTTPS Trust Task door, which an upload's single-use key sends to. */
@@ -1559,7 +1560,7 @@ export class AgentRoomsService implements RoomsService {
     return types.find((t) => served.includes(t))
   }
 
-  /** Whether `sendRecord` is on: only where `RoomsBackend.recordSending` is set, which nothing but tests does. */
+  /** Whether `sendRecord` is on: `RoomsBackend.recordSending`, which the real backend reads from the release's switch on each ask. */
   public recordSendingOn(): boolean {
     return this.backend.recordSending === true
   }
@@ -1598,7 +1599,7 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * Writes a message, a reply or a reaction to an attributed room, by the writer's rule (`recordWrites.ts`). Off until
-   * `RoomsBackend.recordSending` is set, which nothing but tests does: signing new content needs a maintainer's word.
+   * `RoomsBackend.recordSending` says so: the real backend reads the release's switch (`recordSendingSwitch`) on every send.
    */
   public async sendRecord(roomId: string, write: RecordWrite): Promise<{ key: string; version: number }> {
     if (!this.backend.recordSending) throw new RecordSendingOff()
