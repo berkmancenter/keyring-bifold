@@ -1546,14 +1546,16 @@ export class AgentRoomsService implements RoomsService {
   }
 
   /**
-   * The `rooms/keys/seal` this agent takes for a body: the newest it serves. A body using a governed member goes at 0.3
-   * or not at all, since 0.2 refuses those members; any other body is the same at either version.
+   * The `rooms/keys/seal` this agent takes for a body. A body using a governed member goes at 0.3 or not at all, since
+   * 0.2 refuses those members. Any other body goes at 0.2 wherever the agent serves it, exactly as every post went
+   * before the writer's rule, and at 0.3 only on an agent that serves no 0.2: nothing proven live changes for today's
+   * plain posts (Alberto, 11-08: "Keep posts on 0.2").
    *
    * @versionLadder rooms/keys/seal
    */
   private sealType(usesGoverned: boolean): string | undefined {
     const served = this.served?.types ?? []
-    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal03, ROOMS_TASK.keysSeal02]
+    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal02, ROOMS_TASK.keysSeal03]
     return types.find((t) => served.includes(t))
   }
 

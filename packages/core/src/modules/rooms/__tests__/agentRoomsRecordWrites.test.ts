@@ -239,10 +239,10 @@ describe('a message', () => {
     expect(s.sealedBody().body).toEqual(PLAIN)
   })
 
-  it('goes at the newest seal the agent serves, the same body at either', async () => {
-    const newest = setup()
-    await send(newest, { type: 'message', body: 'hello' })
-    expect(newest.sealedBody().type).toBe(ROOMS_TASK.keysSeal03)
+  it('a plain body goes at seal 0.2 wherever the agent serves it, as today, and at 0.3 only where it serves no 0.2', async () => {
+    const both = setup()
+    await send(both, { type: 'message', body: 'hello' })
+    expect(both.sealedBody()).toEqual({ type: ROOMS_TASK.keysSeal02, body: PLAIN })
 
     const older = setup({ served: SERVED.filter((t) => t !== ROOMS_TASK.keysSeal03) })
     await send(older, { type: 'message', body: 'hello' })
@@ -253,11 +253,11 @@ describe('a message', () => {
     expect(only03.sealedBody()).toEqual({ type: ROOMS_TASK.keysSeal03, body: PLAIN })
   })
 
-  it('a note written the existing way goes at the newest seal too, its body unchanged', async () => {
+  it('a note written the existing way still goes at seal 0.2 on an agent serving both, its body unchanged', async () => {
     const s = setup({ recordSending: false })
     const preview = await s.service.prepareWrite(ROOM, { title: 'Agenda', body: 'Bring seeds' })
     await s.service.confirmWrite(preview.token)
-    expect(s.sealedBody().type).toBe(ROOMS_TASK.keysSeal03)
+    expect(s.sealedBody().type).toBe(ROOMS_TASK.keysSeal02)
     expect(s.sealedBody().body).toEqual({
       roomId: ROOM,
       key: 'opaque-1',
