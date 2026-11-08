@@ -130,10 +130,17 @@ export interface RelationshipProposalPrompt {
    * the relationship cards again (`resign`), or again with a witness (`witness`).
    */
   upgrade?: 'resign' | 'witness'
+  /**
+   * Set when the proposal came to a code this phone showed (shared-connect, Keyring as the inviter): there is no
+   * connection and no name, only the scanner's encounter DID, shortened. `connectionId` is the encounter key
+   * (`enc:` + the code's `_id`), and `counterpartyLabel` is empty.
+   */
+  sharedConnect?: { didShort: string }
 }
 
 class VrcFlowStore extends EventEmitter {
   private flowStatus: Map<string, VrcFlowStatus> = new Map()
+  private statusSince: Map<string, number> = new Map()
   private isWitnessed: Map<string, boolean> = new Map()
   private hasReceivedOffer: Map<string, boolean> = new Map()
   private hasSentOffer: Map<string, boolean> = new Map()
@@ -178,6 +185,7 @@ class VrcFlowStore extends EventEmitter {
   }
 
   setStatus(connectionId: string, status: VrcFlowStatus, witnessed: boolean = false): void {
+    if (this.flowStatus.get(connectionId) !== status) this.statusSince.set(connectionId, Date.now())
     this.flowStatus.set(connectionId, status)
     this.flowEnds.delete(connectionId)
     if (witnessed || status === 'witness-active') {
@@ -193,6 +201,11 @@ class VrcFlowStore extends EventEmitter {
     // Clear any existing error when status changes (unless it's an error trigger)
     this.flowErrors.delete(connectionId)
     this.emit('flowUpdate', { connectionId, status })
+  }
+
+  /** When the connection's current status began: the waiting dialog says how long it has waited (IN-448). */
+  getStatusSince(connectionId: string): number | undefined {
+    return this.statusSince.get(connectionId)
   }
 
   getStatus(connectionId: string): VrcFlowStatus {
@@ -333,6 +346,7 @@ class VrcFlowStore extends EventEmitter {
     if (ended) this.flowEnds.set(connectionId, ended)
     else this.flowEnds.delete(connectionId)
     this.flowStatus.delete(connectionId)
+    this.statusSince.delete(connectionId)
     this.isWitnessed.delete(connectionId)
     this.dialects.delete(connectionId)
     this.hasReceivedOffer.delete(connectionId)

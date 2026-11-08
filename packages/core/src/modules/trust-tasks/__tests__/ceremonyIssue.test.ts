@@ -28,6 +28,8 @@ import {
 } from '../ceremony'
 import { digestMultibase } from '../documentProof'
 import { TrustTaskMessage } from '../messages/TrustTaskMessage'
+import { setSharedConnectEnabled } from '../module/sharedConnectFlag'
+import { SHARED_CONNECT_REMOTE_OFF } from '../module/sharedConnectRemoteOff'
 import { RelationshipDidRepository } from '../../vrc/repositories/RelationshipDidRepository'
 import { vrcFlowStore } from '../../vrc/witnessStatusStore'
 import { readOneClock } from '../../../../__tests__/helpers/oneClock'
@@ -424,6 +426,84 @@ describe('the inbound issue leg (verify, store, receipt)', () => {
     expect(fake.storedCredentials).toHaveLength(0)
     const error = fake.sentMessages[0].document as { payload: { code: string } }
     expect(error.payload.code).toBe('vrc/relationships/issue:notAccepted')
+  })
+
+  describe('a credential proofed eddsa-jcs-2022 (the shared-connect profile)', () => {
+    const jcsIssue = () =>
+      inboundIssue({
+        vrc: {
+          ...UNSIGNED_VRC,
+          issuer: 'did:peer:0zPeerRel',
+          credentialSubject: { id: 'did:peer:0zMyRel' },
+          proof: { ...STUB_PROOF, verificationMethod: 'did:peer:0zPeerRel#key-0' },
+        },
+      })
+    const connection = { id: 'conn-1', did: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' }
+    // The JCS path is behind the shared-connect switch: this handler serves every connection peer.
+    beforeEach(() => setSharedConnectEnabled(true))
+    afterEach(() => setSharedConnectEnabled(false))
+
+    // Off, a JCS credential is refused before any verifier, so the refusal does not rest on Credo lacking the suite:
+    // the fake Credo here accepts by default, which is what a Credo that gained the suite (or skipped an unknown one)
+    // would do. Handed to it, the credential would be stored and receipted.
+    test.each([
+      ['the shared-connect switch off', () => setSharedConnectEnabled(false)],
+      ['the remote off set over a saved "on"', () => (SHARED_CONNECT_REMOTE_OFF.connect = true)],
+    ])('with %s, is refused (notAccepted) before any verifier, and nothing is stored', async (_, turnOff) => {
+      turnOff()
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc, vrc } = jcsIssue()
+      mockedVerify.mockClear()
+      try {
+        await deliver(fake.capturedHandlerRef, doc, connection)
+      } finally {
+        SHARED_CONNECT_REMOTE_OFF.connect = false
+      }
+      // With the purpose argument the real call has four arguments: a three-argument shape here would match nothing
+      // and pass whatever happened.
+      expect(mockedVerify).not.toHaveBeenCalledWith(fake.agent, vrc, 'did:peer:0zPeerRel', {
+        proofPurpose: 'assertionMethod',
+      })
+      expect(fake.w3c.verifyCredential).not.toHaveBeenCalled()
+      expect(fake.storedCredentials).toHaveLength(0)
+      expect((fake.sentMessages[0].document as { payload: { code: string } }).payload.code).toBe(
+        'vrc/relationships/issue:notAccepted'
+      )
+    })
+
+    test('is verified by the document-proof verifier under the issuer, not Credo, stored and receipted', async () => {
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc, vrc } = jcsIssue()
+      mockedVerify.mockClear()
+      await deliver(fake.capturedHandlerRef, doc, connection)
+      expect(mockedVerify).toHaveBeenCalledWith(fake.agent, vrc, 'did:peer:0zPeerRel', {
+        proofPurpose: 'assertionMethod',
+      })
+      expect(fake.w3c.verifyCredential).not.toHaveBeenCalled()
+      expect(fake.storedCredentials).toHaveLength(1)
+      expect((fake.sentMessages[0].document as { type: string }).type).toBe(`${issue.TYPE_URI}#response`)
+    })
+
+    test('a JCS proof that fails is refused and nothing is stored', async () => {
+      const fake = makeFakeAgent({ myDid: 'did:peer:4aaa', theirDid: 'did:peer:4zzz' })
+      setupTrustTasksInbound(fake.agent)
+      const { doc } = jcsIssue()
+      // The envelope proof verifies; the credential's own proof does not.
+      mockedVerify.mockImplementation(
+        async (_a: unknown, document: Record<string, unknown>) => document.type === issue.TYPE_URI
+      )
+      try {
+        await deliver(fake.capturedHandlerRef, doc, connection)
+      } finally {
+        mockedVerify.mockImplementation(async () => true)
+      }
+      expect(fake.storedCredentials).toHaveLength(0)
+      expect((fake.sentMessages[0].document as { payload: { code: string } }).payload.code).toBe(
+        'vrc/relationships/issue:notAccepted'
+      )
+    })
   })
 
   test('a proofless delivery is rejected by the pipeline (spec: request proof REQUIRED)', async () => {
