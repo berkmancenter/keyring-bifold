@@ -889,6 +889,8 @@ describe('picking a link back up', () => {
       })
       const tree = render_()
       await act(async () => undefined)
+      // The screen really listens: with no handler caught, the rows below would pass having delivered nothing.
+      expect(changes.length).toBeGreaterThan(0)
       await act(async () => changes.forEach((c) => c('background')))
       await act(async () => changes.forEach((c) => c('active')))
       await act(async () => {
