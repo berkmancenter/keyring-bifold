@@ -2,12 +2,12 @@
  * A task the agent holds for consent waits for an approver, re-asking about every 8 s (VtaClient.task). In a store
  * build that wait is three minutes. A gate row that holds a link's key swap on purpose (linkfail's held rows) waited
  * all of it and re-asked about twenty-two times, each one a request the runner agent had to store (IN-560). A test
- * build with `E2E_CLOCKS=short` waits half a minute instead; every other build, the store build first, keeps the
+ * build with `E2E_CLOCKS=short` waits 20 s instead, clear of its 30 s auto-lock; every other build, the store build first, keeps the
  * three minutes.
  */
 import Config from 'react-native-config'
 
-import { SHORT_CONSENT_WAIT_MS, effectiveConsentWaitMs } from '../../../utils/e2eClocks'
+import { SHORT_AUTO_LOCK_MINUTES, SHORT_CONSENT_WAIT_MS, effectiveConsentWaitMs } from '../../../utils/e2eClocks'
 import { CONSENT_WAIT_MS } from '../clocks'
 import { VtaClient } from '../module/VtaClient'
 import { VtiRefusal } from '../module/vtiAgent'
@@ -65,12 +65,14 @@ afterEach(() => {
 })
 
 describe('the consent wait', () => {
-  it('is three minutes in a store build, half a minute with E2E_CLOCKS=short', () => {
+  it('is three minutes in a store build, 20 s with E2E_CLOCKS=short, clear of the short auto-lock', () => {
     expect(CONSENT_WAIT_MS).toBe(180_000)
-    expect(SHORT_CONSENT_WAIT_MS).toBe(30_000)
+    expect(SHORT_CONSENT_WAIT_MS).toBe(20_000)
+    // The refusal must be on screen before the phone locks, never at the same moment.
+    expect(SHORT_CONSENT_WAIT_MS).toBeLessThan(SHORT_AUTO_LOCK_MINUTES * 60_000)
     expect(effectiveConsentWaitMs(CONSENT_WAIT_MS)).toBe(180_000)
     config.E2E_CLOCKS = 'short'
-    expect(effectiveConsentWaitMs(CONSENT_WAIT_MS)).toBe(30_000)
+    expect(effectiveConsentWaitMs(CONSENT_WAIT_MS)).toBe(20_000)
   })
 
   it.each([
@@ -87,14 +89,14 @@ describe('the consent wait', () => {
     expect(asksAgain).toBe(23)
   })
 
-  it('with E2E_CLOCKS=short: a held task gives up after half a minute, having asked again 4 times', async () => {
+  it('with E2E_CLOCKS=short: a held task gives up after 20 s, having asked again 3 times', async () => {
     config.E2E_CLOCKS = 'short'
     const { settled, outcome, waitedMs, asksAgain } = await holdUntilGivenUp()
     expect(settled).toBe(true)
     expect(String(outcome)).toContain('auth:consent_required')
-    expect(waitedMs).toBeGreaterThanOrEqual(30_000)
-    expect(waitedMs).toBeLessThan(32_000)
-    expect(asksAgain).toBe(4)
+    expect(waitedMs).toBeGreaterThanOrEqual(20_000)
+    expect(waitedMs).toBeLessThan(22_000)
+    expect(asksAgain).toBe(3)
   })
 
   it('a wait the caller sets still wins over the build, short clocks or not', async () => {
