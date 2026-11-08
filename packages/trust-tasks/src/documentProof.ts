@@ -70,15 +70,47 @@ export function taskDigestMultibase(document: Record<string, unknown>): string {
   return digestMultibase(unproofed)
 }
 
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+
+/** base64url (RFC 4648 §5), padded or not, to bytes; throws on any other character. Platform-neutral (no Buffer). */
+function decodeBase64Url(input: string): Uint8Array {
+  const text = input.replace(/=+$/, '')
+  const out: number[] = []
+  let bits = 0
+  let acc = 0
+  for (const ch of text) {
+    const value = B64URL.indexOf(ch)
+    if (value < 0) throw new Error('not base64url')
+    acc = (acc << 6) | value
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      out.push((acc >> bits) & 0xff)
+      acc &= (1 << bits) - 1
+    }
+  }
+  return Uint8Array.from(out)
+}
+
+/**
+ * A multibase digest string to its bytes. credo's `MultiBaseEncoder` has no decoder for the base64url prefixes
+ * (`u` unpadded, `U` padded) a peer may spell a digest in, so those are decoded here; everything else (`z` base58btc
+ * and the rest credo knows) goes through credo.
+ */
+function decodeMultibaseDigest(value: string): Uint8Array {
+  if (value.startsWith('u') || value.startsWith('U')) return decodeBase64Url(value.slice(1))
+  return MultiBaseEncoder.decode(value).data
+}
+
 /**
  * Digest equality per the spec: compared as DECODED multihash bytes, never as
  * encoded strings — `z` and `u` encodings of one digest are different strings
- * (cred-spec Outcome Interpretability; framework §4.9.3).
+ * (cred-spec Outcome Interpretability; framework §4.9.3). A string that does not decode is not equal to anything.
  */
 export function digestBytesEqual(a: string, b: string): boolean {
   try {
-    const bytesA = MultiBaseEncoder.decode(a).data
-    const bytesB = MultiBaseEncoder.decode(b).data
+    const bytesA = decodeMultibaseDigest(a)
+    const bytesB = decodeMultibaseDigest(b)
     if (bytesA.length !== bytesB.length) return false
     let diff = 0
     for (let i = 0; i < bytesA.length; i++) diff |= bytesA[i] ^ bytesB[i]
