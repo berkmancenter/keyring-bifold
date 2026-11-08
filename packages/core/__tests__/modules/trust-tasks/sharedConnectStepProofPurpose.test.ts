@@ -107,22 +107,27 @@ describe('shared-connect step documents are proved for authentication', () => {
     expect(await defaultSharedConnectDeps(agent).verifyProof(wrongPurpose, [inviter.vid])).toBe(false)
   })
 
-  it('puts the document @context in the proof, as eddsa-jcs-2022 requires, and omits it when there is none', async () => {
+  it('puts the document @context in the proof only when asked (carryContext), and never for a document without one', async () => {
     const did = await createEncounterDid(agent, MEDIATOR, { tsp: true })
     const context = ['https://www.w3.org/ns/credentials/v2', 'https://example.org/vrc/v1']
-    const withContext = await signDocumentProof(
-      agent,
-      { '@context': context, id: 'urn:uuid:1', type: ['VerifiableCredential'] },
-      did,
-      {
-        proofPurpose: 'authentication',
-      }
-    )
+    const document = { '@context': context, id: 'urn:uuid:1', type: ['VerifiableCredential'] }
+    const withContext = await signDocumentProof(agent, document, did, {
+      proofPurpose: 'authentication',
+      carryContext: true,
+    })
     expect((withContext.proof as Record<string, unknown>)['@context']).toEqual(context)
     expect(verifyJcs(withContext, did, 'authentication')).toBe(true)
     expect(await verifyDocumentProof(agent, withContext, did, { proofPurpose: 'authentication' })).toBe(true)
 
-    const bare = await signDocumentProof(agent, step(did, inviter.vid), did, { proofPurpose: 'authentication' })
+    // The default is unchanged: cards, statements and eligibility proofs sign exactly as before.
+    const byDefault = await signDocumentProof(agent, document, did, { proofPurpose: 'authentication' })
+    expect(Object.keys(byDefault.proof as object)).not.toContain('@context')
+    expect(await verifyDocumentProof(agent, byDefault, did, { proofPurpose: 'authentication' })).toBe(true)
+
+    const bare = await signDocumentProof(agent, step(did, inviter.vid), did, {
+      proofPurpose: 'authentication',
+      carryContext: true,
+    })
     expect(Object.keys(bare.proof as object)).not.toContain('@context')
   })
 })
