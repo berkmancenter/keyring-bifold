@@ -63,6 +63,7 @@ jest.mock('../module/vtiAgent', () => {
   }
 })
 
+import { membershipLockKey } from '../module/keyedRecords'
 import { VtiRefusal } from '../module/vtiAgent'
 import { COMMUNITY_ROLE_ENDORSEMENT_TYPE, CREDENTIAL_EXCHANGE_ISSUE, receiveIssue } from '../module/vtiInbox'
 import { joinCommunity } from '../module/vtiJoin'
@@ -361,6 +362,12 @@ describe('the acknowledgement and a role card, writing one membership', () => {
     })
     return { reached, release }
   }
+
+  it('the lock is the key the card, role and renewal writers took before it had one name', () => {
+    // The two tests below prove the role card and the acknowledgement share a key. Nothing else would show the renewal
+    // drifting off it, so the key itself is pinned, as vtiInbox and vtiCardRenewal each spelled it out before.
+    expect(membershipLockKey(COMMUNITY, PERSONA)).toBe(`keyring/vti-membership:${COMMUNITY}:${PERSONA}`)
+  })
 
   it('a role card filed while the acknowledgement waits for the community: both are kept', async () => {
     const s = store({ membership: membershipOf() })
