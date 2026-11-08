@@ -875,6 +875,21 @@ describe('a community a listing skipped for now (a step kept its session: heldBa
     expect(ids(list.result.current.rows.rows)).toEqual(['planning', 'rehearsal'])
   })
 
+  test('a room listed anyway while its community is skipped shows once, as read now', async () => {
+    const n = notes()
+    const s = serviceWith(both(), n)
+    const held = withHeld(s)
+    const { list } = mount(s)
+    await flush()
+    n.rehearsal.push(note('r3', 3))
+    held.now = [{ communityDid: CHOIR }]
+    refreshRoomRows()
+    await flush()
+    const rows = list.result.current.rows.rows.filter((r) => r.roomId === 'rehearsal')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].lastPost?.text).toBe('r3')
+  })
+
   test('nothing is asked for a kept row: it is shown, not read', async () => {
     const s = serviceWith(both(), notes())
     const held = withHeld(s)
@@ -982,7 +997,9 @@ describe('a community a listing skipped for now (a step kept its session: heldBa
     withHeld(s)
     const other = serviceWith([room('planning')], { planning: [note('p1', 1)] })
     Object.assign(other, { heldBack: jest.fn(() => [{ communityDid: CHOIR }]) })
-    const poll = renderHook(({ service }) => useRoomRowsPoll(service, true), { initialProps: { service: s } })
+    const poll = renderHook(({ service }: { service: RoomsService }) => useRoomRowsPoll(service, true), {
+      initialProps: { service: s as RoomsService },
+    })
     const list = renderHook(() => useRoomRows())
     await flush()
     expect(ids(list.result.current.rows)).toEqual(['planning', 'rehearsal'])
