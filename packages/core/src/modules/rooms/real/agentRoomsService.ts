@@ -736,7 +736,7 @@ export class AgentRoomsService implements RoomsService {
       statuses.write = {
         status: 'unavailable',
         reason: 'agentDoesNotServe',
-        detail: 'the agent does not serve rooms/keys/seal at a version that signs as the member',
+        detail: `the agent does not serve ${ROOMS_TASK.keysSeal02}`,
       }
     return statuses
   }
@@ -1547,15 +1547,15 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * The `rooms/keys/seal` this agent takes for a body. A body using a governed member goes at 0.3 or not at all, since
-   * 0.2 refuses those members. Any other body goes at 0.2 wherever the agent serves it, exactly as every post went
-   * before the writer's rule, and at 0.3 only on an agent that serves no 0.2: nothing proven live changes for today's
-   * plain posts (Alberto, 11-08: "Keep posts on 0.2").
+   * 0.2 refuses those members. Any other body goes at 0.2 or not at all, exactly as on main before the writer's rule:
+   * an agent serving no 0.2 is refused, with the version named, rather than written to at 0.3 unwatched (Alberto,
+   * 11-08: "Keep posts on 0.2"). Moving plain posts to 0.3 is a decision for a watched run, not a fallback.
    *
    * @versionLadder rooms/keys/seal
    */
   private sealType(usesGoverned: boolean): string | undefined {
     const served = this.served?.types ?? []
-    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal02, ROOMS_TASK.keysSeal03]
+    const types = usesGoverned ? [ROOMS_TASK.keysSeal03] : [ROOMS_TASK.keysSeal02]
     return types.find((t) => served.includes(t))
   }
 
