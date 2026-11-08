@@ -226,6 +226,10 @@ export async function signDocumentProof(
       : verificationMethod.id,
     proofPurpose,
   }
+  // eddsa-jcs-2022 (W3C Data Integrity, "Proof Configuration"): a document that has an @context carries it,
+  // unchanged, in its proof, and the proof configuration that is hashed includes it. A document without one
+  // (a Trust Task step) gets no @context key, so its proof is unchanged.
+  if (document['@context'] !== undefined) proofConfig['@context'] = document['@context']
 
   const configHash = sha256(new TextEncoder().encode(jcsCanonicalize(proofConfig)))
   // Signed as sent: whole-second instants in the form a verifier rebuilds.

@@ -225,6 +225,8 @@ export function verifyJcs(doc: Record<string, unknown>, controller: string, expe
     const resolved = resolvePeer(controller)
     const absolute = vm.startsWith('#') ? `${controller}${vm}` : vm
     if (config.proofPurpose !== expected) return false
+    // eddsa-jcs-2022 (W3C Data Integrity): a document that has an @context carries it, unchanged, in its proof.
+    if (unsecured['@context'] !== undefined && jcs(config['@context']) !== jcs(unsecured['@context'])) return false
     const key = resolved[expected].find((k) => k.id === absolute)
     if (!key) return false
     return ed25519.verify(unbase58(String(proofValue).slice(1)), hashInput(config, unsecured), key.key)
