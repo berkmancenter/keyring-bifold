@@ -119,7 +119,6 @@ const KeyboardPaddedView: React.FC<KeyboardPaddedViewProps> = ({
   const handleLayout = useCallback(
     (event: LayoutChangeEvent) => {
       frame.current = { top: frame.current.top, height: event.nativeEvent.layout.height }
-      apply()
       measure()
       onLayout?.(event)
     },
