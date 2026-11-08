@@ -32,10 +32,16 @@ import { myAgentTabBadge, useWaitingRequestsCount } from '../modules/trust-tasks
 import { SiblingNoticeHost } from '../modules/trust-tasks/screens/SiblingNoticeHost'
 import { StepUpAskHost } from '../modules/trust-tasks/screens/StepUpAskHost'
 import { VtaOfflineBanner } from '../modules/trust-tasks/screens/VtaStatus'
-import { isMessagesLink, keyringAgentLinkKind, myAgentLinkParams } from '../modules/trust-tasks/module/vtiLinks'
+import {
+  isMessagesLink,
+  keyringAgentLinkKind,
+  linkForLog,
+  myAgentLinkParams,
+} from '../modules/trust-tasks/module/vtiLinks'
 import { linkNoticeToast, openKeyringLink, type KeyringLinkNotice } from '../modules/trust-tasks/module/keyringLinkOpen'
 import { useVtiCardVault } from '../modules/trust-tasks/module/vtiCardVault'
 import { useVtiWalletCards } from '../modules/trust-tasks/module/vtiWalletCards'
+import { useVtiCardRenewal } from '../modules/trust-tasks/module/vtiCardRenewal'
 import { useCardAgentNames } from '../modules/trust-tasks/screens/cardAgentNames'
 // How a community's card reads in the Wallet (registers itself on import).
 import '../modules/trust-tasks/screens/communityCardDisplay'
@@ -45,7 +51,7 @@ import { useVtiIdentityListeners } from '../modules/trust-tasks/module/vtiIdenti
 import { useLookAtOtherAgents } from '../modules/trust-tasks/module/lookAtOtherAgents'
 import { useVtiRefusedCardNotice } from '../modules/trust-tasks/screens/refusedCardNotice'
 import { useVtiJoinedNotice } from '../modules/trust-tasks/screens/joinedNotice'
-import { useVtiVetterGrantedNotice } from '../modules/trust-tasks/screens/vetterNotice'
+import { useVtiVetterEndedNotice, useVtiVetterGrantedNotice } from '../modules/trust-tasks/screens/vetterNotice'
 import { useToastAboveTabBar } from '../modules/trust-tasks/screens/aboveTabBar'
 import { useVtiRemovedNotice } from '../modules/trust-tasks/screens/removedNotice'
 import { useVtiTurnedDownNotice } from '../modules/trust-tasks/screens/turnedDownNotice'
@@ -109,6 +115,8 @@ const TabStack: React.FC = () => {
   useVtiCardVault(agent)
   // …and shown in the Wallet while they stand, copied from the community store.
   useVtiWalletCards(agent)
+  // …and renewed before they lapse, as the community asks the member to (IN-501).
+  useVtiCardRenewal(agent, vti?.mediatorDid)
   // …each saying which agent holds it, when there are several.
   useCardAgentNames(agent)
   // A delivered card the inbox did not keep is said in plain words.
@@ -134,6 +142,7 @@ const TabStack: React.FC = () => {
   useVtiJoinedNotice()
   // …and a community making this phone a vetter.
   useVtiVetterGrantedNotice()
+  useVtiVetterEndedNotice()
   // …and a community turning a request down, once, when the app first learns it.
   useVtiTurnedDownNotice()
   // …and the member's rooms: a new offer, an admission, a post that didn't send. Runs the offers poll, so a new
@@ -174,7 +183,7 @@ const TabStack: React.FC = () => {
 
   const handleDeepLink = useCallback(
     async (deepLink: string) => {
-      logger.info(`Handling deeplink: ${deepLink}`)
+      logger.info(`Handling deeplink: ${linkForLog(deepLink)}`)
 
       // A tapped message notification (MESSAGES_LINK): the Messages tab,
       // through the main stack so it comes above any open modal.
