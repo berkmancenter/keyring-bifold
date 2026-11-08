@@ -21,6 +21,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useTranslation } from 'react-i18next'
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   Platform,
   Pressable,
   ScrollView,
@@ -40,8 +41,9 @@ import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { VETTER_HEADER } from '../../../components/views/VetterHeaderBackground'
 import { GenericRecordsCommunityStore, isCurrentMembership, type VtiHeldCredential } from '../module/VtiCommunityStore'
-import { useCommunityChanged } from '../module/communityChanged'
+import { useCommunityChanged, VTI_PERSONA_MESSAGE_WAITING_EVENT } from '../module/communityChanged'
 import { GenericRecordsIdentityStore, type VtiPersona } from '../module/VtiIdentityStore'
+import { sameIdentity } from '../module/didScid'
 import { HIDDEN_VETTING_SUITE, hiddenVettingSuite } from '../module/joinManifest'
 import { openJoinRequestOf, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { GenericRecordsTspPeerRevisionStore } from '../module/vtiTsp'
@@ -250,6 +252,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   const offeredName = offeredProfileName(seed, profileOptions, profileDefault)
   const [usedOffered, setUsedOffered] = useState(false)
   const [ticketLink, setTicketLink] = useState('')
+  // When a ticket last reached this screen: a member from before then has no use for it.
+  const [ticketTakenAt, setTicketTakenAt] = useState<number>()
   const navigation = useNavigation()
   const { width } = useWindowDimensions()
   // A QR sized for a phone held at arm's length, not for the whole width of an
@@ -276,7 +280,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   useEffect(() => {
     const takePending = () => {
       const ticket = pendingVettingTicket.take()
-      if (ticket) setTicketLink(ticket)
+      if (!ticket) return
+      setTicketLink(ticket)
+      setTicketTakenAt(Date.now())
     }
     takePending()
     return pendingVettingTicket.subscribe(takePending)
@@ -319,8 +325,18 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   const { journey } = useCommunityJourney(agent, communityDid)
   // A join whose read failed is unknown, not "not a member" (joinKnown).
   const knownJoin = joinKnown(journey)
-  const memberRole =
-    membershipRole ?? (knownJoin?.kind === 'member' ? (knownJoin.membership.role ?? 'member') : undefined)
+  // This identity's, or one that names none. Making an identity announces nothing, so the reading can be from before
+  // it: a record the phone held for someone else said "You're a member" to a person who had just left (RCZZ-V2XZ).
+  const ownMembership =
+    knownJoin?.kind === 'member' &&
+    persona &&
+    (!knownJoin.membership.personaDid || sameIdentity(knownJoin.membership.personaDid, persona.did))
+      ? knownJoin.membership
+      : undefined
+  const memberRole = membershipRole ?? (ownMembership ? (ownMembership.role ?? 'member') : undefined)
+  // Scanned by someone who was a member by then. A person admitted through this ticket was not, and hears nothing.
+  const ticketNotNeeded =
+    ownMembership !== undefined && ticketTakenAt !== undefined && Date.parse(ownMembership.grantedAt) < ticketTakenAt
 
   const stores = useMemo(
     () =>
@@ -335,6 +351,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
   )
   const deskRef = useRef<VtiVetterDesk | undefined>(undefined)
   const applicantRef = useRef<VtiApplicant | undefined>(undefined)
+  // Which seat the last read gave this persona, so a re-run listens again at once (the desk effect, below).
+  const seated = useRef<{ did: string; side: 'vetter' | 'applicant' } | undefined>(undefined)
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -502,7 +520,11 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     void (async () => {
       const p = await stores.identity.getPersona(communityDid)
       if (cancelled) return
-      setPersona(p)
+      // The same persona read again keeps its object (an optimisation: the comparison is by serialised value, so
+      // it is only as good as one store path's key order; the early re-listen in the desk effect is the guarantee). A new one re-ran every effect keyed on it, and the desk's
+      // cleanup unhooked the desk each time this connect ran again: the MESSAGE_WAITING bump below brought a
+      // vetting request back exactly while the desk was unhooked (277.7, 0.69 gate kk, 2026-11-03).
+      setPersona((was) => (was && p && JSON.stringify(was) === JSON.stringify(p) ? was : p))
       setPersonaReadFor(communityDid)
       if (!p?.kmsKeyIds?.keyAgreement) return
       try {
@@ -526,6 +548,18 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       cancelled = true
     }
   }, [agent, stores, communityDid, mediatorDid, tick])
+
+  // A message for this persona waits on the mediator, left by its listener because only the shared session's
+  // handlers (this screen's desk, the applicant's wait) can take it: sign in as the persona again, and it is
+  // delivered here. On 276.10 a vetting request reached a vetter's listener while another community held the
+  // session, and was lost (vtiIdentityListeners.keepFromListener).
+  useEffect(() => {
+    if (!personaDid) return
+    const sub = DeviceEventEmitter.addListener(VTI_PERSONA_MESSAGE_WAITING_EVENT, (e: { did?: string }) => {
+      if (e?.did === personaDid && vtiAgent.did !== personaDid) bump()
+    })
+    return () => sub.remove()
+  }, [personaDid, bump])
 
   // The seat's read, for a change announced by the stores (below).
   const seatRefresh = useRef<(() => Promise<void>) | undefined>(undefined)
@@ -559,6 +593,14 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       })
       if (got.length) bump()
     })
+    // A desk or applicant already seated for this persona listens again before anything here is awaited. The
+    // cleanup below unhooked it, and the seat read can take seconds (a status read); a message delivered in between
+    // reached no desk and was acknowledged, so a vetting request was lost (277.7, 0.69 gate kk, 2026-11-03).
+    // listen() replaces its own registration, so the read's own listen() below adds no second one.
+    if (seated.current?.did === persona.did) {
+      if (seated.current.side === 'vetter') deskRef.current?.listen()
+      else applicantRef.current?.listen()
+    }
     let cancelled = false
     const refreshSeat = async () => {
       const grants = await stores.community.listHeldCredentials('vetter-grant', persona.communityDid)
@@ -586,6 +628,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!deskRef.current)
           deskRef.current = new VtiVetterDesk(agent, persona, stores.vetting, stores.community, bump)
         deskRef.current.listen()
+        // One side listens: a seat that changed side must not leave the other taking deliveries it cannot serve.
+        applicantRef.current?.stopListening()
+        seated.current = { did: persona.did, side: 'vetter' }
         const p = await stores.vetting.getProfile(persona.communityDid)
         setProfile(p)
         setProfileName((v) => v || p?.displayName || '')
@@ -598,6 +643,10 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         if (!applicantRef.current)
           applicantRef.current = new VtiApplicant(agent, persona, stores.vetting, stores.community, bump)
         applicantRef.current.listen()
+        // A desk left listening after its grant went would take a vetting request, have it acknowledged, and be
+        // unable to serve it: the loss this seat's early re-listen exists to prevent.
+        deskRef.current?.stopListening()
+        seated.current = { did: persona.did, side: 'applicant' }
         const a = await stores.vetting.getApplication(persona.communityDid)
         setApplication(a)
         // A ticket kept from an earlier visit (camera, link, paste) is still here.
@@ -699,8 +748,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
     // A ticket for another community is not asked with: the field shows why.
     if (!checkTicketFor(ticket, communityDid).ok) return
     void run('request', async () => {
-      await vettingManifest(application.requirementsDigest)
-      await applicantRef.current!.requestVetter({ link: ticket })
+      const m = await vettingManifest(application.requirementsDigest)
+      await applicantRef.current!.requestVetter({ link: ticket, manifest: m })
     })
   }, [ticketLink, application, communityDid, busy, run, vettingManifest])
 
@@ -718,7 +767,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       hiddenVettingSuite(c) === HIDDEN_VETTING_SUITE &&
       (!application?.requirementsDigest || c.requirementsDigest === application.requirementsDigest)
   )
-  const privateHere = carriesPrivate && (checklist ? checklist.mode === 'private' : Boolean(privateCriterion))
+  // The way in counts as well as the checklist: an application with no private
+  // record for its own join DID yet reads as named, and the mark stays.
+  const privateHere = carriesPrivate && (checklist?.mode === 'private' || Boolean(privateCriterion))
   // The manifest, read in a build that carries private vetting: the
   // applicant's mark from the first step, and the vetter's private way. Read
   // afresh even when one from earlier is shown: the community's answer now counts.
@@ -1463,8 +1514,8 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         disabled={!!busy || !ticketLink.trim() || !!ticketRefused}
         onPress={() =>
           run('request', async () => {
-            await vettingManifest(application?.requirementsDigest)
-            await applicantRef.current!.requestVetter({ link: ticketLink.trim() })
+            const m = await vettingManifest(application?.requirementsDigest)
+            await applicantRef.current!.requestVetter({ link: ticketLink.trim(), manifest: m })
           })
         }
       >
@@ -1645,6 +1696,7 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
                     : tp('Vetting.Member', { community: communityLabelOf(communityDid ?? '', t) })}
                 </Text>
               </View>
+              {ticketNotNeeded ? <Text style={styles.value}>{t('Vetting.MemberTicketNotNeeded')}</Text> : null}
               <Pressable
                 style={look(VtiVettingIds.goToMyAgent, applicantPrimaryId).button}
                 testID={testIdWithKey(VtiVettingIds.goToMyAgent)}

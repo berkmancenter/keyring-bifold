@@ -8,6 +8,8 @@
  * runs on real proofs, as ref-23 and ref-24 ran them against live ones.
  */
 import { TypedArrayEncoder } from '@credo-ts/core'
+import { PAYLOAD_SCHEMA as GRANT_0_3 } from '@openvtc/trust-tasks/auth/oob/grant/0.3/payload'
+import Ajv from 'ajv/dist/2020'
 import { ed25519 } from '@noble/curves/ed25519.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 
@@ -18,6 +20,7 @@ import {
   SignInError,
   isUnsupportedTaskCode,
   newThrowawayKey,
+  signInEndLine,
   signWithKey,
   type ClaimedSignIn,
   type SignInDidDocument,
@@ -129,17 +132,24 @@ const errorDocument = (code: string) => ({
 
 const resolverFor = (document: SignInDidDocument) => ({ dids: { resolveDidDocument: async () => document } }) as never
 
-function step1Payload() {
+/** A community at vtc 0.14 or before (claim 0.1, prove/grant/respond 0.1-0.2), or from 0d3f268e (claim 0.2, prove/grant/respond 0.3 only). */
+type Era = '0.14' | '0d3f'
+
+/** The decision deadline as each era spells it: epoch seconds, or RFC 3339 `decisionClosesAt`. */
+const deadlineMember = (era: Era) =>
+  era === '0d3f' ? { decisionClosesAt: new Date((NOW + 120) * 1000).toISOString() } : { decisionDeadline: NOW + 120 }
+
+function step1Payload(era: Era = '0.14') {
   return {
     requestId: REQUEST_ID,
     service: { did: VTC, name: VTC },
     origin: ORIGIN,
     purpose: 'login',
-    decisionDeadline: NOW + 120,
+    ...deadlineMember(era),
   }
 }
 
-function claimedSignIn(): ClaimedSignIn {
+function claimedSignIn(era: Era = '0.14'): ClaimedSignIn {
   const keyA = newThrowawayKey()
   return {
     requestId: REQUEST_ID,
@@ -151,12 +161,12 @@ function claimedSignIn(): ClaimedSignIn {
     answer: signWithKey(
       {
         id: 'urn:uuid:claim-answer',
-        type: `${OOB_TASKS.claim}#response`,
+        type: `${era === '0d3f' ? OOB_TASKS.claim02 : OOB_TASKS.claim}#response`,
         issuer: VTC,
         recipient: keyA.did,
         threadId: 'urn:uuid:claim',
         issuedAt: '2026-10-11T07:30:00Z',
-        payload: step1Payload(),
+        payload: step1Payload(era),
       },
       vtcAssert,
       `${VTC}#key-0`,
@@ -180,17 +190,22 @@ function fakeCommunity(
     step2Change?: (answer: Doc, payload: Record<string, unknown>) => void
     only01?: boolean
     offerScope?: string[]
+    era?: Era
   } = {}
 ) {
+  const era = options.era ?? '0.14'
   const state: { step2?: Record<string, unknown>; respondAnswer?: Record<string, unknown>; grant?: Doc } = {}
   const post = jest.fn(async (url: string, document: Record<string, unknown>) => {
     expect(url).toBe(`${BASE}/trust-tasks`)
     const doc = document as Doc
+    // What each era does not serve, refused at dispatch (vtc-service member_portal/oob.rs at vtc 0.14 / 0d3f268e).
+    const v03 = doc.type === OOB_TASKS.prove03 || doc.type === OOB_TASKS.respond03
+    if (era === '0.14' ? v03 : !v03) return errorDocument('unsupportedType')
     if (options.only01 && (doc.type === OOB_TASKS.prove02 || doc.type === OOB_TASKS.respond02)) {
       return errorDocument('unsupportedVersion')
     }
-    if (doc.type === OOB_TASKS.prove || doc.type === OOB_TASKS.prove02) {
-      const v02 = doc.type === OOB_TASKS.prove02
+    if (doc.type === OOB_TASKS.prove || doc.type === OOB_TASKS.prove02 || doc.type === OOB_TASKS.prove03) {
+      const v02 = doc.type !== OOB_TASKS.prove
       const identify = doc.payload.identify as Doc
       if (
         !(await verifyDocumentProof(resolverFor(personaDocument()), identify, PERSONA, {
@@ -200,7 +215,7 @@ function fakeCommunity(
         return errorDocument('auth/oob:notAuthorized')
       if (identify.payload.enteredNumber !== MATCH) return errorDocument('auth/oob/prove:numberMismatch')
       const payload: Record<string, unknown> = {
-        ...step1Payload(),
+        ...step1Payload(era),
         sessionKey: newThrowawayKey().did,
         requester: {
           location: 'unknown',
@@ -225,13 +240,18 @@ function fakeCommunity(
       state.step2 = signWithKey(answer, vtcAssert, `${VTC}#key-0`, 'assertionMethod')
       return state.step2
     }
-    if (doc.type === OOB_TASKS.respond || doc.type === OOB_TASKS.respond02) {
-      const v02 = doc.type === OOB_TASKS.respond02
+    if (doc.type === OOB_TASKS.respond || doc.type === OOB_TASKS.respond02 || doc.type === OOB_TASKS.respond03) {
+      const v02 = doc.type !== OOB_TASKS.respond
       const grant = doc.payload.grant as Doc
       state.grant = grant
       const offered = (state.step2?.payload as Record<string, unknown> | undefined)?.signingScope
+      const grantOf: Record<string, string> = {
+        [OOB_TASKS.respond]: OOB_TASKS.grant,
+        [OOB_TASKS.respond02]: OOB_TASKS.grant02,
+      }
+      const grantType = grantOf[doc.type] ?? OOB_TASKS.grant03
       const ok =
-        grant.type === (v02 ? OOB_TASKS.grant02 : OOB_TASKS.grant) &&
+        grant.type === grantType &&
         (await verifyDocumentProof(resolverFor(personaDocument()), grant, PERSONA, {
           proofPurpose: 'assertionMethod',
         })) &&
@@ -272,6 +292,10 @@ function fakeVta(
     reorder?: boolean
     tamper?: boolean
     noGrant02?: boolean
+    /** An agent at v0.66.0 or before: it signs grants only at 0.1 and 0.2. */
+    noGrant03?: boolean
+    /** An agent from 0d3f268e: it signs a persona's grant only at 0.3 (sign_trust_task.rs). */
+    only03?: boolean
   } = {}
 ) {
   const enrolledUv = options.enrolledUv === undefined ? UV_DID : options.enrolledUv
@@ -285,7 +309,11 @@ function fakeVta(
       let purpose: 'authentication' | 'assertionMethod' = 'authentication'
       // An agent from before auth/oob/grant/0.2 (VTI #2190) refuses it (vta-service oob_sign_in.rs:282).
       if (options.noGrant02 && envelope.type === OOB_TASKS.grant02) throw refuse('oobUnsupportedType')
-      if (envelope.type === OOB_TASKS.grant || envelope.type === OOB_TASKS.grant02) {
+      if (options.noGrant03 && envelope.type === OOB_TASKS.grant03) throw refuse('oobUnsupportedType')
+      if (options.only03 && (envelope.type === OOB_TASKS.grant || envelope.type === OOB_TASKS.grant02)) {
+        throw refuse('oobUnsupportedType')
+      }
+      if ([OOB_TASKS.grant, OOB_TASKS.grant02, OOB_TASKS.grant03].includes(envelope.type as never)) {
         const decision = (ext?.[EXT_UV_CONSENT] as { decision?: Doc } | undefined)?.decision
         if (!decision) throw refuse('oobUvRequired')
         if (!enrolledUv) throw refuse('oobNoUvKey')
@@ -370,7 +398,9 @@ describe('identify and prove', () => {
     // Only the framework members the VTA allows on a sign-in document (oob_sign_in.rs:99-111).
     expect(Object.keys(unsignedEnvelope).sort()).toEqual(['id', 'issuedAt', 'issuer', 'payload', 'recipient', 'type'])
 
-    const [, prove] = community.post.mock.calls[0]
+    // A vtc 0.14 community refuses prove/0.3 at dispatch; the proof is the 0.2 sent next.
+    expect((community.post.mock.calls[0][1] as Doc).type).toBe(OOB_TASKS.prove03)
+    const [, prove] = community.post.mock.calls[1]
     expect(prove).toMatchObject({
       type: OOB_TASKS.prove02,
       issuer: claimed.keyA.did,
@@ -485,7 +515,7 @@ describe('identify and prove', () => {
       [
         'with another deadline',
         (_: Doc, p: Record<string, unknown>) => (p.decisionDeadline = NOW + 999),
-        /decisionDeadline/,
+        /decision deadline/,
       ],
       [
         'with a session key that is not Ed25519',
@@ -565,7 +595,7 @@ describe('approving a sign-in', () => {
     })
     expect(deps.uvSign).toHaveBeenCalledWith(expect.any(Uint8Array), UV_APPROVE_PROMPT)
 
-    const [, respond] = community.post.mock.calls[1]
+    const [, respond] = community.post.mock.calls[2]
     expect(respond).toMatchObject({
       type: OOB_TASKS.respond02,
       issuer: p.claimed.keyA.did,
@@ -662,7 +692,8 @@ describe('approving a sign-in', () => {
       const error = await failureOf(approveSignIn(p, deps))
       expect(error.reason).toBe(reason)
       expect(error.responded).toBe(false)
-      expect(community.post).toHaveBeenCalledTimes(1) // prove only
+      // prove only: prove/0.3, refused by this vtc 0.14 community, then prove/0.2
+      expect(community.post).toHaveBeenCalledTimes(2)
     })
 
     it('reads the code from the message when details carry none (G10)', () => {
@@ -689,7 +720,8 @@ describe('approving a sign-in', () => {
     const error = await failureOf(approveSignIn(p, deps))
     expect(error.reason).toBe('agentNeedsUpdate')
     expect(error.message).toBe(SIGN_IN_FAILURE_MESSAGES.agentNeedsUpdate)
-    expect(community.post).toHaveBeenCalledTimes(1)
+    // prove only: prove/0.3, refused by this vtc 0.14 community, then prove/0.2
+    expect(community.post).toHaveBeenCalledTimes(2)
   })
 
   it("a grant signed by a key that is not the persona's is still a bad answer, nothing sent", async () => {
@@ -701,7 +733,8 @@ describe('approving a sign-in', () => {
     const error = await failureOf(approveSignIn(p, deps))
     expect(error.reason).toBe('badAnswer')
     expect(error.detail).toMatch(/assertionMethod/)
-    expect(community.post).toHaveBeenCalledTimes(1)
+    // prove only: prove/0.3, refused by this vtc 0.14 community, then prove/0.2
+    expect(community.post).toHaveBeenCalledTimes(2)
   })
 
   it('marks every failure from respond on as responded: never cancel then (G2)', async () => {
@@ -813,7 +846,7 @@ describe('auth/oob 0.2: the signing scope', () => {
     expect(p).toMatchObject({ version: '0.2', signingScope: DIRECTORY })
     await expect(approveSignIn(p, deps)).resolves.toEqual({ status: 'approved' })
     expect(community.state.grant).toMatchObject({ type: OOB_TASKS.grant02, payload: { signingScope: DIRECTORY } })
-    expect(community.post.mock.calls[1][1]).toMatchObject({ type: OOB_TASKS.respond02 })
+    expect(community.post.mock.calls[2][1]).toMatchObject({ type: OOB_TASKS.respond02 })
   })
 
   it('offered no scope (the console, or a member sign-in that offers none): the 0.2 grant carries none', async () => {
@@ -832,26 +865,32 @@ describe('auth/oob 0.2: the signing scope', () => {
     async (code) => {
       const community = fakeCommunity()
       const real = community.post.getMockImplementation()!
+      // prove/0.3 is refused by the fake's era; prove/0.2 by this test.
+      community.post.mockImplementationOnce(real)
       community.post.mockImplementationOnce(async () => errorDocument(code))
       community.post.mockImplementation(real)
       const vtaFake = fakeVta()
       const deps = depsWith(community, vtaFake)
       const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
-      expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove02, OOB_TASKS.prove])
-      // The identify is signed once and sent in both.
+      expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([
+        OOB_TASKS.prove03,
+        OOB_TASKS.prove02,
+        OOB_TASKS.prove,
+      ])
+      // The identify is signed once and sent in all three.
       expect(vtaFake.signTrustTask).toHaveBeenCalledTimes(1)
-      expect((community.post.mock.calls[1][1] as Doc).payload.identify).toEqual(
+      expect((community.post.mock.calls[2][1] as Doc).payload.identify).toEqual(
         (community.post.mock.calls[0][1] as Doc).payload.identify
       )
       expect(p).toMatchObject({ version: '0.1' })
       expect(p.signingScope).toBeUndefined()
       await expect(approveSignIn(p, deps)).resolves.toEqual({ status: 'approved' })
       expect(community.state.grant?.type).toBe(OOB_TASKS.grant)
-      expect(community.post.mock.calls[2][1]).toMatchObject({ type: OOB_TASKS.respond })
+      expect(community.post.mock.calls[3][1]).toMatchObject({ type: OOB_TASKS.respond })
     }
   )
 
-  it('a community refusing prove/0.2 for another reason is not retried at 0.1', async () => {
+  it('a community refusing a prove for another reason is not retried a version down', async () => {
     const community = fakeCommunity()
     community.post.mockImplementationOnce(async () => errorDocument('auth/oob:requestExpired'))
     const error = await failureOf(identifyAndProve(claimedSignIn(), MATCH, depsWith(community)))
@@ -894,7 +933,7 @@ describe('auth/oob 0.2: the signing scope', () => {
     expect(deps.uvSign).toHaveBeenCalledTimes(2)
     expect(community.state.grant).toMatchObject({ type: OOB_TASKS.grant })
     expect(community.state.grant?.payload).not.toHaveProperty('signingScope')
-    expect(community.post.mock.calls[1][1]).toMatchObject({ type: OOB_TASKS.respond })
+    expect(community.post.mock.calls[2][1]).toMatchObject({ type: OOB_TASKS.respond })
   })
 
   it("keeps the community's and the agent's 'unsupported' refusals apart (the two fallbacks never cross)", () => {
@@ -919,6 +958,138 @@ describe('auth/oob 0.2: the signing scope', () => {
     const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
     expect(p.version).toBe('0.1')
     await expect(approveSignIn(p, deps)).resolves.toEqual({ status: 'approved' })
+  })
+})
+
+// The 2026-10-24 naming pass reached the services on 10-28 (vta-service 0d3f268e, what first.openvtc.net runs): a
+// community then serves only claim 0.2 and prove/grant/respond 0.3, whose deadline is `decisionClosesAt` and whose
+// grant names `sessionEndsAt`; the member's agent signs a persona's grant only at 0.3. 0.3 is asked first, and a
+// community at vtc 0.14 or before is proved again at 0.2.
+describe('auth/oob 0.3: communities and agents from 0d3f268e', () => {
+  const DIRECTORY = ['vtc/directory']
+
+  it('proves at 0.3, and the grant names sessionEndsAt (RFC 3339) under respond/0.3, valid against grant/0.3', async () => {
+    const community = fakeCommunity({ era: '0d3f', offerScope: DIRECTORY })
+    const deps = depsWith(community, fakeVta({ only03: true }))
+    const p = await identifyAndProve(claimedSignIn('0d3f'), MATCH, deps)
+    expect(p).toMatchObject({ version: '0.3', signingScope: DIRECTORY })
+    await expect(approveSignIn(p, deps)).resolves.toEqual({ status: 'approved' })
+    expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03, OOB_TASKS.respond03])
+    const grant = community.state.grant!
+    expect(grant.type).toBe(OOB_TASKS.grant03)
+    expect(grant.payload).not.toHaveProperty('notAfter')
+    expect(grant.payload.sessionEndsAt).toBe(
+      new Date((NOW + GRANT_LIFETIME_SECONDS) * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z')
+    )
+    expect(grant.payload.signingScope).toEqual(DIRECTORY)
+    const valid = new Ajv({ strict: false, allErrors: true, logger: false }).compile(GRANT_0_3 as object)
+    expect(valid(grant.payload)).toBe(true)
+  })
+
+  it("reads step 2's decisionClosesAt as the same instant as step 1's", async () => {
+    const community = fakeCommunity({
+      era: '0d3f',
+      step2Change: (_answer, payload) => {
+        payload.decisionClosesAt = new Date((NOW + 60) * 1000).toISOString()
+      },
+    })
+    const error = await failureOf(identifyAndProve(claimedSignIn('0d3f'), MATCH, depsWith(community)))
+    expect(error).toMatchObject({ reason: 'badAnswer', detail: "step 2 does not repeat step 1's decision deadline" })
+  })
+
+  it('a community at vtc 0.14 (refusing prove/0.3 as a type it does not serve) is proved again at 0.2', async () => {
+    const community = fakeCommunity({ offerScope: DIRECTORY })
+    const deps = depsWith(community)
+    const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
+    expect(p).toMatchObject({ version: '0.2', signingScope: DIRECTORY })
+    await expect(approveSignIn(p, deps)).resolves.toEqual({ status: 'approved' })
+    expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([
+      OOB_TASKS.prove03,
+      OOB_TASKS.prove02,
+      OOB_TASKS.respond02,
+    ])
+    expect(community.state.grant?.type).toBe(OOB_TASKS.grant02)
+  })
+
+  it('a 0d3f268e community with an agent that cannot sign grant/0.3: needs an update, nothing sent to respond', async () => {
+    const community = fakeCommunity({ era: '0d3f' })
+    const deps = depsWith(community, fakeVta({ noGrant03: true }))
+    const p = await identifyAndProve(claimedSignIn('0d3f'), MATCH, deps)
+    expect(p.version).toBe('0.3')
+    const error = await failureOf(approveSignIn(p, deps))
+    expect(error).toMatchObject({ reason: 'agentNeedsUpdate', detail: 'oobUnsupportedType' })
+    expect(community.post.mock.calls.map(([, d]) => (d as Doc).type)).toEqual([OOB_TASKS.prove03])
+  })
+
+  // IN-390 (276.9): a sign-in ended "Your agent needs an update" and nothing in the Release log said which version
+  // was asked. The error now carries the prove and grant versions asked; the endings are unchanged.
+  it('a current agent (grant 0.3 only) with a community at 0.2: the ending notes every version asked', async () => {
+    const community = fakeCommunity()
+    const deps = depsWith(community, fakeVta({ only03: true }))
+    const p = await identifyAndProve(claimedSignIn(), MATCH, deps)
+    expect(p).toMatchObject({ version: '0.2', provesTried: ['0.3', '0.2'] })
+    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
+      reason: 'agentNeedsUpdate',
+      detail: 'oobUnsupportedType',
+      tried: { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] },
+    })
+  })
+
+  it('an agent without grant 0.3 with a community at 0.3: the ending notes the one version asked', async () => {
+    const community = fakeCommunity({ era: '0d3f' })
+    const deps = depsWith(community, fakeVta({ noGrant03: true }))
+    const p = await identifyAndProve(claimedSignIn('0d3f'), MATCH, deps)
+    expect(await failureOf(approveSignIn(p, deps))).toMatchObject({
+      reason: 'agentNeedsUpdate',
+      tried: { prove: ['0.3'], grant: ['0.3'] },
+    })
+  })
+
+  it('a step 2 that fails its check notes the prove versions asked', async () => {
+    const community = fakeCommunity({
+      era: '0d3f',
+      step2Change: (_answer, payload) => {
+        payload.decisionClosesAt = new Date((NOW + 60) * 1000).toISOString()
+      },
+    })
+    expect(await failureOf(identifyAndProve(claimedSignIn('0d3f'), MATCH, depsWith(community)))).toMatchObject({
+      reason: 'badAnswer',
+      tried: { prove: ['0.3'] },
+    })
+  })
+})
+
+// IN-390: the Release log said nothing about which check ended the sign-in. One line per failed sign-in now does:
+// the reason, its detail and the versions tried, never a link, a key or a document.
+describe('the Release line for a sign-in that ended', () => {
+  it('names the reason, its detail and the prove and grant versions tried', () => {
+    const error = new SignInError('agentNeedsUpdate', 'oobUnsupportedType')
+    error.tried = { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] }
+    expect(signInEndLine(error)).toBe(
+      '[SignIn] not signed in: agentNeedsUpdate (oobUnsupportedType); prove 0.3>0.2; grant 0.2>0.1'
+    )
+  })
+
+  it('leaves links, keys and documents out of the detail, and keeps a DID to its prefix', () => {
+    const line = signInEndLine(
+      new SignInError(
+        'agentUnreachable',
+        'no answer from https://vta.example/path?x=1 for did:webvh:QmRjehe8RTU21cqM7813P9FVwjpqsi8LYRKFrhzP7VJErw:dids.example:gt-vta signing as did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK over {"type":"x","payload":{"secret":"s"}}'
+      )
+    )
+    expect(line).not.toMatch(/https?:/)
+    expect(line).not.toMatch(/z6MkhaXgBZDvotDkL5257/)
+    expect(line).not.toMatch(/QmRjehe8RTU21cqM7813P9FVwjpqsi8LYRKFrhzP7VJErw/)
+    expect(line).not.toMatch(/secret/)
+    expect(line).toMatch(/^\[SignIn\] not signed in: agentUnreachable \(/)
+    expect(line).toMatch(/did:webvh:QmRjehe8…/)
+    expect(line.length).toBeLessThanOrEqual(300)
+  })
+
+  it('an error that is not a sign-in error is named by its kind only', () => {
+    expect(signInEndLine(new TypeError('Cannot read x of undefined'))).toBe(
+      '[SignIn] not signed in: unknown (TypeError)'
+    )
   })
 })
 

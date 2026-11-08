@@ -4,8 +4,11 @@
  * the browser, Approve or Decline, and every way it can end — against fake
  * steps, so no protocol runs here.
  */
+import { useNavigation } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
+import i18n from 'i18next'
 import React from 'react'
+import { PixelRatio } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
@@ -14,11 +17,24 @@ import en from '../../../localization/en/en.json'
 import fr from '../../../localization/fr/fr.json'
 import ptBr from '../../../localization/pt-br/pt-br.json'
 import { hasOtaApplyBlockers, otaApplyBlockerReasons, resetOtaApplyBlockers } from '../../../utils/otaApply'
+import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { SIGN_IN_FAILURE_MESSAGES, SignInError, type ClaimedSignIn } from '../module/oobSignIn'
-import { GRANT_LIFETIME_SECONDS } from '../module/oobSignInAgent'
-import { type ProvedSignIn, type SignInIdentity, type SignInSteps } from '../module/signInSteps'
+import {
+  GRANT_LIFETIME_SECONDS,
+  type ProvedSignIn as AgentProvedSignIn,
+  type SignInRequester,
+} from '../module/oobSignInAgent'
+import {
+  type FarmProvedSignIn,
+  type FarmSignInIdentity,
+  type ProvedSignIn,
+  type SignInIdentity,
+  type SignInSteps,
+} from '../module/signInSteps'
 import SignIn, { SignInFlow } from '../screens/SignIn'
+import { didDomainPath } from '../screens/communityName'
+import { communityTarget } from '../module/vtiCommunityLink'
 import { SignInIds } from '../screens/SignIn.ids'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -40,11 +56,18 @@ const claimed = {
   answer: {},
 } as unknown as ClaimedSignIn
 
-const proved: ProvedSignIn = {
+// A sign-in through the member's agent; a Farm's (farmSignIn) has its own shape.
+const proved: AgentProvedSignIn = {
   claimed,
   step2: {},
-  sessionKey: {},
-  requester: { browser: 'Firefox 131', os: 'macOS', location: 'Boston, US', sameNetwork: true },
+  sessionKey: 'did:key:z6MkBrowserSessionKey',
+  requester: {
+    browser: 'Firefox 131',
+    os: 'macOS',
+    location: 'Boston, US',
+    sameNetwork: true,
+    createdAt: '2026-10-11T07:30:00Z',
+  },
   identifiedAs: 'Alberto',
   persona: { did: 'did:webvh:QmP:host:persona', entryId: 'entry-1' },
   version: '0.2',
@@ -132,9 +155,15 @@ describe('1. confirm, before anything is sent', () => {
     expect(tree.getByTestId(id(SignInIds.community))).not.toHaveTextContent(VTC)
   })
 
-  test('a community this phone has not joined, with no name: its handle, the DID behind Details', async () => {
+  // A sender this phone has not joined and has no name for: nothing is looked up (VTI-LNK-050), so whether it has
+  // published a name, or is a community at all (a Farm's code reads the same), is not known. Its address says only
+  // what is so, as the confirm step did (IN-388 step D, 276.10: "vtafarm-auth (no name published yet)").
+  test('a sender this phone has not joined, with no name: its address, no name claimed, the DID behind Details', async () => {
     const tree = await show(fakeSteps({ community: jest.fn(async () => ({ member: false })) }))
     expect(tree.getByTestId(id(SignInIds.notMember))).toBeTruthy()
+    expect(tree.getByTestId(id(SignInIds.community))).toHaveTextContent(didDomainPath(VTC) as string)
+    expect(tree.getByText('SignIn.HostLabel')).toBeTruthy()
+    expect(tree.queryByText(/Community\.UnnamedRef/)).toBeNull()
     expect(tree.getByTestId(id(SignInIds.community))).not.toHaveTextContent(VTC)
     expect(tree.queryByTestId(id(`${SignInIds.communityDid}Did`))).toBeNull()
     await press(tree, `${SignInIds.communityDid}Toggle`)
@@ -158,6 +187,95 @@ describe('1. confirm, before anything is sent', () => {
     expect(tree.queryByTestId(id(SignInIds.continue))).toBeNull()
     expect(tree.getByTestId(id(SignInIds.done))).toBeTruthy()
     expect(steps.claim).not.toHaveBeenCalled()
+  })
+
+  // IN-406: a community's join page shows its sign-in code. Whether the sender is a community is asked only on the
+  // tap (VTI-LNK-050), and nothing is claimed or sent to it: Join is what first asks it anything.
+  describe('"Check and join" on a code from a community this phone has not joined', () => {
+    const onJoin = jest.fn()
+    const unjoined = (joinable: SignInSteps['joinable']) =>
+      fakeSteps({ community: jest.fn(async () => ({ member: false, name: 'Elsewhere' })), joinable })
+    const showJoin = async (steps: SignInSteps) => {
+      const tree = render(
+        <BasicAppContext>
+          <SignInFlow link={LINK} steps={steps} now={now} onClose={onClose} onJoin={onJoin} />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+    beforeEach(() => onJoin.mockReset())
+
+    test('offered beside the not-joined words, and nothing is checked until the tap', async () => {
+      const steps = unjoined(jest.fn(async () => true))
+      const tree = await showJoin(steps)
+      expect(message(tree)).toHaveTextContent('SignIn.Failure.notAMember')
+      expect(tree.getByTestId(id(SignInIds.checkAndJoin))).toBeTruthy()
+      expect(steps.joinable).not.toHaveBeenCalled()
+    })
+
+    test('a community: Join opens for it, and the scanned request is never claimed', async () => {
+      const steps = unjoined(jest.fn(async () => true))
+      const tree = await showJoin(steps)
+      await press(tree, SignInIds.checkAndJoin)
+      expect(steps.joinable).toHaveBeenCalledWith(VTC)
+      expect(onJoin).toHaveBeenCalledWith(VTC)
+      expect(steps.claim).not.toHaveBeenCalled()
+      expect(steps.cancel).not.toHaveBeenCalled()
+    })
+
+    test('not a community: said so in place of the offer, and Join does not open', async () => {
+      const steps = unjoined(jest.fn(async () => false))
+      const tree = await showJoin(steps)
+      await press(tree, SignInIds.checkAndJoin)
+      expect(tree.getByTestId(id(SignInIds.notJoinable))).toHaveTextContent('SignIn.NotJoinable')
+      expect(tree.queryByTestId(id(SignInIds.checkAndJoin))).toBeNull()
+      expect(message(tree)).toHaveTextContent('SignIn.Failure.notAMember')
+      expect(onJoin).not.toHaveBeenCalled()
+      expect(steps.claim).not.toHaveBeenCalled()
+    })
+
+    test('not checked (no answer in time, or the check failed): said so, never as a "no", and it can be tried again', async () => {
+      const failures: (() => Promise<boolean | undefined>)[] = [
+        async () => undefined,
+        async () => Promise.reject(new Error('offline')),
+      ]
+      for (const failed of failures) {
+        const joinable = jest.fn(failed)
+        const steps = unjoined(joinable)
+        const tree = await showJoin(steps)
+        await press(tree, SignInIds.checkAndJoin)
+        expect(tree.getByTestId(id(SignInIds.joinUnchecked))).toHaveTextContent('SignIn.JoinUnchecked')
+        expect(tree.queryByTestId(id(SignInIds.notJoinable))).toBeNull()
+        expect(onJoin).not.toHaveBeenCalled()
+        // The host is back: tried again, and Join opens.
+        joinable.mockResolvedValueOnce(true)
+        await press(tree, SignInIds.checkAndJoin)
+        expect(joinable).toHaveBeenCalledTimes(2)
+        expect(onJoin).toHaveBeenCalledWith(VTC)
+        expect(steps.claim).not.toHaveBeenCalled()
+        onJoin.mockReset()
+        tree.unmount()
+      }
+    })
+
+    test('the older-agents line stays, with the offer below it', async () => {
+      const steps = fakeSteps({
+        community: jest.fn(async () => ({ member: false, name: 'Elsewhere', olderAgents: true })),
+        joinable: jest.fn(async () => false),
+      })
+      const tree = await showJoin(steps)
+      expect(tree.getByTestId(id(SignInIds.olderAgents))).toBeTruthy()
+      expect(tree.getByTestId(id(SignInIds.checkAndJoin))).toBeTruthy()
+    })
+
+    test('a member signs in as before: no offer', async () => {
+      const steps = fakeSteps({ joinable: jest.fn(async () => true) })
+      const tree = await showJoin(steps)
+      expect(tree.getByTestId(id(SignInIds.continue))).toBeTruthy()
+      expect(tree.queryByTestId(id(SignInIds.checkAndJoin))).toBeNull()
+      expect(steps.joinable).not.toHaveBeenCalled()
+    })
   })
 
   test('a code that expired on the way is refused before the records are even read', async () => {
@@ -208,9 +326,9 @@ describe('1b. which identity, when several hold a membership', () => {
     expect(tree.getByTestId(id(SignInIds.choose))).toBeTruthy()
     expect(steps.claim).not.toHaveBeenCalled()
     expect(tree.getByTestId(id(`${SignInIds.identityOption}-0`))).toHaveTextContent(/Me at Test/)
-    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-0`))).toHaveTextContent('SignIn.ChooseOnAgentCurrent')
+    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-0`))).toHaveTextContent('SignIn.ThisPhonesAgent')
     expect(tree.getByTestId(id(`${SignInIds.identityOption}-0`))).toHaveTextContent(/SignIn\.ChooseFromPhone/)
-    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-1`))).toHaveTextContent('SignIn.ChooseOnAgent')
+    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-1`))).toHaveTextContent('SignIn.AnotherAgent')
     expect(tree.getByTestId(id(`${SignInIds.identityOption}-1`))).toHaveTextContent(/SignIn\.ChooseFromAgent/)
 
     await press(tree, `${SignInIds.identityOption}-1`)
@@ -254,7 +372,7 @@ describe('1b. which identity, when several hold a membership', () => {
     })
     const tree = await show(steps)
     await press(tree, SignInIds.continue)
-    expect(tree.getByTestId(id(`${SignInIds.identityOption}-1`))).toHaveTextContent(/^plugin/)
+    expect(tree.getByTestId(id(`${SignInIds.identityOption}-1`))).toHaveTextContent(/plugin · Work agent/)
     expect(tree.getByTestId(id(`${SignInIds.identityOption}-1`))).not.toHaveTextContent(/did:webvh/)
   })
 
@@ -267,8 +385,84 @@ describe('1b. which identity, when several hold a membership', () => {
         'ChooseOnAgentCurrent',
         'ChooseFromPhone',
         'ChooseFromAgent',
+        'ThisPhonesAgent',
+        'AnotherAgent',
+        'ChooseApproveLater',
+        'ChooseAgentSilent',
+        'IsThisYourBrowser',
+        'HideDetails',
+        'ScopeShort',
+        'ScopeShortDirectory',
+        'ScopeShortGroups',
+        'ScopeShortRepositories',
+        'ScopeShortOther',
       ])
         expect(lang.SignIn[key]).toBeTruthy()
+  })
+
+  describe('each row says which identity it is', () => {
+    const picker = async (identities: SignInIdentity[]) => {
+      const steps = fakeSteps({
+        community: jest.fn(async () => ({ member: true, name: 'Test Community', identities })),
+      })
+      const tree = await show(steps)
+      await press(tree, SignInIds.continue)
+      return { steps, tree, row: (n: number) => tree.getByTestId(id(`${SignInIds.identityOption}-${n}`)) }
+    }
+    const MEMBER = { role: 'member', memberSince: '2026-11-01T12:00:00Z' }
+
+    test('by its agent, with its role and when it joined; the name a phone generates is not shown', async () => {
+      const { row } = await picker([
+        identity({ agentName: 'albertoleon', label: 'keyring-mvyfgdzy', ...MEMBER }),
+        identity({
+          agentName: 'keyring-runner-mini1',
+          current: false,
+          label: 'keyring-mvvqel9i',
+          ...MEMBER,
+          role: 'vetter',
+        }),
+      ])
+      expect(row(0)).toHaveTextContent(/albertoleon/)
+      expect(row(0)).toHaveTextContent(/Community\.RoleMember/)
+      expect(row(0)).toHaveTextContent(/MyAgent\.MemberSince/)
+      expect(row(0)).not.toHaveTextContent(/keyring-mv/)
+      expect(row(1)).toHaveTextContent(/keyring-runner-mini1/)
+      expect(row(1)).toHaveTextContent(/SignIn\.AnotherAgent/)
+      expect(row(1)).toHaveTextContent(/Community\.RoleVetter/)
+      expect(row(1)).not.toHaveTextContent(/keyring-mv/)
+    })
+
+    test('a name someone chose stays, beside the agent', async () => {
+      const { row } = await picker([identity(), PLUGIN])
+      expect(row(1)).toHaveTextContent(/Test \(browser\) · Work agent/)
+    })
+
+    test('one made elsewhere is given no role or date', async () => {
+      const { row } = await picker([identity(), PLUGIN])
+      expect(row(1)).toHaveTextContent(/SignIn\.ChooseFromAgent/)
+      expect(row(1)).not.toHaveTextContent(/Community\.Role|MemberSince/)
+    })
+
+    test('a membership that ended, and an agent that did not answer, say so, and can still be tapped', async () => {
+      const { row, steps, tree } = await picker([
+        identity({ endedAt: '2026-10-12T12:00:00Z' }),
+        identity({ did: 'did:webvh:QmP:host:silent', ...MEMBER, agentSilent: true }),
+      ])
+      expect(row(0)).toHaveTextContent(/VtaLink\.CardMembershipEnded/)
+      expect(row(0)).not.toHaveTextContent(/MemberSince/)
+      expect(row(1)).toHaveTextContent(/SignIn\.ChooseAgentSilent/)
+      expect(tree.UNSAFE_queryAllByProps({ name: 'alert-outline' })).toHaveLength(2)
+      await press(tree, `${SignInIds.identityOption}-0`)
+      expect(steps.claim).toHaveBeenCalledWith(LINK)
+    })
+
+    test('the row reads as one thing to a screen reader, and says what comes next', async () => {
+      const { row, tree } = await picker([identity({ agentName: 'albertoleon', label: undefined, ...MEMBER }), PLUGIN])
+      expect(row(0).props.accessibilityLabel).toBe(
+        'albertoleon, SignIn.ThisPhonesAgent, Community.RoleMember, MyAgent.MemberSince'
+      )
+      expect(tree.getByTestId(id(SignInIds.approveLater))).toHaveTextContent('SignIn.ChooseApproveLater')
+    })
   })
 })
 
@@ -344,9 +538,77 @@ describe('5. the request, as the community reports it', () => {
   test('a scope the community offers is said in words: the browser may also act as the person there, this session', async () => {
     const scoped = { ...proved, signingScope: ['vtc/directory'] }
     const tree = await toReview(fakeSteps({ identifyAndProve: jest.fn(async () => scoped) }))
+    expect(tree.getByTestId(id(SignInIds.scopeShort))).toHaveTextContent(/SignIn\.ScopeShort/)
+    expect(tree.queryByTestId(id(SignInIds.signingScope))).toBeNull()
+    await press(tree, SignInIds.scopeDetails)
     expect(tree.getByTestId(id(SignInIds.signingScope))).toHaveTextContent(/SignIn\.SigningScope/)
     expect(en.SignIn.SigningScope).toBe('For that time it also lets that browser act as you in: {{areas}}.')
     expect(en.SignIn.ScopeDirectory).toBe('the member directory (reading it, and editing your own card)')
+  })
+
+  describe('the scope as the person reads it', () => {
+    const PORTAL_SCOPE = ['vtc/directory', 'vtc/groups', 'git-ns/view', 'git-ns/account/link-status']
+    // The module the screen imports: moduleNameMapper's, which jest.requireMock does not hand back.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const translated = require('react-i18next') as { useTranslation: () => unknown }
+    const mocked = translated.useTranslation
+    afterEach(() => {
+      translated.useTranslation = mocked
+    })
+
+    let lastShort = ''
+
+    // The app's own i18next: no `interpolation` option, so values are escaped (localization/index.ts). Most word
+    // tests here init with escapeValue off, which hides exactly this.
+    const reviewIn = async (lng: string, resources: object, signingScope: string[]) => {
+      const i = i18n.createInstance()
+      await i.init({ lng, resources: { [lng]: { translation: resources } } })
+      translated.useTranslation = () => ({ t: i.t.bind(i), i18n: i })
+      const scoped = { ...proved, signingScope }
+      const tree = await toReview(fakeSteps({ identifyAndProve: jest.fn(async () => scoped) }))
+      lastShort = String(tree.getByTestId(id(SignInIds.scopeShort)).props.children)
+      await press(tree, SignInIds.scopeDetails)
+      return String(tree.getByTestId(id(SignInIds.signingScope)).props.children)
+    }
+
+    test.each([
+      ['en', en],
+      ['fr', fr],
+      ['pt-BR', ptBr],
+    ])('%s: the offered families read as words, with nothing escaped and no task name', async (lng, resources) => {
+      const line = await reviewIn(lng, resources, PORTAL_SCOPE)
+      const words = resources.SignIn
+      for (const key of ['ScopeDirectory', 'ScopeGroups', 'ScopeRepositories', 'ScopeAccountLink'] as const)
+        expect(line).toContain(words[key])
+      expect(line).not.toMatch(/&#|&amp;|\/|git-ns|vtc/)
+    })
+
+    test('a family Keyring has no words for is never shown raw, and is said once', async () => {
+      // Object.prototype keys must not reach t(): `constructor` is a valid family slug, and `__proto__` would answer
+      // an object lookup with an object. signingScopeProblem refuses the second first; this holds the screen itself.
+      const offered = ['vtc/directory', 'tasks/new-thing', 'other-family', 'constructor', '__proto__']
+      const line = await reviewIn('en', en, offered)
+      expect(line).toBe(
+        `For that time it also lets that browser act as you in: ${en.SignIn.ScopeDirectory}, ${en.SignIn.ScopeOther}.`
+      )
+      expect(lastShort).toBe('It can also act as you in the member directory and other parts of the community.')
+    })
+
+    test('the catch-all comes last, wherever the community listed what it covers', async () => {
+      const line = await reviewIn('en', en, ['tasks/new-thing', 'vtc/directory', 'vtc/groups'])
+      const { ScopeDirectory, ScopeGroups, ScopeOther } = en.SignIn
+      expect(line).toBe(
+        `For that time it also lets that browser act as you in: ${ScopeDirectory}, ${ScopeGroups}, ${ScopeOther}.`
+      )
+      expect(lastShort).toBe('It can also act as you in the member directory, groups and other parts of the community.')
+    })
+
+    test('the short line stays on screen, naming each area once, with nothing escaped', async () => {
+      await reviewIn('en', en, PORTAL_SCOPE)
+      expect(lastShort).toBe('It can also act as you in the member directory, groups and code repositories.')
+      await reviewIn('fr', fr, ['vtc/directory'])
+      expect(lastShort).toBe("Il peut aussi agir en votre nom dans : l'annuaire des membres.")
+    })
   })
 
   test('no scope offered (0.1, or none): nothing more is said', async () => {
@@ -355,7 +617,7 @@ describe('5. the request, as the community reports it', () => {
   })
 
   test('what the community did not report is said to be not reported', async () => {
-    const bare = { ...proved, requester: {} }
+    const bare = { ...proved, requester: {} as SignInRequester }
     const tree = await toReview(fakeSteps({ identifyAndProve: jest.fn(async () => bare) }))
     expect(tree.getByTestId(id(SignInIds.browser))).toHaveTextContent('SignIn.NotReported')
     expect(tree.getByTestId(id(SignInIds.sameNetwork))).toHaveTextContent('SignIn.NotReported')
@@ -390,6 +652,115 @@ describe('5. the request, as the community reports it', () => {
   })
 })
 
+describe('5b. who is signing in, and the decision', () => {
+  const HOME = identity({
+    agentName: 'albertoleon',
+    label: 'keyring-mvyfgdzy',
+    did: proved.persona.did,
+    role: 'member',
+    memberSince: '2026-11-01T12:00:00Z',
+  })
+  const withIdentities = (identities: SignInIdentity[]) =>
+    fakeSteps({ community: jest.fn(async () => ({ member: true, name: 'Test Community', identities })) })
+
+  test('the identity reads as it did on the choice, with the DID behind Details', async () => {
+    const tree = await toReview(withIdentities([HOME]))
+    const signingAs = tree.getByTestId(id(SignInIds.signingAs))
+    expect(signingAs).toHaveTextContent(/albertoleon/)
+    expect(signingAs).toHaveTextContent(/SignIn\.ThisPhonesAgent/)
+    expect(signingAs).toHaveTextContent(/Community\.RoleMember/)
+    expect(signingAs).not.toHaveTextContent(/keyring-mv/)
+    expect(tree.queryByTestId(id(SignInIds.identifiedAs))).toBeNull()
+
+    await press(tree, SignInIds.identityDetails)
+    expect(tree.getByTestId(id(SignInIds.identityHeldBy))).toHaveTextContent('SignIn.ChooseOnAgentCurrent')
+    expect(tree.getByTestId(id(SignInIds.identitySince))).toHaveTextContent('MyAgent.MemberSince')
+    expect(tree.getByTestId(id(SignInIds.identifiedAs))).toHaveTextContent('Alberto')
+  })
+
+  test('after a choice, the one chosen; the other is not named', async () => {
+    const OTHER = identity({ agentName: 'Other agent', current: false, did: 'did:webvh:QmP:host:other' })
+    const steps = withIdentities([OTHER, HOME])
+    const tree = await show(steps)
+    await press(tree, SignInIds.continue)
+    await press(tree, `${SignInIds.identityOption}-1`)
+    await typeNumber(tree, '42')
+    await press(tree, SignInIds.numberContinue)
+    expect(tree.getByTestId(id(SignInIds.signingAs))).toHaveTextContent(/albertoleon/)
+    expect(tree.getByTestId(id(SignInIds.signingAs))).not.toHaveTextContent(/Other agent/)
+  })
+
+  describe('Approve is never on screen without what it agrees to', () => {
+    const scoped = { ...proved, signingScope: ['vtc/directory'] }
+    const scopedSteps = () =>
+      fakeSteps({
+        community: jest.fn(async () => ({ member: true, name: 'Test Community', identities: [HOME] })),
+        identifyAndProve: jest.fn(async () => scoped),
+      })
+    /** The keys of what's held in `node`, top to bottom. */
+    const order = (node: { props: Record<string, unknown>; children: unknown[] }, found: string[] = []): string[] => {
+      const testID = node.props?.testID
+      // A component and the native view under it carry the same testID.
+      if (typeof testID === 'string' && found[found.length - 1] !== testID) found.push(testID)
+      for (const child of node.children ?? []) if (typeof child === 'object') order(child as typeof node, found)
+      return found
+    }
+    const held = (tree: ReturnType<typeof render>, key: string) => order(tree.getByTestId(id(key)) as never)
+    const WORDS = [SignInIds.sessionOnly, SignInIds.scopeShort, SignInIds.scopeDetails]
+
+    // Jest's PixelRatio says 2, which is large text here.
+    beforeEach(() => jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(1))
+    afterEach(() => jest.restoreAllMocks())
+
+    test('at normal text sizes: in the bar, outside the scroll, in order', async () => {
+      const tree = await toReview(scopedSteps())
+      const scroll = held(tree, SignInIds.screen)
+      for (const key of [...WORDS, SignInIds.timeLeft, SignInIds.approve, SignInIds.decline])
+        expect(scroll).not.toContain(id(key))
+      const bar = held(tree, SignInIds.decision)
+      expect(bar.slice(1, 4)).toEqual(WORDS.map(id))
+      expect(bar.indexOf(id(SignInIds.approve))).toBeGreaterThan(bar.indexOf(id(SignInIds.scopeDetails)))
+    })
+
+    test('the scope line sits directly under the bold line, or its "It" names nothing', async () => {
+      const tree = await toReview(scopedSteps())
+      const bar = held(tree, SignInIds.decision)
+      expect(bar.indexOf(id(SignInIds.scopeShort))).toBe(bar.indexOf(id(SignInIds.sessionOnly)) + 1)
+    })
+
+    test('at large text: at the end of the scroll, so Approve is reached only past the words', async () => {
+      jest.spyOn(PixelRatio, 'getFontScale').mockReturnValue(1.35)
+      const tree = await toReview(scopedSteps())
+      const scroll = held(tree, SignInIds.screen)
+      const last = (key: string) => scroll.indexOf(id(key))
+      expect(last(SignInIds.review)).toBeLessThan(last(SignInIds.sessionOnly))
+      expect(last(SignInIds.sessionOnly)).toBeLessThan(last(SignInIds.scopeShort))
+      expect(last(SignInIds.scopeShort)).toBeLessThan(last(SignInIds.approve))
+      expect(last(SignInIds.scopeShort)).toBe(last(SignInIds.sessionOnly) + 1)
+      expect(tree.getAllByTestId(id(SignInIds.approve))).toHaveLength(1)
+    })
+
+    test('while approving, the words stay and the buttons go', async () => {
+      const slow = jest.fn(() => new Promise<never>(() => undefined))
+      const tree = await toReview({ ...scopedSteps(), approve: slow })
+      await press(tree, SignInIds.approve)
+      expect(tree.getByTestId(id(SignInIds.sessionOnly))).toBeTruthy()
+      expect(tree.queryByTestId(id(SignInIds.approve))).toBeNull()
+      expect(tree.getByTestId(id(SignInIds.busy))).toBeTruthy()
+    })
+  })
+
+  test('another network is the one reported fact that warns, and no fact is marked as checked', async () => {
+    const away = { ...proved, requester: { ...proved.requester, sameNetwork: false } }
+    const warned = await toReview(fakeSteps({ identifyAndProve: jest.fn(async () => away) }))
+    expect(warned.getByTestId(id(SignInIds.sameNetwork))).toHaveTextContent('SignIn.No')
+    expect(warned.UNSAFE_queryAllByProps({ name: 'alert-outline' })).toHaveLength(1)
+    expect(warned.UNSAFE_queryAllByProps({ name: 'check' })).toHaveLength(0)
+    const same = await toReview(fakeSteps())
+    expect(same.UNSAFE_queryAllByProps({ name: 'alert-outline' })).toHaveLength(0)
+  })
+})
+
 describe('6. how it ended: every reason has its words', () => {
   const fails = (reason: string) => async () => {
     throw new SignInError(reason as never, 'detail')
@@ -420,6 +791,24 @@ describe('6. how it ended: every reason has its words', () => {
     // Never cancelled after Approve: the community would cancel an approved sign-in.
     tree.unmount()
     expect(steps.cancel).not.toHaveBeenCalled()
+  })
+
+  // IN-390: the Release log never said which check ended a sign-in.
+  test('a failed sign-in leaves one Release line: the reason, its detail and the versions tried', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      const failure = new SignInError('agentNeedsUpdate', 'oobUnsupportedType')
+      failure.tried = { prove: ['0.3', '0.2'], grant: ['0.2', '0.1'] }
+      const tree = await toReview(fakeSteps({ approve: jest.fn(async () => Promise.reject(failure)) }))
+      await press(tree, SignInIds.approve)
+      expect(message(tree)).toHaveTextContent('SignIn.Failure.agentNeedsUpdate')
+      const lines = warn.mock.calls.map(([m]) => String(m)).filter((m) => m.startsWith('[SignIn] not signed in'))
+      expect(lines).toEqual([
+        '[SignIn] not signed in: agentNeedsUpdate (oobUnsupportedType); prove 0.3>0.2; grant 0.2>0.1',
+      ])
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   test('an error with no reason is worded generally', async () => {
@@ -563,5 +952,145 @@ describe('the screen in the stack', () => {
     expect(steps.community).toHaveBeenCalledWith(VTC)
     expect(tree.getByTestId(id(SignInIds.confirm))).toBeTruthy()
     ;(Date.now as jest.Mock).mockRestore()
+  })
+
+  test('"Check and join" on a community: Join, for that community, in place of this screen (IN-406)', async () => {
+    clock = NOW
+    jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000)
+    const navigation = useNavigation() as unknown as { replace: jest.Mock }
+    navigation.replace.mockClear()
+    const steps = fakeSteps({
+      community: jest.fn(async () => ({ member: false, name: 'Elsewhere' })),
+      joinable: jest.fn(async () => true),
+    })
+    const tree = render(
+      <BasicAppContext>
+        <SignIn steps={steps} route={{ params: { link: LINK } }} />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    await press(tree, SignInIds.checkAndJoin)
+    expect(communityTarget.getViewing()).toMatchObject({ communityDid: VTC })
+    expect(navigation.replace).toHaveBeenCalledWith(Screens.VtiJoin)
+    expect(steps.claim).not.toHaveBeenCalled()
+    ;(Date.now as jest.Mock).mockRestore()
+  })
+})
+
+// IN-388: a code from the service that hosts agents this phone got there. The UI never names the provider.
+describe("the service that hosts the person's agents", () => {
+  const home: FarmSignInIdentity = {
+    source: 'farm',
+    vtaDid: 'did:webvh:QmA:host.example:agents:home',
+    agentName: 'Home',
+    current: true,
+    did: 'did:key:z6MkClaimKeyOfHome',
+  }
+  const work: FarmSignInIdentity = {
+    ...home,
+    vtaDid: 'did:webvh:QmB:host.example:agents:work',
+    agentName: 'Work',
+    current: false,
+    did: 'did:key:z6MkClaimKeyOfWork',
+  }
+  const serviceProved: FarmProvedSignIn = {
+    claimed,
+    step2: {},
+    sessionKey: 'did:key:z6MkBrowserSessionKey',
+    requester: { browser: 'Safari', os: 'macOS', location: 'unknown', createdAt: '2026-10-30T08:59:00Z' },
+    identifiedAs: home.did,
+    farm: { vtaDid: home.vtaDid, agentName: 'Home', serviceName: 'Agent Host' },
+  }
+  const serviceSteps = (identities: FarmSignInIdentity[] = [home], proved: ProvedSignIn = serviceProved) =>
+    fakeSteps({
+      community: jest.fn(async () => ({ member: true, identities, farm: true })),
+      identifyAndProve: jest.fn(async () => proved),
+    })
+
+  test("confirm: in the service's words, by its address until it names itself; nothing sent before Continue", async () => {
+    const steps = serviceSteps()
+    const tree = await show(steps)
+    expect(tree.getByTestId(id(SignInIds.service))).toHaveTextContent('webvh.storm.ws/test-vtc')
+    expect(tree.queryByTestId(id(SignInIds.community))).toBeNull()
+    expect(tree.getByText('SignIn.Service.ConfirmBody')).toBeTruthy()
+    expect(tree.getByTestId(id(SignInIds.unverified))).toHaveTextContent('SignIn.Service.Unverified')
+    expect(steps.claim).not.toHaveBeenCalled()
+  })
+
+  test('two agents from it: the agents are the choice, the one in use marked, and their keys never shown', async () => {
+    const steps = serviceSteps([home, work])
+    const tree = await show(steps)
+    await press(tree, SignInIds.continue)
+    expect(tree.getByText('SignIn.Service.ChooseTitle')).toBeTruthy()
+    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-0`))).toHaveTextContent('Home')
+    expect(tree.getByTestId(id(`${SignInIds.identityOption}-0`))).toHaveTextContent(/SignIn\.Service\.ChooseCurrent/)
+    expect(tree.getByTestId(id(`${SignInIds.identityAgent}-1`))).toHaveTextContent('Work')
+    expect(tree.queryByText(/did:key/)).toBeNull()
+    await press(tree, `${SignInIds.identityOption}-1`)
+    await typeNumber(tree, '42')
+    await press(tree, SignInIds.numberContinue)
+    expect(steps.identifyAndProve).toHaveBeenCalledWith(claimed, '42', work)
+  })
+
+  test('review: the service as it names itself, the verified website and the agent; never the key', async () => {
+    const steps = serviceSteps()
+    const tree = await toReview(steps)
+    expect(tree.getByTestId(id(SignInIds.service))).toHaveTextContent('Agent Host')
+    expect(tree.getByTestId(id(SignInIds.website))).toHaveTextContent('https://portal.example.org')
+    expect(tree.getByTestId(id(SignInIds.agent))).toHaveTextContent('Home')
+    expect(tree.queryByTestId(id(SignInIds.identifiedAs))).toBeNull()
+    expect(tree.queryByText(/did:key/)).toBeNull()
+    expect(tree.getByTestId(id(SignInIds.reportedBy))).toHaveTextContent('SignIn.Service.ReportedBy')
+    // The service could not tell: not reported, never "no".
+    expect(tree.getByTestId(id(SignInIds.sameNetwork))).toHaveTextContent('SignIn.NotReported')
+    expect(tree.getByTestId(id(SignInIds.sessionOnly))).toBeTruthy()
+
+    await press(tree, SignInIds.approve)
+    expect(steps.approve).toHaveBeenCalledWith(serviceProved)
+    expect(message(tree)).toHaveTextContent('SignIn.SignedIn')
+  })
+
+  test('a service whose answer gives no name: its address', async () => {
+    const unnamed = { ...serviceProved, farm: { vtaDid: home.vtaDid, agentName: 'Home' } }
+    const tree = await toReview(serviceSteps([home], unnamed))
+    expect(tree.getByTestId(id(SignInIds.service))).toHaveTextContent('webvh.storm.ws/test-vtc')
+  })
+
+  test('a sender that is neither, on a phone with an agent that kept no key for its host: said so', async () => {
+    const older = await show(
+      fakeSteps({ community: jest.fn(async () => ({ member: false, name: 'Elsewhere', olderAgents: true })) })
+    )
+    expect(older.getByTestId(id(SignInIds.olderAgents))).toHaveTextContent('SignIn.OlderAgents')
+    const plain = await show(fakeSteps({ community: jest.fn(async () => ({ member: false, name: 'Elsewhere' })) }))
+    expect(plain.queryByTestId(id(SignInIds.olderAgents))).toBeNull()
+  })
+
+  test('the words are in every language, and never name the provider', () => {
+    for (const lang of [en, fr, ptBr] as unknown as {
+      SignIn: { Service: Record<string, string>; OlderAgents: string }
+    }[]) {
+      for (const key of [
+        'ConfirmBody',
+        'Label',
+        'HostLabel',
+        'Unverified',
+        'Claiming',
+        'ChooseTitle',
+        'ChooseBody',
+        'ChooseCurrent',
+        'ReportedBy',
+        'Agent',
+      ])
+        expect(lang.SignIn.Service[key]).toBeTruthy()
+      expect(lang.SignIn.OlderAgents).toBeTruthy()
+      expect(JSON.stringify([lang.SignIn.Service, lang.SignIn.OlderAgents])).not.toMatch(/farm/i)
+    }
+  })
+
+  test('older agents are told both ways out, and not to wait for a fix', () => {
+    const older = (en as unknown as { SignIn: { OlderAgents: string } }).SignIn.OlderAgents
+    expect(older).toMatch(/get a new agent from that service/i)
+    expect(older).toMatch(/sign in another way/)
+    expect(older).not.toMatch(/\byet\b|for now/)
   })
 })

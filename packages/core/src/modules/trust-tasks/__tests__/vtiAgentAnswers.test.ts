@@ -115,8 +115,9 @@ jest.mock('../module/tspCapability', () => ({
 import { DeviceEventEmitter } from 'react-native'
 
 import { plainError } from '../screens/plainError'
-import { VTI_ANSWER_HOLD_MS, VtiSentNoAnswer, isVtiReadTask, vtiAgent } from '../module/vtiAgent'
+import { VTI_ANSWER_HOLD_MS, VTI_BACKLOG_GRACE_MS, VtiSentNoAnswer, isVtiReadTask, vtiAgent } from '../module/vtiAgent'
 import { VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
+import { OFFERS_LIST_TYPES } from '../../rooms/real/wire'
 
 const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() }
 const agent = { config: { logger } } as never
@@ -226,6 +227,176 @@ describe('T1: concurrent asks each get their own answer', () => {
     expect(await submit).toMatchObject({ body: { payload: { verdict: { effect: 'refer' } } } })
     expect(await status).toMatchObject({ body: { payload: { status: 'deferred' } } })
     expect(session.didcomm).toHaveLength(0)
+  })
+})
+
+// 277.8: the session asked as one identity and moved to another 2 ms later. The answer reached the first identity's
+// listener, was left on the mediator for a session no longer signed in as it, and came back at every drain until the
+// session's next turn. A listener may now hand over an answer the session asked for, or drop one nothing waits for.
+describe('an answer a listener heard for the shared session', () => {
+  const MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
+  const orphanOf = (type: string) => ({
+    id: 'urn:uuid:late',
+    type,
+    thid: 'urn:uuid:no-such-request',
+    body: { type, threadId: 'urn:uuid:no-such-request', payload: {} },
+  })
+
+  it('is given to the ask waiting for it, by thread', async () => {
+    const community = 'did:webvh:c:listener-answer'
+    const who = 'did:webvh:p:listener-answer'
+    const session = await connectTo(community, 'didcomm', who)
+    const status = vtiAgent.ask(community, STATUS, {}, 1000)
+    await until(() => session.didcomm.length === 1)
+    const reply = didcommReply((session.didcomm as Sent[])[0], STATUS, { status: 'pending' })
+    expect(vtiAgent.answerFromListener(who, reply as never)).toBe('answered')
+    expect(await status).toMatchObject({ body: { payload: { status: 'pending' } } })
+  })
+
+  it("is not given to another identity's ask, which goes on waiting for its own answer", async () => {
+    const community = 'did:webvh:c:listener-other'
+    const session = await connectTo(community, 'didcomm', 'did:webvh:p:listener-other')
+    const status = vtiAgent.ask(community, STATUS, {}, 1000)
+    await until(() => session.didcomm.length === 1)
+    const reply = didcommReply((session.didcomm as Sent[])[0], STATUS, { status: 'pending' })
+    expect(vtiAgent.answerFromListener('did:webvh:p:someone-else', reply as never)).toBeUndefined()
+    session.onMessage(reply)
+    expect(await status).toMatchObject({ body: { payload: { status: 'pending' } } })
+  })
+
+  it('is an orphan when it answers a read and threads on no ask, in the binding envelope or not', () => {
+    const type = `${MEMBERSHIPS}#response`
+    expect(vtiAgent.answerFromListener('did:webvh:p:a', orphanOf(type) as never)).toBe('orphan')
+    const enveloped = {
+      id: 'urn:uuid:late-2',
+      type: 'https://trusttasks.org/binding/didcomm/0.1/envelope',
+      thid: 'urn:uuid:no-such-request',
+      body: { type, threadId: 'urn:uuid:no-such-request', payload: {} },
+    }
+    expect(vtiAgent.answerFromListener('did:webvh:p:a', enveloped as never)).toBe('orphan')
+  })
+
+  // What 276.10 protects: taken by a listener, a vetting request was acknowledged and lost. All of these stay.
+  it.each([
+    ['a vetting request', orphanOf('https://trusttasks.org/spec/vetting/request/0.1')],
+    [
+      'an answer to a vetting request, which is a write',
+      orphanOf('https://trusttasks.org/spec/vetting/request/0.1#response'),
+    ],
+    ['an answer to a write nothing waits for', orphanOf(`${SUBMIT}#response`)],
+    ['a refusal', orphanOf('https://trusttasks.org/spec/trust-task-error/0.1')],
+    [
+      'an answer to a read that names no thread',
+      { id: 'urn:uuid:bare', type: `${MEMBERSHIPS}#response`, body: { type: `${MEMBERSHIPS}#response`, payload: {} } },
+    ],
+  ])("stays the shared session's: %s", (_what, message) => {
+    expect(vtiAgent.answerFromListener('did:webvh:p:a', message as never)).toBeUndefined()
+  })
+})
+
+// The real order on a phone in two communities: the session moves to another identity with an ask out, and the first
+// identity's listener hears the answer. `connect` disconnects the old session on the way, so a test that doesn't switch
+// never sees what that does to the ask (277.11, report 482B: the answer was dropped, the caller waited out 30 s).
+describe('an answer that comes after the session moved on', () => {
+  const FIRST = 'did:webvh:c:switch-first'
+  const SECOND = 'did:webvh:c:switch-second'
+  const A = 'did:webvh:p:switch-a'
+  const B = 'did:webvh:p:switch-b'
+  const MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
+  // Longer than a sign-in: an ask whose clock ended during the switch is the control's case below.
+  const asked = async (type: string, timeoutMs = 15000) => {
+    const session = await connectTo(FIRST, 'didcomm', A)
+    const before = session.didcomm.length
+    const answer = vtiAgent.ask(FIRST, type, {}, timeoutMs)
+    await until(() => session.didcomm.length === before + 1)
+    const sent = (session.didcomm as Sent[])[before]
+    return { session, sent, answer }
+  }
+
+  it('reaches the ask that waits for it, sent as that identity', async () => {
+    const { sent, answer } = await asked(MEMBERSHIPS)
+    await connectTo(SECOND, 'didcomm', B)
+    expect(vtiAgent.getState().did).toBe(B)
+    expect(vtiAgent.answerFromListener(A, didcommReply(sent, MEMBERSHIPS, { items: [] }) as never)).toBe('answered')
+    expect(await answer).toMatchObject({ body: { payload: { items: [] } } })
+  })
+
+  it("reaches a write's ask too: its only copy", async () => {
+    const { sent, answer } = await asked(SUBMIT)
+    await connectTo(SECOND, 'didcomm', B)
+    expect(vtiAgent.answerFromListener(A, didcommReply(sent, SUBMIT, { id: 'r1' }) as never)).toBe('answered')
+    expect(await answer).toMatchObject({ body: { payload: { id: 'r1' } } })
+  })
+
+  it("is no one else's: another identity's listener doesn't take it", async () => {
+    const { sent, answer } = await asked(MEMBERSHIPS, 100)
+    await connectTo(SECOND, 'didcomm', B)
+    expect(vtiAgent.answerFromListener(B, didcommReply(sent, MEMBERSHIPS, { items: [] }) as never)).toBeUndefined()
+    expect(await answer).toBeUndefined()
+  })
+
+  it("a reply naming no thread on the new session doesn't answer the old identity's ask", async () => {
+    const { sent, answer } = await asked(MEMBERSHIPS)
+    let answered = false
+    void answer.then(() => (answered = true))
+    const second = await connectTo(SECOND, 'didcomm', B)
+    second.onMessage({
+      id: 'urn:uuid:bare',
+      type: `${MEMBERSHIPS}#response`,
+      from: FIRST,
+      body: { payload: { items: ['not a'] } },
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered).toBe(false)
+    // Its own answer still reaches it.
+    expect(vtiAgent.answerFromListener(A, didcommReply(sent, MEMBERSHIPS, { items: ['a'] }) as never)).toBe('answered')
+    expect(await answer).toMatchObject({ body: { payload: { items: ['a'] } } })
+  })
+
+  it("the new identity's identical ask is its own, sent anew", async () => {
+    const { sent, answer } = await asked(MEMBERSHIPS)
+    const second = await connectTo(FIRST, 'didcomm', B)
+    const own = vtiAgent.ask(FIRST, MEMBERSHIPS, {}, 2000)
+    await until(() => second.didcomm.length === 1)
+    second.onMessage(didcommReply((second.didcomm as Sent[])[0], MEMBERSHIPS, { items: ['b'] }))
+    expect(await own).toMatchObject({ body: { payload: { items: ['b'] } } })
+    expect(vtiAgent.answerFromListener(A, didcommReply(sent, MEMBERSHIPS, { items: ['a'] }) as never)).toBe('answered')
+    expect(await answer).toMatchObject({ body: { payload: { items: ['a'] } } })
+  })
+
+  it('an ask no one waits for any more is not kept (control): its answer is an orphan', async () => {
+    const { sent, answer } = await asked(MEMBERSHIPS, 1)
+    expect(await answer).toBeUndefined()
+    await connectTo(SECOND, 'didcomm', B)
+    expect(vtiAgent.answerFromListener(A, didcommReply(sent, MEMBERSHIPS, { items: [] }) as never)).toBe('orphan')
+  })
+
+  it("a late answer kept for later is the identity's that asked: another doesn't take it", async () => {
+    const kept = await asked(MEMBERSHIPS, 50)
+    await connectTo(SECOND, 'didcomm', B)
+    expect(await kept.answer).toBeUndefined()
+    expect(vtiAgent.answerFromListener(A, didcommReply(kept.sent, MEMBERSHIPS, { items: [] }) as never)).toBe(
+      'answered'
+    )
+    const second = await connectTo(FIRST, 'didcomm', B)
+    expect(second).toBeDefined()
+    expect(vtiAgent.takeHeldAnswer(FIRST, MEMBERSHIPS)).toBeUndefined()
+  })
+})
+
+describe('a room offers listing is a read', () => {
+  it.each(OFFERS_LIST_TYPES)('%s', (type) => {
+    expect(isVtiReadTask(type)).toBe(true)
+  })
+
+  it('an answer to one that threads on no ask is dropped, not left on the mediator to come back', () => {
+    const type = `${OFFERS_LIST_TYPES[0]}#response`
+    const orphan = { id: 'urn:uuid:late', type, thid: 'urn:uuid:no-such', body: { type, threadId: 'urn:uuid:no-such' } }
+    expect(vtiAgent.answerFromListener('did:webvh:p:a', orphan as never)).toBe('orphan')
+  })
+
+  it('accepting an offer is still a write (control)', () => {
+    expect(isVtiReadTask('https://trusttasks.org/spec/vtc/rooms/offers/accept/0.1')).toBe(false)
   })
 })
 
@@ -421,5 +592,154 @@ describe('T3: a late answer is kept for the next caller', () => {
     expect(vtiAgent.takeHeldAnswer(community, STATUS)).toBeUndefined()
     expect(inbox).toHaveBeenCalledTimes(1)
     stop()
+  })
+})
+
+// rooms/keys/act: the person's agent completes a room request as the member, and the phone sends it unchanged.
+describe('a document the agent completed is sent as it is', () => {
+  const PUT = 'https://trusttasks.org/spec/rooms/records/put/0.1'
+  const completed = (extra: Record<string, unknown> = {}) => ({
+    id: 'urn:uuid:put-1',
+    type: PUT,
+    issuer: 'did:webvh:p:member',
+    recipient: 'did:webvh:c:rooms',
+    issuedAt: '2026-10-29T12:00:00Z',
+    payload: { roomId: 'did:webvh:room:open', key: 'note/abc', expectedVersion: 0, presentation: { type: 'VP' } },
+    proof: { type: 'DataIntegrityProof', proofValue: 'z-agent' },
+    ...extra,
+  })
+
+  it('over DIDComm: the body is the agent’s document, untouched, and its answer comes back', async () => {
+    const community = 'did:webvh:c:rooms-didcomm'
+    const session = await connectTo(community, 'didcomm', 'did:webvh:p:rooms-didcomm')
+    const document = completed({ recipient: community })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => session.didcomm.length === 1)
+    const [sent] = session.didcomm as Sent[]
+    expect(sent.body).toEqual(document)
+    session.onMessage(didcommReply(sent, PUT, { key: 'note/abc', version: 1 }))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+
+  it('over TSP: the packed document is the agent’s, threaded by its id', async () => {
+    const community = 'did:webvh:c:rooms-tsp'
+    const session = await connectTo(community, 'tsp', 'did:webvh:p:rooms-tsp')
+    const { unpackTrustTaskFromPeer } = jest.requireMock('../module/vtiTsp') as { unpackTrustTaskFromPeer: jest.Mock }
+    const document = completed({ recipient: community })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => mockPacked.length === 1)
+    expect(mockPacked[0]).toEqual(document)
+    unpackTrustTaskFromPeer.mockResolvedValueOnce(tspReply(document.id, PUT, { key: 'note/abc', version: 1 }))
+    await session.onTspFrame?.(new Uint8Array([1]))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+
+  it('over TSP: an answer threaded on the document’s own threadId reaches it too', async () => {
+    vtiAgent.answerTimeoutMs = 1000
+    const community = 'did:webvh:c:rooms-thread'
+    const session = await connectTo(community, 'tsp', 'did:webvh:p:rooms-thread')
+    const { unpackTrustTaskFromPeer } = jest.requireMock('../module/vtiTsp') as { unpackTrustTaskFromPeer: jest.Mock }
+    const document = completed({ recipient: community, threadId: 'urn:uuid:act-thread' })
+    const put = vtiAgent.sendCompleted(community, document)
+    await until(() => mockPacked.length === 1)
+    unpackTrustTaskFromPeer.mockResolvedValueOnce(tspReply('urn:uuid:act-thread', PUT, { key: 'note/abc', version: 1 }))
+    await session.onTspFrame?.(new Uint8Array([1]))
+    expect(await put).toEqual({ key: 'note/abc', version: 1 })
+  })
+})
+
+// Rooms fix 2 (rooms-slow, 11-05): a sign-in waited a fixed 2 s after its socket opened (2.002-2.030 s on 35 of 36
+// sign-ins, 277.12), several in a row at launch. Answers reach their asks by thread; the one reply the wait kept from
+// being mistaken for a fresh answer — no thread, no time, flushed from the mediator's backlog — is held back by type
+// for VTI_BACKLOG_GRACE_MS instead, and nothing else waits.
+describe('signing in: no fixed wait, and a stale reply naming no thread answers nothing', () => {
+  const C = 'did:webvh:c:no-wait'
+  const MEMBERSHIPS = 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1'
+  const bare = (id: string, items: string[], extra: Record<string, unknown> = {}) => ({
+    id,
+    type: `${MEMBERSHIPS}#response`,
+    from: C,
+    body: { payload: { items } },
+    ...extra,
+  })
+  const askOn = async (who: string) => {
+    const session = await connectTo(C, 'didcomm', who)
+    const answer = vtiAgent.ask(C, MEMBERSHIPS, {}, 3000)
+    let answered = false
+    void answer.then(() => (answered = true))
+    await until(() => session.didcomm.length === 1)
+    return { session, answer, answered: () => answered }
+  }
+  afterEach(() => {
+    vtiAgent.now = () => Date.now()
+  })
+
+  it('a sign-in is done once its socket opens: no fixed 2 s', async () => {
+    const started = Date.now()
+    await connectTo(C, 'didcomm', 'did:webvh:p:no-wait-1')
+    expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: 'did:webvh:p:no-wait-1' })
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('a reply naming no thread and no time, as the session opens, does not answer a fresh ask; its own answer does', async () => {
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-2')
+    session.onMessage(bare('urn:uuid:stale', ['stale']))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    session.onMessage(didcommReply((session.didcomm as Sent[])[0], MEMBERSHIPS, { items: ['fresh'] }))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['fresh'] } } })
+  })
+
+  it('past the grace, a reply naming no thread still answers by its type (control)', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer } = await askOn('did:webvh:p:no-wait-3')
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage(bare('urn:uuid:bare-late', ['late']))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
+  })
+
+  // ac's question on #942: a threadless refusal (the VTC's unrouted parse error) answers any ask by type, and a timed
+  // one within 5 s of the ask reads as fresh. Flushed on a quick drop and reconnect, it must not attach to a new ask.
+  it('within the grace, a reply naming no thread is held back even when it names a time; past it, it answers', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-4')
+    const timed = { created_time: Math.floor(opened / 1000) + 1 }
+    session.onMessage(bare('urn:uuid:bare-timed-early', ['early'], timed))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage(bare('urn:uuid:bare-timed-late', ['late'], timed))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['late'] } } })
+  })
+
+  // The one threadless reply a community sends: its unrouted error, when it could not read the document at all
+  // (trust-tasks-rs builds it with no thread: there is no request to respond to). It refuses any ask's type. Within the
+  // grace it may be a stale one flushed from the mediator, so it waits; past it, it is the community's refusal.
+  it("a community's unrouted error — no thread, no time — is held back within the grace and refuses after it", async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer, answered } = await askOn('did:webvh:p:no-wait-6')
+    const unrouted = {
+      id: 'urn:uuid:unrouted',
+      type: 'https://trusttasks.org/spec/trust-task-error/0.1',
+      from: C,
+      body: { payload: { code: 'malformed', message: 'could not parse the document' } },
+    }
+    session.onMessage(unrouted)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(answered()).toBe(false)
+    vtiAgent.now = () => opened + VTI_BACKLOG_GRACE_MS
+    session.onMessage({ ...unrouted, id: 'urn:uuid:unrouted-2' })
+    expect(await answer).toMatchObject({ type: 'https://trusttasks.org/spec/trust-task-error/0.1' })
+  })
+
+  it('a reply naming its thread answers at once, within the grace (control)', async () => {
+    const opened = Date.now()
+    vtiAgent.now = () => opened
+    const { session, answer } = await askOn('did:webvh:p:no-wait-5')
+    session.onMessage(didcommReply((session.didcomm as Sent[])[0], MEMBERSHIPS, { items: ['threaded'] }))
+    expect(await answer).toMatchObject({ body: { payload: { items: ['threaded'] } } })
   })
 })

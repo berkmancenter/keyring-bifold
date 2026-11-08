@@ -23,16 +23,24 @@ import { ToastType } from '../../../components/toast/BaseToast'
 import { useTheme } from '../../../contexts/theme'
 import { Screens, type MyAgentStackParams } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
+import { CommunityDirectorySection } from '../../directory/components/CommunityDirectorySection'
 import { GenericRecordsCommunityStore } from '../module/VtiCommunityStore'
 import { GenericRecordsIdentityStore } from '../module/VtiIdentityStore'
+import { canSignAs, communitiesSharing, personaForCommunity } from '../module/sharedIdentity'
 import { selfRemoveRefusal, vtiAgent, type VtiManifest } from '../module/vtiAgent'
 import { leaveCommunity } from '../module/vtiJoin'
 import { GenericRecordsVettingStore } from '../module/vtiVetting'
 
 import { communityTarget } from '../module/vtiCommunityLink'
 import { joinKnown, readFailed, useCommunityJourney, vetterGrantKnown } from '../module/communityJourney'
+import { CommunityPollsSection } from '../../polls/components/CommunityPollsSection'
+import { CommunityRoomsSection } from '../../rooms/components/CommunityRoomsSection'
+import { afterLeavingCommunity } from '../../rooms/roomsLeave'
+import { useRoomsService } from '../../rooms/useRoomsService'
 
-import { communityLabelAnsweredOf, communityLabelOf, communityLabelStartOf } from './communityName'
+import { communityLabelAnsweredOf, communityLabelOf, communityLabelStartOf, unnamedRef } from './communityName'
+import { CommunityMark } from './CommunityMark'
+import { CommunityGroup, CommunityGroupDivider, CommunitySectionLabel } from './CommunitySection'
 import { HeldByAnotherAgent } from './HeldByAnotherAgent'
 import { useAgentsHoldingIdentity } from './agentsHoldingIdentity'
 import { plainError } from './plainError'
@@ -69,6 +77,7 @@ const VtiCommunity: React.FC = () => {
   const [refusalCode, setRefusalCode] = useState<string>()
   const [showDetails, setShowDetails] = useState(false)
   const { agent } = useAgent()
+  const roomsService = useRoomsService()
   const navigation = useNavigation()
   // Where this phone stands with the community: a member is not asked to apply.
   const { journey, refresh } = useCommunityJourney(agent, communityDid)
@@ -111,14 +120,35 @@ const VtiCommunity: React.FC = () => {
   // Leave is offered only where the phone holds something — an identity, a
   // membership: a community only looked at through a link has nothing to leave.
   const [holds, setHolds] = useState(false)
+  // Leaving is a request the phone signs as its identity here. A membership with no identity the phone can sign in
+  // as (the agent's own DID, or one this phone does not keep) cannot be left from here: the screen says so instead
+  // of a Leave that fails (IN-517).
+  const [canSign, setCanSign] = useState(false)
+  // An identity is here but its keys are not on the phone yet: its agent hands them over when it next connects.
+  const [awaitingKeys, setAwaitingKeys] = useState(false)
+  // The other communities this identity is kept for: leaving here keeps it for them.
+  const [sharedWith, setSharedWith] = useState<string[]>([])
+  const canLeave = holds && !heldElsewhere && canSign
+  const cannotLeaveHere = holds && !heldElsewhere && !canSign && !awaitingKeys
+  const leaveWaitsForKeys = holds && !heldElsewhere && !canSign && awaitingKeys
   useEffect(() => {
     if (!agent) return
     let live = true
+    const identities = new GenericRecordsIdentityStore(agent)
+    const communities = new GenericRecordsCommunityStore(agent)
     void Promise.all([
-      new GenericRecordsIdentityStore(agent).getPersona(communityDid),
-      new GenericRecordsCommunityStore(agent).getMembership(communityDid),
+      // A read that fails is no identity to sign as: Leave is not offered, the words say why.
+      personaForCommunity(identities, communities, communityDid).catch(() => undefined),
+      communities.getMembership(communityDid),
+      identities.listPersonas(),
     ])
-      .then(([p, m]) => live && setHolds(Boolean(p || m)))
+      .then(([p, m, all]) => {
+        if (!live) return
+        setHolds(Boolean(p || m))
+        setCanSign(canSignAs(p))
+        setAwaitingKeys(Boolean(p) && !canSignAs(p))
+        setSharedWith(p ? communitiesSharing(all, p) : [])
+      })
       .catch(() => undefined)
     return () => {
       live = false
@@ -151,6 +181,8 @@ const VtiCommunity: React.FC = () => {
         communityDid,
         { disposition: keep }
       )
+      // Its rooms go from every list now, and its members' names and the photo sent there with them.
+      await afterLeavingCommunity(agent, communityDid, roomsService)
       // The community answered, so it is named plainly here: its published
       // name, else the link's name without "(not confirmed …)", which after
       // "You left" read as if the leave itself was unconfirmed.
@@ -179,6 +211,10 @@ const VtiCommunity: React.FC = () => {
       })
       navigation.goBack()
     } catch (err) {
+      // Its kind in the log, never the community or an identity: a failed leave left no line before (IN-517).
+      agent.config?.logger?.warn?.(
+        `[VTI] leave failed (${selfRemoveRefusal(err) ?? (err instanceof Error ? err.name : 'unknown')})`
+      )
       // Asked twice and still no answer: say so, and offer to try again. The
       // phone is still a member as far as it knows, and keeps what it holds.
       const unanswered = err instanceof Error && err.name === 'VtiSentNoAnswer'
@@ -194,7 +230,7 @@ const VtiCommunity: React.FC = () => {
       setLeaving(false)
       setConfirmingLeave(false)
     }
-  }, [agent, communityDid, navigation, keep, t, toastBottomOffset])
+  }, [agent, communityDid, navigation, keep, t, toastBottomOffset, roomsService])
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -206,10 +242,27 @@ const VtiCommunity: React.FC = () => {
     button: { backgroundColor: ColorPalette.brand.primary, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
     buttonText: { ...TextTheme.bold, color: '#FFFFFF' },
     error: { ...TextTheme.normal, color: ColorPalette.semantic.error },
+    identity: { alignItems: 'center', gap: 8 },
+    title: { ...TextTheme.headingFour, color: TextTheme.normal.color, textAlign: 'center' },
+    pill: {
+      ...TextTheme.label,
+      color: ColorPalette.grayscale.darkGrey,
+      backgroundColor: ColorPalette.grayscale.lightGrey,
+      borderRadius: 10,
+      overflow: 'hidden',
+      paddingHorizontal: 10,
+      paddingVertical: 2,
+    },
+    memberLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    memberSince: { ...TextTheme.labelSubtitle, color: TextTheme.normal.color },
+    section: { gap: 6 },
+    groupRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 52, paddingHorizontal: 14 },
+    did: { paddingHorizontal: 14, paddingBottom: 12 },
   })
 
   useEffect(() => {
     let cancelled = false
+    setBusy(true)
     const load = async () => {
       try {
         // With this screen's agent: a phone with no session yet has none to lend.
@@ -250,31 +303,54 @@ const VtiCommunity: React.FC = () => {
             (navigation as unknown as { navigate: (name: string) => void }).navigate(agentHomeScreen())
           }
         />
-        {/* What it is called, not what it is keyed by. The DID was the
-            headline here; it is the only checkable thing on the screen, so it
-            stays — one tap away, in the same place as every other detail. */}
-        <View style={styles.card}>
-          <Text style={styles.label}>{t('MyAgent.Community')}</Text>
-          <Text style={styles.value} testID={testIdWithKey(VtiCommunityIds.name)}>
-            {called.name ?? t('Join.Unnamed')}
+        {/* Who this community is, first (276.10, option A): what it is called, else the handle that tells it apart
+            and that it has published no name; then where this agent stands. Its DID, the one checkable thing, is
+            under About. */}
+        <View style={styles.identity}>
+          {/* Keyed: what the tile has waited for is one community's. */}
+          <CommunityMark key={communityDid} communityDid={communityDid} reading={busy} />
+          <Text style={styles.title} accessibilityRole="header" testID={testIdWithKey(VtiCommunityIds.name)}>
+            {called.name ?? unnamedRef(communityDid)}
           </Text>
-          {called.name && called.claimed ? (
+          {!called.name ? (
+            <Text style={styles.pill}>{t('Community.PassNoName')}</Text>
+          ) : called.claimed ? (
             <Text style={styles.label} testID={testIdWithKey(VtiCommunityIds.nameClaimed)}>
               {t('Join.NameFromLink')}
             </Text>
           ) : null}
-          <Pressable
-            onPress={() => setShowDetails(!showDetails)}
-            accessibilityRole="button"
-            accessibilityState={{ expanded: showDetails }}
-            testID={testIdWithKey(VtiCommunityIds.detailsToggle)}
-          >
-            <Text style={[styles.label, { textDecorationLine: 'underline' }]}>{t('VtaLink.Details')}</Text>
-          </Pressable>
-          {showDetails ? (
-            <Text style={styles.value} selectable testID={testIdWithKey(VtiCommunityIds.did)}>
-              {communityDid}
-            </Text>
+          {membership ? (
+            <View
+              style={styles.memberLine}
+              accessible
+              accessibilityLabel={`${t('Join.StandingMember', {
+                community: communityLabelOf(communityDid, t),
+                interpolation: { escapeValue: false },
+              })} ${t('MyAgent.MemberSince', { date: localDate(membership.grantedAt) })}`}
+              testID={testIdWithKey(VtiCommunityIds.member)}
+            >
+              <Icon name="check-circle" size={18} color={ColorPalette.semantic.success} />
+              <Text style={styles.memberSince} testID={testIdWithKey(VtiCommunityIds.memberSince)}>
+                {t('MyAgent.MemberSince', { date: localDate(membership.grantedAt) })}
+              </Text>
+            </View>
+          ) : null}
+          {/* The result of private vetting, marked as the steps were. */}
+          {(membership as { privateVetting?: boolean } | undefined)?.privateVetting ? (
+            <PrivateVettingBadge label={t('Vetting.Private.Joined')} testIdStem="CommunityJoinedPrivately" />
+          ) : null}
+          {membership && vetsHere ? (
+            <Pressable
+              style={[styles.button, { alignSelf: 'stretch' }]}
+              testID={testIdWithKey(VtiCommunityIds.openDesk)}
+              accessibilityRole="button"
+              onPress={() => {
+                communityTarget.choose(communityDid)
+                ;(navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiVetting)
+              }}
+            >
+              <Text style={styles.buttonText}>{t('Vetting.OpenDesk')}</Text>
+            </Pressable>
           ) : null}
         </View>
 
@@ -285,39 +361,12 @@ const VtiCommunity: React.FC = () => {
             holderVtaDid={heldElsewhere}
           />
         ) : null}
-        {membership ? (
-          <View style={styles.card} testID={testIdWithKey(VtiCommunityIds.member)}>
-            <View style={styles.row}>
-              <Icon name="check-circle" size={24} color={ColorPalette.semantic.success} />
-              <Text style={[styles.value, { flex: 1 }]}>
-                {t('Join.StandingMember', {
-                  community: communityLabelOf(communityDid, t),
-                  interpolation: { escapeValue: false },
-                })}
-              </Text>
-            </View>
-            <Text style={styles.label} testID={testIdWithKey(VtiCommunityIds.memberSince)}>
-              {t('MyAgent.MemberSince', { date: localDate(membership.grantedAt) })}
-            </Text>
-            {/* The result of private vetting, marked as the steps were. */}
-            {(membership as { privateVetting?: boolean }).privateVetting ? (
-              <PrivateVettingBadge label={t('Vetting.Private.Joined')} testIdStem="CommunityJoinedPrivately" />
-            ) : null}
-            {vetsHere ? (
-              <Pressable
-                style={styles.button}
-                testID={testIdWithKey(VtiCommunityIds.openDesk)}
-                accessibilityRole="button"
-                onPress={() => {
-                  communityTarget.choose(communityDid)
-                  ;(navigation as unknown as { navigate: (name: string) => void }).navigate(Screens.VtiVetting)
-                }}
-              >
-                <Text style={styles.buttonText}>{t('Vetting.OpenDesk')}</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        ) : null}
+        {/* A member's rooms and room offers in this community, beside membership and vetting (rooms flag on only). */}
+        {/* The community's polls, when it lists any: open ones first (Community Polls mock, A). */}
+        {membership ? <CommunityPollsSection communityDid={communityDid} /> : null}
+        {membership ? <CommunityRoomsSection communityDid={communityDid} /> : null}
+        {/* The community's member directory: its members, and the member's own card there. */}
+        {membership ? <CommunityDirectorySection communityDid={communityDid} /> : null}
 
         {membership || heldElsewhere || standingUnknown ? null : (
           <Text style={{ ...TextTheme.headingFour, color: TextTheme.normal.color }}>{t('MyAgent.WhatIsAsked')}</Text>
@@ -389,13 +438,19 @@ const VtiCommunity: React.FC = () => {
           </Pressable>
         ) : null}
 
-        {!holds || heldElsewhere ? null : confirmingLeave ? (
+        {!canLeave ? null : confirmingLeave ? (
           <View style={styles.card} testID={testIdWithKey(VtiCommunityIds.leaveCommunityConfirmCard)}>
             <Text style={styles.value}>
-              {t('Community.LeaveExplains', {
-                community: communityLabelOf(communityDid, t),
-                interpolation: { escapeValue: false },
-              })}
+              {sharedWith.length > 0
+                ? t('Community.LeaveExplainsShared', {
+                    community: communityLabelOf(communityDid, t),
+                    other: communityLabelOf(sharedWith[0], t),
+                    interpolation: { escapeValue: false },
+                  })
+                : t('Community.LeaveExplains', {
+                    community: communityLabelOf(communityDid, t),
+                    interpolation: { escapeValue: false },
+                  })}
             </Text>
             <Text style={styles.label}>
               {t('Community.LeaveKeepWhat', {
@@ -469,19 +524,68 @@ const VtiCommunity: React.FC = () => {
               </Text>
             )}
           </Pressable>
-        ) : (
-          <Pressable
-            style={[
-              styles.button,
-              { backgroundColor: 'transparent', borderWidth: 1, borderColor: ColorPalette.semantic.error },
-            ]}
-            testID={testIdWithKey(VtiCommunityIds.leaveCommunityButton)}
-            accessibilityRole="button"
-            onPress={() => setConfirmingLeave(true)}
-          >
-            <Text style={[styles.buttonText, { color: ColorPalette.semantic.error }]}>{t('Community.Leave')}</Text>
-          </Pressable>
-        )}
+        ) : null}
+
+        {/* About, last: the community's ID behind Details, and Leave as plain words, out of the way (276.10). */}
+        <View style={styles.section}>
+          <CommunitySectionLabel title={t('Community.AboutSection')} />
+          <CommunityGroup>
+            <Pressable
+              style={styles.groupRow}
+              onPress={() => setShowDetails(!showDetails)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: showDetails }}
+              testID={testIdWithKey(VtiCommunityIds.detailsToggle)}
+            >
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text style={styles.value}>{t('VtaLink.Details')}</Text>
+                <Text style={styles.label}>{t('Community.DetailsLine')}</Text>
+              </View>
+              <Icon
+                name={showDetails ? 'chevron-up' : 'chevron-down'}
+                size={24}
+                color={ColorPalette.grayscale.mediumGrey}
+              />
+            </Pressable>
+            {showDetails ? (
+              <Text style={[styles.label, styles.did]} selectable testID={testIdWithKey(VtiCommunityIds.did)}>
+                {communityDid}
+              </Text>
+            ) : null}
+            {canLeave && !confirmingLeave && !leaveUnanswered ? (
+              <>
+                <CommunityGroupDivider />
+                <Pressable
+                  style={styles.groupRow}
+                  testID={testIdWithKey(VtiCommunityIds.leaveCommunityButton)}
+                  accessibilityRole="button"
+                  onPress={() => setConfirmingLeave(true)}
+                >
+                  <Text style={[styles.value, { color: ColorPalette.semantic.error }]}>{t('Community.Leave')}</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </CommunityGroup>
+          {canLeave && !confirmingLeave && !leaveUnanswered ? (
+            <Text style={styles.label}>{t('Join.StandingAgain')}</Text>
+          ) : null}
+          {leaveWaitsForKeys ? (
+            <Text style={styles.label}>
+              {t('Community.LeaveWaitsForKeys', {
+                community: communityLabelOf(communityDid, t),
+                interpolation: { escapeValue: false },
+              })}
+            </Text>
+          ) : null}
+          {cannotLeaveHere ? (
+            <Text style={styles.label}>
+              {t('Community.LeaveNotFromThisPhone', {
+                community: communityLabelOf(communityDid, t),
+                interpolation: { escapeValue: false },
+              })}
+            </Text>
+          ) : null}
+        </View>
       </ScrollView>
     </SafeAreaView>
   )

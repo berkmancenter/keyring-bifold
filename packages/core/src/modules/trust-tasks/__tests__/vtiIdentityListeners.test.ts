@@ -7,6 +7,11 @@
 import { AppState, DeviceEventEmitter } from 'react-native'
 
 import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
+
+// Spelled out, not imported: the control runs these tests on a tree that does not have it.
+const MESSAGE_WAITING = 'vti:persona-message-waiting'
+// For ids that must differ on every run, a retry included (see "said in the log once").
+let freshIds = 0
 import type { VtiPersona } from '../module/VtiIdentityStore'
 
 type Guard = (did: string) => Promise<void>
@@ -18,9 +23,11 @@ const mockShared = {
 const mockSharedListeners = new Set<() => void>()
 const mockGuards = new Set<Guard>()
 const mockSharedCheckAlive = jest.fn()
+const mockAnswerFromListener = jest.fn()
 jest.mock('../module/vtiAgent', () => ({
   vtiAgent: {
     checkAlive: () => mockSharedCheckAlive(),
+    answerFromListener: (...a: unknown[]) => mockAnswerFromListener(...a),
     getState: () => ({
       did: mockShared.did,
       signingInAs: mockShared.signingInAs,
@@ -47,7 +54,11 @@ jest.mock('../module/vtaAgent', () => ({
     subscribe: () => () => undefined,
   },
 }))
-jest.mock('../module/vtiPersonaInbox', () => ({ keepForPersona: jest.fn() }))
+jest.mock('../module/vtiPersonaInbox', () => ({
+  keepForPersona: jest.fn(),
+  // The real one: what a listener takes must be what the inbox keeps.
+  ownedByInbox: jest.requireActual('../module/vtiPersonaInbox').ownedByInbox,
+}))
 jest.mock('../module/VtiMediatorTransport', () => ({}))
 jest.mock('../module/vtiTsp', () => ({}))
 jest.mock('../module/VtiIdentityStore', () => ({ GenericRecordsIdentityStore: jest.fn() }))
@@ -95,6 +106,10 @@ describe('which identities get a listener', () => {
     const other = persona('d', { vtaDid: 'did:webvh:other-vta' })
     expect(listenerTargets([a, noKey, other], {}, 'did:webvh:vta')).toEqual([a])
     expect(listenerTargets([a], {}, undefined)).toEqual([])
+  })
+  it("never the agent's own DID, which would take the agent's inbox from it", () => {
+    const agentItself = persona('vta', { did: 'did:webvh:vta' })
+    expect(listenerTargets([a, agentItself], {}, 'did:webvh:vta')).toEqual([a])
   })
 })
 
@@ -429,8 +444,100 @@ describe('what a listener keeps', () => {
   it('a message not in the envelope is kept as it came', async () => {
     const keep = keepForPersona as jest.Mock
     keep.mockClear()
-    const plain = { id: 'm2', type: 'https://example.org/plain', body: {} }
+    const plain = { id: 'm2', type: 'https://trusttasks.org/spec/vtc/members/removal-notice/0.1', body: {} }
     await keepFromListener({ config: { logger: {} } } as never, persona('a'), plain as never, 'tsp')
     expect(keep).toHaveBeenCalledWith(expect.anything(), expect.anything(), plain)
+  })
+
+  // 276.10, two-phone private vetting: the vetter's listener heard the applicant's vetting request while another
+  // community held the shared session, took it (an acknowledgement) and kept nothing, and the desk never saw it.
+  it('a vetting request is not taken: left on the mediator, and its identity named for the shared session', async () => {
+    const keep = keepForPersona as jest.Mock
+    keep.mockClear()
+    const waiting = jest.fn()
+    const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
+    const a = persona('a')
+    const request = {
+      id: 'm3',
+      type: 'https://trusttasks.org/spec/vetting/request/0.1',
+      body: { type: 'https://trusttasks.org/spec/vetting/request/0.1', payload: {} },
+    }
+    await expect(keepFromListener({ config: { logger: {} } } as never, a, request as never, 'didcomm')).rejects.toThrow(
+      'left on the mediator'
+    )
+    expect(keep).not.toHaveBeenCalled()
+    expect(waiting).toHaveBeenCalledWith({ did: a.did, communityDid: a.communityDid, type: request.type })
+    sub.remove()
+  })
+
+  // Review of #854: a message left on the mediator comes back at every drain until the shared session takes it. The
+  // event goes out each time (the screen may have lost the session again), but the Release log says it once.
+  it('a message left again at the next drain names its identity again, and is said in the log once', async () => {
+    const waiting = jest.fn()
+    const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const a = persona('a')
+    // A fresh id each run: what was said is remembered for the module's life (by identity and message id), so a
+    // fixed id would make this depend on what ran before it, a jest retry included (a retry runs the test again in
+    // the same module). Not Date.now(): jestSetup.js freezes it package-wide, so it is the same on every run.
+    const request = {
+      id: `m5-once-${++freshIds}-${Math.random()}`,
+      type: 'https://trusttasks.org/spec/vetting/request/0.1',
+      body: {},
+    }
+    for (let drain = 0; drain < 3; drain++)
+      await expect(
+        keepFromListener({ config: { logger: {} } } as never, a, request as never, 'didcomm')
+      ).rejects.toThrow('left on the mediator')
+    expect(waiting).toHaveBeenCalledTimes(3)
+    const said = warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes(request.type))
+    expect(said.filter((line) => line.includes('left on the mediator'))).toHaveLength(1)
+    expect(said.filter((line) => line.includes('received'))).toHaveLength(1)
+    warn.mockRestore()
+    sub.remove()
+  })
+
+  // 277.8: an answer the shared session asked for, heard here after the session moved on, came back at every drain.
+  it.each([
+    ['answered', 'given to the ask waiting for it'],
+    ['orphan', 'answers no ask: dropped'],
+  ])(
+    'an answer vtiAgent calls %s is taken: acknowledged, said once, and nobody is told one waits',
+    async (verdict, said) => {
+      const keep = keepForPersona as jest.Mock
+      keep.mockClear()
+      mockAnswerFromListener.mockReturnValueOnce(verdict)
+      const waiting = jest.fn()
+      const sub = DeviceEventEmitter.addListener(MESSAGE_WAITING, waiting)
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const a = persona('a')
+      const answer = {
+        id: `m6-${++freshIds}-${Math.random()}`,
+        type: 'https://trusttasks.org/spec/vtc/rooms/memberships/list/0.1#response',
+        thid: 'urn:uuid:r',
+        body: {},
+      }
+      await expect(
+        keepFromListener({ config: { logger: {} } } as never, a, answer as never, 'didcomm')
+      ).resolves.toBeUndefined()
+      expect(mockAnswerFromListener).toHaveBeenLastCalledWith(a.did, answer)
+      expect(keep).not.toHaveBeenCalled()
+      expect(waiting).not.toHaveBeenCalled()
+      const lines = warn.mock.calls.map(([line]) => String(line))
+      expect(lines.filter((line) => line.includes(said))).toHaveLength(1)
+      expect(lines.filter((line) => line.includes('left on the mediator'))).toHaveLength(0)
+      warn.mockRestore()
+      sub.remove()
+    }
+  )
+
+  it('an answer to an ask the shared session sent is left for it too, in the envelope or not', async () => {
+    const keep = keepForPersona as jest.Mock
+    keep.mockClear()
+    const answer = { id: 'm4', type: 'https://trusttasks.org/spec/vtc/rooms/offers/list/0.4#response', body: {} }
+    await expect(
+      keepFromListener({ config: { logger: {} } } as never, persona('a'), answer as never, 'tsp')
+    ).rejects.toThrow('left on the mediator')
+    expect(keep).not.toHaveBeenCalled()
   })
 })

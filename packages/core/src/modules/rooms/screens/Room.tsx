@@ -1,6 +1,10 @@
 /**
- * A room as a conversation (rooms member sprint, RoomView): its posts newest first, a day pill above each day's
- * posts, "Load older" at the end, and pull to refresh, since nothing pushes a post to a phone yet. Above the posts,
+ * A room as a conversation (rooms member sprint, RoomView), read as the person-to-person chat reads: newest at the
+ * bottom, where it opens, a day pill above each day's posts, and "Load older" at the top. Nothing pushes a post to a
+ * phone, so while the room is in view and the app in the foreground, new posts are asked for every few seconds
+ * (`useRoomPosts`); one arrives at the bottom, in view only if the member is there already. Sending goes to the
+ * bottom, as the person-to-person chat does. Pull to refresh is offered while there are no posts to show; with posts,
+ * a poll that fails says "Couldn't refresh · Try again" at the bottom until one succeeds. Above the posts,
  * the room's name and tier and who the member posts as; and a warning when the member's agent found the host's
  * answer inconsistent (records dropped or replayed).
  *
@@ -9,57 +13,88 @@
  * may not post, the composer gives the reason instead. A post's files show as chips; a tap opens the attachment sheet
  * (download, then share), and "+" posts one.
  *
- * Under the header, the room's parts as tabs (data rooms mock): Chat, and Files, the room's library. Reached only
- * while the rooms flag is on.
+ * The screen is the chat alone (rooms in Messages, R2, chat B). The header opens the room's details (RoomInfo), and
+ * from there its files, its notes (titled records and the markers of removed ones, which the chat leaves out) and its
+ * members, each a screen of its own. The files' "Add a file" comes back here with `attach`, and the composer's "+"
+ * opens. Reached only while the rooms flag is on.
  *
  * @module rooms/screens/Room
  */
+import { useAgent } from '@bifold/react-hooks'
+import Clipboard from '@react-native-clipboard/clipboard'
 import { useHeaderHeight } from '@react-navigation/elements'
-import { useRoute } from '@react-navigation/native'
-import React, { useEffect, useMemo, useState } from 'react'
+import { useNavigation, useRoute } from '@react-navigation/native'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, FlatList, Platform, RefreshControl, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Animated, FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native'
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import Toast from 'react-native-toast-message'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { DayPill } from '../../../components/chat/DayPill'
+import MessageActions from '../../../components/chat/MessageActions'
+import { ReactionChips, reactionChipsLabel } from '../../../components/chat/ReactionChips'
+import { ToastType } from '../../../components/toast/BaseToast'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { Screens } from '../../../types/navigators'
 import { useMeasuredKeyboardOffset } from '../../trust-tasks/screens/keyboardOffset'
 import { localDayKey } from '../../../utils/localDay'
 import { testIdWithKey } from '../../../utils/testable'
 import { RoomComposer } from '../components/RoomComposer'
 import { RoomFileSheet } from '../components/RoomFileSheet'
-import { RoomFilesTab } from '../components/RoomFilesTab'
-import { RoomPostBubble } from '../components/RoomPostBubble'
+import { useFloatingDay } from '../components/useFloatingDay'
+import { isComingSoon, RoomFeatureCard } from '../components/RoomFeatureCard'
+import { RoomHeader } from '../components/RoomHeader'
+import { RoomNotJoined } from '../components/RoomNotJoined'
+import { RoomIdentitySheet } from '../components/RoomIdentitySheet'
+import { useDirectoryNames, useDirectoryService } from '../../directory/useDirectory'
+import { PetnamesProvider } from '../components/memberWords'
+import { RoomNoteMarker } from '../components/RoomNoteMarker'
+import { RoomNotesWaiting } from '../components/RoomNotesWaiting'
+import { RoomThreadPost, RoomThreadReactions } from '../components/RoomThreadPost'
 import { roomTitle } from '../components/RoomRow'
 import { roomsStatusText } from '../components/roomsStatusText'
-import { identityText } from '../components/roomWords'
-import { type RoomTab, RoomTabs } from '../components/RoomTabs'
 import { SampleDataBanner } from '../components/SampleDataBanner'
-import TierBadge from '../components/TierBadge'
-import { toInertText } from '../inertText'
-import type { RoomPost } from '../roomPosts'
-import type { RoomFile } from '../types'
-import { useRoom } from '../useRoom'
-import { POSTS_PAGE, useRoomPosts } from '../useRoomPosts'
+import { type InertText, toInertText } from '../inertText'
+import { isChatPost, isNoteMarker, type RoomPost } from '../roomPosts'
+import { byArrival, drawnInChat, type RoomReactionTally } from '../roomThread'
+import { openInMyAgent } from '../roomLinks'
+import type { Identity, RoomFile } from '../types'
+import { useMyName } from '../useMyName'
+import { usePetnames } from '../usePetname'
+import { useInViewAndActive } from '../useInViewAndActive'
+import { type RoomListing, useRoom } from '../useRoom'
+import { POSTS_PAGE, ROOM_POLL_MS, useRoomPosts } from '../useRoomPosts'
+import { markRoomSeen } from '../useRoomRows'
+import { useRoomDraft } from '../useRoomDraft'
 import { type PendingPost, useRoomSend } from '../useRoomSend'
 import { useRoomsService } from '../useRoomsService'
+import { useRoomThread } from '../useRoomThread'
+
+const NO_LISTINGS: readonly RoomListing[] = []
 
 type Item = { kind: 'day'; key: string; date: Date } | { kind: 'post'; key: string; post: RoomPost }
 
-/** Posts newest first, each day's posts led by that day's pill. Posts with no time take no pill. */
+/**
+ * Posts newest first, for a list drawn from the bottom up (`inverted`, as the person-to-person chat's): each day's
+ * pill comes after that day's posts, so it shows above them. Posts with no time take no pill.
+ */
 export const withDayPills = (posts: RoomPost[]): Item[] => {
   const items: Item[] = []
-  let day: string | undefined
+  let day: { key: string; date: Date } | undefined
+  const pill = (d: { key: string; date: Date }): Item => ({ kind: 'day', key: `day-${d.key}`, date: d.date })
   for (const post of posts) {
     const key = post.at ? localDayKey(post.at) : undefined
-    if (post.at && key && key !== day) items.push({ kind: 'day', key: `day-${key}`, date: post.at })
-    if (key) day = key
+    if (post.at && key && key !== day?.key) {
+      if (day) items.push(pill(day))
+      day = { key, date: post.at }
+    }
     items.push({ kind: 'post', key: `post-${post.key}-${post.version}`, post })
   }
+  if (day) items.push(pill(day))
   return items
 }
 
@@ -74,8 +109,10 @@ export const pendingAsPost = (pending: PendingPost, actingAs: RoomPost['author']
   text: toInertText(pending.text),
   isChatMessage: true,
   retracted: false,
+  pinned: false,
   unread: false,
   delivery: pending.state === 'sent' ? undefined : pending.state,
+  ...(pending.state === 'failed' && pending.refused ? { refused: pending.refused } : {}),
   files: pending.file
     ? [
         {
@@ -92,45 +129,144 @@ export const pendingAsPost = (pending: PendingPost, actingAs: RoomPost['author']
       : undefined,
 })
 
+/** A post with words to copy, already in the room. A withdrawn message has none. */
+const canActOn = (post: RoomPost): boolean => !post.delivery && !post.retracted && !post.unread && !!String(post.text)
+
+/** What a note's line says when the note has no title: the start of its text, cut by the line itself. */
+const firstLineOf = (text: InertText): InertText | undefined =>
+  (String(text)
+    .split('\n')
+    .find((line) => line.trim()) as InertText | undefined) ?? undefined
+
+/** A note's reactions, under its line in the chat. */
+const RoomMarkerChips: React.FC<{ tallies: readonly RoomReactionTally[]; onOpen: () => void }> = ({
+  tallies,
+  onOpen,
+}) => {
+  const { t } = useTranslation()
+  const chips = tallies.map((tally) => ({ value: tally.shown, count: tally.count, mine: tally.mine }))
+  return (
+    <View style={{ marginLeft: 12, marginBottom: 4 }}>
+      <ReactionChips
+        chips={chips}
+        isMe={false}
+        label={reactionChipsLabel(t, chips)}
+        onPress={onOpen}
+        testID={testIdWithKey('RoomNoteReactions')}
+      />
+    </View>
+  )
+}
+
 const Room: React.FC = () => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
-  const roomId = (useRoute()?.params as { roomId?: string } | undefined)?.roomId ?? ''
+  const params = useRoute()?.params as { roomId?: string; attach?: number } | undefined
+  const roomId = params?.roomId ?? ''
+  const navigation = useNavigation() as unknown as { navigate: (name: string, params: object) => void }
   const service = useRoomsService()
   // The composer rides above the keyboard. The view's offset is where its parent starts on screen, measured: on iOS 26
   // the header height a screen is told is the status bar alone, and the composer stayed under the keyboard.
   const headerHeight = useHeaderHeight()
   const keyboard = useMeasuredKeyboardOffset(headerHeight)
-  const state = useRoom(service, roomId)
+  // The chat lists no files or notes of its own: its posts are the feed's, and the other parts have their screens.
+  const state = useRoom(service, roomId, NO_LISTINGS)
   const { room, roomCapabilities } = state
   const canList = roomCapabilities?.listNotes.status === 'available'
-  const feed = useRoomPosts(service, roomId, room?.actingAs, !!room && canList)
-  const outbox = useRoomSend(service, roomId, feed.refresh)
+  const inView = useInViewAndActive()
+  // The chat draws its posts and not the room's notes: a page is counted in chat posts.
+  const feed = useRoomPosts(
+    service,
+    roomId,
+    room?.actingAs,
+    !!room && canList && room.joined !== false,
+    inView,
+    isChatPost
+  )
+  // What the records say about each other: reactions, the quotes above replies, and who wrote a record first.
+  const thread = useRoomThread(service, roomId, room?.actingAs, feed.posts)
+  // The post a long press is on, and the post whose chips were tapped.
+  const [actionFor, setActionFor] = useState<RoomPost>()
+  const [reactionsFor, setReactionsFor] = useState<readonly RoomReactionTally[]>()
+  // On screen, a post that fails is marked in the list; away from it, a notice says so (useRoomNotices).
+  const outbox = useRoomSend(service, roomId, feed.refresh, {
+    onScreen: inView,
+    roomName: room ? roomTitle(t, room) : undefined,
+  })
+  // The post being written is kept per room (useRoomDraft), so it comes back with the room after an inactivity lock.
+  const { agent } = useAgent()
+  const draft = useRoomDraft(agent, roomId)
   const [openedFile, setOpenedFile] = useState<RoomFile>()
-  const [tab, setTab] = useState<RoomTab>('chat')
-  const [attachRequest, setAttachRequest] = useState(0)
+  // Whose sheet is open: the member's own, from the composer, or another member's, from their name.
+  const [sheetFor, setSheetFor] = useState<Identity>()
+  const me = useMyName(room?.communityDid)
+  // The member's own names for the community's members, read once for every label on this screen.
+  const petnames = usePetnames(room?.communityDid)
+  // The names other authors wrote on their own directory cards, where they show them to members.
+  const directory = useDirectoryService()
+  const authors = useMemo(
+    () => (feed.posts ?? []).flatMap((p) => (!p.mine && p.author ? [p.author.did] : [])),
+    [feed.posts]
+  )
+  const directoryNames = useDirectoryNames(directory, room?.communityDid, authors)
   const { reload } = state
-  // The library is read again each time it is shown, so a file just posted from the chat is in it.
-  const showTab = (next: RoomTab) => {
-    if (next === 'files' && tab !== 'files') reload()
-    setTab(next)
-  }
+  // A room that could not be read is read again while it is in view, at the posts' pace: nothing else reads it (the
+  // posts poll waits for the room). useRoom reads it again the moment the agent's session opens; this is the fallback
+  // for a read that failed with nothing to wait for (#772, 10-30). Once per failed read, never while one is out: the
+  // agent's client sends one task at a time, and reads piled up behind a slow one would hold a post behind them.
+  const readFailed = state.failed && !room
+  useEffect(() => {
+    if (!readFailed || !inView || state.reading) return
+    const timer = setTimeout(reload, ROOM_POLL_MS)
+    return () => clearTimeout(timer)
+  }, [readFailed, inView, state.reading, reload])
   const canOpenFiles = roomCapabilities?.openFile.status === 'available'
+  // How large a file this room's host takes, asked once posting a file is possible here.
+  const uploadOn = roomCapabilities?.uploadFile.status === 'available'
+  const [fileLimit, setFileLimit] = useState<number>()
+  useEffect(() => {
+    if (!uploadOn || !service?.fileLimit) return
+    let live = true
+    service
+      .fileLimit(roomId)
+      .then((limit) => live && setFileLimit(limit))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [uploadOn, service, roomId])
   const { settle } = outbox
   // A sent post leaves the outbox once the room's own list shows it.
   useEffect(() => {
     if (feed.posts) settle(new Set(feed.posts.map((p) => p.key)))
   }, [feed.posts, settle])
+  // What the member has on screen is seen: Messages counts only the posts after it (rooms in Messages, R1).
+  useEffect(() => {
+    if (inView && feed.posts?.length) markRoomSeen(service, roomId, Math.max(...feed.posts.map((p) => p.version)))
+  }, [inView, feed.posts, service, roomId])
   const pendingPosts = useMemo(
     () => outbox.pending.map((p) => pendingAsPost(p, room?.actingAs)),
     [outbox.pending, room?.actingAs]
   )
+  // The list is drawn from the bottom up, so offset 0 is the newest post: a post just sent shows there.
+  const list = useRef<FlatList<Item>>(null)
+  // The day of the posts at the top of the screen, floated while the member scrolls (as the person-to-person chat's).
+  const floating = useFloatingDay()
+  const { send: outboxSend } = outbox
+  const send = useCallback(
+    (text: string, file?: Parameters<typeof outboxSend>[1]) => {
+      const sending = outboxSend(text, file)
+      if (sending) list.current?.scrollToOffset({ offset: 0, animated: true })
+      return sending
+    },
+    [outboxSend]
+  )
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
-    header: { paddingHorizontal: 16, paddingVertical: 10, gap: 4 },
     list: { paddingHorizontal: 12, paddingBottom: 16, gap: 2 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     centered: { padding: 16, gap: 8 },
+    floatingDay: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center' },
     warn: {
       flexDirection: 'row',
       gap: 10,
@@ -142,7 +278,8 @@ const Room: React.FC = () => {
       borderColor: ColorPalette.notification.warnBorder,
     },
     warnText: { flex: 1, color: ColorPalette.notification.warnText },
-    idName: { fontFamily: Platform.select({ ios: 'Courier', default: 'monospace' }) },
+    pollFailed: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', gap: 6, paddingVertical: 8 },
+    tryAgain: { color: ColorPalette.brand.primary, fontWeight: 'bold' },
   })
 
   if (!service)
@@ -158,7 +295,7 @@ const Room: React.FC = () => {
     return (
       <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']} testID={testIdWithKey('RoomScreen')}>
         <SampleDataBanner service={service} />
-        {state.failed ? (
+        {state.unreachable ? (
           <View style={styles.centered}>
             <ThemedText testID={testIdWithKey('RoomReadFailed')}>{t('Rooms.AgentUnknown')}</ThemedText>
             <Button
@@ -180,9 +317,27 @@ const Room: React.FC = () => {
 
   const unavailable = roomsStatusText(t, roomCapabilities.listNotes, 'listNotes')
   const cannotPost = roomsStatusText(t, roomCapabilities.write, 'write')
-  const items = feed.posts || pendingPosts.length ? withDayPills([...pendingPosts, ...(feed.posts ?? [])]) : []
+  // A file is posted from the composer, so "Add a file" is offered only where the room takes one (`uploadFile`) and
+  // its files can be listed, so a posted file is seen.
+  const canAttach =
+    roomCapabilities.uploadFile.status === 'available' && roomCapabilities.listFiles.status === 'available'
+  // Titled records and removed ones are the room's notes, on their own screen; the chat shows the rest.
+  const chatPosts = feed.posts?.filter(isChatPost)
+  // The notes the chat leaves out, said under an empty chat: a note from the web page read as an empty room (IN-434).
+  const notesHere = feed.posts?.filter(isNoteMarker) ?? []
+  // In a chat with messages, a note is one line at its time (RoomNoteMarker). In a chat with none, the card below says it.
+  const hasMessages = !!chatPosts?.length || pendingPosts.length > 0
+  const items = hasMessages
+    ? withDayPills([
+        ...pendingPosts,
+        ...byArrival(thread.posts.filter((post) => drawnInChat(post, thread, thread.held.get(post.key)))),
+      ])
+    : []
+  const shown = unavailable ? [] : items
 
-  const empty = unavailable ? (
+  const empty = isComingSoon(roomCapabilities.listNotes) ? (
+    <RoomFeatureCard status={roomCapabilities.listNotes} feature="notes" />
+  ) : unavailable ? (
     <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsUnavailable')}>
       {unavailable}
     </ThemedText>
@@ -191,9 +346,18 @@ const Room: React.FC = () => {
       {t('Rooms.PostsFailed')}
     </ThemedText>
   ) : feed.posts ? (
-    <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsNone')}>
-      {t('Rooms.PostsNone')}
-    </ThemedText>
+    <View style={styles.centered}>
+      <ThemedText style={styles.muted} testID={testIdWithKey('RoomPostsNone')}>
+        {t('Rooms.PostsNone')}
+      </ThemedText>
+      {notesHere.length > 0 ? (
+        <RoomNotesWaiting
+          count={notesHere.length}
+          newest={notesHere[0].title ?? firstLineOf(notesHere[0].text)}
+          onOpen={() => navigation.navigate(Screens.RoomPart, { roomId, part: 'notes' })}
+        />
+      ) : null}
+    </View>
   ) : (
     <ActivityIndicator
       style={styles.centered}
@@ -203,119 +367,197 @@ const Room: React.FC = () => {
   )
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']} testID={testIdWithKey('RoomScreen')}>
-      <SampleDataBanner service={service} />
-      <View style={styles.header} testID={testIdWithKey('RoomHeader')}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <ThemedText
-            variant="headingFour"
-            style={room.nameFrom === 'roomId' ? styles.idName : undefined}
-            testID={testIdWithKey('RoomTitle')}
+    <PetnamesProvider names={petnames} directoryNames={directoryNames}>
+      <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']} testID={testIdWithKey('RoomScreen')}>
+        <SampleDataBanner service={service} />
+        <RoomHeader room={room} onPress={() => navigation.navigate(Screens.RoomInfo, { roomId })} />
+        {feed.check?.verdict === 'conflict' ? (
+          <View style={styles.warn} accessibilityRole="alert" testID={testIdWithKey('RoomHostConflict')}>
+            <Icon name="alert-outline" size={22} color={ColorPalette.notification.warnText} />
+            <ThemedText style={styles.warnText}>{t('Rooms.HostConflict')}</ThemedText>
+          </View>
+        ) : null}
+        {/* Not joined yet: nothing here can be read or sent, and trying again cannot help. Said in place of all of it. */}
+        {room.joined === false ? (
+          <RoomNotJoined room={room} />
+        ) : (
+          /* keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */
+          <KeyboardAvoidingView
+            ref={keyboard.ref}
+            onLayout={keyboard.onLayout}
+            style={{ flex: 1 }}
+            behavior="padding"
+            keyboardVerticalOffset={keyboard.offset}
           >
-            {roomTitle(t, room)}
-          </ThemedText>
-          <TierBadge tier={room.tier} />
-        </View>
-        <ThemedText style={styles.muted} testID={testIdWithKey('RoomActingAs')}>
-          {[
-            room.communityName,
-            t('Rooms.ActingAs', { who: identityText(room.actingAs), interpolation: { escapeValue: false } }) as string,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </ThemedText>
-      </View>
-      {feed.check?.verdict === 'conflict' ? (
-        <View style={styles.warn} accessibilityRole="alert" testID={testIdWithKey('RoomHostConflict')}>
-          <Icon name="alert-outline" size={22} color={ColorPalette.notification.warnText} />
-          <ThemedText style={styles.warnText}>{t('Rooms.HostConflict')}</ThemedText>
-        </View>
-      ) : null}
-      <RoomTabs tabs={['chat', 'files']} selected={tab} onSelect={showTab} />
-      {tab === 'files' ? (
-        <RoomFilesTab
-          files={state.files}
-          failed={state.filesFailed}
-          status={roomCapabilities.listFiles}
-          refreshing={state.refreshing}
-          onRefresh={reload}
-          onOpenFile={canOpenFiles ? setOpenedFile : undefined}
-          onAddFile={
-            unavailable || cannotPost
-              ? undefined
-              : () => {
-                  setTab('chat')
-                  setAttachRequest((n) => n + 1)
-                }
-          }
-        />
-      ) : null}
-      {/* The chat stays mounted on the other tabs, hidden, so its draft and a post on its way are kept.
-          keyboard-controller's view, which lifts on Android too: the app draws under the system bars there. */}
-      <KeyboardAvoidingView
-        ref={keyboard.ref}
-        onLayout={keyboard.onLayout}
-        style={tab === 'chat' ? { flex: 1 } : { display: 'none' }}
-        behavior="padding"
-        keyboardVerticalOffset={keyboard.offset}
-      >
-        <FlatList
-          testID={testIdWithKey('RoomPosts')}
-          data={unavailable ? [] : items}
-          keyExtractor={(item) => item.key}
-          // A page is small (POSTS_PAGE posts and their day pills): draw it whole, so "Load older" sits under it.
-          initialNumToRender={POSTS_PAGE * 2}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) =>
-            item.kind === 'day' ? (
-              <DayPill date={item.date} />
+            <FlatList
+              ref={list}
+              testID={testIdWithKey('RoomPosts')}
+              data={shown}
+              keyExtractor={(item) => item.key}
+              // Newest at the bottom, as the person-to-person chat (gifted-chat's list is inverted too). Only with posts:
+              // an empty list's message reads from the top.
+              inverted={shown.length > 0}
+              // A page is small (POSTS_PAGE posts and their day pills): draw it whole, so "Load older" sits above it.
+              initialNumToRender={POSTS_PAGE * 2}
+              contentContainerStyle={styles.list}
+              renderItem={({ item }) =>
+                item.kind === 'day' ? (
+                  <DayPill date={item.date} />
+                ) : isNoteMarker(item.post) ? (
+                  <View>
+                    <RoomNoteMarker
+                      title={item.post.title ?? firstLineOf(item.post.text)}
+                      onOpen={() => navigation.navigate(Screens.RoomPart, { roomId, part: 'notes' })}
+                    />
+                    {thread.reactions.get(item.post.key) ? (
+                      <RoomMarkerChips
+                        tallies={thread.reactions.get(item.post.key) ?? []}
+                        onOpen={() => setReactionsFor(thread.reactions.get(item.post.key))}
+                      />
+                    ) : null}
+                  </View>
+                ) : (
+                  <RoomThreadPost
+                    thread={thread}
+                    post={item.post}
+                    onLongPress={canActOn(item.post) ? () => setActionFor(item.post) : undefined}
+                    onOpenReactions={() => setReactionsFor(thread.reactions.get(item.post.key))}
+                    onRetry={
+                      item.post.delivery === 'failed'
+                        ? () => (item.post.files.length > 0 ? outbox.cancel : outbox.retry)(item.post.key)
+                        : undefined
+                    }
+                    onCancel={item.post.files.length > 0 ? () => outbox.cancel(item.post.key) : undefined}
+                    onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+                    onOpenAuthor={setSheetFor}
+                  />
+                )
+              }
+              ListEmptyComponent={empty}
+              // Only while there are no posts, where it is the way to try again. Drawn bottom up, a list would put the
+              // control at the bottom; with posts, the room is read again every few seconds while it is in view.
+              refreshControl={
+                unavailable || shown.length > 0 ? undefined : (
+                  <RefreshControl
+                    refreshing={feed.refreshing}
+                    onRefresh={feed.refresh}
+                    tintColor={ColorPalette.brand.primary}
+                  />
+                )
+              }
+              // The header of a list drawn bottom up is at its bottom, under the newest post: where a failed poll is said.
+              ListHeaderComponent={
+                feed.pollFailed && shown.length > 0 ? (
+                  <View style={styles.pollFailed} testID={testIdWithKey('RoomPollFailed')}>
+                    <ThemedText style={styles.muted}>{t('Rooms.RefreshFailed')}</ThemedText>
+                    <ThemedText style={styles.muted}>·</ThemedText>
+                    <Pressable
+                      onPress={feed.pollNow}
+                      accessibilityRole="button"
+                      hitSlop={12}
+                      testID={testIdWithKey('RoomPollTryAgain')}
+                    >
+                      <ThemedText style={styles.tryAgain}>{t('Rooms.TryAgain')}</ThemedText>
+                    </Pressable>
+                  </View>
+                ) : null
+              }
+              // Older posts load as the member scrolls up to them, as a chat's do: the end of a list drawn bottom up is
+              // its top. No button.
+              onEndReached={feed.hasOlder && !feed.loadingOlder ? feed.loadOlder : undefined}
+              onEndReachedThreshold={0.25}
+              onViewableItemsChanged={floating.onViewableItemsChanged}
+              viewabilityConfig={floating.viewabilityConfig}
+              onScrollBeginDrag={floating.onScrollStart}
+              onMomentumScrollBegin={floating.onScrollStart}
+              onScrollEndDrag={floating.onScrollStop}
+              onMomentumScrollEnd={floating.onScrollStop}
+              // The footer of a list drawn bottom up is at its top, above the oldest post shown: the app's spinner while
+              // older posts are read.
+              ListFooterComponent={
+                feed.loadingOlder ? (
+                  <ActivityIndicator
+                    style={styles.centered}
+                    color={ColorPalette.brand.primary}
+                    accessibilityLabel={t('Rooms.Reading')}
+                    testID={testIdWithKey('RoomLoadingOlder')}
+                  />
+                ) : feed.incomplete && !feed.hasOlder ? (
+                  <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
+                    {t('Rooms.NotesIncomplete')}
+                  </ThemedText>
+                ) : null
+              }
+            />
+            {/* Over the top of the list, which is the top of this view: pinned there, never in the way of a tap. */}
+            {floating.day && shown.length > 0 ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.floatingDay, { opacity: floating.opacity }]}
+                testID={testIdWithKey('RoomFloatingDay')}
+              >
+                <DayPill date={floating.day} />
+              </Animated.View>
+            ) : null}
+            {unavailable ? null : isComingSoon(roomCapabilities.write) ? (
+              <RoomFeatureCard status={roomCapabilities.write} feature="write" strip />
             ) : (
-              <RoomPostBubble
-                post={item.post}
-                onRetry={item.post.delivery === 'failed' ? () => outbox.retry(item.post.key) : undefined}
-                onCancel={item.post.files.length > 0 ? () => outbox.cancel(item.post.key) : undefined}
-                onOpenFile={canOpenFiles ? setOpenedFile : undefined}
+              <RoomComposer
+                // A screen reused for another room (navigating to a room already in the stack updates its params)
+                // starts its field afresh: the last room's words never sit in this one's, or are saved as its draft.
+                key={roomId}
+                onSend={send}
+                unavailable={cannotPost}
+                postingAs={
+                  me.name
+                    ? (t('Rooms.PostingAs', { who: me.name, interpolation: { escapeValue: false } }) as string)
+                    : (t('Rooms.PostingAsAddName') as string)
+                }
+                postingAsName={me.name}
+                onPressPostingAs={() => setSheetFor(room.actingAs)}
+                canAttach={canAttach}
+                maxFileBytes={fileLimit}
+                attachRequest={params?.attach}
+                draft={draft.saved}
+                onTextChange={draft.onTextChange}
               />
-            )
-          }
-          ListEmptyComponent={empty}
-          refreshControl={
-            unavailable ? undefined : (
-              <RefreshControl
-                refreshing={feed.refreshing}
-                onRefresh={feed.refresh}
-                tintColor={ColorPalette.brand.primary}
-              />
-            )
-          }
-          ListFooterComponent={
-            feed.hasOlder ? (
-              <Button
-                title={t('Rooms.LoadOlder')}
-                buttonType={ButtonType.Secondary}
-                onPress={feed.loadOlder}
-                disabled={feed.loadingOlder}
-                testID={testIdWithKey('RoomLoadOlder')}
-              />
-            ) : feed.incomplete ? (
-              <ThemedText style={[styles.muted, styles.centered]} testID={testIdWithKey('RoomPostsIncomplete')}>
-                {t('Rooms.NotesIncomplete')}
-              </ThemedText>
-            ) : null
+            )}
+          </KeyboardAvoidingView>
+        )}
+        <RoomFileSheet service={service} roomId={roomId} file={openedFile} onClose={() => setOpenedFile(undefined)} />
+        {/* Nothing sends a reaction or a reply until a room turns them on and an agent can seal them. */}
+        <MessageActions
+          visible={!!actionFor}
+          onClose={() => setActionFor(undefined)}
+          onCopy={() => {
+            Clipboard.setString(String(actionFor?.text ?? ''))
+            setActionFor(undefined)
+            Toast.show({ type: ToastType.Success, text1: t('Chat.Copied') as string })
+          }}
+        />
+        <RoomThreadReactions tallies={reactionsFor} onClose={() => setReactionsFor(undefined)} />
+        <RoomIdentitySheet
+          identity={sheetFor}
+          communityDid={room.communityDid}
+          mine={sheetFor?.did === room.actingAs.did}
+          me={me}
+          onClose={() => setSheetFor(undefined)}
+          onOpenProfile={(profileId) => openInMyAgent(navigation, Screens.EditRCard, profileId ? { profileId } : {})}
+          onViewCard={
+            room.communityDid
+              ? (memberDid, standIn) => {
+                  setSheetFor(undefined)
+                  openInMyAgent(navigation, Screens.CommunityMemberCard, {
+                    communityDid: room.communityDid,
+                    memberDid,
+                    standIn,
+                  })
+                }
+              : undefined
           }
         />
-        {unavailable ? null : (
-          <RoomComposer
-            onSend={outbox.send}
-            unavailable={cannotPost}
-            postingAs={identityText(room.actingAs)}
-            canAttach
-            attachRequest={attachRequest}
-          />
-        )}
-      </KeyboardAvoidingView>
-      <RoomFileSheet service={service} roomId={roomId} file={openedFile} onClose={() => setOpenedFile(undefined)} />
-    </SafeAreaView>
+      </SafeAreaView>
+    </PetnamesProvider>
   )
 }
 

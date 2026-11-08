@@ -26,6 +26,7 @@ export type RoomsOperation =
   | 'hideOffer'
   | 'listFiles'
   | 'openFile'
+  | 'uploadFile'
   | 'listCommunityMembers'
   | 'agentAccess'
   | 'leaveViaCommunity'
@@ -43,11 +44,18 @@ export type RoomsOperation =
  * - `adminOnly`: only a community's administrators may do it.
  * - `noAgentLinked`: the phone has no agent to ask.
  * - `agentUnknown`: the agent could not be asked what it serves; try again later.
- * - `communityDoesNotServe`: the community's service is too old for it (reserved: community
- *   operations are not yet discovered in advance, so today a call to an old community fails instead).
+ * - `communityDoesNotServe`: the community's service is too old for it. Community operations are not discovered in
+ *   advance, so this comes from a call the community refused as a task it doesn't have.
  * - `detailsNotLoaded`: a room known only from the agent's key custody, without the community's
  *   record of it (rights, host). The operation needs those ("Details not loaded").
  * - `noRight`: this member's rights in the room do not include it ("You can't post here").
+ * - `communityUnreachable`: none of the member's communities answered for their rooms; try again later.
+ * - `noIdentity`: the phone holds a membership in the community but no identity it can sign in as there, so nothing
+ *   was asked of it; trying again does not help (IN-517).
+ * - `keysNotHeld`: the identity is on the phone but its keys are not yet: the agent hands them over when it next
+ *   connects, and trying again then helps.
+ * - `tierNotYet`: served, but Keyring does not yet do it in a room of this tier, e.g. writing in an `attributed`
+ *   room, whose records are sealed ("not available yet in this kind of room").
  */
 export type RoomsReason =
   | 'ok'
@@ -61,6 +69,12 @@ export type RoomsReason =
   | 'communityDoesNotServe'
   | 'detailsNotLoaded'
   | 'noRight'
+  | 'communityUnreachable'
+  | 'noIdentity'
+  | 'keysNotHeld'
+  | 'tierNotYet'
+  // Never in this kind of room: files exist on attributed and private rooms only (upstream refuses them on open ones).
+  | 'notOnThisTier'
 
 export type RoomsStatus = 'available' | 'comingSoon' | 'unavailable'
 
@@ -113,6 +127,12 @@ export interface RoomSummary {
   /** The DID of the host serving this room. Unknown for a custody-only room. */
   host?: string
   standing: 'member' | 'lapsed' | 'removed'
+  /**
+   * False for a sealed room the community lists for this identity while the agent holds none of its keys as it: not
+   * joined yet. A community's re-invite does not re-admit to a room, and its posts, notes and files said "Couldn't
+   * read… Try again later" for ever (34VR-Y58H, 277.8, 11-03). Absent: joined, or not known to be otherwise.
+   */
+  joined?: false
 }
 
 /** The operations whose status also depends on the room: its source and this member's rights in it. */
@@ -123,6 +143,7 @@ export type RoomOperation =
   | 'curate'
   | 'listFiles'
   | 'openFile'
+  | 'uploadFile'
   | 'agentAccess'
   | 'listCommunityMembers'
 
@@ -146,6 +167,10 @@ export interface NoteSummary {
   /** Set when an AI agent wrote it under its person's membership. */
   byAgent?: boolean
   updatedAt?: string
+  /** When the host first stored the record; neither an edit nor a curation moves it. Only where an agent serves it. */
+  createdAt?: string
+  /** Who wrote the record's first version, as the host recorded it. Only where an agent serves it, never on a private room. */
+  createdBy?: Identity
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
@@ -169,11 +194,23 @@ export interface HostCheck {
   detail: string
 }
 
+/**
+ * A room's last prune (`rooms/_shared/0.2` RecordPrune), as `rooms/keys/browse` 0.3 passes it on: the room version
+ * the prune took it to, when, and how many records it removed outright, tombstones included.
+ */
+export interface RecordPrune {
+  version: number
+  prunedAt: string
+  removed: number
+}
+
 export interface NoteList {
   notes: NoteSummary[]
   /** False when the host's listing stopped early. */
   complete: boolean
   check: HostCheck
+  /** The room's last prune, when the agent passes one on (browse 0.3). */
+  lastPrune?: RecordPrune
 }
 
 export interface InertFlags {
@@ -187,6 +224,15 @@ export interface Note extends NoteSummary {
   body: InertText
   flags: InertFlags
   check: HostCheck
+  /** What the record says it is (trust-tasks-tf #1027). An open set: see `placeOf`. Only once it is read. */
+  kind?: string
+  /** The record it answers, in this room. */
+  inReplyTo?: { key: string; version?: number }
+  /** When its author says they wrote it, and last edited it: the author's claim, not an attested time. */
+  writtenAt?: string
+  editedAt?: string
+  /** A reaction whose body, as written and before it was made inert, a reader must not show. */
+  reactionRefused?: true
 }
 
 /** A file to post, as the phone picked it: a local copy the service reads and uploads through the member's agent. */
@@ -196,6 +242,11 @@ export interface RoomsAttachment {
   mimeType?: string
   size: number
 }
+
+/** The longest note title, in characters: the room schema's cleartext title (`RecordMetadata.title`). */
+export const NOTE_TITLE_MAX = 512
+/** The longest note body, in characters: the member sprint's 16 KiB cap on a record. */
+export const NOTE_BODY_MAX = 16384
 
 export interface WriteDraft {
   title: string
@@ -237,11 +288,17 @@ export interface WritePreview {
 }
 
 export interface RoomOffer {
+  /** Names the offer to `previewOffer` and `hideOffer`: a route parameter, opaque to screens. */
   offerId: string
   roomId: string
+  /** The community's name for the room, else what tells it apart (`roomRef`): then `roomNameFrom` is `roomId`. */
   roomName: InertText
+  roomNameFrom?: 'roomId'
+  /** What the room is for, as the community's administrators wrote it. Absent when the room has none. */
+  description?: InertText
   communityDid: string
-  communityName: InertText
+  /** Absent when the community published no name: a screen says `offerCommunity`, never a cut of the DID. */
+  communityName?: InertText
   tier: RoomTier
   verbs: RoomVerb[]
   validUntil?: string
@@ -272,9 +329,18 @@ export interface RoomFile {
   name: InertText
   mediaType?: string
   size?: number
+  /**
+   * Whether the signature on the record the file came in was checked: `confirmed`, it holds; `unconfirmed`, it could
+   * not be checked, and the file opens without saying who shared it; `refused`, it does not hold, and the file is not
+   * opened. Absent: the service made no check (the sample rooms).
+   */
+  sender?: RoomFileSender
+  /** Who shared it: set by the agent's service only once `sender` is `confirmed`. */
   sharedBy?: Identity
   sharedAt?: string
 }
+
+export type RoomFileSender = 'confirmed' | 'unconfirmed' | 'refused'
 
 /**
  * A file opened for viewing: a protected local copy. The file's key never leaves the service:
@@ -284,6 +350,8 @@ export interface OpenedFile {
   localUri: string
   mediaType?: string
   size: number
+  /** Its bytes are an image the sheet can draw. Set from the bytes, never from `mediaType`, which is only claimed. */
+  image?: boolean
 }
 
 export interface CommunityRoomMember {
@@ -347,6 +415,27 @@ export class RoomsPreviewExpired extends Error {
   }
 }
 
+/**
+ * A community or the person's agent refused the operation, in its own terms. `code` is the refusal's code
+ * without its task prefix (`vtc/rooms/offers/accept:alreadyAccepted` → `alreadyAccepted`), plus a few of
+ * Keyring's own for a step that went wrong between them (`welcomeMissing`, `joinFailed`). Screens word the
+ * codes they know and show a generic line for any other. `retryable`: the same request again may succeed.
+ * A transport failure (no answer) is not a refusal and arrives as a plain `Error`.
+ */
+export class RoomsRefused extends Error {
+  public constructor(
+    public readonly operation: RoomsOperation,
+    public readonly code: string,
+    public readonly retryable: boolean,
+    detail?: string,
+    /** The agent's or community's own refusal, where this passes one on: what a log reads its reason from. */
+    public readonly refusal?: unknown
+  ) {
+    super(`${operation} was refused (${code})${detail ? `: ${detail}` : ''}`)
+    this.name = 'RoomsRefused'
+  }
+}
+
 /** The note being replaced changed since the preview. Nothing was sent; re-read it first. */
 export class RoomsConflict extends Error {
   public constructor(
@@ -358,19 +447,39 @@ export class RoomsConflict extends Error {
   }
 }
 
+/** A community whose rooms are still to come: the screens say "Still loading…" under its name, and nothing of why. */
+export interface HeldBackCommunity {
+  communityDid: string
+  communityName?: InertText
+}
+
 export interface RoomsService {
   /** True for the fixture service: every screen it feeds shows the "Sample data" banner. */
   readonly isSample: boolean
   /** For logs and support. The sample service puts its build marker here, where it is read at runtime. */
   readonly label: string
+  /** The app's agent a real service is built on (`RoomsBackend.runsOn`); none for the sample. */
+  readonly runsOn?: object
+  /** A line for the app's log, from a screen's read of the rooms: what failed, and each retry. None for the sample. */
+  note?(line: string): void
   /** One status per operation. Cached per agent; `refresh` asks again. */
   capabilities(options?: { refresh?: boolean }): Promise<RoomsCapabilities>
 
   listMyRooms(): Promise<RoomSummary[]>
+  /**
+   * The communities the last `listMyRooms` could not read for now because the community session was kept for another
+   * of this phone's identities: their rooms come with a read again (`onReadable`). Never why. None for the sample.
+   */
+  heldBack?(): HeldBackCommunity[]
   getRoom(roomId: string): Promise<Room>
   /** One status per room operation: the service-wide status, narrowed by the room's source and rights. */
   roomCapabilities(roomId: string): Promise<RoomCapabilities>
-  listNotes(roomId: string): Promise<NoteList>
+  /**
+   * The room's records, metadata only. With `sinceVersion`, only those written or curated after it (a version is
+   * the host's, monotonic per room), so a refresh asks only for what is new; such a listing is never complete
+   * against the room's record count.
+   */
+  listNotes(roomId: string, options?: { sinceVersion?: number }): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
   /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
@@ -378,16 +487,23 @@ export interface RoomsService {
   curate(roomId: string, key: string, action: 'pin' | 'unpin' | 'retract'): Promise<void>
 
   listOffers(communityDid?: string): Promise<RoomOffer[]>
+  /**
+   * Called when a community a listing had to skip for now (another identity's step kept the community session) can
+   * be read again; returns the unsubscribe. Absent where nothing is skipped that way (the sample).
+   */
+  onReadable?(listener: () => void): () => void
   previewOffer(offerId: string): Promise<OfferPreview>
   acceptOffer(token: string): Promise<{ roomId: string }>
   /** Hides an offer on this phone only. Upstream has no decline: the community is not told. */
   hideOffer(offerId: string): Promise<void>
 
   listFiles(roomId: string): Promise<RoomFile[]>
+  /** The largest file this room's host takes, in bytes, where that is less than the picker's own limit. */
+  fileLimit?(roomId: string): Promise<number>
   openFile(roomId: string, fileId: string, options?: RoomsTransferOptions): Promise<OpenedFile>
   /**
-   * Deletes the protected local copy a completed `openFile` made (a cancelled one keeps none). Call it when the viewer closes. The service also
-   * deletes any copies left from earlier sessions on its first `openFile` after the app starts.
+   * Deletes the protected local copy a completed `openFile` made (a cancelled one keeps none). Call it when the viewer closes. The wallet
+   * locking deletes every copy, and the app's start deletes any a killed app left.
    */
   releaseFile(localUri: string): Promise<void>
 
@@ -401,4 +517,9 @@ export interface RoomsService {
 
   /** Leaving goes through the community: leaving it takes the member out of its rooms. */
   leaveViaCommunity(communityDid: string): Promise<void>
+  /**
+   * The phone left `communityDid` another way (the community's own screen): its rooms and what was read of them
+   * go now, and the next listing is asked afresh. None for the sample.
+   */
+  leftCommunity?(communityDid: string): void
 }

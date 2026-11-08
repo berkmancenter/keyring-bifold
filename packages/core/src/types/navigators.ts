@@ -36,6 +36,7 @@ export enum Screens {
   Tours = 'Tours',
   Contacts = 'Contacts',
   Messages = 'Messages',
+  NewMessage = 'New Message',
   ContactDetails = 'Contact Details',
   WhatAreContacts = 'What Are Contacts',
   WhatAreConnections = 'What Are Connections',
@@ -93,9 +94,18 @@ export enum Screens {
   VtiJoin = 'Join',
   SignIn = 'Sign in to a community',
   VtaClaim = 'Set up your agent',
+  SharedConnect = 'Connect with someone',
+  SharedConnectInvite = 'Show a code',
   RoomsHome = 'Rooms',
   Room = 'Room',
   RoomOffer = 'Room offer',
+  Poll = 'Poll',
+  PollBallot = 'Poll ballot',
+  RoomInfo = 'Room details',
+  RoomPart = 'Room part',
+  CommunityMembers = 'Community members',
+  CommunityCard = 'Your community card',
+  CommunityMemberCard = 'Member card',
 }
 
 export enum Stacks {
@@ -154,6 +164,14 @@ export type TabStackParams = {
 export type MyAgentStackParams = {
   [Screens.MyAgent]: undefined
   [Screens.VtiCommunity]: { communityDid: string }
+  // A member's view of a community's directory: its members, and their own card there.
+  [Screens.CommunityMembers]: { communityDid: string }
+  [Screens.CommunityCard]: { communityDid: string }
+  // One poll, and its ballot: `communityDid` is the community the member reaches it through.
+  [Screens.Poll]: { communityDid: string; electionId: string }
+  [Screens.PollBallot]: { communityDid: string; electionId: string }
+  // Another member's card: by the entry the members list gave, or by a room author's DID.
+  [Screens.CommunityMemberCard]: { communityDid: string; entryId?: string; memberDid?: string; standIn?: string }
   [Screens.VtiVetting]: undefined
   /**
    * `ticket`: a vetting ticket the person already pasted somewhere else — the
@@ -177,10 +195,20 @@ export type MyAgentStackParams = {
   [Screens.SignIn]: { link: string; scanId: string } | undefined
   // The code, and the scan it came from (the route's id: each scan is its own screen).
   [Screens.VtaClaim]: { link: string; scanId: string } | undefined
+  // A shared-connect link (developer flag), and the scan it came from.
+  [Screens.SharedConnect]: { link: string; scanId: string } | undefined
   [Screens.EditRCard]: { profileId: string } | undefined
   // Every room and offer the member has (rooms flag on only).
   [Screens.RoomsHome]: undefined
-  [Screens.Room]: { roomId: string }
+} & RoomScreenParams
+
+/** What a room opens on, in My Agent and in Messages alike (rooms in Messages, R2). */
+export type RoomScreenParams = {
+  // `attach`: a file asked for from the room's files, so the composer opens its "+" (a new number each time).
+  [Screens.Room]: { roomId: string; attach?: number }
+  // The room's details, and its files, notes and members, one part a screen.
+  [Screens.RoomInfo]: { roomId: string }
+  [Screens.RoomPart]: { roomId: string; part: 'files' | 'notes' | 'members' }
   // One offer's consent screen. `offerRef` names the offer however it was reached: the offers list today, a join
   // link or QR later.
   [Screens.RoomOffer]: { offerRef: string }
@@ -231,6 +259,7 @@ export type ContactStackParams = {
 
 export type MessageStackParams = {
   [Screens.Messages]: undefined
+  [Screens.NewMessage]: undefined
   [Screens.Chat]: { connectionId: string }
   [Screens.ContactDetails]: { contact: ContactCredentialDetails }
   [Screens.RenameContact]: { connectionId: string }
@@ -241,7 +270,7 @@ export type MessageStackParams = {
   [Screens.ProofDetails]: { recordId: string; isHistory?: boolean }
   [Screens.ProofRequest]: { proofId: string }
   [Screens.JSONDetails]: { jsonBlob: any }
-}
+} & RoomScreenParams
 
 export type ProofRequestsStackParams = {
   [Screens.ProofRequests]: { connectionId?: string }
@@ -272,6 +301,7 @@ export type ConnectStackParams = {
   [Screens.RenameWallet]: undefined
   [Screens.ScanHelp]: undefined
   [Screens.PasteUrl]: undefined
+  [Screens.SharedConnectInvite]: undefined
 }
 
 export type SettingStackParams = {

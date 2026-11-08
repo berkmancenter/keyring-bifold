@@ -12,18 +12,39 @@
  * A post may carry one file (picked and size-checked by `pickRoomFile`), with or without words. While it uploads,
  * the post shows how far it has come, and Cancel stops it: nothing is written, and the post is gone.
  *
+ * The posts on their way are kept per room, in memory only, not by the screen: one still sending when the member
+ * leaves the room carries on, and one that fails then is said in a notice ({@link ROOM_POST_FAILED_EVENT}) that can
+ * send it again from anywhere. Back in the room, it shows as it is.
+ *
  * @module rooms/useRoomSend
  */
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { DeviceEventEmitter } from 'react-native'
 
 import { MAX_TEXT_LENGTH } from '../chat/chatEvent'
 import { newEventId } from '../chat/eventId'
 
-import { chatMessageBody } from './roomPosts'
+import { permanentRefusal, type PostRefusal } from './postRefusal'
+import { holdRoomFileTransfer, removeRoomFileCopy } from './real/files/tempCopies'
 import type { RoomsAttachment, RoomsService, RoomsTransferProgress } from './types'
 
 /** The longest post, in characters: the chat's own limit (keyring.chat/1), within the sprint's 16 KiB cap. */
 export const MAX_POST_LENGTH = MAX_TEXT_LENGTH
+
+/** A post failed while its room was not on screen: the notice says so, and can send it again. */
+export const ROOM_POST_FAILED_EVENT = 'rooms:post-failed'
+
+export interface RoomPostFailed {
+  service: RoomsService
+  roomId: string
+  localId: string
+  /** The room's name as its screen last showed it, when it has been open. */
+  roomName?: string
+  /** It carried a file, so it cannot be sent again from the notice. */
+  hasFile?: boolean
+  /** Refused in a way no retry passes: the notice says why and offers no retry. */
+  refused?: PostRefusal
+}
 
 export interface PendingPost {
   /** The post's eventId, which also names it on screen until the room has it. */
@@ -38,6 +59,8 @@ export interface PendingPost {
   file?: RoomsAttachment
   /** How far the file's upload has come, while sending. */
   progress?: RoomsTransferProgress
+  /** Failed in a way no retry passes (postRefusal): said, and never sent again. */
+  refused?: PostRefusal
 }
 
 export interface RoomSend {
@@ -53,64 +76,161 @@ export interface RoomSend {
   settle: (shownKeys: Set<string>) => void
 }
 
+interface Outbox {
+  posts: PendingPost[]
+  listeners: Set<() => void>
+  /** The room screen's refresh, while it is open: a post written shows in its list. */
+  onSent?: () => void
+  /** Whether the room is on screen, where a post that fails is marked and needs no notice. */
+  onScreen: boolean
+  name?: string
+}
+
+const NO_POSTS: PendingPost[] = []
+
+// Per service, so a new agent (and its service) starts with none, and per room. These two maps are in memory only,
+// never a stored record: tier.mjs reads a `.delete(` on a name like `outboxStore` as deleting stored records, so a
+// rename to `*Store` would move this file out of an OTA.
+const outboxes = new WeakMap<RoomsService, Map<string, Outbox>>()
+// By post: an upload's Cancel.
+const controllers = new Map<string, AbortController>()
+
+function outboxOf(service: RoomsService, roomId: string): Outbox {
+  let rooms = outboxes.get(service)
+  if (!rooms) outboxes.set(service, (rooms = new Map()))
+  let box = rooms.get(roomId)
+  if (!box) rooms.set(roomId, (box = { posts: NO_POSTS, listeners: new Set(), onScreen: false }))
+  return box
+}
+
+function change(box: Outbox, next: (posts: PendingPost[]) => PendingPost[]) {
+  box.posts = next(box.posts)
+  box.listeners.forEach((listener) => listener())
+}
+
+const update = (box: Outbox, localId: string, values: Partial<PendingPost>) =>
+  change(box, (all) => all.map((p) => (p.localId === localId ? { ...p, ...values } : p)))
+
 const isExpired = (e: unknown): boolean => e instanceof Error && e.name === 'RoomsPreviewExpired'
-const isAbort = (e: unknown): boolean => e instanceof Error && e.name === 'AbortError'
 
-export function useRoomSend(service: RoomsService | undefined, roomId: string, onSent: () => void): RoomSend {
-  const [pending, setPending] = useState<PendingPost[]>([])
-  const pendingRef = useRef(pending)
-  pendingRef.current = pending
-  const onSentRef = useRef(onSent)
-  onSentRef.current = onSent
-  const controllers = useRef(new Map<string, AbortController>())
-
-  const update = (localId: string, change: Partial<PendingPost>) =>
-    setPending((all) => all.map((p) => (p.localId === localId ? { ...p, ...change } : p)))
-
-  const deliver = useCallback(
-    async (post: PendingPost) => {
-      if (!service) return
-      const abort = new AbortController()
-      controllers.current.set(post.localId, abort)
-      const write = async () => {
-        const preview = await service.prepareWrite(roomId, {
-          title: '',
-          body: post.body,
-          idempotencyKey: post.localId,
-          ...(post.file ? { attachment: post.file } : {}),
-        })
-        return service.confirmWrite(
-          preview.token,
-          post.file
-            ? {
-                signal: abort.signal,
-                onProgress: (progress) => {
-                  if (!abort.signal.aborted) update(post.localId, { progress })
-                },
-              }
-            : undefined
-        )
-      }
-      try {
-        let written: { key: string }
-        try {
-          written = await write()
-        } catch (e) {
-          // A preview gone stale between the two steps (an app sent to the background): prepare it once more.
-          if (!isExpired(e)) throw e
-          written = await write()
+async function deliver(service: RoomsService, roomId: string, post: PendingPost) {
+  const box = outboxOf(service, roomId)
+  const abort = new AbortController()
+  controllers.set(post.localId, abort)
+  // A locked wallet stops a file's upload, and the file's copy goes with the lock.
+  const letGo = post.file ? holdRoomFileTransfer(abort) : undefined
+  const write = async () => {
+    const preview = await service.prepareWrite(roomId, {
+      title: '',
+      body: post.body,
+      idempotencyKey: post.localId,
+      ...(post.file ? { attachment: post.file } : {}),
+    })
+    return service.confirmWrite(
+      preview.token,
+      post.file
+        ? {
+            signal: abort.signal,
+            onProgress: (progress) => {
+              if (!abort.signal.aborted) update(box, post.localId, { progress })
+            },
+          }
+        : undefined
+    )
+  }
+  try {
+    let written: { key: string }
+    try {
+      written = await write()
+    } catch (e) {
+      // A preview gone stale between the two steps (an app sent to the background): prepare it once more.
+      if (!isExpired(e)) throw e
+      written = await write()
+    }
+    update(box, post.localId, { state: 'sent', key: written.key, progress: undefined })
+    box.onSent?.()
+  } catch (e) {
+    // A cancelled upload is gone already (`cancel` took it off); anything else stays, to send again, or for a file,
+    // to say it was not sent: a stop by the lock is not the member's cancelling. One refused for good says why.
+    if (box.posts.some((p) => p.localId === post.localId)) {
+      const refused = permanentRefusal(e)
+      update(box, post.localId, { state: 'failed', progress: undefined, refused })
+      if (!box.onScreen) {
+        const failed: RoomPostFailed = {
+          service,
+          roomId,
+          localId: post.localId,
+          roomName: box.name,
+          hasFile: Boolean(post.file),
+          ...(refused ? { refused } : {}),
         }
-        update(post.localId, { state: 'sent', key: written.key, progress: undefined })
-        onSentRef.current()
-      } catch (e) {
-        // A cancelled upload is gone already (`cancel` took it off); anything else stays, to send again.
-        if (!isAbort(e) && !abort.signal.aborted) update(post.localId, { state: 'failed', progress: undefined })
-      } finally {
-        if (controllers.current.get(post.localId) === abort) controllers.current.delete(post.localId)
+        DeviceEventEmitter.emit(ROOM_POST_FAILED_EVENT, failed)
       }
+    }
+  } finally {
+    if (controllers.get(post.localId) === abort) controllers.delete(post.localId)
+    letGo?.()
+    // The file in the clear never outlasts its upload, however it ended.
+    if (post.file) await removeRoomFileCopy(post.file.uri)
+  }
+}
+
+/** Sends a failed post again, as the same event: from its room, or from the notice that it failed. */
+export function retryRoomPost(service: RoomsService, roomId: string, localId: string): void {
+  const box = outboxOf(service, roomId)
+  const post = box.posts.find((p) => p.localId === localId)
+  // A failed post's file is gone with its upload, so that post cannot be sent again: the member adds the file again.
+  // One refused for good fails the same way however often it is sent.
+  if (!post || post.state !== 'failed' || post.file || post.refused) return
+  update(box, localId, { state: 'sending' })
+  void deliver(service, roomId, post)
+}
+
+export function useRoomSend(
+  service: RoomsService | undefined,
+  roomId: string,
+  onSent: () => void,
+  /** Whether the room is on screen now, and its name: for the notice of a post that fails while it is not. */
+  where: { onScreen?: boolean; roomName?: string } = {}
+): RoomSend {
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      if (!service) return () => undefined
+      const { listeners } = outboxOf(service, roomId)
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
     },
     [service, roomId]
   )
+  const pending = useSyncExternalStore(subscribe, () =>
+    service ? (outboxes.get(service)?.get(roomId)?.posts ?? NO_POSTS) : NO_POSTS
+  )
+  const onSentRef = useRef(onSent)
+  onSentRef.current = onSent
+  const { onScreen = false, roomName } = where
+
+  useEffect(() => {
+    if (!service) return
+    const box = outboxOf(service, roomId)
+    const refresh = () => onSentRef.current()
+    box.onSent = refresh
+    return () => {
+      if (box.onSent === refresh) box.onSent = undefined
+    }
+  }, [service, roomId])
+
+  useEffect(() => {
+    if (!service) return
+    const box = outboxOf(service, roomId)
+    box.onScreen = onScreen
+    return () => {
+      box.onScreen = false
+    }
+  }, [service, roomId, onScreen])
+
+  useEffect(() => {
+    if (service && roomName) outboxOf(service, roomId).name = roomName
+  }, [service, roomId, roomName])
 
   const send = useCallback(
     (text: string, file?: RoomsAttachment) => {
@@ -121,40 +241,47 @@ export function useRoomSend(service: RoomsService | undefined, roomId: string, o
       const post: PendingPost = {
         localId,
         text: trimmed,
-        // A file with no words is a record with an empty body: keyring.chat/1 has no hosted-file message, and the
-        // record's own file details (its blobs) are what the room shows.
-        body: trimmed ? chatMessageBody(trimmed, localId, at) : '',
+        // The words are the record's body as they were typed: the room schema's text, which every member's client
+        // shows (the community's web page, the browser wallet, pnm). Posts were a keyring.chat/1 message, which those
+        // showed as raw JSON (277.7, IN-447); they still read here (`chatMessageText`). A file with no words is a
+        // record with an empty body, and the record's own file details are what the room shows.
+        body: trimmed,
         at,
         state: 'sending',
         ...(file ? { file } : {}),
       }
-      setPending((all) => [post, ...all])
-      void deliver(post)
+      change(outboxOf(service, roomId), (all) => [post, ...all])
+      void deliver(service, roomId, post)
       return true
     },
-    [service, deliver]
+    [service, roomId]
   )
 
   const retry = useCallback(
     (localId: string) => {
-      const post = pendingRef.current.find((p) => p.localId === localId)
-      if (!post || post.state !== 'failed') return
-      update(localId, { state: 'sending' })
-      void deliver(post)
+      if (service) retryRoomPost(service, roomId, localId)
     },
-    [deliver]
+    [service, roomId]
   )
 
-  const cancel = useCallback((localId: string) => {
-    controllers.current.get(localId)?.abort()
-    controllers.current.delete(localId)
-    setPending((all) => all.filter((p) => p.localId !== localId))
-  }, [])
+  const cancel = useCallback(
+    (localId: string) => {
+      controllers.get(localId)?.abort()
+      controllers.delete(localId)
+      if (service) change(outboxOf(service, roomId), (all) => all.filter((p) => p.localId !== localId))
+    },
+    [service, roomId]
+  )
 
-  const settle = useCallback((shownKeys: Set<string>) => {
-    if (!pendingRef.current.some((p) => p.key && shownKeys.has(p.key))) return
-    setPending((all) => all.filter((p) => !(p.key && shownKeys.has(p.key))))
-  }, [])
+  const settle = useCallback(
+    (shownKeys: Set<string>) => {
+      if (!service) return
+      const box = outboxOf(service, roomId)
+      if (!box.posts.some((p) => p.key && shownKeys.has(p.key))) return
+      change(box, (all) => all.filter((p) => !(p.key && shownKeys.has(p.key))))
+    },
+    [service, roomId]
+  )
 
   return { pending, send, retry, cancel, settle }
 }

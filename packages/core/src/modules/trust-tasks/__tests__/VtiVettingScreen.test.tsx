@@ -16,6 +16,8 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import VtiVetting, { confirmedNameOf, requestRef, requestTestKey, whenShown } from '../screens/VtiVetting'
+import { communityJourneys } from '../module/communityJourney'
+import { setCurrentAgentDid } from '../module/currentAgent'
 import { vtaAgent } from '../module/vtaAgent'
 import * as hiddenVettingModule from '../module/hiddenVetting'
 import { vtiAgent } from '../module/vtiAgent'
@@ -266,6 +268,118 @@ describe('Vetting — a member', () => {
 })
 
 /**
+ * Whose membership the screen reads. On 277 a person left a community and scanned a vetter's ticket: the
+ * phone's reading said "member", from a record that was not theirs. Making the identity announced nothing, so
+ * the reading stayed, and the screen said "You're a member" to someone who had just left. My Agent read again
+ * and said the vetting was not finished, and the ticket had gone with the screen, so it took a second scan.
+ */
+describe('Vetting — a membership of another identity', () => {
+  const ticket = encodeTicketUri({
+    community: communityDid,
+    vetter: 'did:webvh:example:vetter',
+    presentation: { code: { code: 'ABCD-EFGH' } },
+  } as never)
+  const heldBy = (holder: string | undefined, grantedAt = '2026-09-23T20:04:44Z'): Rec => ({
+    ...membership('member'),
+    content: { ...membership('member').content, personaDid: holder, grantedAt },
+  })
+  const scan = async () => {
+    await act(async () => {
+      await routeKeyringAgentLink(ticket, {} as never, jest.fn())
+      jest.advanceTimersByTime(10)
+    })
+  }
+  const open = async (records: Rec[]) => {
+    mockUseAgent.mockReturnValue(withRecords(records))
+    const tree = render(
+      <BasicAppContext>
+        <VtiVetting config={storeConfig} />
+      </BasicAppContext>
+    )
+    await act(async () => {
+      jest.advanceTimersByTime(50)
+    })
+    return tree
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2026-11-01T22:54:27Z'))
+    setVta({ link: linked })
+    setCurrentAgentDid(linkedVtaDid)
+    communityJourneys.forget()
+    jest.spyOn(vtiAgent, 'connect').mockResolvedValue(undefined as never)
+    jest.spyOn(vtiAgent, 'fetchManifest').mockResolvedValue({ wire: '0.3', criteria: [] } as never)
+  })
+  afterEach(() => {
+    setCurrentAgentDid(undefined)
+    communityJourneys.forget()
+    jest.restoreAllMocks()
+    jest.useRealTimers()
+  })
+
+  test('an identity made after the reading: one scan carries through, with no "You\'re a member"', async () => {
+    // The agent itself holds a membership here, and has no identity: the reading says "member".
+    const records = [heldBy(linkedVtaDid)]
+    const start = jest.spyOn(VtiApplicant.prototype, 'start').mockResolvedValue(undefined as never)
+    jest.spyOn(vtaAgent, 'client').mockReturnValue({
+      ensurePersona: async () => {
+        records.push(persona)
+        return persona.content
+      },
+    } as never)
+    const tree = await open(records)
+    await scan()
+    await tree.findByTestId(testIdWithKey('VettingApplicantStep_identity'))
+
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('VettingCreateIdentityButton')))
+      jest.advanceTimersByTime(50)
+    })
+
+    await tree.findByTestId(testIdWithKey('VettingApplicantStep_name'))
+    expect(tree.queryByTestId(testIdWithKey('VettingAlreadyMember'))).toBeNull()
+    fireEvent.changeText(tree.getByTestId(testIdWithKey('VettingLegalNameInput')), 'Ada Lovelace')
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('VettingStartButton')))
+      jest.advanceTimersByTime(50)
+    })
+    expect(start).toHaveBeenCalledWith(expect.anything(), { 'name.legal': 'Ada Lovelace' }, { ticket })
+  })
+
+  test("this identity's own membership is a member", async () => {
+    const tree = await open([persona, membership('member')])
+    expect(await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))).toHaveTextContent(/Vetting\.Member\b/)
+  })
+
+  test('a membership kept from before identities were named is a member, and a ticket is not needed', async () => {
+    const tree = await open([persona, heldBy(undefined)])
+    expect(await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))).toHaveTextContent(/Vetting\.Member\b/)
+    await scan()
+    expect(await tree.findByText('Vetting.MemberTicketNotNeeded')).toBeTruthy()
+  })
+
+  test("a member who scans a ticket is told it isn't needed", async () => {
+    const tree = await open([persona, membership('member')])
+    await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))
+    expect(tree.queryByText('Vetting.MemberTicketNotNeeded')).toBeNull()
+
+    await scan()
+
+    expect(await tree.findByText('Vetting.MemberTicketNotNeeded')).toBeTruthy()
+    // The way on stays: this says why nothing more is asked, it doesn't replace the next step.
+    expect(tree.getByTestId(testIdWithKey('VettingGoToMyAgent'))).toBeTruthy()
+  })
+
+  test('someone admitted after scanning hears nothing about the ticket: it was what got them in', async () => {
+    const tree = await open([persona, heldBy(personaDid, '2026-11-01T22:56:23Z')])
+    await tree.findByTestId(testIdWithKey('VettingAlreadyMember'))
+    await scan()
+    expect(tree.queryByText('Vetting.MemberTicketNotNeeded')).toBeNull()
+  })
+})
+
+/**
  * One filled button per step: the next thing to do. Everything else on the
  * step is outlined (IN-16, IN-18 and the desk with three filled buttons).
  */
@@ -389,7 +503,11 @@ describe('Vetting — one filled button per step', () => {
       await routeKeyringAgentLink(ticket, {} as never, jest.fn())
       jest.advanceTimersByTime(10)
     })
-    expect(ask).toHaveBeenCalledWith({ link: ticket })
+    // With the manifest the screen just read: whether the way in is private is its answer.
+    expect(ask).toHaveBeenCalledWith({
+      link: ticket,
+      manifest: expect.objectContaining({ criteria: expect.any(Array) }),
+    })
     ask.mockRestore()
   })
 
@@ -452,7 +570,13 @@ describe('Vetting — one filled button per step', () => {
         fireEvent.press(tree.getByTestId(testIdWithKey('VettingRequestButton')))
         jest.advanceTimersByTime(10)
       })
-      expect(ask).toHaveBeenCalledWith({ link: ticket })
+      // The private way in goes with the request, so the module can make a current private application.
+      expect(ask).toHaveBeenCalledWith({
+        link: ticket,
+        manifest: expect.objectContaining({
+          criteria: expect.arrayContaining([expect.objectContaining({ id: 'kernel-developer-private' })]),
+        }),
+      })
       expect(navigation.navigate).not.toHaveBeenCalledWith(Screens.VtiHiddenVetting, expect.anything())
       expect(tree.queryByTestId(testIdWithKey('VettingError'))).toBeNull()
       expect(tree.getByTestId(testIdWithKey('VettingPrivate'))).toHaveTextContent(/Vetting\.Private\.Badge/)

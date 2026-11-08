@@ -26,7 +26,7 @@
  *
  * @module trust-tasks/module/vtiCardVault
  */
-import type { Agent } from '@credo-ts/core'
+import { TypedArrayEncoder, type Agent } from '@credo-ts/core'
 import { useEffect } from 'react'
 import { DeviceEventEmitter } from 'react-native'
 
@@ -35,6 +35,7 @@ import { WALLET_LOCKED_EVENT } from '../../../utils/walletLocked'
 import { VTI_PERSONA_DELIVERIES_EVENT } from './communityChanged'
 import { sameIdentity } from './didScid'
 import { listKeyed, putKeyed } from './keyedRecords'
+import { versionsFor } from './taskVersions'
 import { vtaAgent } from './vtaAgent'
 import {
   GenericRecordsCommunityStore,
@@ -42,7 +43,8 @@ import {
   isCurrentMembership,
   type VtiCommunityStore,
 } from './VtiCommunityStore'
-import { GenericRecordsIdentityStore, type VtiPersona } from './VtiIdentityStore'
+import { GenericRecordsIdentityStore, type VtiIdentityStore, type VtiPersona } from './VtiIdentityStore'
+import { shareIdentityWith } from './sharedIdentity'
 import { checkDeliveredCard, VtiCardStatusUnreadable } from './vtiDeliveredCheck'
 import { withoutRoomCards } from './roomCards'
 import { classifyCredential, roleNameOf } from './vtiInbox'
@@ -50,6 +52,30 @@ import { classifyCredential, roleNameOf } from './vtiInbox'
 export const VAULT_RECEIVE = 'https://trusttasks.org/spec/vault/credentials/receive/0.1'
 export const VAULT_QUERY = 'https://trusttasks.org/spec/vault/credentials/query/0.1'
 export const VAULT_GET = 'https://trusttasks.org/spec/vault/credentials/get/0.1'
+/**
+ * 0.2, asked first: from 0d3f268e (vta-service #2309) the agent serves only vault/credentials/get/0.2, while
+ * v0.60.0 to v0.66.0 serve only 0.1. The request is the same; 0.2's answer names a `format` and carries the card
+ * as `credential` or, for a format that is not JSON, `credentialBase64`.
+ */
+export const VAULT_GET_02 = 'https://trusttasks.org/spec/vault/credentials/get/0.2'
+
+type VaultGetAnswer = { credential?: unknown; credentialBase64?: unknown; format?: unknown }
+
+/** The card in a vault/credentials/get answer (0.1 or 0.2), when it is a JSON object. */
+export function credentialOfGet(answer: VaultGetAnswer | undefined): Record<string, unknown> | undefined {
+  const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+  if (isObject(answer?.credential)) return answer.credential
+  if (typeof answer?.credentialBase64 !== 'string') return undefined
+  try {
+    const parsed: unknown = JSON.parse(
+      TypedArrayEncoder.toUtf8String(TypedArrayEncoder.fromBase64(answer.credentialBase64))
+    )
+    return isObject(parsed) ? parsed : undefined
+  } catch {
+    // A format that is not JSON (a JWT, say): not a card this phone keeps.
+    return undefined
+  }
+}
 
 /** A card's vault state changed: `{ credentialId }`. */
 export const VTI_CARD_VAULT_EVENT = 'vti:card-vault'
@@ -269,6 +295,8 @@ DeviceEventEmitter.addListener(WALLET_LOCKED_EVENT, forgetCardReads)
  * run's time (#401 re-time: 88 cards, ~40 s), and a count that sat at 0 for
  * all of it read as stuck. A card on the phone already (`onPhone`, by id) or
  * read earlier this session is not fetched again.
+ *
+ * @versionLadder vault/credentials/get
  */
 export async function fetchAgentCards(
   task: VaultTask,
@@ -285,8 +313,11 @@ export async function fetchAgentCards(
   for (const id of ids) {
     let credential = onPhone?.get(id) ?? cardReads.get(id)
     if (!credential) {
-      const got = await task<{ credential?: Record<string, unknown> }>(VAULT_GET, { id }).catch(() => undefined)
-      credential = got?.credential
+      const got = await versionsFor(task)
+        .ask('vaultCredentialsGet', [VAULT_GET_02, VAULT_GET], (uri) => task<VaultGetAnswer>(uri, { id }))
+        .then(({ answer }) => answer)
+        .catch(() => undefined)
+      credential = credentialOfGet(got)
       if (credential) cardReads.set(id, credential)
     }
     cards.push({ id, credential })
@@ -331,6 +362,8 @@ export async function recoverCardsFromAgent(
     onProgress?: (p: { found: number; restored: number }) => void
     check?: (credential: Record<string, unknown>, issuer: string) => Promise<string | undefined>
     cards?: AgentCard[]
+    /** Where a card for another community keeps this identity for that community too (sharedIdentity). */
+    identities?: Pick<VtiIdentityStore, 'getPersona' | 'setPersona'>
   } = {}
 ): Promise<{ found: number; restored: string[]; already: string[]; refused: RecoveredRefusal[] }> {
   const check = options.check ?? ((c, issuer) => checkDeliveredCard(agent, c, issuer))
@@ -361,7 +394,22 @@ export async function recoverCardsFromAgent(
       continue
     }
     let held = false
-    if (item.kind === 'membership') {
+    // A card from a community this identity was not made for: the identity is kept for that community too, or,
+    // when the phone keeps another identity there, the card is kept on its own (IN-517).
+    let onItsOwn = false
+    if ((item.kind === 'membership' || item.kind === 'role') && item.communityDid !== persona.communityDid) {
+      const identities = options.identities ?? new GenericRecordsIdentityStore(agent)
+      const outcome = await shareIdentityWith(identities, persona, item.communityDid)
+      onItsOwn = outcome !== 'shared' && outcome !== 'already'
+    }
+    if (onItsOwn) {
+      // Held as any other card (a held membership is not a kind), so it shows as no membership of this identity.
+      const heldKind = item.kind === 'role' ? 'role' : 'other'
+      held = (await store.listHeldCredentials(heldKind, item.communityDid)).some((c) =>
+        sameCard(c.credential, credential)
+      )
+      if (!held) await store.saveHeldCredential({ ...item, subjectDid: persona.did, kind: heldKind })
+    } else if (item.kind === 'membership') {
       const found = await store.getMembership(item.communityDid, persona.did)
       // The very card the community ended does not bring the membership back.
       if (found && !isCurrentMembership(found) && found.vmc?.id === credential.id) continue

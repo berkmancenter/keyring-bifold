@@ -42,6 +42,7 @@ import {
   type VerifyAttestationPayload,
   PCS_FAMILY,
   DISCOVERY_TASK,
+  DISCOVERY_TASK_03,
 } from './pcsVtaPayloads'
 
 import {
@@ -77,7 +78,14 @@ import {
   type VetterStanding,
 } from './pcsVetterTasks'
 import { VtiRefusal, isHiddenVettingType } from './vtiAgent'
-import { STEP_UP_TASK, StepUpDeclined, approveResponsePayload, stepUpRequestOf, type StepUpRequest } from './stepUp'
+import {
+  STEP_UP_REQUEST_TYPES,
+  StepUpDeclined,
+  approveResponsePayload,
+  approveResponseTypesFor,
+  stepUpRequestOf,
+  type StepUpRequest,
+} from './stepUp'
 import { isDigestMultibase } from './vettingShape'
 import { TaskVersions } from './taskVersions'
 import { chooseCarriage, type Carriage } from './tspCapability'
@@ -94,6 +102,8 @@ import { GenericRecordsTspProbeStore, runTspProbe, type TspProbeOutcome, type Ts
 import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
+import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
+import { besideQueue, inReadLane, VTA_HEARTBEAT_BESIDE, VTA_READ_LANE_SIZE } from './vtaReadLane'
 import {
   DECLARATIVE_POLICY_ID,
   DECLARATIVE_POLICY_NAME,
@@ -138,6 +148,9 @@ export const VTA_TASK = {
   contextsCreate: 'https://trusttasks.org/spec/vta/contexts/create/1.0',
   didsList: 'https://trusttasks.org/spec/vta/webvh/dids/list/1.0',
   didsCreate: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.0',
+  didsCreate11: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.1',
+  /** 1.2 adds only OPTIONAL request members (`didMethod`, `scidAlsoKnownAs`); 1.1's payload is a valid 1.2 one. */
+  didsCreate12: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.2',
   keysExportSecret: 'https://trusttasks.org/spec/keys/export-secret/0.1',
   serversList: 'https://trusttasks.org/spec/vta/webvh/servers/list/1.0',
   consentRequest: 'https://trusttasks.org/spec/task-consent/request/0.1',
@@ -159,11 +172,17 @@ export const VTA_TASK = {
   aclGrant02: 'https://trusttasks.org/spec/acl/grant/0.2',
   aclRevoke02: 'https://trusttasks.org/spec/acl/revoke/0.2',
   aclUpdate02: 'https://trusttasks.org/spec/acl/update/0.2',
+  /** 0.3 (vta-service #2324, in v0.67.0): 0.2's entries; `pageSize` is `limit`, `cursor`/`truncated` are `nextCursor`. */
+  aclList03: 'https://trusttasks.org/spec/acl/list/0.3',
   // Only "Send me a test request" sends these (approvalRules.ts TEST_REQUEST_TASKS).
   contextsDelete: 'https://trusttasks.org/spec/vta/contexts/delete/1.0',
+  /** 1.1 (trust-tasks-tf #967, vta-service 1afebe27): 1.0's payload plus `abandonHostCopies`, default false. */
+  contextsDelete11: 'https://trusttasks.org/spec/vta/contexts/delete/1.1',
   // The approval rules' row (vta-sdk trust_tasks.rs:2048-2060). Writing is super-admin.
   policyGet: 'https://trusttasks.org/spec/policy/get/0.1',
   policyUpsert: 'https://trusttasks.org/spec/policy/upsert/0.2',
+  /** 0.3: the same request; the answer's `created` is spelled `wasCreated` (trust-tasks-tf f27ea5387). */
+  policyUpsert03: 'https://trusttasks.org/spec/policy/upsert/0.3',
   // The vault, for trigger-link sign-in (oobSignInAgent). vta-sdk's own client
   // sends every vault task at 0.1 (client/vault.rs:35-279, VTI 03a3562f);
   // 0.1 is deprecated in favour of 0.2 (trust_tasks.rs:701-846), which the VTA
@@ -172,6 +191,12 @@ export const VTA_TASK = {
   vaultList02: 'https://trusttasks.org/spec/vault/list/0.2',
   vaultUpsert: 'https://trusttasks.org/spec/vault/upsert/0.1',
   vaultUpsert02: 'https://trusttasks.org/spec/vault/upsert/0.2',
+  vaultList03: 'https://trusttasks.org/spec/vault/list/0.3',
+  vaultUpsert03: 'https://trusttasks.org/spec/vault/upsert/0.3',
+  // 0.4 (trust-tasks-tf f27ea5387): the same vault-entry shape as 0.3 (vault/_shared/0.3); list's `pageSize` is
+  // `limit` and its answer's `cursor`/`truncated` are `nextCursor`; upsert's `created` is `wasCreated`.
+  vaultList04: 'https://trusttasks.org/spec/vault/list/0.4',
+  vaultUpsert04: 'https://trusttasks.org/spec/vault/upsert/0.4',
   vaultSignTrustTask: 'https://trusttasks.org/spec/vault/sign-trust-task/0.1',
   vaultSignTrustTask02: 'https://trusttasks.org/spec/vault/sign-trust-task/0.2',
 } as const
@@ -179,30 +204,46 @@ export const VTA_TASK = {
 /**
  * Each family this client speaks in more than one version, in the order to
  * ask: newest first, except where agents in use serve only the older one.
+ *
+ * @versionLadder
  */
 export const VTA_TASK_VERSIONS = {
-  // 0.1 first: vta-service 0.53.1 and 0.54.0 serve acl/{list,grant,update,
-  // revoke} only at 0.1 (trust_tasks/mod.rs:2245-2255 in both), and a refused
-  // 0.2 never reached the phone over TSP, so an add to My devices read as "no
-  // answer" (al-phone, 10-05). 0.2 is asked if an agent ever refuses 0.1.
-  aclList: [VTA_TASK.aclList, VTA_TASK.aclList02],
-  aclGrant: [VTA_TASK.aclGrant, VTA_TASK.aclGrant02],
-  aclRevoke: [VTA_TASK.aclRevoke, VTA_TASK.aclRevoke02],
-  aclUpdate: [VTA_TASK.aclUpdate, VTA_TASK.aclUpdate02],
-  // 0.1 first: vta-service 0.53.1 and 0.54.0 serve only task-consent/decision/0.1
-  // (trust_tasks/mod.rs:2242, TASK_TASK_CONSENT_DECISION_0_1), and its refusal of
-  // a 0.2 decision never reached the phone over TSP, so the step-down never
-  // ran and an Approve hung (al-phone, 10-05). This client sends only 0.1's
-  // members; 0.2 is asked if an agent ever refuses 0.1.
-  consentDecision: [VTA_TASK.consentDecision, VTA_TASK.consentDecision02],
+  // Newest first. The agents in use share no version: vta-service v0.60.0 to 0d3f268e serve acl/* only at 0.1,
+  // and v0.67.0 (#2323, #2324) only acl/{grant,revoke,update}/0.2 and acl/list/0.3. So one of them steps down on a
+  // refusal whichever is asked first. That needs the refusal to reach the phone: over TSP a refused 0.2 once did
+  // not (al-phone, 10-05), so a TSP-only agent before v0.67.0 is the case to watch.
+  aclList: [VTA_TASK.aclList03, VTA_TASK.aclList02, VTA_TASK.aclList],
+  aclGrant: [VTA_TASK.aclGrant02, VTA_TASK.aclGrant],
+  aclRevoke: [VTA_TASK.aclRevoke02, VTA_TASK.aclRevoke],
+  aclUpdate: [VTA_TASK.aclUpdate02, VTA_TASK.aclUpdate],
+  // 0.2 first. The agents in use share no version: vta-service v0.60.0 to v0.66.0 serve only 0.1, and from
+  // 0d3f268e (2026-10-28, #2313, what first.openvtc.net runs) only 0.2. So one of them steps down on a refusal
+  // whichever is asked first, and 0.2 is where agents are going. This client sends only 0.1's members, which are a
+  // valid 0.2 decision. The step-down needs the refusal to reach the phone: over TSP it once did not (al-phone,
+  // 10-05), so a TSP-only agent at 0.60-0.66 is the case to watch.
+  consentDecision: [VTA_TASK.consentDecision02, VTA_TASK.consentDecision],
   // 0.2 first: the reference rungs signed identify and grant with 0.2 against
   // VTI main 03a3562f (ref-23, ref-24). The payload is the same in both.
   vaultSignTrustTask: [VTA_TASK.vaultSignTrustTask02, VTA_TASK.vaultSignTrustTask],
-  // 0.1 first, as vta-sdk's own client and pnm send them (ref-23 created the
-  // sign-in entry with pnm's 0.1). Both casings of `secretKind` are read and
-  // accepted (vti-common vault/mod.rs:300-322).
-  vaultList: [VTA_TASK.vaultList, VTA_TASK.vaultList02],
-  vaultUpsert: [VTA_TASK.vaultUpsert, VTA_TASK.vaultUpsert02],
+  // 0.4 first, then 0.3. The agents in use share no version: vta-service v0.22.0 to v0.66.0 serve 0.1 to 0.3
+  // (0.2 and 0.3 converted down to the 0.1 handler, trust_tasks/wire_v0_2.rs), and from 0d3f268e (2026-10-28,
+  // #2309, what first.openvtc.net runs) the same edge takes only 0.4. So an agent before 0d3f268e answers 0.4 with
+  // a refusal and is asked 0.3. 0.1 and 0.2 are withdrawn in the 2027-01-01 batch and 0.3 in 2027-04-01's. Each
+  // version gets its own spellings (vaultPayloadFor), and both answers are read back.
+  vaultList: [VTA_TASK.vaultList04, VTA_TASK.vaultList03, VTA_TASK.vaultList02, VTA_TASK.vaultList],
+  vaultUpsert: [VTA_TASK.vaultUpsert04, VTA_TASK.vaultUpsert03, VTA_TASK.vaultUpsert02, VTA_TASK.vaultUpsert],
+  // 1.2 first, then 1.1. vta-service serves 1.1 from v0.49.0 (2026-10-02) and 1.2 from v0.65.0 (2026-10-26);
+  // VTI main serves only 1.2 (#2318), so the next release refuses 1.1. A 0.60-0.64 agent steps down to 1.1 on a
+  // refusal. 1.0 is withdrawn in the 2027-01-01 batch and 1.1 in 2027-04-01's. The payload is the same in all three.
+  didsCreate: [VTA_TASK.didsCreate12, VTA_TASK.didsCreate11, VTA_TASK.didsCreate],
+  // 0.3 first: 0d3f268e (#2310 batch) serves only policy/upsert/0.3; v0.60.0 to v0.66.0 only 0.2.
+  policyUpsert: [VTA_TASK.policyUpsert03, VTA_TASK.policyUpsert],
+  // 0.3 first: every VTA in use serves it (pcsVtaPayloads.ts DISCOVERY_TASK_03).
+  discovery: [DISCOVERY_TASK_03, DISCOVERY_TASK],
+  // 1.1 first. vta-service serves only 1.0 up to v0.66.0, both in v0.67.0, and only 1.1 from 61c23f20 (#2332,
+  // 2026-10-29: v0.68.0 and the nightlies). An agent before v0.67.0 steps down to 1.0 on a refusal. The test
+  // request's context holds nothing, so 1.1's host settling has nothing to do and the payload is the same in both.
+  contextsDelete: [VTA_TASK.contextsDelete11, VTA_TASK.contextsDelete],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -224,11 +265,42 @@ export interface VtaVaultEntry {
   [key: string]: unknown
 }
 
-/** `vault/_shared` SealedEnvelope, the one variant Keyring makes (vta-service trust_tasks/vault.rs:168-188). */
-export type VtaSealedSecret = { envelope: 'didcomm-authcrypt'; jwe: string }
+/**
+ * `vault/_shared` SealedEnvelope, the one variant Keyring makes (vta-service trust_tasks/vault.rs:168-188):
+ * `didcomm-authcrypt` at 0.1, `didcommAuthcrypt` from 0.2 (vaultPayloadFor spells it for the version sent).
+ */
+export type VtaSealedSecret = { envelope: 'didcomm-authcrypt' | 'didcommAuthcrypt'; jwe: string }
 
-/** Is this one of the 0.2 access-list URIs (where a revoke may answer `entry: null`)? */
-const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.2$/.test(uri)
+/**
+ * A vault payload spelled for the version it is sent in. vault 0.1 spells its enums in kebab case and 0.2 on in
+ * camel case (trust-tasks vault/_shared 0.1 vs 0.2 and 0.3: `secretKind`, a target's `kind`, a sealed secret's
+ * `envelope`); the VTA validates each version against its own schema, so a payload built once in 0.1's spelling is
+ * invalid at 0.2 and 0.3. Callers build in 0.1's spelling; values with no camel form (`did`, `custom`) are unchanged.
+ */
+export function vaultPayloadFor<P extends Record<string, unknown>>(uri: string, payload: P): P {
+  const minor = Number(/\/vault\/[a-z-]+\/0\.(\d+)$/.exec(uri)?.[1] ?? 1)
+  if (minor < 2) return payload
+  const camel = (value: unknown) =>
+    typeof value === 'string' ? value.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) : value
+  const out: Record<string, unknown> = { ...payload }
+  if ('secretKind' in out) out.secretKind = camel(out.secretKind)
+  if (Array.isArray(out.targets)) {
+    out.targets = out.targets.map((target) =>
+      target && typeof target === 'object' ? { ...target, kind: camel((target as { kind?: unknown }).kind) } : target
+    )
+  }
+  const sealed = out.sealedSecret as { envelope?: unknown } | undefined
+  if (sealed && typeof sealed === 'object') out.sealedSecret = { ...sealed, envelope: camel(sealed.envelope) }
+  // 0.4 names a page's size `limit` (vault/list/0.4).
+  if (minor >= 4 && 'pageSize' in out) {
+    out.limit = out.pageSize
+    delete out.pageSize
+  }
+  return out as P
+}
+
+/** Is this one of the 0.2 access-list URIs, or acl/list/0.3 (the same entries; a revoke may answer `entry: null`)? */
+const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.2$|\/acl\/list\/0\.3$/.test(uri)
 
 /**
  * A full administrator's authority as an `acl/_shared/0.2` entry spells it:
@@ -290,6 +362,8 @@ export interface VtaMintedDid {
   scid: string
   signingKeyId: string
   kaKeyId: string
+  /** From dids/create 1.1 on: the VTA serves the DID's log itself. */
+  serverless?: boolean
   didDocument?: unknown
   [key: string]: unknown
 }
@@ -684,16 +758,17 @@ export function activeSwapTestHook(): VtaSwapTestHook {
 type Probe = { kind: 'live' } | { kind: 'refused'; detail: string } | { kind: 'unknown'; detail: string }
 
 /** Documents the agent sends of its own accord: never the answer to a task this client asked. */
-const UNSOLICITED = new Set<string>([
-  VTA_TASK.consentRequest,
-  VTA_TASK.consentGranted,
-  STEP_UP_TASK.approveRequest01,
-  STEP_UP_TASK.approveRequest02,
-  STEP_UP_TASK.approveRequest04,
-])
+const UNSOLICITED = new Set<string>([VTA_TASK.consentRequest, VTA_TASK.consentGranted, ...STEP_UP_REQUEST_TYPES])
 
 /** Persona mints running now, by VTA and community (see `ensurePersona`). */
 const personasInFlight = new Map<string, Promise<VtiPersona>>()
+
+/**
+ * Key copies being fetched now, by the in-memory key id they go to (see `holdPersonaKeys`): only that a fetch is
+ * running, never the key. Each entry goes when its fetch ends, so nothing outlives it to be cleared on a lock. The id
+ * names the agent and its key (`inMemoryKeyId(vtaDid, vtaKeyId)`), so two agents never share an entry.
+ */
+const keysInFlight = new Map<string, Promise<void>>()
 
 /** A task dropped from the queue before it was sent ({@link VtaClient.dropQueued}). */
 export class VtaTaskDropped extends Error {
@@ -747,6 +822,13 @@ export const REPLIES_STALLED_STEPS_MS = [30_000, 60_000, 120_000, 300_000] as co
  */
 export function isReadOnlyVtaTask(type: string): boolean {
   return /\/(whoami|list|show|status|get)\/\d+(\.\d+)*$/.test(type)
+}
+
+/** A task asked for and not yet started: `start` sends it and settles when its answer (or failure) is in. */
+interface QueuedTask {
+  ticket: number
+  type: string
+  start: () => Promise<void>
 }
 
 export class TspReplyBreaker {
@@ -840,16 +922,29 @@ export class VtaClient {
    */
   private attemptsByKey = new Map<string, string[]>()
 
-  private pending?: {
-    resolve: (plaintext: DidCommV2PlaintextMessage) => void
-    sentAt: number
-    /** What the reply may name as its thread: our DIDComm message, our document, our thread. */
-    ids: Set<string>
-    /** Of `ids`, those an earlier attempt of the same keyed request was sent with. */
-    earlier?: Set<string>
-  }
-  /** The task on the wire now: what a task queued behind it logs that it waits on. */
-  private inFlight?: { type: string; since: number; id: string }
+  /** The tasks on the wire, each waiting for its reply (more than one only in the read lane, vtaReadLane.ts). */
+  private pendings = new Map<
+    number,
+    {
+      resolve: (plaintext: DidCommV2PlaintextMessage) => void
+      sentAt: number
+      /** What the reply may name as its thread: our DIDComm message, our document, our thread. */
+      ids: Set<string>
+      /** Of `ids`, those an earlier attempt of the same keyed request was sent with. */
+      earlier?: Set<string>
+    }
+  >()
+  private nextSlot = 0
+  /** The tasks on the wire now: what a task queued behind them logs that it waits on. */
+  private inFlight = new Map<number, { type: string; since: number; id: string }>()
+  /**
+   * Whether this session's agent threads its replies. Until one comes back threaded, and for the rest of a session
+   * where one did not, every task goes one at a time: an unthreaded reply can be matched only to the one task on the
+   * wire. Cleared at each (re)connect.
+   */
+  private replyThreading: 'unknown' | 'threaded' | 'unthreaded' = 'unknown'
+  /** When an unanswered TSP ask last counted against the breaker: an ask sent before then was on the wire with it. */
+  private lastStrikeAt = 0
   /** The manager's TSP identity, when this build and this wallet can supply one. */
   private tsp?: TspSessionIdentity
   /** §4.2's per-peer decision, taken once per session. */
@@ -883,12 +978,16 @@ export class VtaClient {
   private heardFromAgent = false
   /** This agent's reply breaker: the caller's, shared by every client it makes for the agent, else this client's own. */
   private readonly breaker: TspReplyBreaker
-  private queue: Promise<unknown> = Promise.resolve()
+  /** Tasks asked for and not yet started, oldest first. */
+  private waiting: QueuedTask[] = []
+  /** Lane tasks on the wire now; and whether a task that runs alone is. */
+  private readsRunning = 0
+  private aloneRunning = false
   /** Each task's place in the queue; {@link dropQueued} drops those not yet sent. */
   private tickets = 0
   private droppedThrough = 0
-  /** Stops the wait of the task in flight ({@link dropQueued}). */
-  private cancelInFlight?: () => void
+  /** Stop the waits of the tasks in flight ({@link dropQueued}). */
+  private cancelInFlight = new Set<() => void>()
 
   /**
    * Drop every task queued and not yet sent, and stop waiting for the one in
@@ -900,7 +999,7 @@ export class VtaClient {
    */
   dropQueued(): void {
     this.droppedThrough = this.tickets
-    this.cancelInFlight?.()
+    for (const cancel of [...this.cancelInFlight]) cancel()
   }
 
   /** Keep a keyed attempt's ids; the oldest keys go first, past a few dozen. */
@@ -963,8 +1062,7 @@ export class VtaClient {
       this.options.onInbound?.(plaintext)
       return
     }
-    const pending = this.pending
-    if (!pending) {
+    if (this.pendings.size === 0) {
       this.options.onInbound?.(plaintext)
       return
     }
@@ -978,40 +1076,75 @@ export class VtaClient {
       (body as { threadId?: unknown } | undefined)?.threadId,
     ].filter((ref): ref is string => typeof ref === 'string' && ref.length > 0)
     if (threadRefs.length > 0) {
-      if (!threadRefs.some((ref) => pending.ids.has(ref))) {
+      const match = [...this.pendings].find(([, p]) => threadRefs.some((ref) => p.ids.has(ref)))
+      if (!match) {
         // Threaded to another request: a late answer to an earlier task.
         this.options.onInbound?.(plaintext)
         return
       }
+      const [slot, pending] = match
       if (pending.earlier && threadRefs.some((ref) => pending.earlier?.has(ref)))
         this.agent.config.logger.info(
           `${LOG_PREFIX} took the answer to an earlier attempt of the same keyed request (${body?.type ?? 'no type'})`
         )
-      this.pending = undefined
+      if (this.replyThreading === 'unknown') {
+        this.replyThreading = 'threaded'
+        if (this.readLaneSize > 1)
+          this.agent.config.logger.info(
+            `${LOG_PREFIX} ${this.vtaDid} threads its replies: up to ${this.readLaneSize} reads at a time this session`
+          )
+      }
+      this.pendings.delete(slot)
       pending.resolve(plaintext)
       return
     }
     // No thread at all: the old rule, the next message after the request — but
-    // never one older than it (a poll draining the queue) — and say so.
-    const stale = typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < pending.sentAt - 5000
+    // never one older than it (a poll draining the queue) — and say so. With
+    // more than one task on the wire there is no telling whose it is: none
+    // takes it, and the rest of the session goes one at a time.
+    const [only] = this.pendings.size === 1 ? [...this.pendings] : []
+    const sentAt = only ? only[1].sentAt : Math.min(...[...this.pendings.values()].map((p) => p.sentAt))
+    const stale = typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < sentAt - 5000
     if (stale) {
+      this.options.onInbound?.(plaintext)
+      return
+    }
+    this.replyThreading = 'unthreaded'
+    if (!only) {
+      this.agent.config.logger.warn(
+        `${LOG_PREFIX} a reply with no thread came while ${this.pendings.size} tasks were on the wire; taken by none, and one at a time from now (${body?.type ?? 'no type'})`
+      )
       this.options.onInbound?.(plaintext)
       return
     }
     this.agent.config.logger.warn(
       `${LOG_PREFIX} a reply with no thread was taken as the answer to the task in flight (${body?.type ?? 'no type'})`
     )
-    this.pending = undefined
-    pending.resolve(plaintext)
+    this.pendings.delete(only[0])
+    only[1].resolve(plaintext)
+  }
+
+  private get readLaneSize(): number {
+    return Math.max(1, this.options.readLaneSize ?? VTA_READ_LANE_SIZE)
+  }
+
+  /** Whether a task of `type` goes beside the queue now (vtaReadLane.ts, besideQueue). */
+  private goesBeside(type: string): boolean {
+    return (
+      (this.options.heartbeatBeside ?? VTA_HEARTBEAT_BESIDE) && this.replyThreading === 'threaded' && besideQueue(type)
+    )
   }
 
   /** Grants this client is waiting for, by the payload digest the VTA names. */
   private grantWaiters = new Map<string, () => void>()
   /** Which version of each family this agent was found to serve (taskVersions.ts). */
-  private readonly versions = new TaskVersions((family, from, to) =>
-    this.agent.config.logger.info(
-      `${LOG_PREFIX} ${agentNamedFor(from, this.vtaDid)} does not serve ${from}; asking ${to} (${family})`
-    )
+  private readonly versions = new TaskVersions(
+    (family, from, to) =>
+      this.agent.config.logger.info(
+        `${LOG_PREFIX} ${agentNamedFor(from, this.vtaDid)} does not serve ${from}; asking ${to} (${family})`
+      ),
+    // The version in use, once per family: what shows when an older one's fallback can go.
+    (family, uri) => this.agent.config?.logger?.info(`${LOG_PREFIX} ${family} answered in ${uri}`)
   )
 
   constructor(
@@ -1047,6 +1180,10 @@ export class VtaClient {
       peerRevisionStore?: TspPeerRevisionStore
       /** Where probe outcomes are kept; the wallet's generic records when absent. */
       probeStore?: TspProbeStore
+      /** How many read-lane tasks may be on the wire at once (vtaReadLane.ts); its default when absent. */
+      readLaneSize?: number
+      /** Whether the heartbeat goes beside the queue (vtaReadLane.ts); its default when absent. */
+      heartbeatBeside?: boolean
     } = {}
   ) {
     this.breaker = options.breaker ?? new TspReplyBreaker()
@@ -1115,6 +1252,7 @@ export class VtaClient {
     // session's (D7FG-2Y9J: resetting it here, at every reconnect, was half of why the hold never held).
     this.carriageByPeer.clear()
     this.heardFromAgent = false
+    this.replyThreading = 'unknown'
     this.probeWaiter = undefined
     const session = new VtiMediatorSession(this.agent, this.identity, this.mediator, {
       onError: (error) => this.options.onError?.(error),
@@ -1154,8 +1292,9 @@ export class VtaClient {
   async disconnect(): Promise<void> {
     await this.session?.stop()
     this.session = undefined
-    this.pending = undefined
-    this.inFlight = undefined
+    this.pendings.clear()
+    this.inFlight.clear()
+    this.replyThreading = 'unknown'
     this.probeWaiter = undefined
   }
 
@@ -1311,7 +1450,13 @@ export class VtaClient {
     return done.finally(release)
   }
 
-  /** One send in the queue, behind whatever is in flight — no step-up or consent handling. */
+  /**
+   * One send in the queue, behind whatever is in flight — no step-up or consent handling. Oldest first: a task in the
+   * read lane (vtaReadLane.ts) may start beside other lane tasks, up to the lane's size, once this session's agent is
+   * known to thread its replies; any other task starts only when nothing is on the wire, and the tasks behind it wait.
+   * Once that is known, a heartbeat goes beside the queue (vtaReadLane.ts, besideQueue): at once, and nothing waits
+   * for it.
+   */
   private enqueue<T>(
     type: string,
     payload: Record<string, unknown>,
@@ -1320,24 +1465,56 @@ export class VtaClient {
     onSent?: () => void
   ): Promise<T> {
     const ticket = ++this.tickets
-    const run = (): Promise<T> =>
-      ticket <= this.droppedThrough
-        ? Promise.reject(new VtaTaskDropped(type))
-        : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent).finally(() => {
-            this.inFlight = undefined
-          })
-    // One task at a time: one queued behind another says what it waits on, so a
-    // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
-    const ahead = this.inFlight
-    if (ahead) {
-      this.agent.config.logger.info(
-        `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
-      )
+    return new Promise<T>((resolve, reject) => {
+      const run = (): Promise<T> =>
+        ticket <= this.droppedThrough
+          ? Promise.reject(new VtaTaskDropped(type))
+          : this.sendTask<T>(type, payload, timeoutMs, documentExtras, onSent)
+      // What may start is decided by the running counts in pump(), which a task beside the queue never touches;
+      // inFlight, where it does show, only names what a task waits behind (below).
+      if (this.goesBeside(type)) {
+        void Promise.resolve().then(() => run().then(resolve, reject))
+        return
+      }
+      this.waiting.push({ ticket, type, start: () => run().then(resolve, reject) })
+      // One task at a time: one queued behind another says what it waits on, so a
+      // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
+      // A heartbeat beside the queue holds nothing: what is named is the other task on the wire, if there is one.
+      const onWire = [...this.inFlight.values()]
+      const ahead = onWire.find((t) => !besideQueue(t.type)) ?? onWire[0]
+      if (ahead && !this.mayStart(type)) {
+        this.agent.config.logger.info(
+          `${LOG_PREFIX} ${type} waits behind ${ahead.type} (in flight ${Math.round((Date.now() - ahead.since) / 1000)} s, ${ahead.id})`
+        )
+      }
+      // Scheduled, not started: nothing of the task runs before the caller has its promise (task(), the OTA blocker).
+      void Promise.resolve().then(() => this.pump())
+    })
+  }
+
+  private sharesLane(type: string): boolean {
+    return this.readLaneSize > 1 && this.replyThreading === 'threaded' && inReadLane(type)
+  }
+
+  /** Whether a task of `type` at the head of the queue could start now. */
+  private mayStart(type: string): boolean {
+    if (this.aloneRunning) return false
+    return this.sharesLane(type) ? this.readsRunning < this.readLaneSize : this.readsRunning === 0
+  }
+
+  /** Start what may start, oldest first; a task that must wait holds back everything behind it. */
+  private pump(): void {
+    while (this.waiting.length > 0 && this.mayStart(this.waiting[0].type)) {
+      const next = this.waiting.shift() as QueuedTask
+      const shared = this.sharesLane(next.type)
+      if (shared) this.readsRunning++
+      else this.aloneRunning = true
+      void next.start().finally(() => {
+        if (shared) this.readsRunning--
+        else this.aloneRunning = false
+        this.pump()
+      })
     }
-    // Chain behind whatever is in flight, but do not let one failure poison the next.
-    const next = this.queue.then(run, run)
-    this.queue = next.catch(() => undefined)
-    return next
   }
 
   /**
@@ -1359,7 +1536,19 @@ export class VtaClient {
     }
     const answer = await ask(stepUp.request, { taskType })
     const decision = answer === 'approve' ? 'approved' : 'denied'
-    await this.sendTask(stepUp.request.responseType, approveResponsePayload(stepUp.request, decision), 30000)
+    // The version the answer goes in is logged once it is answered ("stepUpResponse:… answered in …").
+    this.agent.config.logger.info(
+      `${LOG_PREFIX} answering the agent's step-up ${stepUp.request.requestType} (${decision}), in ${approveResponseTypesFor(stepUp.request.requestType).join(' then ')}`
+    )
+    // 0.6 first, whatever the request's version: from 0d3f268e (#2313) the agent mints approve-request/0.2 yet
+    // serves only approve-response/0.6, while v0.60.0 to v0.66.0 serve only 0.1-0.3. The request's own response
+    // version is the step-down. The members are the same in every version sent (approveResponsePayload).
+    const payload = approveResponsePayload(stepUp.request, decision)
+    await this.versions.ask(
+      `stepUpResponse:${stepUp.request.responseType}`,
+      approveResponseTypesFor(stepUp.request.requestType),
+      (type) => this.sendTask(type, payload, 30000)
+    )
     if (decision === 'denied') throw new StepUpDeclined()
     return resubmit()
   }
@@ -1406,68 +1595,89 @@ export class VtaClient {
       const key = typeof documentExtras.idempotencyKey === 'string' ? documentExtras.idempotencyKey : undefined
       const earlier = new Set(key ? (this.attemptsByKey.get(key) ?? []) : [])
       if (key) this.rememberAttempt(key, [envelopeId, documentId, threadId])
+      const slot = ++this.nextSlot
       const reply = new Promise<DidCommV2PlaintextMessage>((resolve) => {
-        this.pending = { resolve, sentAt, ids: new Set([envelopeId, documentId, threadId, ...earlier]), earlier }
-        this.inFlight = { type, since: sentAt, id: documentId }
-      })
-      // §4.2 on the VTA leg: read what the VTA advertises and speak TSP when it
-      // offers it and this wallet can introduce itself. A VTA built without the
-      // `tsp` feature advertises nothing, and this stays on DIDComm.
-      const carriage = await chooseCarriage(
-        this.agent,
-        this.vtaDid,
-        Boolean(this.tsp) && tsp.CODEC_FORMS_RELATIONSHIPS,
-        {
-          decided: this.carriageByPeer,
-          freshV1: async (peer) => isFreshV1(await this.peerRevisions.get(peer)),
-          onProbeWanted: (_peer, serviceId) => this.startProbe(serviceId),
-        }
-      )
-      const overTsp = carriage === 'tsp' && Boolean(this.tsp)
-      // The breaker (vta-sdk's D4 breaker, VTI #1978): after two TSP asks in a
-      // row went unanswered, nothing more is sent until the window passes; the
-      // first ask after it goes as the probe, with a fresh greeting.
-      if (overTsp && this.breaker.holding(Date.now())) {
-        this.pending = undefined
-        throw new VtaRepliesNotArriving(type, this.breaker.noAnswerInARow)
-      }
-      if (carriage === 'tsp' && this.tsp) {
-        if (!this.greeted) {
-          // Our mediator, then us: §5.3.3 ends a hop list at our own VID.
-          const route = [this.mediator!.did, did]
-          const invite = await tsp.packInviteV1(did, this.vtaDid, this.tsp.identity, this.tsp.resolver, { route })
-          await session.sendTspFrame(invite.bytes)
-          this.greeted = true
-          this.agent.config.logger.info(`${LOG_PREFIX} greeted ${this.vtaDid} with an XRFI invite`)
-        }
-        // To an upstream service TSP means TSP 1.0 (cutover plan §6.2).
-        const packed = await packTrustTaskForPeer(this.tsp, did, this.vtaDid, document, 'v1')
-        await session.sendTspFrame(packed.bytes)
-        this.agent.config.logger.info(
-          `${LOG_PREFIX} asked ${agentNamedFor(type, this.vtaDid)} ${type} over ${packed.revision}`
-        )
-      } else
-        await session.sendTo(this.vtaDid, {
-          id: envelopeId,
-          typ: 'application/didcomm-plain+json',
-          type: TRUST_TASK_V2_ENVELOPE_TYPE,
-          from: did,
-          to: [this.vtaDid],
-          thid: threadId,
-          created_time: nowSec(),
-          expires_time: nowSec() + 300,
-          body: document,
+        this.pendings.set(slot, {
+          resolve,
+          sentAt,
+          ids: new Set([envelopeId, documentId, threadId, ...earlier]),
+          earlier,
         })
-      onSent?.()
+        this.inFlight.set(slot, { type, since: sentAt, id: documentId })
+      })
+      const settle = () => {
+        this.pendings.delete(slot)
+        this.inFlight.delete(slot)
+      }
+      let overTsp = false
+      // Nothing sent, or a send that failed, leaves no reply waiting.
+      try {
+        // §4.2 on the VTA leg: read what the VTA advertises and speak TSP when it
+        // offers it and this wallet can introduce itself. A VTA built without the
+        // `tsp` feature advertises nothing, and this stays on DIDComm.
+        const carriage = await chooseCarriage(
+          this.agent,
+          this.vtaDid,
+          Boolean(this.tsp) && tsp.CODEC_FORMS_RELATIONSHIPS,
+          {
+            decided: this.carriageByPeer,
+            freshV1: async (peer) => isFreshV1(await this.peerRevisions.get(peer)),
+            onProbeWanted: (_peer, serviceId) => this.startProbe(serviceId),
+          }
+        )
+        overTsp = carriage === 'tsp' && Boolean(this.tsp)
+        // The breaker (vta-sdk's D4 breaker, VTI #1978): after two TSP asks in a
+        // row went unanswered, nothing more is sent until the window passes; the
+        // first ask after it goes as the probe, with a fresh greeting.
+        if (overTsp && this.breaker.holding(Date.now())) {
+          settle()
+          throw new VtaRepliesNotArriving(type, this.breaker.noAnswerInARow)
+        }
+        if (carriage === 'tsp' && this.tsp) {
+          if (!this.greeted) {
+            // Our mediator, then us: §5.3.3 ends a hop list at our own VID.
+            const route = [this.mediator!.did, did]
+            const invite = await tsp.packInviteV1(did, this.vtaDid, this.tsp.identity, this.tsp.resolver, { route })
+            await session.sendTspFrame(invite.bytes)
+            this.greeted = true
+            this.agent.config.logger.info(`${LOG_PREFIX} greeted ${this.vtaDid} with an XRFI invite`)
+          }
+          // To an upstream service TSP means TSP 1.0 (cutover plan §6.2).
+          const packed = await packTrustTaskForPeer(this.tsp, did, this.vtaDid, document, 'v1')
+          await session.sendTspFrame(packed.bytes)
+          this.agent.config.logger.info(
+            `${LOG_PREFIX} asked ${agentNamedFor(type, this.vtaDid)} ${type} over ${packed.revision}`
+          )
+        } else
+          await session.sendTo(this.vtaDid, {
+            id: envelopeId,
+            typ: 'application/didcomm-plain+json',
+            type: TRUST_TASK_V2_ENVELOPE_TYPE,
+            from: did,
+            to: [this.vtaDid],
+            thid: threadId,
+            created_time: nowSec(),
+            expires_time: nowSec() + 300,
+            body: document,
+          })
+        onSent?.()
+      } catch (error) {
+        settle()
+        throw error
+      }
       let timer: ReturnType<typeof setTimeout> | undefined
+      let cancel: (() => void) | undefined
       const answer = await Promise.race([
         reply,
         new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), timeoutMs))),
-        new Promise<'dropped'>((resolve) => (this.cancelInFlight = () => resolve('dropped'))),
+        new Promise<'dropped'>((resolve) => {
+          cancel = () => resolve('dropped')
+          this.cancelInFlight.add(cancel)
+        }),
       ])
       clearTimeout(timer)
-      this.cancelInFlight = undefined
-      this.pending = undefined
+      if (cancel) this.cancelInFlight.delete(cancel)
+      settle()
       if (answer === 'dropped') throw new VtaTaskDropped(type)
       if (!answer) {
         // A VTA that restarted may have forgotten the relationship, and a
@@ -1481,7 +1691,11 @@ export class VtaClient {
         if (overTsp) {
           this.greeted = false
           const wasOpen = this.breaker.open
-          const holdMs = this.breaker.unanswered(Date.now())
+          // Asks on the wire together go unanswered together: the first counts, and one sent before it adds nothing
+          // (three reads in the lane timing out are one silence, not three).
+          const counts = sentAt >= this.lastStrikeAt
+          if (counts) this.lastStrikeAt = Date.now()
+          const holdMs = counts ? this.breaker.unanswered(this.lastStrikeAt) : undefined
           if (holdMs !== undefined) {
             // A VTA that found this phone not collecting drops its replies and
             // sends no accept for 5 min (VTI #1978): greeting it at every ask
@@ -1658,7 +1872,7 @@ export class VtaClient {
   /** `vault/list`: the entries' metadata, filtered as the VTA filters (`contextId`, `targetDid`, …). */
   async vaultList(filters: Record<string, unknown> = {}): Promise<VtaVaultEntry[]> {
     const { answer } = await this.versions.ask('vaultList', VTA_TASK_VERSIONS.vaultList, (type) =>
-      this.task<{ entries?: VtaVaultEntry[] } | VtaVaultEntry[]>(type, filters)
+      this.task<{ entries?: VtaVaultEntry[] } | VtaVaultEntry[]>(type, vaultPayloadFor(type, filters))
     )
     return Array.isArray(answer) ? answer : (answer?.entries ?? [])
   }
@@ -1666,9 +1880,14 @@ export class VtaClient {
   /** `vault/upsert`: create (no `id`) or update an entry. A create needs `sealedSecret` (vault.rs:826-870). */
   async vaultUpsert(payload: Record<string, unknown>): Promise<{ entry?: VtaVaultEntry; created?: boolean }> {
     const { answer } = await this.versions.ask('vaultUpsert', VTA_TASK_VERSIONS.vaultUpsert, (type) =>
-      this.task<{ entry?: VtaVaultEntry; created?: boolean }>(type, payload)
+      this.task<{ entry?: VtaVaultEntry; created?: boolean; wasCreated?: boolean }>(
+        type,
+        vaultPayloadFor(type, payload)
+      )
     )
-    return answer ?? {}
+    // 0.4 spells it `wasCreated`; 0.1 to 0.3 `created`.
+    const { wasCreated, ...rest } = answer ?? {}
+    return wasCreated === undefined ? rest : { ...rest, created: wasCreated }
   }
 
   /**
@@ -1870,9 +2089,10 @@ export class VtaClient {
    */
   async listAcl(): Promise<VtaAclEntry[]> {
     const { answer } = await this.versions.ask('aclList', VTA_TASK_VERSIONS.aclList, (uri) =>
-      this.task<{ entries?: unknown; truncated?: unknown }>(uri, {})
+      this.task<{ entries?: unknown; truncated?: unknown; nextCursor?: unknown }>(uri, {})
     )
-    if (answer?.truncated === true) {
+    // 0.1 and 0.2 say a partial page with `truncated`; 0.3 with a `nextCursor`.
+    if (answer?.truncated === true || typeof answer?.nextCursor === 'string') {
       this.agent.config.logger.warn(
         `${LOG_PREFIX} ${this.vtaDid} answered a partial access list; showing the first page`
       )
@@ -1965,7 +2185,7 @@ export class VtaClient {
   }
 
   /**
-   * Write the approval rules: `policy/upsert/0.2` on the reserved row, its
+   * Write the approval rules: `policy/upsert` (0.3, else 0.2) on the reserved row, its
    * Rego generated from the rules exactly as the SDK does — the agent derives
    * it again and refuses a write that differs, and refuses the reserved id
    * without the rules in `ext` (operations/policy.rs:172-197). Validated here
@@ -1977,15 +2197,17 @@ export class VtaClient {
   async writeApprovals(model: Pick<ApprovalsModel, 'rules' | 'sets'>, expectedVersion: number): Promise<number> {
     const rules = model.rules.map(ruleForWire)
     validateApprovals(rules, model.sets)
-    const answer = await this.task<{ policy?: { version?: unknown } }>(VTA_TASK.policyUpsert, {
-      id: DECLARATIVE_POLICY_ID,
-      name: DECLARATIVE_POLICY_NAME,
-      module: synthesizeRego(rules),
-      priority: DECLARATIVE_POLICY_PRIORITY,
-      enabled: true,
-      expectedVersion,
-      ext: { [EXT_KEY_RULES]: rules, [EXT_KEY_APPROVER_SETS]: model.sets },
-    })
+    const { answer } = await this.versions.ask('policyUpsert', VTA_TASK_VERSIONS.policyUpsert, (type) =>
+      this.task<{ policy?: { version?: unknown } }>(type, {
+        id: DECLARATIVE_POLICY_ID,
+        name: DECLARATIVE_POLICY_NAME,
+        module: synthesizeRego(rules),
+        priority: DECLARATIVE_POLICY_PRIORITY,
+        enabled: true,
+        expectedVersion,
+        ext: { [EXT_KEY_RULES]: rules, [EXT_KEY_APPROVER_SETS]: model.sets },
+      })
+    )
     return typeof answer?.policy?.version === 'number' ? answer.policy.version : expectedVersion + 1
   }
 
@@ -2065,10 +2287,14 @@ export class VtaClient {
       await this.relayConsentRequests(pending.requests)
       return { kind: 'held' }
     }
-    const cleanedUp = await this.enqueue(VTA_TASK.contextsDelete, { id, force: true }, 30000, {}).then(
-      () => true,
-      () => false
-    )
+    const cleanedUp = await this.versions
+      .ask('contextsDelete', VTA_TASK_VERSIONS.contextsDelete, (type) =>
+        this.enqueue(type, { id, force: true }, 30000, {})
+      )
+      .then(
+        () => true,
+        () => false
+      )
     return { kind: 'letThrough', cleanedUp }
   }
 
@@ -2131,30 +2357,36 @@ export class VtaClient {
     if (!options.serverId && !options.didUrl) {
       throw new Error(`${LOG_PREFIX} mintPersona needs a registered server id or a serverless DID URL`)
     }
-    return this.task<VtaMintedDid>(
-      VTA_TASK.didsCreate,
-      {
-        contextId: options.contextId,
-        ...(options.serverId ? { serverId: options.serverId } : {}),
-        // Serverless: the VTA mints and serves the log itself at this URL.
-        ...(options.didUrl ? { url: options.didUrl } : {}),
-        label: options.label,
-        addMediatorService: true,
-        // DIDComm only. A VTA adds `#tsp` by default when it and its mediator
-        // speak TSP (VTI vta-service did_webvh/document.rs:47-67), and a
-        // community then pushes to the persona over TSP first. Across two
-        // mediators that push never reached the phone (227 gate, VTA Farm),
-        // and the community falls back to DIDComm only after an hour. Over
-        // DIDComm the same pushes arrive.
-        addTspService: false,
-        setPrimary: false,
-      },
-      MINT_TIMEOUT_MS,
-      // A mint whose answer is lost still succeeds at the VTA; retried with the
-      // same key within 24 h the VTA returns that first mint instead of minting
-      // an orphan (VTI-Q17, answered by the maintainers 2026-09-23).
-      options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}
-    )
+    const payload = {
+      contextId: options.contextId,
+      ...(options.serverId ? { serverId: options.serverId } : {}),
+      // Serverless: the VTA mints and serves the log itself at this URL.
+      ...(options.didUrl ? { url: options.didUrl } : {}),
+      label: options.label,
+      addMediatorService: true,
+      // DIDComm only. A VTA adds `#tsp` by default when it and its mediator
+      // speak TSP (VTI vta-service did_webvh/document.rs:47-67), and a
+      // community then pushes to the persona over TSP first. Across two
+      // mediators that push never reached the phone (227 gate, VTA Farm),
+      // and the community falls back to DIDComm only after an hour. Over
+      // DIDComm the same pushes arrive.
+      addTspService: false,
+      setPrimary: false,
+    }
+    // A step down happens only on a version refusal, when the VTA minted nothing, so the same key goes with each try.
+    return this.versions
+      .ask('didsCreate', VTA_TASK_VERSIONS.didsCreate, (type) =>
+        this.task<VtaMintedDid>(
+          type,
+          payload,
+          MINT_TIMEOUT_MS,
+          // A mint whose answer is lost still succeeds at the VTA; retried with the
+          // same key within 24 h the VTA returns that first mint instead of minting
+          // an orphan (VTI-Q17, answered by the maintainers 2026-09-23).
+          options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}
+        )
+      )
+      .then(({ answer }) => answer)
   }
 
   /**
@@ -2288,10 +2520,59 @@ export class VtaClient {
     }
   }
 
-  /** Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. */
+  /**
+   * Borrow both keys of an identity that holds no copies, and record them on it, as a join records a new
+   * persona's. Only the identity's own agent is asked, and nothing is minted: a persona of another agent is left as
+   * it is. Answers whether the identity recorded for its community is this one, with copies, afterwards.
+   *
+   * The in-flight map is per community, not per identity, and shared with `ensurePersona`: a join or another borrow
+   * for the same community is waited for, and what it left is read again before anything is borrowed. So a borrow
+   * never repeats one that has just finished, and never writes this identity back over one a join recorded
+   * meanwhile (both keep one record per agent and community). It cannot wait on itself: `ensurePersonaOnce` hands
+   * a persona to `holdPersonaKeys` only when both its copies are recorded, which never comes here.
+   */
+  private async borrowAdoptedKeys(persona: VtiPersona): Promise<boolean> {
+    if (persona.vtaDid !== this.vtaDid || isAgentsOwnPersona(persona)) return false
+    const inFlightKey = `${this.vtaDid}|${persona.communityDid}`
+    for (;;) {
+      const running = personasInFlight.get(inFlightKey)
+      if (running) {
+        await running.catch(() => undefined)
+        continue
+      }
+      const recorded = await this.store.getPersona(persona.communityDid, this.vtaDid)
+      // Something started for this community while the record was read: wait for it, and read again.
+      if (personasInFlight.has(inFlightKey)) continue
+      if (recorded?.did !== persona.did) return false
+      if (recorded.kmsKeyIds?.keyAgreement && recorded.kmsKeyIds.signing) return true
+      const work = (async () => {
+        await this.connect()
+        const keyAgreement = await this.borrowKey(recorded.vtaKeyIds.keyAgreement)
+        const signing = await this.borrowKey(recorded.vtaKeyIds.signing)
+        const held: VtiPersona = {
+          ...recorded,
+          kmsKeyIds: { keyAgreement: keyAgreement.keyId, signing: signing.keyId },
+        }
+        await this.store.setPersona(held)
+        return held
+      })().finally(() => {
+        if (personasInFlight.get(inFlightKey) === work) personasInFlight.delete(inFlightKey)
+      })
+      personasInFlight.set(inFlightKey, work)
+      await work
+      return true
+    }
+  }
+
+  /**
+   * Borrow one of the VTA's keys into the wallet's KMS; returns the KMS key id. Never a key of the agent's own DID:
+   * an identity's keys only (agentOwnIdentity).
+   */
   async borrowKey(
     vtaKeyId: string
   ): Promise<{ keyId: string; curve: 'Ed25519' | 'X25519'; publicKeyMultibase: string }> {
+    if (isAgentsOwnDid(didOfKeyId(vtaKeyId), this.vtaDid))
+      throw new Error(`${LOG_PREFIX} not borrowed: the key is the agent's own, not an identity's`)
     const exported = await this.task<VtaExportedKey>(VTA_TASK.keysExportSecret, { keyId: vtaKeyId })
     // Held in memory only (#10, plan part C), under an id that is the same every
     // session, so a persona's record keeps naming it across restarts.
@@ -2304,8 +2585,18 @@ export class VtaClient {
    * after a restart or a lock the in-memory backend is empty. A persona whose
    * copies are still in the wallet's store (minted before memory-only custody)
    * is left alone. Answers whether anything was fetched.
+   *
+   * An identity taken on from the agent (Bring back, vtiAdoptIdentities) is recorded with the agent's key ids
+   * and no copies at all, so nothing on the phone could sign in as it (vtiAgent: "the persona has no borrowed
+   * key-agreement key"): its rooms, its community's messages and its vetting all stopped there. Its copies are
+   * borrowed and recorded here, the first time it is asked for.
+   *
+   * A copy is fetched once however many ask for it at the same moment: the session-open sweep and a sign-in that
+   * needs the key both found it missing and each exported both keys, four exports one after another in the agent's
+   * queue for one sign-in (a tester's 277.4 log, 11-02). The second waits for the first's fetch.
    */
   async holdPersonaKeys(persona: VtiPersona): Promise<boolean> {
+    if (!persona.kmsKeyIds?.keyAgreement || !persona.kmsKeyIds.signing) return this.borrowAdoptedKeys(persona)
     const pairs = [
       [persona.kmsKeyIds?.signing, persona.vtaKeyIds.signing],
       [persona.kmsKeyIds?.keyAgreement, persona.vtaKeyIds.keyAgreement],
@@ -2315,18 +2606,47 @@ export class VtaClient {
       if (!kmsKeyId || !isInMemoryKeyId(kmsKeyId)) continue
       // Asked without fetching: getPublicKey would fetch a missing copy itself
       // (EphemeralKeyManagementService), and this is the fetch.
-      const held =
-        (await heldInMemory(this.agent, kmsKeyId)) ??
-        (await this.agent.kms
-          .getPublicKey({ keyId: kmsKeyId, backend: EPHEMERAL_KMS_BACKEND })
-          .then(() => true)
-          .catch(() => false))
-      if (held) continue
-      await this.connect()
-      await this.borrowKey(vtaKeyId)
+      if (await this.holdsKeyNow(kmsKeyId)) continue
+      const joined = keysInFlight.get(kmsKeyId)
+      if (joined) {
+        await joined
+        // Someone else's fetch: the copy is this agent's only if it is held now. A fetch started before a lock lands
+        // in the agent that locked, and a caller after the unlock (a new agent, the same id) would otherwise take it as
+        // held. Not held: this caller fetches it itself.
+        if (!(await this.holdsKeyNow(kmsKeyId))) await this.fetchKeyCopy(kmsKeyId, vtaKeyId)
+      } else {
+        await this.fetchKeyCopy(kmsKeyId, vtaKeyId)
+      }
       fetched = true
     }
     return fetched
+  }
+
+  /**
+   * Whether this agent's in-memory backend holds the copy now: one answer for before a fetch and after joining one.
+   * Asked without fetching where the backend can say; where it can't, getPublicKey is asked, which would fetch a
+   * missing copy itself (EphemeralKeyManagementService), so "can't tell" is never taken as held.
+   */
+  private async holdsKeyNow(kmsKeyId: string): Promise<boolean> {
+    return (
+      (await heldInMemory(this.agent, kmsKeyId)) ??
+      (await this.agent.kms
+        .getPublicKey({ keyId: kmsKeyId, backend: EPHEMERAL_KMS_BACKEND })
+        .then(() => true)
+        .catch(() => false))
+    )
+  }
+
+  /** One fetch of a key copy, shared with whoever asks for the same copy while it runs (`keysInFlight`). */
+  private fetchKeyCopy(kmsKeyId: string, vtaKeyId: string): Promise<void> {
+    const running = (async () => {
+      await this.connect()
+      await this.borrowKey(vtaKeyId)
+    })().finally(() => {
+      if (keysInFlight.get(kmsKeyId) === running) keysInFlight.delete(kmsKeyId)
+    })
+    keysInFlight.set(kmsKeyId, running)
+    return running
   }
 
   // ---------------------------------------------------------------------------
@@ -2348,23 +2668,25 @@ export class VtaClient {
     // and its handler takes no capability check, so the answer is conclusive
     // both ways and needs no grant.
     try {
-      const answer = await this.task<{ supportedTypes?: unknown }>(
-        DISCOVERY_TASK,
-        // **No patterns**, deliberately: a responder matches a pattern against
-        // a task's *slug*, not its Type URI
-        // (`vti-common/src/trust_task/discovery.rs` `matches_any` calls
-        // `slug_of(uri)` before `match_slug`), so a URI-shaped pattern matches
-        // nothing and the answer comes back empty — which would read as "does
-        // not serve it" for an agent that does. An empty pattern list means
-        // every supported task (`matches_any` returns true when
-        // `patterns.is_empty()`), and the filtering happens below where the
-        // Type URIs are unambiguous. The spec's own payload note says as much:
-        // a discoverer wanting more asks for everything and filters locally.
-        {},
-        30000,
-        {},
-        undefined,
-        { waitForConsent: false }
+      const { answer } = await this.versions.ask('discovery', VTA_TASK_VERSIONS.discovery, (type) =>
+        this.task<{ supportedTypes?: unknown }>(
+          type,
+          // **No patterns**, deliberately: a responder matches a pattern against
+          // a task's *slug*, not its Type URI
+          // (`vti-common/src/trust_task/discovery.rs` `matches_any` calls
+          // `slug_of(uri)` before `match_slug`), so a URI-shaped pattern matches
+          // nothing and the answer comes back empty — which would read as "does
+          // not serve it" for an agent that does. An empty pattern list means
+          // every supported task (`matches_any` returns true when
+          // `patterns.is_empty()`), and the filtering happens below where the
+          // Type URIs are unambiguous. The spec's own payload note says as much:
+          // a discoverer wanting more asks for everything and filters locally.
+          {},
+          30000,
+          {},
+          undefined,
+          { waitForConsent: false }
+        )
       )
       const types = Array.isArray(answer?.supportedTypes) ? answer.supportedTypes : []
       // Entries come as a bare URI or as `{type}` — both forms are legal in

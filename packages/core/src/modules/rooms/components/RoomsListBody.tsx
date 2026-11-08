@@ -19,11 +19,12 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { localDate } from '../../trust-tasks/screens/localTime'
 import { testIdWithKey } from '../../../utils/testable'
-import type { RoomOffer, RoomSummary } from '../types'
+import { offerCommunityAlone, offerRoom } from '../offerCommunity'
+import type { HeldBackCommunity, RoomOffer, RoomSummary } from '../types'
 import type { MyRooms } from '../useMyRooms'
 
 import { roomHandle, RoomRow } from './RoomRow'
-import { roomsStatusText } from './roomsStatusText'
+import { roomsReadFailedText, roomsStatusText } from './roomsStatusText'
 import TierBadge from './TierBadge'
 
 const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (offer: RoomOffer) => void }> = ({
@@ -34,12 +35,12 @@ const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const line = [
-    withCommunity ? offer.communityName : undefined,
+    withCommunity ? offerCommunityAlone(offer, t) : undefined,
     offer.validUntil ? (t('Rooms.Until', { date: localDate(offer.validUntil) }) as string) : undefined,
   ]
     .filter(Boolean)
     .join(' · ')
-  const label = `${t('Rooms.OfferOf', { room: offer.roomName, interpolation: { escapeValue: false } })}${
+  const label = `${t('Rooms.OfferOf', { room: offerRoom(offer, t), interpolation: { escapeValue: false } })}${
     line ? `, ${line}` : ''
   }`
   const style = { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 } as const
@@ -49,7 +50,7 @@ const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (
       <Icon name="email-outline" size={22} color={ColorPalette.brand.primary} />
       <View style={{ flex: 1, gap: 2 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <ThemedText variant="bold">{offer.roomName}</ThemedText>
+          <ThemedText variant="bold">{offerRoom(offer, t)}</ThemedText>
           <TierBadge tier={offer.tier} />
         </View>
         {line ? (
@@ -80,13 +81,29 @@ const OfferRow: React.FC<{ offer: RoomOffer; withCommunity: boolean; onPress?: (
   )
 }
 
-/** Rooms by community, in first-seen order; custody-only rooms last, in their own group. */
-export const groupRooms = (rooms: RoomSummary[]): { key: string; title?: string; rooms: RoomSummary[] }[] => {
-  const groups = new Map<string, { key: string; title?: string; rooms: RoomSummary[] }>()
+type RoomsGroup = { key: string; title?: string; rooms: RoomSummary[]; loading?: boolean }
+
+/**
+ * Rooms by community, in first-seen order; custody-only rooms last, in their own group. A community whose rooms are
+ * still to come (`stillLoading`) has its group, with or without rooms yet, marked loading.
+ */
+export const groupRooms = (rooms: RoomSummary[], stillLoading: HeldBackCommunity[] = []): RoomsGroup[] => {
+  const groups = new Map<string, RoomsGroup>()
   for (const room of rooms) {
     const key = room.source === 'custody' || !room.communityDid ? 'custody' : room.communityDid
     if (!groups.has(key)) groups.set(key, { key, title: key === 'custody' ? undefined : room.communityName, rooms: [] })
     groups.get(key)?.rooms.push(room)
+  }
+  for (const held of stillLoading) {
+    const group = groups.get(held.communityDid)
+    if (group) group.loading = true
+    else
+      groups.set(held.communityDid, {
+        key: held.communityDid,
+        title: held.communityName !== undefined ? String(held.communityName) : undefined,
+        rooms: [],
+        loading: true,
+      })
   }
   const all = [...groups.values()]
   return [...all.filter((g) => g.key !== 'custody'), ...all.filter((g) => g.key === 'custody')]
@@ -98,6 +115,10 @@ export interface RoomsListBodyProps {
   acrossCommunities: boolean
   onOpenRoom?: (room: RoomSummary) => void
   onOpenOffer?: (offer: RoomOffer) => void
+  /** What shows while the rooms are read; the app's spinner unless a screen draws its own (a community's rows). */
+  whileReading?: React.ReactNode
+  /** The community these rooms are of, by name, when one is: who to name when it doesn't answer. */
+  communityName?: string
 }
 
 export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
@@ -105,29 +126,61 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
   acrossCommunities,
   onOpenRoom,
   onOpenOffer,
+  whileReading,
+  communityName,
 }) => {
   const { t } = useTranslation()
   const { ColorPalette } = useTheme()
   const styles = StyleSheet.create({
     section: { gap: 4 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
+    failed: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+    trying: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44 },
   })
   const { capabilities, rooms, offers, failed } = myRooms
 
-  if (!capabilities && failed)
+  if (!capabilities && failed) {
+    // Who didn't answer, by name where the screen knows it: on a community's screen its rooms failed as "Couldn't
+    // reach your agent" while the agent was fine (a tester's 277.4 log, 11-02).
+    const named = myRooms.failure?.reason === 'communityUnreachable' && communityName
     return (
-      <View style={styles.section}>
-        <ThemedText testID={testIdWithKey('RoomsReadFailed')}>{t('Rooms.AgentUnknown')}</ThemedText>
-        <Button
-          title={t('Rooms.TryAgain')}
-          buttonType={ButtonType.Secondary}
-          onPress={myRooms.reload}
-          testID={testIdWithKey('RoomsTryAgain')}
-        />
+      <View style={styles.failed} testID={testIdWithKey('RoomsReadFailedCard')}>
+        <Icon name="cloud-off-outline" size={24} color={ColorPalette.grayscale.mediumGrey} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <View style={{ gap: 2 }}>
+            <ThemedText testID={testIdWithKey('RoomsReadFailed')}>
+              {named
+                ? t('Rooms.CommunityNotAnswering', { community: communityName, interpolation: { escapeValue: false } })
+                : roomsReadFailedText(t, myRooms.failure)}
+            </ThemedText>
+            {named ? (
+              <ThemedText variant="caption" style={styles.muted}>
+                {t('Rooms.ShowWhenItAnswers')}
+              </ThemedText>
+            ) : null}
+          </View>
+          {/* Trying again doesn't update a community. While it runs, it says so: a tap used to change nothing. */}
+          {myRooms.failure?.reason === 'communityDoesNotServe' ? null : myRooms.refreshing ? (
+            <View style={styles.trying} accessibilityLiveRegion="polite" testID={testIdWithKey('RoomsTryingAgain')}>
+              <ActivityIndicator color={ColorPalette.brand.primary} />
+              <ThemedText style={styles.muted}>{t('Rooms.TryingAgain')}</ThemedText>
+            </View>
+          ) : (
+            <Button
+              title={t('Rooms.TryAgain')}
+              buttonType={ButtonType.Secondary}
+              onPress={myRooms.reload}
+              testID={testIdWithKey('RoomsTryAgain')}
+            />
+          )}
+        </View>
       </View>
     )
-  if (!capabilities)
-    return <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  }
+  const reading = whileReading ?? (
+    <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  )
+  if (!capabilities) return <>{reading}</>
 
   const unavailable = roomsStatusText(t, capabilities.listMyRooms, 'listMyRooms')
   if (unavailable)
@@ -136,15 +189,25 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
         {unavailable}
       </ThemedText>
     )
-  if (!rooms) return <ActivityIndicator color={ColorPalette.brand.primary} testID={testIdWithKey('RoomsReading')} />
+  if (!rooms) return <>{reading}</>
 
   const waiting = offers ?? []
-  const groups = acrossCommunities ? groupRooms(rooms) : [{ key: 'one', title: undefined, rooms }]
+  // A community whose rooms are still to come says so under its name, and the list is not "No rooms yet" meanwhile: a
+  // community read while the session was kept for another identity showed nothing at all (34VR-Y58H, 11-03).
+  const stillLoading = myRooms.stillLoading ?? []
+  const groups: RoomsGroup[] = acrossCommunities
+    ? groupRooms(rooms, stillLoading)
+    : [{ key: 'one', title: undefined, rooms, loading: stillLoading.length > 0 }]
   return (
     <View style={{ gap: 16 }}>
       {failed ? (
         <ThemedText style={styles.muted} testID={testIdWithKey('RoomsStale')}>
           {t('Rooms.Stale')}
+        </ThemedText>
+      ) : null}
+      {myRooms.offersFailed ? (
+        <ThemedText style={styles.muted} testID={testIdWithKey('RoomOffersFailed')}>
+          {t('Rooms.OffersNotRead')}
         </ThemedText>
       ) : null}
       {waiting.length > 0 ? (
@@ -157,7 +220,7 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
           ))}
         </View>
       ) : null}
-      {rooms.length === 0 ? (
+      {rooms.length === 0 && stillLoading.length === 0 ? (
         <ThemedText style={styles.muted} testID={testIdWithKey('RoomsNone')}>
           {t('Rooms.None')}
         </ThemedText>
@@ -172,6 +235,11 @@ export const RoomsListBody: React.FC<RoomsListBodyProps> = ({
             {group.rooms.map((room) => (
               <RoomRow key={room.roomId} room={room} onPress={onOpenRoom} />
             ))}
+            {group.loading ? (
+              <ThemedText style={styles.muted} testID={testIdWithKey(`RoomsStillLoading_${roomHandle(group.key)}`)}>
+                {t('Rooms.StillLoading')}
+              </ThemedText>
+            ) : null}
           </View>
         ))
       )}

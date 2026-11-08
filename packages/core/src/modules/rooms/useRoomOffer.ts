@@ -7,11 +7,27 @@
  * app restarted) is not an error the person caused: the preview is read again and the screen asks them to look
  * once more, since what they agreed to may have changed. Nothing is sent in that case.
  *
+ * An accept the community answers is an admission, said in a notice ({@link ROOM_ADMITTED_EVENT}) as the screen
+ * moves into the room. One it answers "admission pending" is asked again in the background for a few minutes
+ * (admissionResend), and the same notice says when it is through, wherever the member is then.
+ *
  * @module rooms/useRoomOffer
  */
 import { useCallback, useEffect, useState } from 'react'
+import { DeviceEventEmitter } from 'react-native'
 
+import { resendAdmission, stopAdmissionResend } from './admissionResend'
 import type { OfferPreview, OperationStatus, RoomsReason, RoomsService } from './types'
+
+/** The member was admitted to a room: an accept the community answered. */
+export const ROOM_ADMITTED_EVENT = 'rooms:admitted'
+
+export interface RoomAdmitted {
+  roomId: string
+  roomName: string
+  /** `roomId` when the community published no name: the notice then says "Unnamed room" (`roomTitle`). */
+  roomNameFrom?: 'roomId'
+}
 
 export type OfferStep = 'reading' | 'ready' | 'accepting' | 'hiding'
 
@@ -23,6 +39,8 @@ export interface RoomOfferState {
   step: OfferStep
   /** The offer could not be read. */
   readFailed: boolean
+  /** With `readFailed`: the community no longer lists it, so reading it again can't help. */
+  gone: boolean
   /** The last accept or hide failed; nothing changed. */
   actFailed?: 'accept' | 'hide'
   /** Why the last accept was refused, when the service said; undefined for a failure with no reason (try again). */
@@ -55,12 +73,25 @@ const refusalOf = (e: unknown): AcceptRefusal | undefined => {
   return undefined
 }
 
+/**
+ * Why the offer could not be read, as one value so a failure can't be raised without saying which. `gone` is a read the
+ * community answered: this offer isn't there (accepted elsewhere, withdrawn or expired), and reading it again can't
+ * help. Anything else can be tried again.
+ */
+type ReadFailure = 'failed' | 'gone'
+
+const readFailureOf = (e: unknown): ReadFailure => {
+  const refusal = refusalOf(e)
+  const gone = !!refusal && 'code' in refusal && (refusal.code === 'notFound' || refusal.code === 'offerExpired')
+  return gone ? 'gone' : 'failed'
+}
+
 export function useRoomOffer(service: RoomsService | undefined, offerRef: string): RoomOfferState {
   const [acceptStatus, setAcceptStatus] = useState<OperationStatus>()
   const [hideStatus, setHideStatus] = useState<OperationStatus>()
   const [preview, setPreview] = useState<OfferPreview>()
   const [step, setStep] = useState<OfferStep>('reading')
-  const [readFailed, setReadFailed] = useState(false)
+  const [readFailure, setReadFailure] = useState<ReadFailure>()
   const [actFailed, setActFailed] = useState<'accept' | 'hide'>()
   const [refusal, setRefusal] = useState<AcceptRefusal>()
   const [refreshed, setRefreshed] = useState(false)
@@ -71,7 +102,7 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
     if (!service) return
     let live = true
     setStep('reading')
-    setReadFailed(false)
+    setReadFailure(undefined)
     void (async () => {
       try {
         const capabilities = await service.capabilities({ refresh: generation > 0 })
@@ -83,9 +114,9 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
         if (!live) return
         setPreview(read)
         setStep('ready')
-      } catch {
+      } catch (e) {
         if (live) {
-          setReadFailed(true)
+          setReadFailure(readFailureOf(e))
           setStep('ready')
         }
       }
@@ -101,21 +132,31 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
     setRefusal(undefined)
     setRefreshed(false)
     setStep('accepting')
+    // The member asking again themselves: the background tries step aside.
+    stopAdmissionResend(preview.offer.offerId)
     try {
       const { roomId } = await service.acceptOffer(preview.token)
       setStep('ready')
+      const admitted: RoomAdmitted = {
+        roomId,
+        roomName: String(preview.offer.roomName),
+        roomNameFrom: preview.offer.roomNameFrom,
+      }
+      DeviceEventEmitter.emit(ROOM_ADMITTED_EVENT, admitted)
       return roomId
     } catch (e) {
       if (isExpired(e)) {
         try {
           setPreview(await service.previewOffer(offerRef))
           setRefreshed(true)
-        } catch {
-          setReadFailed(true)
+        } catch (again) {
+          setReadFailure(readFailureOf(again))
         }
       } else {
         setActFailed('accept')
-        setRefusal(refusalOf(e))
+        const refusal = refusalOf(e)
+        setRefusal(refusal)
+        if (refusal && 'code' in refusal && refusal.code === 'admissionPending') resendAdmission(service, preview)
       }
       setStep('ready')
       return undefined
@@ -137,5 +178,18 @@ export function useRoomOffer(service: RoomsService | undefined, offerRef: string
     }
   }, [service, offerRef])
 
-  return { acceptStatus, hideStatus, preview, step, readFailed, actFailed, refusal, refreshed, reload, accept, hide }
+  return {
+    acceptStatus,
+    hideStatus,
+    preview,
+    step,
+    readFailed: readFailure !== undefined,
+    gone: readFailure === 'gone',
+    actFailed,
+    refusal,
+    refreshed,
+    reload,
+    accept,
+    hide,
+  }
 }

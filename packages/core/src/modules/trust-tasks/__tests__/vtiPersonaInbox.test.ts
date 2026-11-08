@@ -79,6 +79,8 @@ const mockForgetApplication = jest.fn(async () => undefined)
 jest.mock('../module/vtiVetting', () => ({
   GenericRecordsVettingStore: jest.fn().mockImplementation(() => ({ forgetApplication: mockForgetApplication })),
   VtiApplicant: jest.fn().mockImplementation(() => ({ receiveStatement: mockReceiveStatement })),
+  isVettingRequest: () => false,
+  closeExpiredParkedRequests: async () => undefined,
 }))
 const mockReceiveNotice = jest.fn(async (): Promise<string> => 'ignored')
 jest.mock('../module/vtiCommunityNotices', () => ({
@@ -682,6 +684,17 @@ describe('what the inbox says in the Release log', () => {
       ),
       expect.stringMatching(/signed in/),
     ])
+  })
+
+  // 10-31: a phone in two communities; a vetting step keeps the session as the other identity (vtiAgent holding).
+  it('listens, and reports no failure, when a step keeps the session as another identity', async () => {
+    connect.mockRejectedValueOnce(Object.assign(new Error('vtiAgent: the session is kept'), { name: 'VtiSessionHeld' }))
+    const onError = jest.fn()
+    startPersonaInbox(agent, { mediatorDid: 'did:peer:m', intervalMs: 60_000, onError })
+    await flush()
+    expect(connect).toHaveBeenCalledWith(agent, 'did:peer:m', expect.objectContaining({ background: true }))
+    expect(lines().slice(-1)[0]).toMatch(/listening only: another identity keeps the session/)
+    expect(onError).not.toHaveBeenCalled()
   })
 
   it('says why a sign-in failed', async () => {

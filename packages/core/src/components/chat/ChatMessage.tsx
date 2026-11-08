@@ -16,6 +16,8 @@ import type { ChatReaction } from '../../modules/chat/fold'
 import type { ChatEventRecord } from '../../modules/chat/records/ChatEventRecord'
 import { testIdWithKey } from '../../utils/testable'
 import { ChatIds } from './Chat.ids'
+import { PendingPhotoBubble, type PhotoSending } from './PendingPhotoBubble'
+import { ReactionChips } from './ReactionChips'
 import { timeLabel, useDateWords, useUses24HourClock } from '../../utils/localDay'
 
 // Date separator color as per design
@@ -74,6 +76,8 @@ export interface ExtendedChatMessage extends IMessage {
   chatEvent?: ChatEventRecord
   /** A plain BasicMessage's record id, so Delete for me can remove it. Cards never carry one. */
   basicMessageId?: string
+  /** A photo on its way, not yet stored (media/pending.ts): drawn as its pending bubble. */
+  photoSending?: PhotoSending
 }
 
 /**
@@ -93,47 +97,35 @@ export const MessageReactions: React.FC<{ reactions: ChatReaction[]; isMe: boole
     )
     .join(', ')
   return (
-    <View
-      style={{ flexDirection: 'row', justifyContent: isMe ? 'flex-end' : 'flex-start', marginTop: -6, gap: 4 }}
-      accessible
-      accessibilityLabel={label}
+    <ReactionChips
+      chips={[...counts.entries()].map(([value, { count, mine }]) => ({ value, count, mine }))}
+      isMe={isMe}
+      label={label}
       testID={testIdWithKey(ChatIds.reactions)}
-    >
-      {[...counts.entries()].map(([emoji, { count, mine }]) => (
-        <View
-          key={emoji}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: mine ? '#E8E0EC' : '#FFFFFF',
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: 'rgba(170, 170, 170, 0.4)',
-            paddingHorizontal: 6,
-            paddingVertical: 2,
-          }}
-        >
-          <Text style={{ fontSize: 14 }}>{emoji}</Text>
-          {count > 1 && <Text style={{ fontSize: 12, color: '#555555', marginLeft: 2 }}>{count}</Text>}
-        </View>
-      ))}
-    </View>
+    />
   )
 }
 
 const MessageTime: React.FC<{ message: ExtendedChatMessage }> = ({ message }) => {
   const { ChatTheme: theme } = useTheme()
+  const { t } = useTranslation()
   const words = useDateWords()
   const use24h = useUses24HourClock()
 
   // Only the time, in the app's words and the phone's clock ("4:01 PM", "16:01"); the day pill says the day.
   const timeOnly = timeLabel(new Date(message.createdAt), words, use24h)
+  const isMe = message.user._id === Role.me
 
-  return (
-    <ThemedText style={message.user._id === Role.me ? theme.timeStyleRight : theme.timeStyleLeft}>
-      {timeOnly}
-    </ThemedText>
-  )
+  // A photo this phone sent says so beside its time: it is stored only once it really went (send.ts).
+  if (isMe && message.image && message.chatEventId)
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }} testID={testIdWithKey(ChatIds.photoSent)}>
+        <ThemedText style={theme.timeStyleRight}>{timeOnly}</ThemedText>
+        <ThemedText style={theme.timeStyleRight}>{`✓ ${t('Chat.PhotoSent')}`}</ThemedText>
+      </View>
+    )
+
+  return <ThemedText style={isMe ? theme.timeStyleRight : theme.timeStyleLeft}>{timeOnly}</ThemedText>
 }
 
 const EVENT_CIRCLE_COLOR = '#F1D2D6'
@@ -356,6 +348,16 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({ messageProps }) => {
   }
 
   const isMe = message.user?._id === Role.me
+
+  // A photo on its way: its own bubble, until it is stored or deleted.
+  if (message.photoSending && message.image)
+    return (
+      <PendingPhotoBubble
+        uri={message.image}
+        size={bubbleImageSize(message.imageSize)}
+        sending={message.photoSending}
+      />
+    )
 
   // A line about the chat itself (a timer change): centered words, no bubble.
   if (message.kind === 'system') {

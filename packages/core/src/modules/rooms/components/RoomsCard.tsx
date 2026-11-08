@@ -8,7 +8,7 @@
 import type { TFunction } from 'i18next'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { Pressable, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import { ThemedText } from '../../../components/texts/ThemedText'
@@ -17,7 +17,7 @@ import { testIdWithKey } from '../../../utils/testable'
 import type { RoomsService } from '../types'
 import type { MyRooms } from '../useMyRooms'
 
-import { roomsStatusText } from './roomsStatusText'
+import { roomsReadFailedText, roomsStatusText } from './roomsStatusText'
 import { SampleDataBanner } from './SampleDataBanner'
 
 /** "2 rooms · 1 offer", leaving out offers when there are none. */
@@ -57,8 +57,10 @@ export const RoomsCard: React.FC<RoomsCardProps> = ({ service, myRooms, offersCo
   const offers = offersCount ?? myRooms.offers?.length ?? 0
   const status = myRooms.capabilities?.listMyRooms
   const unavailable = status ? roomsStatusText(t, status, 'listMyRooms') : undefined
+  // While the rooms are read, the app's spinner stands in for the line; the words stay in the card's label.
+  const reading = !myRooms.failed && !unavailable && !myRooms.rooms
   const detail = myRooms.failed
-    ? (t('Rooms.AgentUnknown') as string)
+    ? roomsReadFailedText(t, myRooms.failure)
     : (unavailable ?? (myRooms.rooms ? roomsCount(t, myRooms.rooms.length, offers) : (t('Rooms.Reading') as string)))
   const enabled = !!status && !unavailable
   return (
@@ -76,9 +78,18 @@ export const RoomsCard: React.FC<RoomsCardProps> = ({ service, myRooms, offersCo
         <Icon name="door" size={24} color={ColorPalette.brand.primary} />
         <View style={{ flex: 1 }}>
           <ThemedText variant="bold">{t('Rooms.Rooms')}</ThemedText>
-          <ThemedText variant="caption" style={styles.muted} testID={testIdWithKey('RoomsCardDetail')}>
-            {detail}
-          </ThemedText>
+          {reading ? (
+            <ActivityIndicator
+              size="small"
+              color={ColorPalette.brand.primary}
+              style={{ alignSelf: 'flex-start' }}
+              testID={testIdWithKey('RoomsCardReading')}
+            />
+          ) : (
+            <ThemedText variant="caption" style={styles.muted} testID={testIdWithKey('RoomsCardDetail')}>
+              {detail}
+            </ThemedText>
+          )}
         </View>
         {offers > 0 ? (
           <View style={styles.badge} testID={testIdWithKey('RoomsCardBadge')}>

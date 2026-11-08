@@ -2,7 +2,8 @@
  * A room offer's consent screen: opened from an `offerRef` alone (no offers list behind it), it shows who offers
  * which room, its tier, what the member could do, and the identity they would join as, before they agree. Join asks
  * for confirmation first and opens the room; a stale preview is read again and nothing is sent; "Not now" hides
- * the offer on this phone. With accepting not available it says why and offers nothing.
+ * the offer on this phone. With accepting not available it says why and offers nothing. An offer the community no
+ * longer lists says so, with nothing to try again.
  */
 import { useRoute } from '@react-navigation/native'
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
@@ -12,6 +13,7 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { requestBiometricConfirmationWithUI } from '../../vrc/vrc-biometric'
+import { stopAllAdmissionResends } from '../admissionResend'
 import { createSampleRoomsService } from '../sample/sampleRooms'
 import { PREVIEW_TOKEN_TTL_MS, RoomsUnavailable, type RoomsService } from '../types'
 
@@ -54,6 +56,8 @@ beforeEach(() => {
   navigation.replace.mockClear()
   navigation.goBack.mockClear()
 })
+// An accept answered "admission pending" starts tries in the background (admissionResend): none outlives its test.
+afterEach(() => stopAllAdmissionResends())
 
 describe('RoomOffer', () => {
   test('from an offerRef alone: who offers which room, what the member could do, and who they join as', async () => {
@@ -84,6 +88,30 @@ describe('RoomOffer', () => {
     expect(acceptOffer).toHaveBeenCalledTimes(1)
     expect(navigation.replace).toHaveBeenCalledWith(Screens.Room, { roomId: 'did:webvh:sample:kernel-notes' })
     expect(await mockService.listOffers()).toEqual([])
+  })
+
+  test.each([
+    [
+      'a community that published no name is the app\'s label for it, never "undefined" (276.9)',
+      undefined,
+      'Community.UnnamedRef',
+    ],
+    ['a named community is its name (control)', 'Keyring Lab', 'Keyring Lab'],
+  ])('Join confirms with the community: %s', async (_, communityName, said) => {
+    mockService = sample()
+    const service = mockService
+    const original = service.previewOffer.bind(service)
+    jest.spyOn(service, 'previewOffer').mockImplementation(async (ref) => {
+      const preview = await original(ref)
+      const { communityName: _named, ...offer } = preview.offer
+      return { ...preview, offer: communityName ? { ...offer, communityName: communityName as never } : offer }
+    })
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeTruthy())
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('RoomOfferAccept')))
+    })
+    expect(confirm.mock.calls[0][1]).toBe(said)
   })
 
   test('declining the confirmation sends nothing (control: the test above accepts)', async () => {
@@ -215,6 +243,67 @@ describe('RoomOffer', () => {
     })
     await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferTitle'))).toBeTruthy())
     expect(previewOffer).toHaveBeenCalledTimes(2)
+  })
+
+  test.each(['notFound', 'offerExpired'])(
+    'an offer the community no longer lists (%s) says so, with no Try again and no Join',
+    async (code) => {
+      mockService = sample()
+      const previewOffer = jest.spyOn(mockService, 'previewOffer').mockRejectedValue(refused(code, false))
+      const tree = show()
+      await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toBeTruthy())
+      expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toHaveTextContent('Rooms.OfferGone')
+      expect(tree.queryByTestId(testIdWithKey('RoomOfferTryAgain'))).toBeNull()
+      expect(tree.queryByTestId(testIdWithKey('RoomOfferAccept'))).toBeNull()
+      expect(previewOffer).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  test('any other refusal of the read keeps Try again (control for the test above)', async () => {
+    mockService = sample()
+    jest.spyOn(mockService, 'previewOffer').mockRejectedValueOnce(refused('notAMember', false))
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toBeTruthy())
+    expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toHaveTextContent('Rooms.OfferReadFailed')
+    expect(tree.getByTestId(testIdWithKey('RoomOfferTryAgain'))).toBeTruthy()
+  })
+
+  test('a stale preview whose offer has gone since says so too, and offers nothing', async () => {
+    mockService = sample()
+    const previewOffer = jest.spyOn(mockService, 'previewOffer')
+    jest
+      .spyOn(mockService, 'acceptOffer')
+      .mockRejectedValue(Object.assign(new Error('stale'), { name: 'RoomsPreviewExpired' }))
+    const tree = show()
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferAccept'))).toBeTruthy())
+    previewOffer.mockRejectedValue(refused('notFound', false))
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('RoomOfferAccept')))
+    })
+    await waitFor(() => expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toBeTruthy())
+    expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toHaveTextContent('Rooms.OfferGone')
+    expect(tree.queryByTestId(testIdWithKey('RoomOfferTryAgain'))).toBeNull()
+  })
+
+  test('another offer opened on the same screen is read afresh: the last one being gone says nothing of it', async () => {
+    mockService = sample()
+    jest.spyOn(mockService, 'previewOffer').mockRejectedValueOnce(refused('notFound', false))
+    const tree = show('o1')
+    await waitFor(() =>
+      expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toHaveTextContent('Rooms.OfferGone')
+    )
+
+    jest.spyOn(mockService, 'previewOffer').mockRejectedValueOnce(new Error('offline'))
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { offerRef: 'o2' } })
+    tree.rerender(
+      <BasicAppContext>
+        <RoomOffer />
+      </BasicAppContext>
+    )
+    await waitFor(() =>
+      expect(tree.getByTestId(testIdWithKey('RoomOfferReadFailed'))).toHaveTextContent('Rooms.OfferReadFailed')
+    )
+    expect(tree.getByTestId(testIdWithKey('RoomOfferTryAgain'))).toBeTruthy()
   })
 
   test('rooms flag off: says so, and reads nothing', () => {

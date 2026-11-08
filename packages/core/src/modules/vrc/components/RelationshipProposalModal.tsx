@@ -17,7 +17,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet, View } from 'react-native'
+import { ScrollView, StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
@@ -69,6 +69,9 @@ const RelationshipProposalModal: React.FC = () => {
       justifyContent: 'flex-end',
     },
     safeAreaView: {
+      // Past a large text size the words and buttons are taller than the screen: the sheet stops at its top and they
+      // scroll, so the buttons are reached only past the words (as sign-in's review).
+      flexShrink: 1,
       backgroundColor: ColorPalette.brand.modalPrimaryBackground,
       borderTopRightRadius: 20,
       borderTopLeftRadius: 20,
@@ -89,14 +92,50 @@ const RelationshipProposalModal: React.FC = () => {
     buttonSpacer: {
       height: 12,
     },
+    card: {
+      borderWidth: 1,
+      borderColor: ColorPalette.grayscale.lightGrey,
+      borderRadius: 12,
+      padding: 14,
+      gap: 10,
+      marginBottom: 12,
+    },
+    row: { gap: 2 },
+    mono: { fontFamily: 'Menlo', fontSize: 13 },
+    hint: { textAlign: 'center', marginBottom: 16, color: ColorPalette.grayscale.mediumGrey },
   })
 
   return (
     <SafeAreaModal visible transparent animationType="slide">
-      <View style={styles.overlay}>
+      <SafeAreaView style={styles.overlay} edges={['top']}>
         <SafeAreaView style={styles.safeAreaView} edges={['bottom']}>
-          <View style={styles.container}>
-            {prompt.upgrade ? (
+          <ScrollView bounces={false} contentContainerStyle={styles.container}>
+            {prompt.sharedConnect ? (
+              // Someone scanned this phone's shared-connect code (WP9). The request carries no name, so the sheet
+              // says plainly that Keyring can't tell who this is: the same honesty as the scanner's "Is this name
+              // checked?". Only the address prefix is shown; nothing the other side wrote (WP12).
+              <View testID={testIdWithKey('ProposalSharedConnect')}>
+                <ThemedText variant="headingThree" style={styles.title}>
+                  {t('SharedConnectInvite.ConsentTitle')}
+                </ThemedText>
+                <ThemedText style={styles.body}>{t('SharedConnectInvite.ConsentBody')}</ThemedText>
+                <View style={styles.card}>
+                  <View style={styles.row}>
+                    <ThemedText variant="labelSubtitle">{t('SharedConnectInvite.ConsentWho')}</ThemedText>
+                    <ThemedText testID={testIdWithKey('ProposalWho')}>
+                      {t('SharedConnectInvite.ConsentWhoUnknown')}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.row}>
+                    <ThemedText variant="labelSubtitle">{t('SharedConnectInvite.ConsentAddress')}</ThemedText>
+                    <ThemedText style={styles.mono} testID={testIdWithKey('ProposalAddress')}>
+                      {prompt.sharedConnect.didShort}
+                    </ThemedText>
+                  </View>
+                </View>
+                <ThemedText style={styles.hint}>{t('SharedConnectInvite.ConsentHint')}</ThemedText>
+              </View>
+            ) : prompt.upgrade ? (
               // An existing relationship asking to sign again: says what it adds, and nothing more.
               <>
                 <ThemedText variant="headingThree" style={styles.title}>
@@ -121,8 +160,8 @@ const RelationshipProposalModal: React.FC = () => {
               </>
             )}
             <Button
-              title="Accept"
-              accessibilityLabel="Accept"
+              title={prompt.sharedConnect ? t('Global.Accept') : 'Accept'}
+              accessibilityLabel={prompt.sharedConnect ? t('Global.Accept') : 'Accept'}
               testID={testIdWithKey('ProposalAccept')}
               buttonType={ButtonType.Primary}
               onPress={() => respond(true)}
@@ -130,16 +169,16 @@ const RelationshipProposalModal: React.FC = () => {
             />
             <View style={styles.buttonSpacer} />
             <Button
-              title="Decline"
-              accessibilityLabel="Decline"
+              title={prompt.sharedConnect ? t('Global.Decline') : 'Decline'}
+              accessibilityLabel={prompt.sharedConnect ? t('Global.Decline') : 'Decline'}
               testID={testIdWithKey('ProposalDecline')}
               buttonType={ButtonType.Secondary}
               onPress={() => respond(false)}
               disabled={busy}
             />
-          </View>
+          </ScrollView>
         </SafeAreaView>
-      </View>
+      </SafeAreaView>
     </SafeAreaModal>
   )
 }

@@ -1,16 +1,6 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Alert,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Share,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native'
+import { Alert, Keyboard, Platform, ScrollView, Share, StyleSheet, TextInput, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Icon from 'react-native-vector-icons/MaterialIcons'
 import RNFS from 'react-native-fs'
@@ -20,6 +10,7 @@ import { useTheme } from '../contexts/theme'
 import { testIdWithKey } from '../utils/testable'
 import { ThemedText } from '../components/texts/ThemedText'
 import Button from '../components/buttons/Button'
+import { KeyboardSpace } from '../components/views/KeyboardPaddedView'
 import { ButtonType } from '../components/buttons/Button-api'
 import { removeWalletBackups } from '../utils/walletBackup'
 
@@ -102,12 +93,12 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
     }
 
     if (!agent) {
-      Alert.alert(String(t('Error.Problem')), 'Agent is not available. Please restart the app.')
+      Alert.alert(String(t('Error.Problem')), String(t('Settings.WalletBackupAgentUnavailable')))
       return
     }
 
     if (!agent.isInitialized) {
-      Alert.alert(String(t('Error.Problem')), 'Agent is still initializing. Please wait and try again.')
+      Alert.alert(String(t('Error.Problem')), String(t('Settings.WalletBackupAgentInitializing')))
       return
     }
 
@@ -151,22 +142,22 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
         const { action } = await Share.share({ url, title: String(t('Settings.ExportWalletShareTitle')) })
         if (action === Share.sharedAction) {
           shared = true
-          Alert.alert(String(t('Global.Success')), String(t('Settings.ExportWalletShared')), [{ text: 'OK' }])
+          Alert.alert(String(t('Global.Success')), String(t('Settings.ExportWalletShared')), [
+            { text: String(t('Settings.WalletBackupOK')) },
+          ])
           setPassword('')
           setConfirmPassword('')
         } else {
           Alert.alert(String(t('Settings.ExportWalletNotSavedTitle')), String(t('Settings.ExportWalletNotSaved')), [
-            { text: 'OK' },
+            { text: String(t('Settings.WalletBackupOK')) },
           ])
         }
         return
       }
 
-      Alert.alert(
-        String(t('Global.Success')),
-        `Wallet exported successfully!\n\nYou can find your ${fileCount} backup files in your Downloads folder.\n\nKeep all files together — you'll need them to restore.`,
-        [{ text: 'OK' }]
-      )
+      Alert.alert(String(t('Global.Success')), String(t('Settings.ExportWalletSavedToDownloads', { fileCount })), [
+        { text: String(t('Settings.WalletBackupOK')) },
+      ])
       setPassword('')
       setConfirmPassword('')
     } catch (error: any) {
@@ -184,11 +175,7 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom', 'left', 'right']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
+      <KeyboardSpace style={{ flex: 1 }} android={{ behavior: 'height', keyboardVerticalOffset: 20 }}>
         <ScrollView style={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.iconContainer}>
             <Assets.svg.walletExport width={80} height={80} fill={ColorPalette.brand.primary} />
@@ -256,7 +243,7 @@ const ExportWallet: React.FC<ExportWalletProps> = () => {
             </ThemedText>
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </SafeAreaView>
   )
 }

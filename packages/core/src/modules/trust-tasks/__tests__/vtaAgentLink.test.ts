@@ -1,7 +1,9 @@
 import { DeviceEventEmitter } from 'react-native'
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
+import { AGENT_NOT_FOUND_CONFIRM_MS } from '../module/agentGone'
 import {
+  GONE_OTHER_RECHECK_MS,
   GRANT_HOLD_MS,
   MAX_RECONNECT_TRIES,
   SESSION_CONNECT_DEADLINE_MS,
@@ -12,6 +14,7 @@ import {
   keepManagerMessage,
 } from '../module/vtaAgent'
 import { currentAgentDid } from '../module/currentAgent'
+import { vtiAgent } from '../module/vtiAgent'
 import { EnrolmentError } from '../module/vtaEnrolment'
 import { VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 
@@ -747,6 +750,53 @@ describe('when the app replaces its agent (an unlock after a lock builds a new o
     expect(vta.getState().link).toMatchObject({ kind: 'linked', connection: { kind: 'online' } })
   })
 
+  /** What the link does not say: a rooms screen waits for the reopen, and reads again when it is done (#772, 276.9). */
+  it('says a session is opening while the unlock reopens it, and when it opened', async () => {
+    let clock = 1_000
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => clock,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    await vta.restore({ tag: 'A' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(vta.getState()).toMatchObject({ sessionOpening: false, sessionOpenedAt: 1_000 })
+    let open!: () => void
+    mockClient.connect.mockImplementationOnce(
+      () => new Promise<undefined>((resolve) => (open = () => resolve(undefined)))
+    )
+    clock = 5_000
+
+    const restoring = vta.restore({ tag: 'B' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(vta.getState()).toMatchObject({ sessionOpening: true, sessionOpenedAt: 1_000 })
+    open()
+    await restoring
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(vta.getState()).toMatchObject({ sessionOpening: false, sessionOpenedAt: 5_000 })
+  })
+
+  it('a reopen that fails ends the opening and keeps when a session last opened (control)', async () => {
+    let clock = 1_000
+    const vta = new VtaAgentController()
+    vta.configure({
+      now: () => clock,
+      linkStore: () => ({ get: async () => linked as never, set: async () => undefined, clear: async () => undefined }),
+      identityStore: () => ({ setManager: async () => undefined, listPersonas: async () => [persona] }) as never,
+    })
+    await vta.restore({ tag: 'A' } as never)
+    await new Promise((resolve) => setImmediate(resolve))
+    mockClient.connect.mockRejectedValueOnce(new Error('mediator unreachable'))
+    clock = 5_000
+
+    await vta.restore({ tag: 'B' } as never)
+
+    expect(vta.getState()).toMatchObject({ sessionOpening: false, sessionOpenedAt: 1_000 })
+    await vta.unlink({ tag: 'B' } as never)
+  })
+
   it('counts a reopen that fails as a drop, and retries', async () => {
     const vta = new VtaAgentController()
     vta.configure({
@@ -874,6 +924,50 @@ describe('unlinking this phone from its agent', () => {
     ])
     expect(stored()).toBeUndefined()
     expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+  })
+
+  describe("the community session's failure", () => {
+    const failed = 'Error importing key'
+    const setVti = (next: Record<string, unknown>) => (vtiAgent as unknown as { set(n: unknown): void }).set(next)
+    const next = { vtaDid: 'did:webvh:next', label: 'Next', linkedAt: 't1', introSeenAt: 't1' }
+
+    afterEach(() => setVti({ status: 'disconnected', did: undefined, error: undefined }))
+
+    it('goes with the last agent', async () => {
+      const { vta } = unlinkable()
+      await vta.restore({} as never)
+      setVti({ status: 'failed', error: failed })
+      await vta.unlink({} as never)
+      expect(vta.getState().link).toEqual({ kind: 'notLinked' })
+      expect(vtiAgent.getState()).toMatchObject({ status: 'disconnected', error: undefined })
+    })
+
+    it('stays while another agent comes up', async () => {
+      let stored: unknown = linked
+      const vta = new VtaAgentController()
+      vta.configure({
+        now: () => 1_000,
+        linkStore: () => ({
+          get: async () => stored as never,
+          set: async (l) => void (stored = l),
+          clear: async () => void (stored = next),
+        }),
+        identityStore: () => ({ setManager: async () => undefined, forgetManager: async () => undefined }) as never,
+      })
+      await vta.restore({} as never)
+      setVti({ status: 'failed', error: failed })
+      await vta.unlink({} as never)
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: next.vtaDid })
+      expect(vtiAgent.getState()).toMatchObject({ status: 'failed', error: failed })
+    })
+
+    it('a session still open stays open: only its error goes', async () => {
+      const { vta } = unlinkable()
+      await vta.restore({} as never)
+      setVti({ status: 'connected', did: 'did:webvh:persona', error: failed })
+      await vta.unlink({} as never)
+      expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: 'did:webvh:persona', error: undefined })
+    })
   })
 
   it('still unlinks when the agent refuses either step', async () => {
@@ -1165,7 +1259,7 @@ describe('several agents', () => {
     const vta = new VtaAgentController()
     vta.configure({
       ...extra,
-      now: () => 1_000,
+      now: (extra.now as () => number) ?? (() => 1_000),
       linkStore: () => ({
         get: async () => links.find((l) => l.vtaDid === current) as never,
         set: async (l) => {
@@ -1480,6 +1574,144 @@ describe('several agents', () => {
     expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: HOME.vtaDid })
   })
 
+  // A tester's 277.4 log (11-02): at a push-wake start the look ran before the stored link was read, took the current
+  // agent for another, and signed in to it on a second session as the same manager key; the mediator closed one of
+  // the two (1008) twice in 3 s.
+  it('a look asked before the stored link is read waits for it, and never signs in to the current agent', async () => {
+    const { looked, deps } = lookDelivering([])
+    const { vta } = twoAgents(deps)
+    const look = vta.lookAtOtherAgents({} as never)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    // Control: nothing looked at while the link is unread, the current agent least of all.
+    expect(looked).toEqual([])
+    await vta.restore({} as never)
+    await look
+    expect(looked).toEqual([WORK.vtaDid])
+  })
+
+  it('a link never read within the wait: no look at all, rather than one that could knock the live session off', async () => {
+    const { looked, deps } = lookDelivering([])
+    const { vta } = twoAgents({ ...deps, keyFetchWaitMs: 50 })
+    await vta.lookAtOtherAgents({} as never)
+    expect(looked).toEqual([])
+    expect(vta.getState().otherRequests).toBeUndefined()
+  })
+
+  // DEAD-AGENT-LOOK (277.8, a report from 11-03): an agent deleted on its host stayed linked on the phone, and the
+  // look resolved its address four times (~6 s of 404s) at start-up and on every return.
+  describe('an other agent whose address no longer exists', () => {
+    const answering = (answers: Record<string, 'notFound' | 'found' | 'unknown'>) => {
+      const asked: string[] = []
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => {
+        asked.push(did)
+        return answers[did] ?? 'found'
+      })
+      return { asked, agentAddress }
+    }
+
+    // One 404 is not a verdict: a host mid-deploy or a moved path answers 404 too (classifyDid reads any 404 as
+    // notFound). The first miss only skips the costly sign-in; gone takes a second miss an hour or more later.
+    it('a first "not found" skips the look and is noted, not a verdict; the current agent is never checked', async () => {
+      const { looked, deps } = lookDelivering([])
+      const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
+      const { vta } = twoAgents({ ...deps, agentAddress })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(looked).toEqual([])
+      expect(asked).toEqual([WORK.vtaDid])
+      const seen = vta.getState().otherRequests?.[WORK.vtaDid]
+      expect(seen).toMatchObject({ reachable: false, approvals: [], notFoundAt: 1_000 })
+      expect(seen).not.toHaveProperty('gone')
+      expect(vta.getState().link).toMatchObject({ kind: 'linked', vtaDid: HOME.vtaDid })
+    })
+
+    it('"not found" again within the hour is still no verdict; an hour on it is gone, and left alone for a day', async () => {
+      const { looked, deps } = lookDelivering([])
+      const { asked, agentAddress } = answering({ [WORK.vtaDid]: 'notFound' })
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      clock += AGENT_NOT_FOUND_CONFIRM_MS - 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
+      clock += 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, notFoundAt: 1_000 })
+      expect(asked).toHaveLength(3)
+      // Gone: no check and no look within a day, then one check.
+      const goneAt = clock
+      clock = goneAt + GONE_OTHER_RECHECK_MS - 1
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toHaveLength(3)
+      clock = goneAt + GONE_OTHER_RECHECK_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(asked).toHaveLength(4)
+      expect(looked).toEqual([])
+    })
+
+    it('an address found in between forgets the earlier "not found"; one that cannot be told keeps it, unconfirmed', async () => {
+      const answers: Record<string, 'notFound' | 'found' | 'unknown'> = { [WORK.vtaDid]: 'notFound' }
+      const { looked, deps } = lookDelivering([])
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => answers[did])
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      answers[WORK.vtaDid] = 'unknown'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ notFoundAt: 1_000, reachable: true })
+      answers[WORK.vtaDid] = 'found'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('notFoundAt')
+      // A "not found" an hour after the first, with a "found" between, is a first again: no verdict.
+      answers[WORK.vtaDid] = 'notFound'
+      clock = 1_000 + AGENT_NOT_FOUND_CONFIRM_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
+      expect(looked).toEqual([WORK.vtaDid, WORK.vtaDid])
+    })
+
+    // Review of #908: one 404 (a host mid-deploy) must not hide requests a look already found waiting.
+    it('a first "not found" keeps the requests already seen waiting; the verdict an hour on clears them', async () => {
+      const answers: Record<string, 'notFound' | 'found' | 'unknown'> = { [WORK.vtaDid]: 'found' }
+      const { deps } = lookDelivering([request('r1'), request('r2')])
+      const agentAddress = jest.fn(async (_a: unknown, did: string) => answers[did])
+      let clock = 1_000
+      const { vta } = twoAgents({ ...deps, agentAddress, now: () => clock })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      answers[WORK.vtaDid] = 'notFound'
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ reachable: false, notFoundAt: 1_010 })
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      // Another miss inside the hour keeps them still.
+      clock += 10
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]?.approvals).toHaveLength(2)
+      // Control: the verdict an hour after the first miss marks it gone, and its requests with it.
+      clock = 1_010 + AGENT_NOT_FOUND_CONFIRM_MS
+      await vta.lookAtOtherAgents({} as never)
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ gone: true, approvals: [] })
+    })
+
+    // Control: an address that answers, or that cannot be told, is looked at as before.
+    it.each(['found', 'unknown'] as const)('an address that is %s: looked at as before', async (answer) => {
+      const { looked, deps } = lookDelivering([request('r1')])
+      const { agentAddress } = answering({ [WORK.vtaDid]: answer })
+      const { vta } = twoAgents({ ...deps, agentAddress })
+      await vta.restore({} as never)
+      await vta.lookAtOtherAgents({} as never)
+      expect(looked).toEqual([WORK.vtaDid])
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).toMatchObject({ reachable: true, approvals: [{ id: 'r1' }] })
+      expect(vta.getState().otherRequests?.[WORK.vtaDid]).not.toHaveProperty('gone')
+    })
+  })
+
   it('an agent the look cannot reach is said unreachable, not "nothing waits"', async () => {
     const { deps } = lookDelivering([], { fail: true })
     const { vta } = twoAgents(deps)
@@ -1549,6 +1781,61 @@ describe('several agents', () => {
     await vta.restore({} as never)
     await vta.unlinkAgent({} as never, WORK.vtaDid)
     expect(links()).toEqual([HOME.vtaDid])
+  })
+
+  // IN-379: the row stayed as it was for the 5–10 s the telling took.
+  it('an agent being unlinked reads as unlinking from the tap until it is gone, and a second tap adds nothing', async () => {
+    jest.useRealTimers()
+    let signedIn!: () => void
+    const connects: Array<{ connectDrainMs?: number }> = []
+    const lookClient = (_a: unknown, _did: string, _s: unknown, options: { connectDrainMs?: number }) => ({
+      connect: () => {
+        connects.push(options)
+        return new Promise<void>((resolve) => (signedIn = resolve))
+      },
+      disconnect: async () => undefined,
+      task: async () => ({}),
+    })
+    const { vta, links } = twoAgents({ lookClient })
+    await vta.restore({} as never)
+    const unlinking = vta.unlinkAgent({} as never, WORK.vtaDid)
+    await vta.unlinkAgent({} as never, WORK.vtaDid)
+    expect(vta.getState().unlinkingOthers).toEqual({ [WORK.vtaDid]: 'unlinking' })
+    expect(vta.getState().agents?.map((a) => a.vtaDid)).toEqual([HOME.vtaDid, WORK.vtaDid])
+    // Told without the drain a session otherwise waits before its first send.
+    expect(connects).toEqual([expect.objectContaining({ connectDrainMs: 0 })])
+    signedIn()
+    await unlinking
+    expect(links()).toEqual([HOME.vtaDid])
+    expect(vta.getState().unlinkingOthers).toEqual({})
+  })
+
+  it('an agent still on the list after the unlink is marked failed, and a retry clears it', async () => {
+    const { lookClient } = telling()
+    const { vta, links } = twoAgents({ lookClient })
+    const deps = (vta as unknown as { deps: { linkStore: (a: unknown) => Record<string, unknown> } }).deps
+    let refuse = true
+    vta.configure({
+      ...deps,
+      linkStore: (a: unknown) => {
+        const store = deps.linkStore(a)
+        return {
+          ...store,
+          remove: async (did: string) => {
+            if (refuse) throw new Error('store busy')
+            return (store.remove as (d: string) => Promise<void>)(did)
+          },
+        }
+      },
+    } as never)
+    await vta.restore({} as never)
+    await vta.unlinkAgent({} as never, WORK.vtaDid)
+    expect(links()).toContain(WORK.vtaDid)
+    expect(vta.getState().unlinkingOthers).toEqual({ [WORK.vtaDid]: 'failed' })
+    refuse = false
+    await vta.unlinkAgent({} as never, WORK.vtaDid)
+    expect(links()).toEqual([HOME.vtaDid])
+    expect(vta.getState().unlinkingOthers).toEqual({})
   })
 
   it('unlinking the current agent this way brings up the next', async () => {

@@ -16,7 +16,7 @@ import { AppState, DeviceEventEmitter, Platform } from 'react-native'
 
 import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
-import { agentGoneVerdict, type AgentGoneWhy } from './agentGone'
+import { AGENT_NOT_FOUND_CONFIRM_MS, agentGoneVerdict, type AgentGoneWhy } from './agentGone'
 import { didPrefix } from './didPrefix'
 import {
   AGENT_HOST_QR_LIFETIME_MS,
@@ -33,7 +33,7 @@ import { checkConsentRequest, consentMatchCode, consentOutcome, type ConsentOutc
 import type { StepUpRequest } from './stepUp'
 import { releaseWarn } from './releaseLog'
 import { approvalsView, withPhoneRule, type ApprovalsModel, type ApprovalsView } from './approvalRules'
-import { VtiRefusal } from './vtiAgent'
+import { VtiRefusal, vtiAgent } from './vtiAgent'
 import {
   ManagerKeyUnresolved,
   SwapDoneSignInFailed,
@@ -55,7 +55,7 @@ import {
   type VtiManagerIdentity,
   type VtiPersona,
 } from './VtiIdentityStore'
-import { GenericRecordsVtaLinkStore, type VtaLinkStore } from './VtaLinkStore'
+import { GenericRecordsVtaLinkStore, type VtaLink, type VtaLinkStore } from './VtaLinkStore'
 import { createVtiTemporaryDidKey } from './VtiMediatorTransport'
 import {
   AGENT_DEVICE_TASK,
@@ -83,6 +83,7 @@ import { migratePersonaKeys } from './vtaKeyMigration'
 import { forgetKeyCopy, setInMemoryKeyFetcher } from './vtaKeys'
 import {
   initialLinkState,
+  QUIET_DROP_MS,
   reconnectDelayMs,
   reduceLink,
   resumableFailure,
@@ -182,6 +183,14 @@ export interface VtaAgentState {
    */
   repliesStalled?: boolean
   /**
+   * A session to the linked agent is being opened, the quiet reopen after an unlock included (the link stays
+   * shown online then): a screen whose read failed meanwhile waits for it rather than saying the agent is
+   * unreachable (#772, 276.9: "Couldn't reach your agent" for 10–20 s after the PIN).
+   */
+  sessionOpening?: boolean
+  /** When a session to the linked agent last opened: a screen whose read failed reads again then. */
+  sessionOpenedAt?: number
+  /**
    * The devices an agent's list named when last read, by DID: what a request
    * card calls the device that asked (Alberto's iPhone, 10-06: a request from
    * his computer read "Someone asks"). Filled by every read of the list.
@@ -206,11 +215,24 @@ export interface VtaAgentState {
    */
   unlinking?: boolean
   /**
+   * Agents that are not current, being unlinked (`unlinking`, while the agent
+   * is told) or still on the list after an unlink (`failed`), by DID (IN-379).
+   */
+  unlinkingOthers?: Readonly<Record<string, 'unlinking' | 'failed'>>
+  /**
    * Requests for this phone's decision from the agents that are not current,
    * as last seen by a look at each (several agents, step 3), with whether the
    * look reached it. Carried into `approvals` when the person switches to it.
    */
-  otherRequests?: Readonly<Record<string, { approvals: VtiApproval[]; reachable: boolean; at: number }>>
+  /**
+   * What a look at each other agent found. `notFoundAt`: when its address first answered "not found" (any HTTP 404,
+   * which a host mid-deploy also gives), so not yet a verdict. `gone`: "not found" again at least
+   * AGENT_NOT_FOUND_CONFIRM_MS later, the same bar as the current agent's address: said so, and not looked at again
+   * for {@link GONE_OTHER_RECHECK_MS}.
+   */
+  otherRequests?: Readonly<
+    Record<string, { approvals: VtiApproval[]; reachable: boolean; at: number; notFoundAt?: number; gone?: true }>
+  >
   /**
    * Whether the saved link has been read at start-up (`restore`). Until then
    * `link` reads "not linked" on every phone, linked or not, so a screen that
@@ -266,7 +288,7 @@ export interface VtaAgentDeps {
     agent: Agent,
     vtaDid: string,
     store: VtiIdentityStore,
-    options: { onInbound: (plaintext: DidCommV2PlaintextMessage) => void }
+    options: { onInbound: (plaintext: DidCommV2PlaintextMessage) => void; connectDrainMs?: number }
   ) => Pick<VtaClient, 'connect' | 'disconnect' | 'task'>
   /** How long a key fetch waits for the current agent's session (KEY_FETCH_WAIT_MS); shorter in tests. */
   keyFetchWaitMs?: number
@@ -426,6 +448,20 @@ export const APPROVE_REASON = 'Approve a request from your agent'
 export const DEVICE_LIST_DEADLINE_MS = 15000
 /** Reconnect tries in a row (1 s, 2 s, 4 s, 8 s, 16 s apart) before the agent screen says it didn't answer. */
 export const MAX_RECONNECT_TRIES = 5
+
+/**
+ * How long an other agent found gone (its address answers "not found") is left before one more address check.
+ * Until then it is not looked at: a look's sign-in resolves the address four times, and the look runs on every
+ * return to the foreground (a deleted agent cost ~6 s of 404s per return on 277.8, DEAD-AGENT-LOOK).
+ */
+export const GONE_OTHER_RECHECK_MS = 24 * 60 * 60_000
+
+/**
+ * How long after a return a drop still counts as found because the app was
+ * away: the foreground's alive check (VtiMediatorTransport's ALIVE_CHECK_MS,
+ * 10 s) finds a socket iOS let die, then {@link QUIET_DROP_MS} more.
+ */
+export const RETURN_DROP_WINDOW_MS = 15_000
 
 /** How long the step-up card waits for the person; unanswered, nothing is sent. */
 export const STEP_UP_ASK_TIMEOUT_MS = 120_000
@@ -635,10 +671,21 @@ export class VtaAgentController {
   private attemptToken = 0
   private reconnectAttempt = 0
   private retryTimer?: ReturnType<typeof setTimeout>
+  /** When the session last dropped, for the reconnect's log line. */
+  private droppedAt?: number
+  /** Whether the app is in the background now (`backgrounded`/`foregrounded`). */
+  private suspended = false
+  /** When the app last came back to the foreground. */
+  private returnedAt?: number
   /** The next check of a resumed link that went unanswered: a timer, or a wait for the foreground. */
   private resumeRetry?: { timer?: ReturnType<typeof setTimeout>; subscription?: { remove(): void } }
   private reconnecting = false
   private opening?: { client: VtaClient; done: Promise<void> }
+  /** The sign-in shared by every caller, and `sessionOpening` with it. */
+  private setOpening(opening: { client: VtaClient; done: Promise<void> } | undefined) {
+    this.opening = opening
+    if (Boolean(this.state.sessionOpening) !== Boolean(opening)) this.set({ sessionOpening: Boolean(opening) })
+  }
   /** The VTA whose client an unlock just retired; its replacement opens quietly. */
   private handedOver?: string
   /** Identities whose keys moved into memory in this run; their stored copies go at the next (plan part E). */
@@ -725,8 +772,14 @@ export class VtaAgentController {
         this.set({ status: 'disconnected' })
         void this.reset().catch(() => undefined)
       }
-    } else if (wasOnline && !isOnline) this.note('wentOffline')
-    else if (!wasOnline && isOnline && previous.kind === 'linked') this.note('reconnected')
+    } else if (wasOnline && !isOnline) {
+      // A drop found while suspended or just back is not news to the person: it stays out of the list (quietUntil).
+      if (!(next.kind === 'linked' && 'quietUntil' in next.connection && next.connection.quietUntil !== undefined))
+        this.note('wentOffline')
+    } else if (!wasOnline && isOnline && previous.kind === 'linked') {
+      if (!('quietUntil' in previous.connection && previous.connection.quietUntil !== undefined))
+        this.note('reconnected')
+    }
   }
 
   private note(kind: VtaActivity['kind']) {
@@ -778,7 +831,7 @@ export class VtaAgentController {
         // A socket that went away while linked is a drop, not a failure to
         // show: go offline quietly and let the backoff bring it back.
         if (this.state.link.kind === 'linked' && !client.isConnected) {
-          this.dispatch({ type: 'sessionDropped', reason: error.message, now: this.now() })
+          this.dropped(error.message)
           this.scheduleReconnect(agent)
         }
       },
@@ -830,7 +883,7 @@ export class VtaAgentController {
         await client.whoAmI().catch((error: unknown) => {
           if (refusedAsNotOnAcl(error)) throw error
         })
-        this.set({ status: 'connected', managerDid: client.managerDid })
+        this.set({ status: 'connected', managerDid: client.managerDid, sessionOpenedAt: this.now() })
         this.learnAgentName(client, vtaDid)
       } catch (error) {
         this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
@@ -840,11 +893,11 @@ export class VtaAgentController {
         throw error
       }
     })()
-    this.opening = { client, done }
+    this.setOpening({ client, done })
     try {
       await done
     } finally {
-      if (this.opening?.done === done) this.opening = undefined
+      if (this.opening?.done === done) this.setOpening(undefined)
     }
   }
 
@@ -1058,10 +1111,56 @@ export class VtaAgentController {
   async lookAtOtherAgents(agent: Agent): Promise<void> {
     if (this.looking) return this.looking
     this.looking = (async () => {
+      // Which agent is current is not known until the stored link is read, as fetchKeyCopy waits for: looked at
+      // before then (at start-up, a push wake), the current agent was taken for another and signed in to on a second
+      // session as the same manager key, and the mediator closed one of the two, 1008, twice in 3 s (a tester's
+      // 277.4 log, 11-02). A link never read is no look: better none than one that knocks the live session off.
+      try {
+        await this.untilLinkRead(this.deps.keyFetchWaitMs ?? KEY_FETCH_WAIT_MS)
+      } catch {
+        return
+      }
       const store = this.linkStore(agent)
       const links = (await Promise.resolve(store.list?.()).catch(() => undefined)) ?? []
-      const current = this.state.link.kind === 'linked' ? this.state.link.vtaDid : undefined
-      for (const { vtaDid } of links.filter((l) => l.vtaDid !== current)) {
+      const current = () => (this.state.link.kind === 'linked' ? this.state.link.vtaDid : undefined)
+      for (const { vtaDid } of links) {
+        // Asked again before each look: a look takes seconds, and the current agent can change under it.
+        if (vtaDid === current()) continue
+        const known = this.state.otherRequests?.[vtaDid]
+        if (known?.gone && this.now() - known.at < GONE_OTHER_RECHECK_MS) continue
+        // One bounded address check first. "Not found" is any HTTP 404, which a host mid-deploy or a moved path also
+        // answers, so one is noted, not a verdict: the agent is skipped this time (no four-try sign-in) and said
+        // unreachable; "not found" again an hour or more later is the verdict, as for the current agent's address.
+        // A non-current agent is not signed in to for the bar the current one has (a failed sign-in first): the
+        // sign-in is the cost being saved, and a wrong verdict here only hides a look, never the agent itself.
+        const address = await (this.deps.agentAddress ?? agentAddressOf)(agent, vtaDid).catch(() => 'unknown' as const)
+        if (address === 'notFound') {
+          const at = this.now()
+          const firstAt = known?.notFoundAt ?? at
+          const gone = at - firstAt >= AGENT_NOT_FOUND_CONFIRM_MS
+          releaseWarn(
+            gone
+              ? `[VTA] another agent, ${didPrefix(vtaDid)}, no longer exists (its address is not found, again): not looked at`
+              : `[VTA] another agent, ${didPrefix(vtaDid)}: its address is not found; not looked at this time`
+          )
+          this.set({
+            otherRequests: {
+              ...(this.state.otherRequests ?? {}),
+              [vtaDid]: {
+                // Kept, as a failed look keeps them: one miss is not a verdict, and the waiting count is what the
+                // screen is for. Gone, the address can act on none of them.
+                approvals: gone ? [] : stillWaiting(known?.approvals ?? [], at),
+                reachable: false,
+                at,
+                notFoundAt: firstAt,
+                ...(gone ? { gone: true as const } : {}),
+              },
+            },
+          })
+          continue
+        }
+        // Found: an earlier "not found" is forgotten. Unknown (the host did not answer): kept, not confirmed.
+        const notFoundAt = address === 'unknown' ? known?.notFoundAt : undefined
         const seen = await this.lookAt(agent, vtaDid)
         const now = this.now()
         const before = this.state.otherRequests?.[vtaDid]?.approvals ?? []
@@ -1069,7 +1168,12 @@ export class VtaAgentController {
         this.set({
           otherRequests: {
             ...(this.state.otherRequests ?? {}),
-            [vtaDid]: { approvals: stillWaiting([...byId.values()], now), reachable: seen !== undefined, at: now },
+            [vtaDid]: {
+              approvals: stillWaiting([...byId.values()], now),
+              reachable: seen !== undefined,
+              at: now,
+              ...(notFoundAt !== undefined ? { notFoundAt } : {}),
+            },
           },
         })
       }
@@ -1137,15 +1241,42 @@ export class VtaAgentController {
    * forgets its link, its own key for it and what a look found there. As with
    * any unlink, the agent keeps this phone's key on its list until removed from
    * another device (VTI-Q23), and identities and memberships stay recorded.
+   *
+   * The telling takes up to UNLINK_TELL_QUEUE_MS, so `unlinkingOthers` says
+   * the agent is going from the tap: its row stayed as it was for 5–10 s, with
+   * nothing to say the tap was taken (IN-379). It is not taken off the list
+   * before then: the telling signs in with the key this phone forgets after.
+   * An agent still on the list afterwards is marked failed, for a retry.
    */
   async unlinkAgent(agent: Agent, vtaDid: string): Promise<void> {
     const link = this.state.link
     if ((link.kind === 'linked' || link.kind === 'revoked') && link.vtaDid === vtaDid) return this.unlink(agent)
+    if (this.state.unlinkingOthers?.[vtaDid] === 'unlinking') return
+    this.markUnlinkingOther(vtaDid, 'unlinking')
+    let gone = false
+    try {
+      await this.unlinkOther(agent, vtaDid)
+      gone = !this.state.agents?.some((a) => a.vtaDid === vtaDid)
+    } finally {
+      this.markUnlinkingOther(vtaDid, gone ? undefined : 'failed')
+    }
+  }
+
+  private markUnlinkingOther(vtaDid: string, mark: 'unlinking' | 'failed' | undefined): void {
+    const marks = { ...(this.state.unlinkingOthers ?? {}) }
+    if (mark) marks[vtaDid] = mark
+    else delete marks[vtaDid]
+    this.set({ unlinkingOthers: marks })
+  }
+
+  private async unlinkOther(agent: Agent, vtaDid: string): Promise<void> {
     const client = (this.deps.lookClient ?? ((a, did, store, options) => new VtaClient(a, did, store, options)))(
       agent,
       vtaDid,
       this.identityStore(agent),
-      { onInbound: () => undefined }
+      // No drain before the telling: a reply is matched by its thread, so the
+      // backlog a drain would discard cannot pass for one, and it saved 2 s.
+      { onInbound: () => undefined, connectDrainMs: 0 }
     )
     let timer: ReturnType<typeof setTimeout> | undefined
     const deadline = new Promise<void>((resolve) => {
@@ -1327,6 +1458,7 @@ export class VtaAgentController {
     this.note('unlinked')
     // Another linked agent is now current (the store's oldest): it comes up.
     await this.takeUpCurrent(agent, { not: vtaDid })
+    if (this.state.link.kind === 'notLinked') vtiAgent.clearFailure()
   }
 
   /**
@@ -1766,7 +1898,12 @@ export class VtaAgentController {
     const links = this.linkStore(agent)
     const owner = this.ownerFor === vtaDid
     this.ownerFor = undefined
-    await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}) })
+    // Read before the swap below moves the manager record onto the long-term key.
+    // A claim key keeps its Farm on its own record, so a Try again with it
+    // after a swap that never happened, even after a restart, still knows it.
+    const manager = await Promise.resolve(identities.getManager?.(vtaDid)).catch(() => undefined)
+    const farmLogin = manager?.claimedFrom ? { farmLogin: { farmDid: manager.claimedFrom, did: manager.did } } : {}
+    await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
     // The agent just linked is the one this phone acts with: the store keeps
     // every linked agent, and a link no longer replaces another one's record.
     await links.use?.(vtaDid)
@@ -2083,8 +2220,17 @@ export class VtaAgentController {
    * The person already compared the claim check and confirmed as owner, so
    * nothing is asked here. With an agent already current it is the "add
    * another agent" path, which keeps that one.
+   *
+   * `farmDid`, the Farm the code came from: the link keeps it with `did`
+   * (`farmLogin`), the key the Farm signs this person in by.
    */
-  async finishClaimedLink(agent: Agent, vtaDid: string, did: string, label: string = vtaDid): Promise<void> {
+  async finishClaimedLink(
+    agent: Agent,
+    vtaDid: string,
+    did: string,
+    farmDid?: string,
+    label: string = vtaDid
+  ): Promise<void> {
     if (this.hasAgent(vtaDid)) throw new AgentAlreadyOnPhone(vtaDid)
     const current = this.state.link
     if (current.kind === 'linked' || current.kind === 'revoked') await this.startAddingAgent()
@@ -2098,6 +2244,7 @@ export class VtaAgentController {
         did,
         createdAt: new Date(this.now()).toISOString(),
         stage: 'temporary',
+        ...(farmDid ? { claimedFrom: farmDid } : {}),
       })
       if (token !== this.attemptToken) return
       this.dispatch({ type: 'keyShown', vtaDid, label, did })
@@ -2434,10 +2581,13 @@ export class VtaAgentController {
   /**
    * Every agent this phone is linked to, the current one first, each by the
    * name this phone shows for it (the person's nickname, the agent's own name,
-   * or its host's). Waits for the stored link to be read, as a sign-in at
-   * start-up may ask before then.
+   * or its host's), and the Farm sign-in key of one claimed from a Farm.
+   * Waits for the stored link to be read, as a sign-in at start-up may ask
+   * before then.
    */
-  async linkedAgents(agent: Agent): Promise<{ vtaDid: string; name: string; current: boolean }[]> {
+  async linkedAgents(
+    agent: Agent
+  ): Promise<{ vtaDid: string; name: string; current: boolean; farmLogin?: VtaLink['farmLogin'] }[]> {
     await this.untilLinkRead(this.deps.keyFetchWaitMs ?? KEY_FETCH_WAIT_MS)
     const store = this.linkStore(agent)
     let links = await Promise.resolve(store.list?.()).catch(() => undefined)
@@ -2451,6 +2601,7 @@ export class VtaAgentController {
         vtaDid: l.vtaDid,
         name: l.nickname?.trim() || this.state.agentNames?.[l.vtaDid]?.label || l.agentName?.label || l.label,
         current: l.vtaDid === current,
+        ...(l.farmLogin ? { farmLogin: { ...l.farmLogin } } : {}),
       }))
       .sort((x, y) => Number(y.current) - Number(x.current))
   }
@@ -2500,16 +2651,21 @@ export class VtaAgentController {
     const client = await this.signedIn(agent, this.linkedAgent())
     const managerDid = client.managerDid
     if (!managerDid) throw new DeviceActionRefused('notLinked')
-    const [model, me] = await Promise.all([client.readApprovals(), client.whoAmI()]).catch((error: unknown) => {
+    // A rule holds only the version it names, so the rules are read against what the agent dispatches now
+    // (approvalRules.ts OLDER_VERSIONS). supportedTypes never throws: unanswered, nothing is judged against it.
+    const [model, me, served] = await Promise.all([
+      client.readApprovals(),
+      client.whoAmI(),
+      client.supportedTypes(),
+    ]).catch((error: unknown) => {
       throw this.refused(error)
     })
     const roles = me.roles ?? (me.role ? [me.role] : [])
     const scoped = (me.scopes ?? []).length > 0 || (me.contexts ?? []).length > 0
-    return {
-      model,
-      view: approvalsView(model, managerDid),
-      canChange: roles.includes('admin') && !scoped && !model.unreadable,
-    }
+    const view = approvalsView(model, managerDid, served)
+    const renew = view.offered.filter((o) => o.renew).map((o) => o.key)
+    if (renew.length) releaseWarn(`[VTI] ask me before: rules miss a version the agent serves: ${renew.join(', ')}`)
+    return { model, view, canChange: roles.includes('admin') && !scoped && !model.unreadable }
   }
 
   /**
@@ -2528,16 +2684,19 @@ export class VtaAgentController {
       const client = await this.signedIn(agent, vtaDid)
       const managerDid = client.managerDid
       if (!managerDid) throw new DeviceActionRefused('notLinked')
+      // A rule holds only the exact version it names: write one per version the agent dispatches. Unanswered
+      // (undefined), every version Keyring knows.
+      const served = await client.supportedTypes()
       for (let attempt = 0; ; attempt++) {
         try {
           const model = await client.readApprovals()
           if (model.unreadable)
             throw new DeviceActionRefused('failed', 'the approval rules hold something Keyring cannot read')
-          const next = withPhoneRule(model, taskType, on, managerDid)
+          const next = withPhoneRule(model, taskType, on, managerDid, served)
           const version = await client.writeApprovals(next, model.version)
           releaseWarn(`[VTI] ask me before: rules written, version ${model.version} → ${version}`)
           const held = { ...next, version, unreadable: false }
-          return { model: held, view: approvalsView(held, managerDid), canChange: true }
+          return { model: held, view: approvalsView(held, managerDid, served), canChange: true }
         } catch (error) {
           const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
           if (details?.reason === 'conflict' && attempt === 0) continue
@@ -3008,6 +3167,9 @@ export class VtaAgentController {
    * breaker lets one probe go early, and then the link is brought online as before.
    */
   async foregrounded(given: Agent): Promise<void> {
+    this.suspended = false
+    this.returnedAt = this.now()
+    this.dispatch({ type: 'returned', now: this.returnedAt })
     const link = this.state.link
     if (link.kind === 'linked') {
       this.current?.client.checkAlive()
@@ -3017,6 +3179,48 @@ export class VtaAgentController {
         )
     }
     await this.ensureOnline(given)
+  }
+
+  /** The app went to the background: a drop found from now until just after the return is a quiet one. */
+  backgrounded(): void {
+    this.suspended = true
+  }
+
+  /**
+   * Until when a drop found now stays out of sight, if it is quiet: found while
+   * the app is suspended, or within {@link RETURN_DROP_WINDOW_MS} of the return.
+   */
+  private quietUntil(now: number): number | undefined {
+    if (this.suspended) return now + QUIET_DROP_MS
+    if (this.returnedAt === undefined || now - this.returnedAt >= RETURN_DROP_WINDOW_MS) return undefined
+    return now + QUIET_DROP_MS
+  }
+
+  /** The session dropped: said in the log (a report could not show it, 277.6), and to the link. */
+  private dropped(reason: string): void {
+    const link = this.state.link
+    if (link.kind !== 'linked') return
+    const now = this.now()
+    const quietUntil = this.quietUntil(now)
+    if (link.connection.kind === 'online') this.droppedAt = now
+    // Identifiers as prefixes only: these lines reach testers' problem reports.
+    const words = reason.replace(/did:[a-z0-9]+:[^\s,;)]+/gi, (did) => didPrefix(did)).slice(0, 160)
+    const what =
+      link.connection.kind === 'online'
+        ? 'session dropped'
+        : link.connection.kind === 'connecting'
+          ? 'start-up sign-in failed'
+          : 'reconnect failed'
+    const quiet =
+      quietUntil !== undefined ? `, found while away: shown only if not back in ${QUIET_DROP_MS / 1000} s` : ''
+    releaseWarn(`[VTA] ${what}${quiet}: ${words}`)
+    this.dispatch({
+      type: 'sessionDropped',
+      reason,
+      now,
+      quietUntil,
+      ...(quietUntil !== undefined && this.suspended ? { untilReturn: true as const } : {}),
+    })
   }
 
   /**
@@ -3037,8 +3241,14 @@ export class VtaAgentController {
     this.retryTimer = undefined
     try {
       await this.signInWithin(agent, link.vtaDid)
+      const tries = this.reconnectAttempt
       this.reconnectAttempt = 0
       if (this.state.reconnectGaveUp) this.set({ reconnectGaveUp: false })
+      if (link.connection.kind !== 'connecting' && this.droppedAt !== undefined)
+        releaseWarn(
+          `[VTA] back online ${Math.round((this.now() - this.droppedAt) / 100) / 10} s after the drop (${tries} ${tries === 1 ? 'retry' : 'retries'})`
+        )
+      this.droppedAt = undefined
       this.dispatch({ type: 'sessionOpened' })
       void this.noteReached(agent, link.vtaDid)
       void this.holdPersonaKeys(agent, link.vtaDid)
@@ -3064,7 +3274,7 @@ export class VtaAgentController {
         this.dispatch({ type: 'accessRevoked', reason })
         return
       }
-      this.dispatch({ type: 'sessionDropped', reason, now: this.now() })
+      this.dropped(reason)
       this.scheduleReconnect(agent)
       // Beside the retry, never in front of it: the lookup can take seconds.
       void this.markIfGone(agent, link.vtaDid)
@@ -3140,7 +3350,7 @@ export class VtaAgentController {
         // go, or the next attempt would wait on the same one.
         const stuck = this.opening
         if (stuck) {
-          this.opening = undefined
+          this.setOpening(undefined)
           void stuck.client.disconnect().catch(() => undefined)
         }
         reject(new Error(`the VTA did not answer: signing in took over ${SESSION_CONNECT_DEADLINE_MS / 1000} s`))
@@ -3166,10 +3376,14 @@ export class VtaAgentController {
     if (this.retryTimer || this.state.link.kind !== 'linked') return
     const attempt = ++this.reconnectAttempt
     if (attempt > MAX_RECONNECT_TRIES) {
+      releaseWarn(
+        `[VTA] reconnecting stopped after ${MAX_RECONNECT_TRIES} tries: Try again on My Agent, or the next foreground`
+      )
       this.set({ reconnectGaveUp: true })
       return
     }
     const delay = reconnectDelayMs(attempt - 1)
+    releaseWarn(`[VTA] reconnect try ${attempt} of ${MAX_RECONNECT_TRIES} in ${delay / 1000} s`)
     this.dispatch({ type: 'retryScheduled', attempt, nextRetryAt: this.now() + delay })
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined

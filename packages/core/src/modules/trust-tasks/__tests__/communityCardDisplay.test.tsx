@@ -16,6 +16,7 @@ import {
   fakeCommunityStore,
   membership,
   membershipCard,
+  persona,
   roleCard,
   seedCardVaultState,
 } from '../../../../__tests__/helpers/cardVault'
@@ -99,7 +100,8 @@ describe('a community card as the Wallet reads it', () => {
   it('names the membership card for the community, issued by the community by name', () => {
     const d = communityCardDisplay(membershipCard, t)!
     // Unnamed so far: said to be, with its DID's path to tell it apart, never its host.
-    expect(d.name).toBe('Community.CardMemberOf(community=Community.UnnamedRef(ref=keyring-test-vtc))')
+    // In the card's sentence the handle is plain; standing alone as its issuer, it says the community is unnamed.
+    expect(d.name).toBe('Community.CardMemberOf(community=keyring-test-vtc)')
     expect(d.issuerName).toBe('Community.UnnamedRef(ref=keyring-test-vtc)')
     expect(JSON.stringify(d)).not.toMatch(/vtc\.example|did:webvh/)
     expect(d.attributes).toEqual({
@@ -112,11 +114,9 @@ describe('a community card as the Wallet reads it', () => {
 
   it('a role card and a vetter grant say which role, in words rather than the raw role', () => {
     expect(communityCardDisplay(roleCard, t)!.name).toBe(
-      'Community.CardRoleIn(community=Community.UnnamedRef(ref=keyring-test-vtc),role=Community.RoleMember)'
+      'Community.CardRoleIn(community=keyring-test-vtc,role=Community.RoleMember)'
     )
-    expect(communityCardDisplay(vetterGrant, t)!.name).toBe(
-      'Community.CardVetterFor(community=Community.UnnamedRef(ref=keyring-test-vtc))'
-    )
+    expect(communityCardDisplay(vetterGrant, t)!.name).toBe('Community.CardVetterFor(community=keyring-test-vtc)')
     expect(communityCardDisplay(vetterGrant, t)!.attributes?.['Community.CardRole']).toBe('Community.RoleVetter')
   })
 
@@ -129,7 +129,7 @@ describe('a community card as the Wallet reads it', () => {
       },
     }
     const d = communityCardDisplay(custom, t)!
-    expect(d.name).toBe('Community.CardRoleIn(community=Community.UnnamedRef(ref=keyring-test-vtc),role=Senior vetter)')
+    expect(d.name).toBe('Community.CardRoleIn(community=keyring-test-vtc,role=Senior vetter)')
     expect(d.attributes?.['Community.CardRole']).toBe('Senior vetter')
   })
 
@@ -265,12 +265,33 @@ describe('what happened to a card that no longer stands, on the community card',
     expect(tree.getByTestId(testIdWithKey(`AgentCardKept_membership_${key}`))).toBeTruthy()
   })
 
-  it('expired: "Your membership ended on <date>"', () => {
-    const ended = { ...membershipCard, id: 'urn:uuid:ended', validUntil: '2023-06-01T00:00:00Z' }
-    const tree = renderCard({ ...membership, vmc: ended, roleVec: undefined })
+  // IN-501: only the card's dates ran out; the membership stands (the community's ACL says so), so it is not "ended".
+  it('lapsed: "Your card needs renewing", not "Your membership ended"', () => {
+    const lapsed = { ...membershipCard, id: 'urn:uuid:lapsed', validUntil: '2023-06-01T00:00:00Z' }
+    const tree = renderCard({ ...membership, vmc: lapsed, roleVec: undefined })
+    expect(tree.getByTestId(testIdWithKey(`AgentCardRenew_membership_${key}`))).toHaveTextContent(
+      /VtaLink\.CardMembershipNeedsRenewing/
+    )
+    expect(tree.queryByTestId(testIdWithKey(`AgentCardHistory_membership_${key}`))).toBeNull()
+  })
+
+  it('ended by the community, lapsed or not: "Your membership ended on <date>"', async () => {
+    const lapsed = { ...membershipCard, id: 'urn:uuid:lapsed', validUntil: '2023-06-01T00:00:00Z' }
+    const removal = {
+      code: 'adminRemoved' as const,
+      decidedBy: COMMUNITY,
+      decidedAt: '2023-05-01T00:00:00Z',
+      disposition: 'purge' as const,
+      noticeId: 'n1',
+    }
+    const tree = renderCard({ ...membership, vmc: lapsed, roleVec: undefined, removal })
+    // A removed membership reads as history, folded (cc24cf18b): its cards show behind "Show the ended cards".
+    expect(tree.queryByTestId(testIdWithKey(`AgentCardRenew_membership_${key}`))).toBeNull()
+    await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey(`AgentCommunityHistory_${key}`))))
     expect(tree.getByTestId(testIdWithKey(`AgentCardHistory_membership_${key}`))).toHaveTextContent(
       /VtaLink\.CardMembershipEnded/
     )
+    expect(tree.queryByTestId(testIdWithKey(`AgentCardRenew_membership_${key}`))).toBeNull()
   })
 })
 
@@ -301,5 +322,36 @@ describe('whose card it is, with several agents', () => {
       ['did:me:a', 'Personal'],
       ['did:me:b', 'Work'],
     ])
+  })
+})
+
+// IN-517: one identity kept for two communities. Each community sees the same DID, so the person is told.
+describe('an identity the card shares with another community', () => {
+  const renderWith = (sharedWith?: string[]) =>
+    render(
+      <BasicAppContext>
+        <CommunityCard
+          communityDid={COMMUNITY}
+          persona={persona}
+          sharedWith={sharedWith}
+          membership={membership}
+          invited={false}
+          vetter={false}
+          onOpen={jest.fn()}
+          onPrimary={jest.fn()}
+        />
+      </BasicAppContext>
+    )
+
+  it('says the other community sees the same identity', () => {
+    const tree = renderWith(['did:webvh:QmOther:vtc.example:first-vtc'])
+    expect(tree.getByTestId(testIdWithKey(`AgentIdentityShared_${key}`))).toHaveTextContent(
+      /MyAgent\.IdentitySharedWith/
+    )
+  })
+
+  it('says nothing of the kind for an identity kept for this community only (control)', () => {
+    const tree = renderWith()
+    expect(tree.queryByTestId(testIdWithKey(`AgentIdentityShared_${key}`))).toBeNull()
   })
 })

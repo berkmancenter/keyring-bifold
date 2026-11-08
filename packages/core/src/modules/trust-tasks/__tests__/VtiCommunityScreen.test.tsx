@@ -8,7 +8,7 @@
 import { useNavigation, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import React, { Profiler } from 'react'
-import { StyleSheet } from 'react-native'
+import { DeviceEventEmitter, StyleSheet } from 'react-native'
 
 import { useAgent } from '@bifold/react-hooks'
 
@@ -16,11 +16,16 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { TAB_BAR_CLEARANCE } from '../screens/aboveTabBar'
+import { COMMUNITY_BRAND_EVENT } from '../module/communityChanged'
+import { resetCommunityBrands } from '../module/useCommunityBrand'
 import { vtaAgent } from '../module/vtaAgent'
 import { communityTarget } from '../module/vtiCommunityLink'
 import VtiCommunity from '../screens/VtiCommunity'
+import { LOOK_WAIT_MS } from '../screens/CommunityMark'
+import { unnamedRef } from '../screens/communityName'
 import { registerHiddenVetter, type HiddenVetterSeam } from '../screens/hiddenVetterSeam'
 
+import { ROOMS_LEFT_EVENT } from '../../rooms/useMyRooms'
 import { readDirectoryDisclosure } from '../module/directoryDisclosure'
 import { statement } from './fixtures/directoryStatement'
 
@@ -33,6 +38,9 @@ jest.mock('../module/vtiAgent', () => ({
 const mockLeave = jest.fn()
 jest.mock('../module/vtiJoin', () => ({ leaveCommunity: (...a: unknown[]) => mockLeave(...a) }))
 jest.mock('../module/vtiVetting', () => ({ GenericRecordsVettingStore: class {} }))
+jest.mock('../module/communityLogo', () => ({
+  cachedCommunityLogo: async (did: string) => `file:///community-logos/${did}`,
+}))
 const mockToast = jest.fn()
 jest.mock('react-native-toast-message', () => ({
   __esModule: true,
@@ -47,10 +55,17 @@ let mockPersonasRead: Promise<void> | undefined
 let mockPersonasFailOnce = false
 const mockForgetCommunity = jest.fn(async () => undefined)
 const mockForgetPersona = jest.fn(async () => undefined)
+// What the phone keeps of how communities look, set by the tests of the community's mark.
+let mockBrands: unknown[] = []
+// A membership the phone holds here, set by the tests of one with no identity to sign as (IN-517).
+let mockMembership: unknown = undefined
 jest.mock('../module/VtiCommunityStore', () => ({
+  isCurrentMembership: jest.requireActual('../module/VtiCommunityStore').isCurrentMembership,
   GenericRecordsCommunityStore: class {
-    getMembership = async () => undefined
+    getMembership = async () => mockMembership
+    listMemberships = async () => (mockMembership ? [mockMembership] : [])
     listHeldCredentials = async () => []
+    listCommunityBrands = async () => mockBrands
     forgetCommunity = (...a: unknown[]) => mockForgetCommunity(...(a as []))
   },
 }))
@@ -79,6 +94,10 @@ jest.mock('../module/communityJourney', () => ({
 }))
 /** Read, and not a member. */
 const notMember = { join: { kind: 'none' }, vetterGrant: { state: 'none' } }
+
+// The rooms service, set by the rooms tests (undefined: the rooms flag is off, as in every other test).
+let mockRoomsService: unknown = undefined
+jest.mock('../../rooms/useRoomsService', () => ({ useRoomsService: () => mockRoomsService }))
 
 // What the persona inbox says of this community's agent, set per test (IN-350).
 let mockAgentState: unknown = undefined
@@ -121,10 +140,18 @@ describe('the community screen', () => {
     expect(tree.getByTestId(testIdWithKey('CommunityError'))).not.toHaveTextContent(/vtiAgent|503/)
   })
 
-  it('says a community published no name rather than showing its host as one', () => {
+  it('says a community published no name rather than showing its host as one: its handle, and a pill saying so', () => {
     const tree = show()
-    expect(tree.getByTestId(testIdWithKey('CommunityName'))).toHaveTextContent('Join.Unnamed')
+    expect(tree.getByTestId(testIdWithKey('CommunityName'))).toHaveTextContent(unnamedRef(communityDid))
+    expect(tree.getByText('Community.PassNoName')).toBeTruthy()
     expect(tree.queryByTestId(testIdWithKey('CommunityNameClaimed'))).toBeNull()
+  })
+
+  it('a published name has no pill (control)', () => {
+    communityTarget.set({ communityDid, name: 'Keyring Lab', published: true })
+    const tree = show()
+    expect(tree.getByTestId(testIdWithKey('CommunityName'))).toHaveTextContent('Keyring Lab')
+    expect(tree.queryByText('Community.PassNoName')).toBeNull()
   })
 
   it('a name only a link claimed says where it came from', () => {
@@ -164,7 +191,8 @@ describe('the community screen, when its identity cannot sign in because of its 
 })
 
 describe('leaving a community (220)', () => {
-  const persona = { did: 'did:webvh:QmPersona:p', communityDid }
+  // Signable: both key copies recorded (canSignAs).
+  const persona = { did: 'did:webvh:QmPersona:p', communityDid, kmsKeyIds: { signing: 's', keyAgreement: 'k' } }
   beforeEach(() => {
     mockPersona = persona
     mockLeave.mockReset()
@@ -199,6 +227,29 @@ describe('leaving a community (220)', () => {
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Community.LeftPurge' }))
   })
 
+  it('an identity also kept for another community: leaving says the identity stays for it (IN-517)', async () => {
+    mockPersona = { ...persona, vtaDid: 'did:webvh:QmAgent:a' }
+    mockPersonas = [
+      mockPersona,
+      { ...persona, communityDid: 'did:webvh:QmOther:other-vtc', vtaDid: 'did:webvh:QmAgent:a' },
+    ]
+    try {
+      const tree = await openLeave()
+      expect(tree.getByTestId(testIdWithKey('LeaveCommunityConfirmCard'))).toHaveTextContent(
+        /Community\.LeaveExplainsShared/
+      )
+    } finally {
+      mockPersonas = []
+    }
+  })
+
+  it('an identity kept for this community only: the usual words (control)', async () => {
+    const tree = await openLeave()
+    const confirm = tree.getByTestId(testIdWithKey('LeaveCommunityConfirmCard'))
+    expect(confirm).toHaveTextContent(/Community\.LeaveExplains/)
+    expect(confirm).not.toHaveTextContent(/Community\.LeaveExplainsShared/)
+  })
+
   it('keeps only a note when the person chooses so, and says what the community applied', async () => {
     mockLeave.mockResolvedValue({ disposition: 'tombstone', alreadyGone: false })
     const tree = await openLeave()
@@ -214,6 +265,22 @@ describe('leaving a community (220)', () => {
     Object.assign(new Error('vtiAgent: sent vtc/members/self-remove; the community has not answered yet'), {
       name: 'VtiSentNoAnswer',
     })
+
+  // Left from here, the rooms were never told: My Agent kept "1 room" and the Rooms list kept the room (277.7, 11-03).
+  it("a leave drops the community's rooms from every list; one that fails drops nothing (control)", async () => {
+    const heard: string[] = []
+    const sub = DeviceEventEmitter.addListener(ROOMS_LEFT_EVENT, (did: string) => heard.push(did))
+    try {
+      mockLeave.mockRejectedValueOnce(noAnswer()).mockResolvedValueOnce({ disposition: 'purge', alreadyGone: false })
+      const tree = await openLeave()
+      await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('LeaveCommunityConfirm'))))
+      expect(heard).toEqual([])
+      await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('LeaveCommunityRetry'))))
+      expect(heard).toEqual([communityDid])
+    } finally {
+      sub.remove()
+    }
+  })
 
   it('a leave that goes unanswered says so in words, and offers Try again, which leaves', async () => {
     mockLeave.mockRejectedValueOnce(noAnswer()).mockResolvedValueOnce({ disposition: 'purge', alreadyGone: false })
@@ -295,11 +362,182 @@ describe('the community screen, for a member', () => {
     mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
     const tree = show()
     await act(async () => undefined)
-    expect(tree.getByTestId(testIdWithKey('CommunityMember'))).toHaveTextContent(/Join\.StandingMember/)
+    // One line under the name: "✓ Member since …"; a screen reader hears that they are a member, and since when.
+    expect(tree.getByTestId(testIdWithKey('CommunityMember'))).toHaveTextContent(/MyAgent\.MemberSince/)
+    expect(tree.getByTestId(testIdWithKey('CommunityMember')).props.accessibilityLabel).toMatch(
+      /^Join\.StandingMember MyAgent\.MemberSince$/
+    )
     expect(tree.getByTestId(testIdWithKey('CommunityMemberSince'))).toBeTruthy()
     expect(tree.queryByTestId(testIdWithKey('CommunityCriteria'))).toBeNull()
     expect(tree.queryByTestId(testIdWithKey('ApplyToCommunityButton'))).toBeNull()
     expect(tree.queryByTestId(testIdWithKey('CommunityOpenDesk'))).toBeNull()
+  })
+
+  // 276.10, option A: who the community is first, then Rooms and Directory, and About last with Leave out of the way.
+  it('reads top to bottom: the name, Rooms, Directory, then About with Details and Leave', async () => {
+    mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
+    mockPersona = { did: 'did:webvh:QmPersona:p', communityDid, kmsKeyIds: { signing: 's', keyAgreement: 'k' } }
+    mockRoomsService = {
+      isSample: false,
+      capabilities: async () => jest.requireActual('../../rooms/capabilities').sampleCapabilities(),
+      listMyRooms: async () => [],
+      listOffers: async () => [],
+    }
+    try {
+      // With an agent, as the leave tests: the phone holds an identity here, so Leave is offered.
+      ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid } })
+      ;(useAgent as jest.Mock).mockReturnValue({ agent: {} })
+      const tree = render(
+        <BasicAppContext>
+          <VtiCommunity />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      const order = tree.UNSAFE_root.findAll((n) => typeof n.props.testID === 'string' && typeof n.type === 'string')
+        .map((n) => n.props.testID as string)
+        .filter((testID, i, all) => all.indexOf(testID) === i)
+      const at = (key: string) => order.indexOf(testIdWithKey(key))
+      const keys = [
+        'CommunityName',
+        'CommunityRooms',
+        'CommunityDirectory',
+        'CommunityDetailsToggle',
+        'LeaveCommunityButton',
+      ]
+      keys.forEach((key) => expect(at(key)).toBeGreaterThanOrEqual(0))
+      expect(keys.map(at)).toEqual([...keys.map(at)].sort((a, b) => a - b))
+      // Leave is plain words in About, not a bordered button, with the way back said under it.
+      const leave = StyleSheet.flatten(tree.getByTestId(testIdWithKey('LeaveCommunityButton')).props.style)
+      expect(leave.borderWidth ?? 0).toBe(0)
+      expect(tree.getByText('Join.StandingAgain')).toBeTruthy()
+      expect(tree.getByText('Community.AboutSection')).toBeTruthy()
+    } finally {
+      mockRoomsService = undefined
+      mockPersona = undefined
+    }
+  })
+
+  it('Details, under About, shows the community ID on a tap', async () => {
+    mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
+    const tree = show()
+    await act(async () => undefined)
+    expect(tree.queryByTestId(testIdWithKey('CommunityDid'))).toBeNull()
+    fireEvent.press(tree.getByTestId(testIdWithKey('CommunityDetailsToggle')))
+    expect(tree.getByTestId(testIdWithKey('CommunityDid'))).toHaveTextContent(communityDid)
+  })
+
+  it('Rooms: rows in the shape of rooms while they are read, then counted in the label', async () => {
+    mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
+    let answer: (rooms: unknown[]) => void = () => undefined
+    mockRoomsService = {
+      isSample: false,
+      capabilities: async () => jest.requireActual('../../rooms/capabilities').sampleCapabilities(),
+      listMyRooms: () => new Promise((resolve) => (answer = resolve)),
+      listOffers: async () => [],
+    }
+    try {
+      const tree = show()
+      await act(async () => undefined)
+      const reading = tree.getByTestId(testIdWithKey('RoomsReading'))
+      expect(reading.props.accessibilityLabel).toBe('Rooms.Reading')
+      expect(tree.UNSAFE_queryAllByType(jest.requireActual('react-native').ActivityIndicator)).toHaveLength(0)
+      expect(tree.getByText('Rooms.Rooms')).toBeTruthy()
+
+      await act(async () =>
+        answer([
+          {
+            roomId: 'did:webvh:r:here',
+            name: 'Planning',
+            nameFrom: 'community',
+            source: 'community',
+            communityDid,
+            tier: 'open',
+            verbs: ['read'],
+            standing: 'member',
+          },
+        ])
+      )
+      expect(tree.queryByTestId(testIdWithKey('RoomsReading'))).toBeNull()
+      expect(tree.getByText('Rooms.Rooms · 1')).toBeTruthy()
+    } finally {
+      mockRoomsService = undefined
+    }
+  })
+
+  it("rooms flag on: this community's offers and rooms, each opening its screen; off, no section (on is the control)", async () => {
+    mockJourney = { join: { kind: 'member', membership }, vetterGrant: { state: 'none' } }
+    const room = (roomId: string, name: string, did: string) => ({
+      roomId,
+      name,
+      nameFrom: 'community',
+      source: 'community',
+      communityDid: did,
+      tier: 'open',
+      verbs: ['read'],
+      standing: 'member',
+    })
+    const offer = (offerId: string, roomName: string, did: string) => ({
+      offerId,
+      roomId: `did:webvh:r:${offerId}`,
+      roomName,
+      communityDid: did,
+      tier: 'open',
+      verbs: ['read'],
+    })
+    mockRoomsService = {
+      isSample: false,
+      capabilities: async () => jest.requireActual('../../rooms/capabilities').sampleCapabilities(),
+      listMyRooms: async () => [
+        room('did:webvh:r:here', 'Planning', communityDid),
+        room('did:webvh:r:else', 'Elsewhere', 'did:webvh:other'),
+      ],
+      listOffers: async () => [
+        offer('o-here', 'Kernel notes', communityDid),
+        offer('o-else', 'Far', 'did:webvh:other'),
+      ],
+    }
+    const navigate = useNavigation().navigate as jest.Mock
+    navigate.mockClear()
+    try {
+      const on = show()
+      await act(async () => undefined)
+      expect(on.getByTestId(testIdWithKey('CommunityRooms'))).toBeTruthy()
+      expect(on.getByText('Planning')).toBeTruthy()
+      expect(on.getByText('Kernel notes')).toBeTruthy()
+      expect(on.queryByText('Elsewhere')).toBeNull()
+      expect(on.queryByText('Far')).toBeNull()
+
+      fireEvent.press(on.getByText('Planning'))
+      expect(navigate).toHaveBeenCalledWith(Screens.Room, { roomId: 'did:webvh:r:here' })
+      fireEvent.press(on.getByTestId(testIdWithKey('RoomOfferRow_ohere')))
+      expect(navigate).toHaveBeenCalledWith(Screens.RoomOffer, { offerRef: 'o-here' })
+      on.unmount()
+
+      mockRoomsService = undefined
+      const off = show()
+      await act(async () => undefined)
+      expect(off.getByTestId(testIdWithKey('CommunityMember'))).toBeTruthy()
+      expect(off.queryByTestId(testIdWithKey('CommunityRooms'))).toBeNull()
+    } finally {
+      mockRoomsService = undefined
+    }
+  })
+
+  it('not a member: no Rooms section, even with the rooms flag on', async () => {
+    mockJourney = notMember
+    mockRoomsService = {
+      isSample: false,
+      capabilities: async () => jest.requireActual('../../rooms/capabilities').sampleCapabilities(),
+      listMyRooms: async () => [],
+      listOffers: async () => [],
+    }
+    try {
+      const tree = show()
+      await act(async () => undefined)
+      expect(tree.queryByTestId(testIdWithKey('CommunityRooms'))).toBeNull()
+    } finally {
+      mockRoomsService = undefined
+    }
   })
 
   it('a member who vets here is offered their desk', async () => {
@@ -518,8 +756,60 @@ describe("a community known only through another agent's identity", () => {
     expect(mockForgetPersona).toHaveBeenCalledWith(communityDid, AL_PHONE)
   })
 
-  it("the current agent's own identity: a member as before, with Leave", async () => {
+  it('a membership with no identity this phone can sign in as: no Leave, and words saying to ask its admin (IN-517)', async () => {
+    mockPersona = undefined
+    mockPersonas = []
+    mockMembership = { communityDid, personaDid: 'did:webvh:QmAgentItself:agent', role: 'member' }
+    try {
+      const tree = await open()
+      expect(tree.queryByTestId(testIdWithKey('LeaveCommunityButton'))).toBeNull()
+      expect(tree.getByText(/Community\.LeaveNotFromThisPhone/)).toBeTruthy()
+    } finally {
+      mockMembership = undefined
+    }
+  })
+
+  it('an identity whose keys are not on the phone yet: no Leave, and words saying the agent hands them over (ac, #938)', async () => {
+    // Kept for a second community while the first held its copies in the wallet's store: no copies named yet.
     mockPersona = { did: 'did:webvh:QmP:mine', communityDid, vtaDid: AL_SIGNER }
+    mockPersonas = [mockPersona]
+    mockMembership = { communityDid, personaDid: 'did:webvh:QmP:mine', role: 'member' }
+    try {
+      const tree = await open()
+      expect(tree.queryByTestId(testIdWithKey('LeaveCommunityButton'))).toBeNull()
+      expect(tree.getByText(/Community\.LeaveWaitsForKeys/)).toBeTruthy()
+      expect(tree.queryByText(/Community\.LeaveNotFromThisPhone/)).toBeNull()
+    } finally {
+      mockMembership = undefined
+    }
+  })
+
+  it('an identity this phone can sign in as: Leave, and no such words (control)', async () => {
+    mockPersona = {
+      did: 'did:webvh:QmP:mine',
+      communityDid,
+      vtaDid: AL_SIGNER,
+      kmsKeyIds: { signing: 's', keyAgreement: 'k' },
+    }
+    mockPersonas = [mockPersona]
+    mockMembership = { communityDid, personaDid: 'did:webvh:QmP:mine', role: 'member' }
+    try {
+      const tree = await open()
+      expect(tree.getByTestId(testIdWithKey('LeaveCommunityButton'))).toBeTruthy()
+      expect(tree.queryByText(/Community\.LeaveNotFromThisPhone/)).toBeNull()
+      expect(tree.queryByText(/Community\.LeaveWaitsForKeys/)).toBeNull()
+    } finally {
+      mockMembership = undefined
+    }
+  })
+
+  it("the current agent's own identity: a member as before, with Leave", async () => {
+    mockPersona = {
+      did: 'did:webvh:QmP:mine',
+      communityDid,
+      vtaDid: AL_SIGNER,
+      kmsKeyIds: { signing: 's', keyAgreement: 'k' },
+    }
     mockPersonas = [mockPersona]
     const tree = await open()
     expect(tree.queryByTestId(testIdWithKey('CommunityHeldElsewhere'))).toBeNull()
@@ -575,5 +865,103 @@ describe('the community screen, before it knows whether this phone is a member',
     expect(tree.getByTestId(testIdWithKey('CommunityReadFailed'))).toHaveTextContent(/Join\.StandingUnread/)
     await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('CommunityReadAgain'))))
     expect(mockRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+// A community's Wallet card showed its logo, and this screen the generic people icon.
+describe("the community's mark at the top of its screen", () => {
+  const otherDid = 'did:webvh:QmOther:keyring-vti-vtc.ngrok.app'
+  const logoOf = (did: string) => ({ communityDid: did, logoUrl: 'https://vtc.example.org/logo.png' })
+  const flush = () => act(async () => new Promise((resolve) => setTimeout(resolve, 0)))
+  const screen = () => (
+    <BasicAppContext>
+      <VtiCommunity />
+    </BasicAppContext>
+  )
+  const showOn = (did: string) => {
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid: did } })
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: {} })
+    return render(screen())
+  }
+  const logo = (tree: ReturnType<typeof render>) => tree.queryByTestId(testIdWithKey('CommunityLogo'))
+  const icon = (tree: ReturnType<typeof render>) => tree.queryByTestId(testIdWithKey('CommunityMarkIcon'))
+
+  beforeEach(() => {
+    communityTarget.clear()
+    resetCommunityBrands()
+    mockJourney = notMember
+  })
+  afterEach(() => {
+    mockBrands = []
+    mockJourney = undefined
+  })
+
+  it('shows the logo the Wallet card shows, not the people icon', async () => {
+    mockBrands = [logoOf(communityDid)]
+    const tree = showOn(communityDid)
+    await flush()
+    expect(logo(tree)?.props.source).toEqual({ uri: `file:///community-logos/${communityDid}` })
+    expect(icon(tree)).toBeNull()
+  })
+
+  it('keeps the people icon for a community that has no logo (control)', async () => {
+    mockBrands = [{ communityDid }]
+    const tree = showOn(communityDid)
+    await flush()
+    expect(icon(tree)).toBeTruthy()
+    expect(logo(tree)).toBeNull()
+  })
+
+  it('first open: the read ends before the look is kept, and the icon never shows ahead of the logo', async () => {
+    const tree = showOn(communityDid)
+    await flush()
+    expect(icon(tree)).toBeNull()
+    mockBrands = [logoOf(communityDid)]
+    await act(async () => void DeviceEventEmitter.emit(COMMUNITY_BRAND_EVENT, { communityDid }))
+    await flush()
+    expect(logo(tree)).toBeTruthy()
+    expect(icon(tree)).toBeNull()
+  })
+
+  it("opened on another community, the wait is that community's, from the end of its own read", async () => {
+    const fetchManifest = (jest.requireMock('../module/vtiAgent') as { vtiAgent: { fetchManifest: jest.Mock } })
+      .vtiAgent.fetchManifest
+    let answer: (manifest: unknown) => void = () => undefined
+    jest.useFakeTimers()
+    try {
+      // Nothing is ever kept for the first: it gives up waiting, and shows the icon.
+      const tree = showOn(communityDid)
+      await act(async () => undefined)
+      await act(async () => void jest.advanceTimersByTime(LOOK_WAIT_MS))
+      expect(icon(tree)).toBeTruthy()
+      fetchManifest.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)))
+      ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid: otherDid } })
+      tree.rerender(screen())
+      await act(async () => undefined)
+      expect(icon(tree)).toBeNull()
+      // Its read is slower than the wait, which has not started.
+      await act(async () => void jest.advanceTimersByTime(2 * LOOK_WAIT_MS))
+      expect(icon(tree)).toBeNull()
+      mockBrands = [logoOf(otherDid)]
+      await act(async () => answer({ criteria: [] }))
+      await act(async () => void DeviceEventEmitter.emit(COMMUNITY_BRAND_EVENT, { communityDid: otherDid }))
+      await act(async () => undefined)
+      expect(logo(tree)).toBeTruthy()
+      expect(icon(tree)).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  it("opened on another community, never shows the last one's logo", async () => {
+    mockBrands = [logoOf(communityDid), { communityDid: otherDid }]
+    const tree = showOn(communityDid)
+    await flush()
+    expect(logo(tree)).toBeTruthy()
+    ;(useRoute as jest.Mock).mockReturnValue({ params: { communityDid: otherDid } })
+    tree.rerender(screen())
+    await flush()
+    expect(logo(tree)).toBeNull()
+    expect(icon(tree)).toBeTruthy()
   })
 })

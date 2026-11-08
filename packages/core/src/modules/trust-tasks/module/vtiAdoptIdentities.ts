@@ -27,6 +27,7 @@
  * @module trust-tasks/module/vtiAdoptIdentities
  */
 
+import { isAgentsOwnDid } from './agentOwnIdentity'
 import { sameIdentity } from './didScid'
 import type { VtaMintedDid } from './VtaClient'
 import type { AgentCard } from './vtiCardVault'
@@ -47,6 +48,8 @@ export interface AdoptionReport {
   otherIdentities: number
   /** Community cards about those identities. */
   cardsForOthers: number
+  /** Community cards about the agent's own DID: never an identity of this phone (agentOwnIdentity). */
+  cardsForAgent?: number
   /** Identities with a community card whose DID document could not be read: not taken on. */
   unreadable: string[]
   /** Cards that named a community for an identity but did not hold up: no identity taken on from them. */
@@ -101,18 +104,35 @@ export async function adoptAgentIdentities(options: {
   keyIdsOf: (did: string) => Promise<AdoptionKeyIds | undefined>
   /** The DIDs of the identities this phone already holds. */
   held?: string[]
+  /**
+   * Borrow an identity's key copies from its agent once it is recorded (VtaClient.holdPersonaKeys). Run one at a
+   * time, after the report is made and never waited for: Bring back does not take longer for it, and a borrow
+   * that fails takes nothing back. The identity stays recorded and its keys are asked for again when a session
+   * with its agent next opens.
+   */
+  holdKeys?: (persona: VtiPersona) => Promise<unknown>
+  /** Told of a borrow that failed, and why, for the log. */
+  onKeysFailed?: (persona: VtiPersona, reason: string) => void
   now?: () => number
 }): Promise<AdoptionReport> {
   const { identities, vtaDid, cards } = options
   const now = options.now ?? Date.now
   const held = new Set(options.held ?? [])
-  const minted = new Map((await options.listDids()).map((d) => [d.did, d]))
+  // The agent's own DID is never one of this phone's identities, whatever a community issued to it (agentOwnIdentity).
+  const listed = await options.listDids()
+  const minted = new Map(listed.filter((d) => !isAgentsOwnDid(d.did, vtaDid)).map((d) => [d.did, d]))
   // The agent's DID a card is about: the same DID, or its did:scid:vh:1 form (didScid).
   const mintedAs = (subject: string) =>
     minted.has(subject) ? subject : [...minted.keys()].find((did) => sameIdentity(did, subject))
   const otherIdentities = [...minted.keys()].filter((did) => !held.has(did)).length
-  const report: AdoptionReport = { adopted: [], otherIdentities, cardsForOthers: 0, unreadable: [], failedCheck: [] }
-  if (minted.size === 0) return report
+  const report: AdoptionReport = {
+    adopted: [],
+    otherIdentities,
+    cardsForOthers: 0,
+    cardsForAgent: 0,
+    unreadable: [],
+    failedCheck: [],
+  }
 
   // Each community's cards about one of the agent's DIDs, best first.
   const byCommunity = new Map<
@@ -125,6 +145,8 @@ export async function adoptAgentIdentities(options: {
     const item = classifyCredential(credential)
     // The cards a community gives an identity in it: membership, a role, a vetter grant.
     if (item.kind !== 'membership' && item.kind !== 'role' && item.kind !== 'vetter-grant') continue
+    if (item.communityDid && item.subjectDid && isAgentsOwnDid(item.subjectDid, vtaDid))
+      report.cardsForAgent = (report.cardsForAgent ?? 0) + 1
     const did = item.subjectDid ? mintedAs(item.subjectDid) : undefined
     if (!item.communityDid || !did) continue
     if (!held.has(did)) report.cardsForOthers += 1
@@ -163,9 +185,23 @@ export async function adoptAgentIdentities(options: {
       vtaKeyIds: { signing: keyIds.signing, keyAgreement: keyIds.keyAgreement },
       createdAt: new Date(now()).toISOString(),
     }
+    // The card check and the DID document are network reads: a join may have recorded this community's identity
+    // meanwhile. That one, which the community just admitted and whose keys are on the phone, is kept.
+    if (await identities.getPersona(communityDid, vtaDid)) continue
     await identities.setPersona(persona)
     report.adopted.push(persona)
   }
+  const { holdKeys, onKeysFailed } = options
+  if (holdKeys)
+    void report.adopted.reduce(
+      (previous, persona) =>
+        previous.then(() =>
+          holdKeys(persona).then(undefined, (e: unknown) =>
+            onKeysFailed?.(persona, e instanceof Error ? e.message : String(e))
+          )
+        ),
+      Promise.resolve()
+    )
   return report
 }
 

@@ -20,6 +20,7 @@
 import type { Agent } from '@credo-ts/core'
 import { TypedArrayEncoder, utils } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
+import { extendsChain } from '@openvtc/trust-tasks/runtime'
 import {
   CROCKFORD,
   communityRoleCard,
@@ -53,7 +54,14 @@ import {
 import { resolveDidDocumentRetrying } from './VtiMediatorTransport'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import { disclosedUnder, recordAnswer, recordSent, recordStatus } from './joinSubmission'
-import { joinRequestRefusal, openJoinRequestOf, vtiAgent, type VtiManifest, type VtiVerdict } from './vtiAgent'
+import {
+  isUnsupportedJoinVersion,
+  joinRequestRefusal,
+  openJoinRequestOf,
+  vtiAgent,
+  type VtiManifest,
+  type VtiVerdict,
+} from './vtiAgent'
 import { checkCredentialStatus, checkStatusEntry, statusEntryOf, type CredentialStatusResult } from './vtiStatusList'
 import { pickOwnVetterGrant, vetterNotEligibleReason } from './vtiGrantState'
 import { emitCommunityChanged } from './communityChanged'
@@ -69,6 +77,7 @@ import {
 import { HIDDEN_VETTING_SUITE, pcsErrorCode, type HiddenAttestation } from './pcsVtaPayloads'
 import { PRIVATE_ATTEST_RELATIONSHIPS } from './pcsVetterTasks'
 import {
+  asVetter,
   connectedVetterClient,
   currentHiddenCriterion,
   drawVetterTokens,
@@ -121,6 +130,12 @@ export const TASK_ERROR_TYPE = `${TASK_ERROR}0.5`
  * other version Keyring does not emit.
  */
 export const LEGACY_ERROR_03_UNTIL = '2026-11-01'
+/**
+ * The trust-task-error versions that declare they extend an earlier one (SPEC §5.2), so a refusal in them is read
+ * as 0.5: 0.6 (`extends: "0.5"`), which @openvtc/trust-tasks 0.28 emits. Named here because the package's own
+ * table is empty in 0.28.1 and its 0.6 module only exports the declaration, so `extendsChain` alone finds nothing.
+ */
+const TASK_ERROR_EXTENDS: Readonly<Record<string, string>> = { [`${TASK_ERROR}0.6`]: '0.5' }
 const DTG_CONTEXT = ['https://www.w3.org/ns/credentials/v2', 'https://firstperson.network/credentials/dtg/v1']
 
 export type VettingMethod = 'inPerson' | 'video' | 'priorAcquaintance'
@@ -491,6 +506,28 @@ export interface VettingApplication {
   pendingTicket?: string
 }
 
+/**
+ * A vetting request that arrived while no desk was listening, kept until the
+ * desk takes it. While it waits, `message` holds what the applicant presented,
+ * ticket code or secret included, so it is never logged. Once closed the message
+ * is gone and only this note remains, which tells a copy delivered again that
+ * the request is done. `forget` removes the note with the community's other
+ * records.
+ */
+export interface ParkedVettingRequest {
+  requestDocumentId: string
+  personaDid: string
+  communityDid: string
+  /** The ticket it presented, which bounds how many are kept (`MAX_PARKED_PER_TICKET`). */
+  ticketId: string
+  parkedAt: string
+  /** The ticket's own expiry: after it the desk could not take the request anyway. */
+  expiresAt: string
+  message?: DidCommV2PlaintextMessage
+  closed?: 'taken' | 'expired'
+  closedAt?: string
+}
+
 export interface VtiVettingStore {
   listTickets(communityDid: string): Promise<VettingTicket[]>
   saveTicket(ticket: VettingTicket): Promise<void>
@@ -504,6 +541,11 @@ export interface VtiVettingStore {
   saveApplication(application: VettingApplication): Promise<void>
   /** The application alone, leaving a vetter's desk, tickets and profile for that community. */
   forgetApplication?(communityDid: string): Promise<void>
+  /** Keep a request for the desk (`parkVettingRequest` decides whether it may be kept). */
+  parkRequest?(request: ParkedVettingRequest): Promise<void>
+  listParkedRequests?(): Promise<ParkedVettingRequest[]>
+  /** Blank a parked request's message and mark why it is finished. */
+  closeParkedRequest?(requestDocumentId: string, closed: 'taken' | 'expired'): Promise<void>
   forget(communityDid: string): Promise<void>
 }
 
@@ -574,6 +616,30 @@ export class GenericRecordsVettingStore implements VtiVettingStore {
     }
     emitCommunityChanged(communityDid, 'application')
   }
+  async parkRequest(request: ParkedVettingRequest) {
+    await this.put('parked', request.requestDocumentId, { ...request })
+  }
+  async listParkedRequests() {
+    return this.list<ParkedVettingRequest>('parked')
+  }
+  async closeParkedRequest(requestDocumentId: string, closed: 'taken' | 'expired') {
+    const held = (await this.list<ParkedVettingRequest>('parked')).find(
+      (p) => p.requestDocumentId === requestDocumentId
+    )
+    if (!held || held.closed) return
+    // Rewritten field by field, so nothing the message held can stay behind.
+    const note: ParkedVettingRequest = {
+      requestDocumentId: held.requestDocumentId,
+      personaDid: held.personaDid,
+      communityDid: held.communityDid,
+      ticketId: held.ticketId,
+      parkedAt: held.parkedAt,
+      expiresAt: held.expiresAt,
+      closed,
+      closedAt: new Date().toISOString(),
+    }
+    await this.put('parked', requestDocumentId, { ...note })
+  }
   async forget(communityDid: string) {
     const rs = await this.agent.genericRecords.findAllByQuery({ recordType: RECORD_TYPE })
     for (const r of rs) {
@@ -599,6 +665,23 @@ function randomBytes(n: number): Uint8Array {
   }
   return out
 }
+/** The live ticket a request presents, by code or by QR secret: the desk's one test, whenever it runs. */
+function liveTicketFor(
+  tickets: VettingTicket[],
+  presented: { code?: string; ticketId?: string; secret?: string } | undefined,
+  applicantDid: string,
+  now: number
+): VettingTicket | undefined {
+  return tickets.find((t) => {
+    if (t.usesLeft <= 0 || new Date(t.expiresAt).getTime() < now) return false
+    if (t.boundTo && t.boundTo !== applicantDid) return false
+    if (presented?.code) return constantTimeEqual(t.code, presented.code)
+    if (presented?.ticketId && presented?.secret)
+      return t.ticketId === presented.ticketId && constantTimeEqual(t.secret, presented.secret)
+    return false
+  })
+}
+
 /** `XXXX-XXXX` from 40 fresh bits — a ticket code is a secret, not a derivation. */
 function randomCode(): string {
   const b = randomBytes(5)
@@ -903,6 +986,79 @@ export function identityCommitment(salt: string, claims: { type: string; value: 
 }
 
 /**
+ * How many requests one ticket can keep, closed ones included: a real applicant
+ * keeps one. Closed ones count because a refused request closes and spends
+ * nothing, so its ticket stays live for the next.
+ */
+export const MAX_PARKED_PER_TICKET = 10
+
+/** The largest request kept, in characters: a real one is a few thousand, and the sender decides. */
+export const MAX_PARKED_REQUEST_CHARS = 64 * 1024
+
+/** Whether a message is an applicant's vetting request. */
+export const isVettingRequest = (m: DidCommV2PlaintextMessage): boolean => typeOf(m) === VETTING.request
+
+/** Blank every parked request whose ticket has expired. */
+export async function closeExpiredParkedRequests(store: VtiVettingStore, now = Date.now()): Promise<void> {
+  const parked = (await store.listParkedRequests?.()) ?? []
+  for (const p of parked) {
+    if (!p.closed && new Date(p.expiresAt).getTime() < now)
+      await store.closeParkedRequest?.(p.requestDocumentId, 'expired')
+  }
+}
+
+/**
+ * Keep a vetting request for this identity's desk, before the mediator is told it
+ * was taken. A request reaching the shared session with no desk listening, the
+ * vetter elsewhere in the app, was acknowledged and lost (2026-11-04).
+ *
+ * Only a request presenting a live ticket here: the desk would answer nothing
+ * else but a wrong QR secret, so a stranger can't write here and a wrong secret is
+ * never stored. Who sent it is checked when the desk takes it.
+ *
+ * Holding a ticket doesn't make the sender trusted: keeping spends no use, an
+ * unbound ticket fits any sender, a code gets shared, and the sender picks the
+ * document id. So what one ticket can keep is bounded, in number and in size. A
+ * request past the bound isn't kept, as before this existed: a desk listening
+ * still takes it, and with none it is lost.
+ */
+export async function parkVettingRequest(
+  store: VtiVettingStore,
+  persona: VtiPersona,
+  m: DidCommV2PlaintextMessage
+): Promise<void> {
+  await closeExpiredParkedRequests(store)
+  const body = bodyOf(m)
+  const p = payloadOf(m)
+  const requestDocumentId = String(body.id ?? m.id ?? '')
+  if (!requestDocumentId || String(p.community ?? '') !== persona.communityDid) return
+  const presented = p.ticket as { code?: string; ticketId?: string; secret?: string } | undefined
+  const applicantDid = String(body.issuer ?? m.from ?? '')
+  const tickets = await store.listTickets(persona.communityDid)
+  const ticket = liveTicketFor(tickets, presented, applicantDid, Date.now())
+  if (!ticket) return
+  // A desk listening took it already.
+  if ((await store.listDesk()).some((r) => r.requestDocumentId === requestDocumentId)) return
+  const parked = (await store.listParkedRequests?.()) ?? []
+  // A copy of one already kept changes nothing, whatever the count.
+  if (parked.some((held) => held.requestDocumentId === requestDocumentId)) return
+  const forTicket = parked.filter((held) => held.ticketId === ticket.ticketId).length
+  if (forTicket >= MAX_PARKED_PER_TICKET || JSON.stringify(m).length > MAX_PARKED_REQUEST_CHARS) {
+    releaseWarn('[VTI] a vetting request was not kept for the desk: past the bound for its ticket')
+    return
+  }
+  await store.parkRequest?.({
+    requestDocumentId,
+    personaDid: persona.did,
+    communityDid: persona.communityDid,
+    ticketId: ticket.ticketId,
+    parkedAt: new Date().toISOString(),
+    expiresAt: ticket.expiresAt,
+    message: m,
+  })
+}
+
+/**
  * A Vetting Card's `digestMultibase`, the value a statement names in
  * `cardDigestMultibase`: JCS of the card WITHOUT its top-level `proof`, as DTG
  * Credentials §Digest Encoding defines it and the VTI SDK computes it
@@ -1057,7 +1213,42 @@ export class VtiVetterDesk {
     // told it was taken, and a failure leaves it for redelivery.
     this.stop = vtiAgent.onInbound((m) => this.inbound(m))
     void this.keepHiddenVetterReady('listen')
+    void this.takeParkedRequests()
     return this.stop
+  }
+
+  /** The look running now: the screen calls `listen` every few seconds, and a take can outlast that. */
+  private takingParked?: Promise<void>
+
+  /**
+   * Take what the inbox kept while no desk was listening (`parkVettingRequest`),
+   * through the same path as a live delivery. Only while the session is this
+   * identity: the answer goes out on it. Otherwise the request waits for the next
+   * look. A request whose proof doesn't verify also waits, since that is what
+   * being offline looks like (a DID that won't resolve); its expiry ends it.
+   */
+  private takeParkedRequests(): Promise<void> {
+    if (this.takingParked) return this.takingParked
+    const look = async () => {
+      await closeExpiredParkedRequests(this.store)
+      const parked = (await this.store.listParkedRequests?.()) ?? []
+      const waiting = parked
+        .filter((p) => !p.closed && p.message && p.personaDid === this.persona.did)
+        .sort((a, b) => a.parkedAt.localeCompare(b.parkedAt))
+      if (waiting.length === 0) return
+      if (!vtiAgent.isConnected || vtiAgent.getState().did !== this.persona.did) return
+      for (const { message } of waiting) {
+        const opened = await openPeerDocument(this.agent, message as DidCommV2PlaintextMessage)
+        if (!opened.ok && opened.code === 'proof') continue
+        await this.inbound(message as DidCommV2PlaintextMessage)
+      }
+    }
+    this.takingParked = look()
+      .catch(() => releaseWarn('[VTI] a parked vetting request was not taken; it waits for the next look'))
+      .finally(() => {
+        this.takingParked = undefined
+      })
+    return this.takingParked
   }
 
   /** When this desk last ran its hidden-vetting round, on the one clock (`nowMs`). */
@@ -1144,11 +1335,21 @@ export class VtiVetterDesk {
         standing.statusChecked ? 'checked' : `not checked${standing.reason ? ` (${standing.reason})` : ''}`
       }`
     )
-    if (!(await isEnrolled(this.agent, community, criterion))) {
-      await enrolVetter(this.agent, community, criterion)
-      logger?.info?.(`[hidden-vetting] vetter round (${trigger}): enrolled for the current period`)
-    }
-    const { drawn } = await drawVetterTokens(this.agent, community, criterion)
+    // One hold for the whole round, as the desk's own persona (the one its
+    // grant is for): enrolment and the draw are signed as it, and the session
+    // cannot change hands between them.
+    const { drawn } = await asVetter(
+      this.agent,
+      community,
+      async () => {
+        if (!(await isEnrolled(this.agent, community, criterion))) {
+          await enrolVetter(this.agent, community, criterion)
+          logger?.info?.(`[hidden-vetting] vetter round (${trigger}): enrolled for the current period`)
+        }
+        return drawVetterTokens(this.agent, community, criterion)
+      },
+      this.persona
+    )
     this.hiddenRoundFailure = undefined
     logger?.info?.(
       `[hidden-vetting] vetter round (${trigger}): ${drawn ? `drew ${drawn} token(s)` : 'no draw due this tick'}`
@@ -1178,6 +1379,10 @@ export class VtiVetterDesk {
       // taken. A card does — the session it answers — when the sender is the
       // applicant that session is with.
       if (isCard) await this.noteRefusedCard(m, opened.code)
+      // Refused for good: a parked copy would be refused the same way. `proof` can be a DID that won't resolve offline.
+      else if (opened.code !== 'proof' && typeof bodyOf(m).id === 'string') {
+        await this.store.closeParkedRequest?.(String(bodyOf(m).id), 'taken')
+      }
       return
     }
     if (isRequest) return this.takeRequest(m)
@@ -1224,9 +1429,9 @@ export class VtiVetterDesk {
     try {
       if ((await this.store.listDesk()).some((r) => r.requestDocumentId === requestDocumentId)) {
         this.agent.config?.logger?.debug?.(`[VTI] vetting request ${requestDocumentId} already taken; copy ignored`)
-        return
-      }
-      await this.takeRequestOnce(m, requestDocumentId)
+      } else await this.takeRequestOnce(m, requestDocumentId)
+      // Answered or passed over, it is finished: what it presented doesn't stay here.
+      await this.store.closeParkedRequest?.(requestDocumentId, 'taken')
     } finally {
       takingRequests.delete(key)
     }
@@ -1242,14 +1447,7 @@ export class VtiVetterDesk {
     const presented = p.ticket as { code?: string; ticketId?: string; secret?: string } | undefined
     const tickets = await this.store.listTickets(this.persona.communityDid)
     const now = Date.now()
-    const ticket = tickets.find((t) => {
-      if (t.usesLeft <= 0 || new Date(t.expiresAt).getTime() < now) return false
-      if (t.boundTo && t.boundTo !== applicantDid) return false
-      if (presented?.code) return constantTimeEqual(t.code, presented.code)
-      if (presented?.ticketId && presented?.secret)
-        return t.ticketId === presented.ticketId && constantTimeEqual(t.secret, presented.secret)
-      return false
-    })
+    const ticket = liveTicketFor(tickets, presented, applicantDid, now)
     if (!ticket) {
       // A wrong code is never answered; a wrong QR secret says so.
       if (presented?.ticketId) await this.refuse(m, applicantDid, 'vetting/request:invalidTicket')
@@ -1341,6 +1539,7 @@ export class VtiVetterDesk {
       this.agent,
       this.persona,
       to,
+      // version-pinned: 0.5 is all trust-tasks-rs models (TASK_ERROR_TYPE); Keyring reads 0.6 but does not send it
       TASK_ERROR_TYPE,
       {
         code,
@@ -1354,6 +1553,7 @@ export class VtiVetterDesk {
       },
       String(body.threadId ?? body.id ?? '')
     )
+    // version-pinned: 0.5 is all trust-tasks-rs models (TASK_ERROR_TYPE); Keyring reads 0.6 but does not send it
     await vtiAgent.send(to, TASK_ERROR_TYPE, error, { thid: String(m.id ?? '') })
   }
 
@@ -1484,6 +1684,26 @@ export class VtiVetterDesk {
     }))
   }
 
+  /**
+   * The community's manifest, read twice before giving up: the requirements
+   * decide the shape, and the fallback is a guess (a guess of the old shape
+   * made a vetting not count).
+   */
+  private async readManifest(communityDid: string): Promise<ManifestRead> {
+    let unread: string | undefined
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return { manifest: await vtiAgent.fetchManifest(communityDid, this.agent) }
+      } catch (e) {
+        // It serves no version this wallet speaks, and said so: asking again gets the same answer.
+        if (isUnsupportedJoinVersion(e)) return { unusable: (e as Error)?.message ?? String(e) }
+        unread = (e as Error)?.message ?? String(e)
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
+      }
+    }
+    return { unread }
+  }
+
   /** The human check, then the statement — never automatic, signed as the member persona. */
   /**
    * The statement shape to write for `communityDid` (228; `chooseStatementShape`).
@@ -1491,36 +1711,17 @@ export class VtiVetterDesk {
    * vetter's own grant from it (B); a manifest that cannot be read now leaves
    * the grant to decide. `off` and `force` read nothing.
    */
-  private async statementShapeFor(communityDid: string): Promise<StatementShapeChoice> {
+  private async statementShapeFor(communityDid: string, manifest?: VtiManifest): Promise<StatementShapeChoice> {
     const mode = getDtgV1WritingMode()
     if (mode !== 'auto') return chooseStatementShape({ mode })
-    let statementType: string | undefined
-    let unread: string | undefined
-    // Read twice before giving up: the requirements decide the shape, and the
-    // fallback is a guess (a guess of the old shape made a vetting not count).
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        statementType = publishedStatementType(await vtiAgent.fetchManifest(communityDid, this.agent))
-        unread = undefined
-        break
-      } catch (e) {
-        unread = (e as Error)?.message ?? String(e)
-        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, VtiVetterDesk.shapeRetryMs))
-      }
-    }
+    const statementType = manifest ? publishedStatementType(manifest) : undefined
     const grants =
       (await this.communityStore?.listHeldCredentials?.('vetter-grant', communityDid).catch(() => [])) ?? []
     const own = grants
       .filter((g) => g.subjectDid === this.persona.did)
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
     const grantShape = communityRoleCard(own[0]?.credential)?.shape
-    const choice = chooseStatementShape({ mode, statementType, grantShape })
-    if (unread) {
-      releaseWarn(
-        `[VTI] statement shape: the community's requirements could not be read twice (${unread}); writing ${choice.shape} by ${choice.by}`
-      )
-    }
-    return choice
+    return chooseStatementShape({ mode, statementType, grantShape })
   }
 
   async attest(
@@ -1568,7 +1769,50 @@ export class VtiVetterDesk {
       declaredRelationship: decision.declaredRelationship ?? 'none',
     }
     let statement: Record<string, unknown>
-    const shape = await this.statementShapeFor(desk.communityDid)
+    // Read in `auto`, the release mode, as the shape has always been; `off`
+    // and `force` are for development and read nothing.
+    const auto = getDtgV1WritingMode() === 'auto'
+    const read: ManifestRead = auto ? await this.readManifest(desk.communityDid) : {}
+    // The community's rules say whether a statement can count there and in
+    // which shape. Without them nothing is signed, rather than a statement
+    // written on a guess (the owner's decision, 2026-11-04). The two ways of
+    // not having them read differently, because trying again only helps one:
+    // an answer that never came may come; rules that came and say nothing about
+    // vetting will say the same next time. `readManifest` (joinManifest) reads
+    // a malformed answer as no criteria at all rather than throwing, so that
+    // case arrives here as a manifest, and has to be looked for.
+    if (auto) {
+      const unusable =
+        read.unusable ??
+        (read.manifest && vettingCriteriaOf(read.manifest).length === 0 ? 'no vetting rules' : undefined)
+      if (unusable) {
+        releaseWarn(`[VTI] statement not written: the community's requirements cannot be used (${unusable})`)
+        throw Object.assign(new Error("vtiVetting: the community's vetting rules cannot be used"), {
+          code: 'keyring/hidden-vetter/attest:rulesUnusable',
+        })
+      }
+      if (!read.manifest) {
+        releaseWarn(
+          `[VTI] statement not written: the community's requirements could not be read twice (${read.unread ?? 'no manifest'})`
+        )
+        throw Object.assign(new Error("vtiVetting: the community's vetting rules could not be read"), {
+          code: 'keyring/hidden-vetter/attest:rulesUnread',
+        })
+      }
+    }
+    // A request that did not ask to be vetted privately, for a community whose
+    // every way in is private: a statement naming this vetter cannot count
+    // there (the community counts only the agent's proof), so nothing is signed
+    // and the vetter is told to have the person ask again. The applicant's
+    // Keyring sent such a request from a stale private record (2026-11-03,
+    // 277.7).
+    if (read.manifest && everyWayInIsPrivate(read.manifest)) {
+      throw Object.assign(
+        new Error('vtiVetting: this request did not ask to be vetted privately, and this community vets privately'),
+        { code: 'keyring/hidden-vetter/attest:requestNotPrivate' }
+      )
+    }
+    const shape = await this.statementShapeFor(desk.communityDid, read.manifest)
     // Which shape went out, and what decided it: a device run cannot see it
     // otherwise (the Farm 0.47 gate reads it from a Release build's log).
     releaseWarn(`[VTI] statement shape: writing ${shape.shape} (by ${shape.by})`)
@@ -1942,8 +2186,15 @@ export class VtiApplicant {
     // kept whatever happens here: a phone whose agent cannot carry private
     // vetting has still started applying, and the refusal belongs where the
     // person acts, not at the start of a flow they were offered.
+    //
+    // Keyed on whether the way in is private, never on whether its digest
+    // matches the one gathered for, the rule `submit` already follows: the
+    // digest is the proof's business. Gating on the match skipped this without
+    // a word, the phone kept a private record from an earlier identity, and
+    // every request it sent went out named (2026-11-03, 277.7). A record this
+    // application already has is kept: making another would drop what it holds.
     const privateCriterion = manifest.criteria.find((c) => hiddenParametersOf(c) !== undefined)
-    if (privateCriterion && (!digest || privateCriterion.requirementsDigest === digest)) {
+    if (privateCriterion && !(await this.hiddenApplicationForDisplay())) {
       try {
         await beginHiddenApplication(
           this.agent,
@@ -2054,7 +2305,8 @@ export class VtiApplicant {
       logger?.warn?.('[hidden-vetting] an attestation was not in the published shape; dropped')
       return
     }
-    if (!(await loadHiddenVettingRecord(this.agent, community))) {
+    // This application's own, not one an earlier identity left behind.
+    if (!(await this.hiddenApplication())) {
       logger?.warn?.('[hidden-vetting] an attestation arrived for a community with no hidden application; dropped')
       return
     }
@@ -2111,12 +2363,20 @@ export class VtiApplicant {
    * private application" means (Alberto, 2026-10-15 — the same flow, with the
    * zero-knowledge part on the agent, detected from state).
    *
-   * Note its `joinDid` is the phone's identity at its **agent**, not this
-   * persona: the agent mints the application key against the identity it
-   * knows. So it is never compared with `persona.did`.
+   * Only a record made for **this** application's join DID counts. The record
+   * is kept per community, so it outlives a removal and a join as another
+   * identity; one made for an earlier identity holds a proof bound to that
+   * identity and attestations about it. `requestVetter` already read it this
+   * way and every other reader did not, so a phone holding an old record sent
+   * named requests and then refused the named statements they brought, as
+   * meant for a private application (2026-11-03, 277.7). One answer, here.
    */
-  private hiddenApplication(): Promise<HiddenVettingRecord | undefined> {
-    return loadHiddenVettingRecord(this.agent, this.persona.communityDid)
+  private async hiddenApplication(): Promise<HiddenVettingRecord | undefined> {
+    const [hidden, application] = await Promise.all([
+      loadHiddenVettingRecord(this.agent, this.persona.communityDid),
+      this.store.getApplication(this.persona.communityDid),
+    ])
+    return hidden && application && hidden.joinDid === application.joinDid ? hidden : undefined
   }
 
   /**
@@ -2177,6 +2437,8 @@ export class VtiApplicant {
     code?: string
     method?: VettingMethod
     message?: string
+    /** The community's manifest, when the caller has just read it: whether the way in is private. */
+    manifest?: VtiManifest
   }): Promise<VettingApplicationRequest> {
     const application = await this.app()
     let vetterDid = input.vetterDid
@@ -2202,7 +2464,7 @@ export class VtiApplicant {
       preferredMethod: input.method ?? 'inPerson',
       languages: ['en'],
       ...(input.message ? { message: input.message } : {}),
-      ...(await this.hiddenRequestExt(application)),
+      ...(await this.hiddenRequestExt(application, input.manifest)),
     })
     await vtiAgent.send(vetterDid, VETTING.request, doc)
     const request: VettingApplicationRequest = {
@@ -2230,10 +2492,42 @@ export class VtiApplicant {
    * A hidden application whose identifier is not known yet cannot be vetted:
    * the request is refused here rather than sent to a vetter who could only
    * answer with a statement that names them.
+   *
+   * Nor is a request sent named into a private way in. With no application
+   * at the agent for this join DID (`start` could not make one, or this phone
+   * holds only an earlier identity's), one is made now, so a phone left in
+   * that state mends on its next request; if that fails the request is not
+   * sent, as `submit` refuses for #405 (2026-11-03, 277.7). Whether the way
+   * in is private is the manifest's answer: the one the caller read, or read
+   * here.
    */
-  private async hiddenRequestExt(application: VettingApplication): Promise<{ ext?: Record<string, unknown> }> {
-    const hidden = await loadHiddenVettingRecord(this.agent, application.communityDid)
-    if (!hidden || hidden.joinDid !== application.joinDid) return {}
+  private async hiddenRequestExt(
+    application: VettingApplication,
+    manifest?: VtiManifest
+  ): Promise<{ ext?: Record<string, unknown> }> {
+    let hidden = await this.hiddenApplication()
+    if (!hidden) {
+      const way = manifest ?? (await vtiAgent.fetchManifest(application.communityDid, this.agent))
+      const privateCriterion = way.criteria.find((c) => hiddenParametersOf(c) !== undefined)
+      if (!privateCriterion) return {}
+      try {
+        hidden = await beginHiddenApplication(
+          this.agent,
+          await this.pcsClient(),
+          application.communityDid,
+          privateCriterion,
+          application.joinDid
+        )
+      } catch (error) {
+        this.agent.config?.logger?.info?.(
+          `[hidden-vetting] a request for a private way in was not sent: no agent-side application (${String(error)})`
+        )
+        throw Object.assign(
+          new Error('this way in is vetted privately, and this phone could not make a private application'),
+          { code: 'keyring/hidden-vetting/request:noApplication' }
+        )
+      }
+    }
     if (!hidden.id) {
       throw new Error(
         'vtiVetting: the hidden-vetting application has no identifier yet; refresh it before asking a vetter'
@@ -2346,14 +2640,15 @@ export class VtiApplicant {
   private async refused(m: DidCommV2PlaintextMessage): Promise<void> {
     const body = bodyOf(m)
     const vetterDid = String(body.issuer ?? m.from ?? '')
-    // 0.5 is what Keyring and VTI emit. 0.3 is what Keyring vetters sent
-    // before PR E: read until LEGACY_ERROR_03_UNTIL, and said so.
+    // 0.5 is what Keyring and VTI emit, and 0.6 extends it (a peer on
+    // @openvtc/trust-tasks 0.28). 0.3 is what Keyring vetters sent before
+    // PR E: read until LEGACY_ERROR_03_UNTIL, and said so.
     const version = typeOf(m).slice(TASK_ERROR.length)
     if (version === '0.3' && this.now() < new Date(`${LEGACY_ERROR_03_UNTIL}T00:00:00Z`)) {
       this.agent.config?.logger?.info?.('[VTI] vetting refusal read in the legacy trust-task-error/0.3 form', {
         vetterDid,
       })
-    } else if (version !== '0.5') {
+    } else if (version !== '0.5' && !extendsChain(typeOf(m), TASK_ERROR_EXTENDS).includes('0.5')) {
       this.agent.config?.logger?.warn?.(`[VTI] vetting refusal in trust-task-error/${version} not read`, { vetterDid })
       return
     }
@@ -3110,6 +3405,29 @@ export interface HiddenAttestMeta {
   cardDigestMultibase: string
   validFrom: string
   validUntil: string
+}
+
+/** A community's manifest as a vetter read it: the manifest, or why it could not be read. */
+type ManifestRead = { manifest?: VtiManifest; unread?: string; unusable?: string }
+
+/** The criteria that publish vetting requirements; a malformed `criteria` or `vetting` counts as none. */
+function vettingCriteriaOf(manifest: VtiManifest): VtiManifest['criteria'] {
+  const criteria = (manifest as { criteria?: unknown }).criteria
+  if (!Array.isArray(criteria)) return []
+  return criteria.filter((c) => {
+    const vetting = (c as { vetting?: unknown } | null | undefined)?.vetting
+    return typeof vetting === 'object' && vetting !== null && !Array.isArray(vetting)
+  })
+}
+
+/**
+ * Whether every criterion that vets in this manifest vets privately (publishes
+ * hidden-vetting parameters). False when none vets at all, so a manifest with
+ * no vetting is never read as private.
+ */
+export function everyWayInIsPrivate(manifest: VtiManifest): boolean {
+  const vetting = vettingCriteriaOf(manifest)
+  return vetting.length > 0 && vetting.every((c) => hiddenParametersOf(c) !== undefined)
 }
 
 /**

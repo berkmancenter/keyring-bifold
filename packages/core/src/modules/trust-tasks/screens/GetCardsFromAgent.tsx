@@ -14,13 +14,13 @@
 import type { Agent } from '@credo-ts/core'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, DeviceEventEmitter, StyleSheet, View } from 'react-native'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
-import { emitCommunityChanged } from '../module/communityChanged'
+import { emitCommunityChanged, VTI_PERSONA_KEYS_HELD_EVENT } from '../module/communityChanged'
 import { vtaAgent } from '../module/vtaAgent'
 import {
   adoptAgentIdentities,
@@ -37,6 +37,7 @@ import {
   type VaultTask,
 } from '../module/vtiCardVault'
 import { sameIdentity } from '../module/didScid'
+import { forgetRoomCommunities } from '../module/roomCards'
 import { checkDeliveredCard } from '../module/vtiDeliveredCheck'
 import { classifyCredential } from '../module/vtiInbox'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from '../module/VtiCommunityStore'
@@ -58,9 +59,10 @@ export interface CardsBack {
   taken?: VtiPersona[]
   /**
    * Why no community came back, when none did and the agent answered: it showed this phone no identity it does
-   * not hold already (`noOtherIdentities`), or it holds no community card for those it showed (`noCards`).
+   * not hold already (`noOtherIdentities`), or it holds no community card for those it showed (`noCards`), or its
+   * only community cards are for the agent itself (`agentItself`), which is never one of this phone's identities.
    */
-  noneBecause?: 'noOtherIdentities' | 'noCards'
+  noneBecause?: 'noOtherIdentities' | 'noCards' | 'agentItself'
   /** The agent contexts this phone's grant lets it see, when it is not unrestricted. */
   visibleContexts?: string[]
   /** Identities with a community card whose DID document could not be read: not taken on. */
@@ -89,6 +91,8 @@ export interface GetCardsDeps {
   ) => Promise<AgentCard[]>
   /** Take on the agent's identities this phone does not hold yet (`held`: the DIDs it does), from its `cards`. */
   adopt: (agent: Agent, vtaDid: string, held: string[], cards: AgentCard[]) => Promise<AdoptionFound>
+  /** Forget the data rooms an earlier Bring back recorded as communities, found among `cards`; answers their DIDs. */
+  forgetRooms?: (agent: Agent, cards: AgentCard[]) => Promise<string[]>
 }
 
 const defaultDeps: GetCardsDeps = {
@@ -114,11 +118,26 @@ const defaultDeps: GetCardsDeps = {
         return keyIdsFromDocument(did, didDocument as unknown as Record<string, unknown> | undefined)
       },
       held,
+      // An identity taken on has no key copies on the phone yet: without them it cannot reach its community.
+      holdKeys: async (persona) => {
+        await client.holdPersonaKeys(persona)
+        DeviceEventEmitter.emit(VTI_PERSONA_KEYS_HELD_EVENT, { did: persona.did })
+      },
+      onKeysFailed: (persona, reason) =>
+        agent.config.logger.warn(
+          `Bring back: ${persona.did}'s keys were not borrowed; asked again when a session with its agent next opens: ${reason}`
+        ),
     })
     // What this phone's grant lets it see, for saying why nothing came back; a phone that cannot tell says less.
     const me = await client.whoAmI().catch(() => undefined)
     return { ...report, visibleContexts: visibleContextsOf(me?.scopes) }
   },
+  forgetRooms: (agent, cards) =>
+    forgetRoomCommunities({
+      cards,
+      communities: new GenericRecordsCommunityStore(agent),
+      identities: new GenericRecordsIdentityStore(agent),
+    }),
 }
 
 /**
@@ -136,22 +155,25 @@ export async function bringBackFromAgent(
   const read = vaultReader(agent, deps, (r, of) => onProgress({ found: of, restored: 0, read: r }))
   let silent = false
   const vault = vtaDid ? await read(vtaDid) : undefined
+  // A room an earlier Bring back took for a community is forgotten first, so nothing below asks it as one.
+  const rooms = new Set((vault && (await deps.forgetRooms?.(agent, vault.cards).catch((): string[] => []))) || [])
+  const kept = rooms.size > 0 ? personas.filter((p) => !rooms.has(p.communityDid)) : personas
   const found =
     vtaDid && vault
       ? await deps
           .adopt(
             agent,
             vtaDid,
-            personas.filter((p) => p.vtaDid === vtaDid).map((p) => p.did),
+            kept.filter((p) => p.vtaDid === vtaDid).map((p) => p.did),
             vault.cards
           )
           .catch(() => undefined)
       : undefined
   if (vtaDid && !found) silent = true
   const adopted = found?.adopted ?? []
-  const held = new Set(personas.map((p) => `${p.vtaDid}|${p.communityDid}`))
+  const held = new Set(kept.map((p) => `${p.vtaDid}|${p.communityDid}`))
   const fresh = adopted.filter((p) => !held.has(`${p.vtaDid}|${p.communityDid}`))
-  const all = [...personas, ...fresh]
+  const all = [...kept, ...fresh]
   // Nothing on this phone, and the agent did not answer: said as unreachable, not "no cards".
   if (silent && all.length === 0)
     return { found: 0, restored: 0, refused: [], unreachable: 1, adopted: 0, asked: 1, taken: [] }
@@ -160,11 +182,14 @@ export async function bringBackFromAgent(
   const noneBecause =
     !found || fresh.length > 0 || found.unreadable.length > 0
       ? undefined
-      : found.otherIdentities === 0
-        ? 'noOtherIdentities'
-        : found.cardsForOthers === 0
-          ? 'noCards'
-          : undefined
+      : // A card for the agent itself is not taken on (agentOwnIdentity): said so, not "no other identities".
+        (found.cardsForAgent ?? 0) > 0 && found.cardsForOthers === 0
+        ? 'agentItself'
+        : found.otherIdentities === 0
+          ? 'noOtherIdentities'
+          : found.cardsForOthers === 0
+            ? 'noCards'
+            : undefined
   return {
     ...got,
     adopted: fresh.length,
@@ -371,12 +396,14 @@ export const GetCardsFromAgent: React.FC<{
             <ThemedText style={styles.muted} testID={testIdWithKey('AgentGetCardsNoCommunities')}>
               {result.noneBecause === 'noCards'
                 ? t('VtaLink.CommunitiesNoCards')
-                : result.visibleContexts
-                  ? t('VtaLink.CommunitiesNoneSeenScoped', {
-                      contexts: result.visibleContexts.join(', '),
-                      interpolation: { escapeValue: false },
-                    })
-                  : t('VtaLink.CommunitiesNoneSeen')}
+                : result.noneBecause === 'agentItself'
+                  ? t('VtaLink.CommunitiesAgentItself')
+                  : result.visibleContexts
+                    ? t('VtaLink.CommunitiesNoneSeenScoped', {
+                        contexts: result.visibleContexts.join(', '),
+                        interpolation: { escapeValue: false },
+                      })
+                    : t('VtaLink.CommunitiesNoneSeen')}
             </ThemedText>
           ) : null}
           {result.unreadableIdentities ? (

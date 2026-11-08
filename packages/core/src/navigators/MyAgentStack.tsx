@@ -23,11 +23,19 @@ import VtaLink from '../modules/trust-tasks/screens/VtaLink'
 import VtiHiddenVetter from '../modules/trust-tasks/screens/VtiHiddenVetter'
 import VtiHiddenVetting from '../modules/trust-tasks/screens/VtiHiddenVetting'
 import VtiVetting from '../modules/trust-tasks/screens/VtiVetting'
+import SharedConnect from '../modules/trust-tasks/screens/SharedConnect'
 import SignIn from '../modules/trust-tasks/screens/SignIn'
 import VtaClaim from '../modules/trust-tasks/screens/VtaClaim'
 import RoomsHome from '../modules/rooms/screens/RoomsHome'
 import Room from '../modules/rooms/screens/Room'
+import RoomInfo from '../modules/rooms/screens/RoomInfo'
 import RoomOffer from '../modules/rooms/screens/RoomOffer'
+import RoomPart, { roomPartTitle } from '../modules/rooms/screens/RoomPart'
+import CommunityCard from '../modules/directory/screens/CommunityCard'
+import CommunityMemberCard from '../modules/directory/screens/CommunityMemberCard'
+import CommunityMembers from '../modules/directory/screens/CommunityMembers'
+import Poll from '../modules/polls/screens/Poll'
+import PollBallot from '../modules/polls/screens/PollBallot'
 import { MyAgentStackParams, Screens } from '../types/navigators'
 
 import { useDefaultStackOptions } from './defaultStackOptions'
@@ -79,6 +87,31 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
         name={Screens.VtiCommunity}
         component={VtiCommunity}
         options={{ title: t('Screens.Community'), ...ScreenOptionsDictionary[Screens.VtiCommunity] }}
+      />
+      <Stack.Screen
+        name={Screens.Poll}
+        component={Poll}
+        options={{ title: t('Polls.Poll'), ...ScreenOptionsDictionary[Screens.Poll] }}
+      />
+      <Stack.Screen
+        name={Screens.PollBallot}
+        component={PollBallot}
+        options={{ title: t('Polls.Ballot'), ...ScreenOptionsDictionary[Screens.PollBallot] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityMembers}
+        component={CommunityMembers}
+        options={{ title: t('Screens.CommunityMembers'), ...ScreenOptionsDictionary[Screens.CommunityMembers] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityMemberCard}
+        component={CommunityMemberCard}
+        options={{ title: t('Screens.CommunityMemberCard'), ...ScreenOptionsDictionary[Screens.CommunityMemberCard] }}
+      />
+      <Stack.Screen
+        name={Screens.CommunityCard}
+        component={CommunityCard}
+        options={{ title: t('Screens.CommunityCard'), ...ScreenOptionsDictionary[Screens.CommunityCard] }}
       />
       <Stack.Screen
         name={Screens.VtiVetting}
@@ -171,6 +204,13 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
         getId={({ params }) => params?.scanId}
         options={{ title: t('Screens.VtaClaim'), ...ScreenOptionsDictionary[Screens.VtaClaim] }}
       />
+      {/* A shared-connect link (relationship over TSP), scanned or pasted; reached only with its developer flag on. */}
+      <Stack.Screen
+        name={Screens.SharedConnect}
+        component={SharedConnect as React.FC}
+        getId={({ params }) => params?.scanId}
+        options={{ title: t('Screens.SharedConnect'), ...ScreenOptionsDictionary[Screens.SharedConnect] }}
+      />
       {/* Rooms: reached only from the entry points the rooms flag shows. */}
       <Stack.Screen
         name={Screens.RoomsHome}
@@ -181,6 +221,19 @@ const MyAgentStack: React.FC<MyAgentStackProps> = ({ route, navigation }) => {
         name={Screens.Room}
         component={Room}
         options={{ title: t('Rooms.Room'), ...ScreenOptionsDictionary[Screens.Room] }}
+      />
+      <Stack.Screen
+        name={Screens.RoomInfo}
+        component={RoomInfo}
+        options={{ title: t('Rooms.Details'), ...ScreenOptionsDictionary[Screens.RoomInfo] }}
+      />
+      <Stack.Screen
+        name={Screens.RoomPart}
+        component={RoomPart}
+        options={({ route }) => ({
+          title: roomPartTitle(t, route.params?.part),
+          ...ScreenOptionsDictionary[Screens.RoomPart],
+        })}
       />
       <Stack.Screen
         name={Screens.RoomOffer}

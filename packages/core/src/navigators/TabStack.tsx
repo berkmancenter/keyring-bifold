@@ -32,10 +32,16 @@ import { myAgentTabBadge, useWaitingRequestsCount } from '../modules/trust-tasks
 import { SiblingNoticeHost } from '../modules/trust-tasks/screens/SiblingNoticeHost'
 import { StepUpAskHost } from '../modules/trust-tasks/screens/StepUpAskHost'
 import { VtaOfflineBanner } from '../modules/trust-tasks/screens/VtaStatus'
-import { isMessagesLink, keyringAgentLinkKind, myAgentLinkParams } from '../modules/trust-tasks/module/vtiLinks'
+import {
+  isMessagesLink,
+  keyringAgentLinkKind,
+  linkForLog,
+  myAgentLinkParams,
+} from '../modules/trust-tasks/module/vtiLinks'
 import { linkNoticeToast, openKeyringLink, type KeyringLinkNotice } from '../modules/trust-tasks/module/keyringLinkOpen'
 import { useVtiCardVault } from '../modules/trust-tasks/module/vtiCardVault'
 import { useVtiWalletCards } from '../modules/trust-tasks/module/vtiWalletCards'
+import { useVtiCardRenewal } from '../modules/trust-tasks/module/vtiCardRenewal'
 import { useCardAgentNames } from '../modules/trust-tasks/screens/cardAgentNames'
 // How a community's card reads in the Wallet (registers itself on import).
 import '../modules/trust-tasks/screens/communityCardDisplay'
@@ -45,10 +51,13 @@ import { useVtiIdentityListeners } from '../modules/trust-tasks/module/vtiIdenti
 import { useLookAtOtherAgents } from '../modules/trust-tasks/module/lookAtOtherAgents'
 import { useVtiRefusedCardNotice } from '../modules/trust-tasks/screens/refusedCardNotice'
 import { useVtiJoinedNotice } from '../modules/trust-tasks/screens/joinedNotice'
-import { useVtiVetterGrantedNotice } from '../modules/trust-tasks/screens/vetterNotice'
+import { useVtiVetterEndedNotice, useVtiVetterGrantedNotice } from '../modules/trust-tasks/screens/vetterNotice'
 import { useToastAboveTabBar } from '../modules/trust-tasks/screens/aboveTabBar'
 import { useVtiRemovedNotice } from '../modules/trust-tasks/screens/removedNotice'
 import { useVtiTurnedDownNotice } from '../modules/trust-tasks/screens/turnedDownNotice'
+import { usePollsWaitingCheck } from '../modules/polls/pollsWaiting'
+import { useRoomNotices } from '../modules/rooms/roomNotices'
+import { useRoomsUnreadCount } from '../modules/rooms/useRoomRows'
 import { communityTarget } from '../modules/trust-tasks/module/vtiCommunityLink'
 import { useChosenCommunityDid } from '../modules/trust-tasks/screens/useCommunity'
 
@@ -106,6 +115,8 @@ const TabStack: React.FC = () => {
   useVtiCardVault(agent)
   // …and shown in the Wallet while they stand, copied from the community store.
   useVtiWalletCards(agent)
+  // …and renewed before they lapse, as the community asks the member to (IN-501).
+  useVtiCardRenewal(agent, vti?.mediatorDid)
   // …each saying which agent holds it, when there are several.
   useCardAgentNames(agent)
   // A delivered card the inbox did not keep is said in plain words.
@@ -131,8 +142,14 @@ const TabStack: React.FC = () => {
   useVtiJoinedNotice()
   // …and a community making this phone a vetter.
   useVtiVetterGrantedNotice()
+  useVtiVetterEndedNotice()
   // …and a community turning a request down, once, when the app first learns it.
   useVtiTurnedDownNotice()
+  // …and the member's rooms: a new offer, an admission, a post that didn't send. Runs the offers poll, so a new
+  // offer is said from the start, not only once My Agent has been opened.
+  useRoomNotices()
+  // …and the polls waiting for the member, for Messages: checked when the app opens or comes back, then hourly.
+  usePollsWaitingCheck()
   const navigation = useNavigation<StackNavigationProp<TabStackParams>>()
   const { fontScale } = useWindowDimensions()
   const showLabels = fontScale * TabTheme.tabBarTextStyle.fontSize < 18
@@ -141,7 +158,10 @@ const TabStack: React.FC = () => {
   // label's last letter was clipped with no ellipsis ("Contact" for "Contacts" at font scale 1.15).
   const labelGap = { paddingHorizontal: 2 }
   const [showQRCodeBottomSheet, setShowQRCodeBottomSheet] = React.useState(false)
-  const { totalUnread } = useUnreadMessages()
+  const { totalUnread: peopleUnread } = useUnreadMessages()
+  // Rooms shown in Messages add their posts by others the member hasn't seen; the badge and its spoken label say one
+  // number (rooms in Messages, R1).
+  const totalUnread = peopleUnread + useRoomsUnreadCount()
   // Requests waiting for this phone's decision: said on the tab, wherever the person is.
   const myAgentBadge = myAgentTabBadge(useWaitingRequestsCount(), t)
   const styles = StyleSheet.create({
@@ -163,7 +183,7 @@ const TabStack: React.FC = () => {
 
   const handleDeepLink = useCallback(
     async (deepLink: string) => {
-      logger.info(`Handling deeplink: ${deepLink}`)
+      logger.info(`Handling deeplink: ${linkForLog(deepLink)}`)
 
       // A tapped message notification (MESSAGES_LINK): the Messages tab,
       // through the main stack so it comes above any open modal.
@@ -310,6 +330,7 @@ const TabStack: React.FC = () => {
     void vtaAgent.restore(agent)
     const subscription = AppState.addEventListener('change', (next) => {
       if (next === 'active') void vtaAgent.foregrounded(agent)
+      else if (next === 'background') vtaAgent.backgrounded()
     })
     return () => subscription.remove()
   }, [agent, store.authentication.didAuthenticate])
@@ -329,7 +350,7 @@ const TabStack: React.FC = () => {
     >
       {GradientBg && <GradientBg style={StyleSheet.absoluteFillObject} />}
       <VtaOfflineBanner />
-      {/* "Also open as you": the presence loop above emits it (#10, part F). */}
+      {/* "Also open as you": the presence loop above emits it (#10, part F); each header shows the strip. */}
       <SiblingNoticeHost />
       {/* The agent asks to be sure it is the person before a task (a step-up, #200). */}
       <StepUpAskHost />
