@@ -53,7 +53,7 @@ describe('shared-connect VRC on a real KMS', () => {
   beforeAll(async () => {
     jest.spyOn(Date, 'now').mockRestore()
     agent = new Agent({
-      config: { label: 'shared-connect-kms-test' },
+      config: {},
       dependencies: agentDependencies,
       modules: {
         // As the app configures it (bc-agent-modules): Credo expands a JSON-LD credential when it stores one,
