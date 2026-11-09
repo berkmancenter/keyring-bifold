@@ -6,7 +6,6 @@
  */
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
-import { Pressable } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
@@ -328,11 +327,13 @@ describe('the file chip on its own', () => {
     )
     // RNTL's fireEvent would find onLongPress on the chip's own props too, so hold the touchable itself: without the
     // prop, Pressable fires onPress on a long press's release and the file opens.
-    const [touchable] = tree
-      .UNSAFE_getAllByType(Pressable)
-      .filter((p) => p.props.testID === id(`RoomFileChip_${roomHandle(AGENDA.fileId)}`))
-    expect(touchable.props.onLongPress).toBe(onLongPress)
-    act(() => touchable.props.onLongPress())
+    const chipId = id(`RoomFileChip_${roomHandle(AGENDA.fileId)}`)
+    const touchable = tree.UNSAFE_root.findAll(
+      (node) => typeof node.type !== 'string' && node.props.testID === chipId && node.props.onLongPress === onLongPress
+    )
+    // Pressable's own wrappers may carry the same props: at least one, never none.
+    expect(touchable.length).toBeGreaterThan(0)
+    act(() => touchable[0].props.onLongPress())
     expect(onLongPress).toHaveBeenCalledTimes(1)
     expect(onPress).not.toHaveBeenCalled()
   })
