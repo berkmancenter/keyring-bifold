@@ -24,7 +24,7 @@ describe('trusted approvers', () => {
         minApprovals: 1,
         excludeRequester: true,
       },
-      ...['1.0', '1.1', '1.2'].map((v) => ({
+      ...['1.2', '1.1', '1.0'].map((v) => ({
         taskType: `${SPEC}vta/webvh/dids/create/${v}`,
         requires: 'consent',
         approverSet: TRUSTED_SET,
@@ -54,7 +54,7 @@ describe('trusted approvers', () => {
     expect(row.rules.map((r) => r.taskType)).toEqual([`${SPEC}acl/grant/0.2`])
     // Unknown: every listed version.
     const all = withTrustedApprovers(EMPTY_APPROVALS, [JORDAN], ['addDevice'])
-    expect(all.rules.map((r) => r.taskType)).toEqual([`${SPEC}acl/grant/0.1`, `${SPEC}acl/grant/0.2`])
+    expect(all.rules.map((r) => r.taskType)).toEqual([`${SPEC}acl/grant/0.2`, `${SPEC}acl/grant/0.1`])
   })
 
   it('replaces its own rules rather than adding to them, and keeps each approver once', () => {

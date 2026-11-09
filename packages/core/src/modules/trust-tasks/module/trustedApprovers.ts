@@ -30,6 +30,11 @@ export const TRUSTED_SET = 'keyring-trusted-approvers'
  * agent (plan §5.1): adding a device rides an access grant, and changing the
  * rules is a super-admin write that the agent may let through without asking
  * (VTI-22). The screen says so; the rule is still written.
+ *
+ * A rule's coverage, not what is sent: each task goes at whichever version its
+ * own ladder picks, so every version is here, newest first.
+ *
+ * @versionCoverage
  */
 export const TRUSTED_TASKS = [
   { key: 'shareCredential', taskTypes: [`${SPEC}vault/credentials/present/0.1`], conditional: false },
@@ -39,16 +44,16 @@ export const TRUSTED_TASKS = [
   {
     key: 'joinCommunity',
     taskTypes: [
-      `${SPEC}vta/webvh/dids/create/1.0`,
-      `${SPEC}vta/webvh/dids/create/1.1`,
       `${SPEC}vta/webvh/dids/create/1.2`,
+      `${SPEC}vta/webvh/dids/create/1.1`,
+      `${SPEC}vta/webvh/dids/create/1.0`,
     ],
     conditional: false,
   },
-  { key: 'addDevice', taskTypes: [`${SPEC}acl/grant/0.1`, `${SPEC}acl/grant/0.2`], conditional: true },
+  { key: 'addDevice', taskTypes: [`${SPEC}acl/grant/0.2`, `${SPEC}acl/grant/0.1`], conditional: true },
   {
     key: 'changeApprovers',
-    taskTypes: [`${SPEC}policy/upsert/0.2`, `${SPEC}policy/upsert/0.3`],
+    taskTypes: [`${SPEC}policy/upsert/0.3`, `${SPEC}policy/upsert/0.2`],
     conditional: true,
   },
 ] as const
