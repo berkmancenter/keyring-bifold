@@ -184,7 +184,7 @@ describe('Biometry Screen', () => {
     mockedCheck.mockResolvedValue(RESULTS.UNAVAILABLE)
     ;(getSupportedBiometryType as jest.Mock).mockResolvedValueOnce(null)
 
-    const { findByTestId, findByText } = render(
+    const { findByTestId, findByText, queryByText } = render(
       <StoreProvider initialState={customStore}>
         <BasicAppContext>
           <AuthContext.Provider value={authContext}>
@@ -201,6 +201,9 @@ describe('Biometry Screen', () => {
     })
     expect(await findByText('Biometry.SetupBiometricsTitle')).toBeTruthy()
     expect(await findByText('Biometry.SetupBiometricsDesc')).toBeTruthy()
+    // Android reaches this popup too, so its button keeps the platform-neutral label, not iOS's "Réglages"/"Ajustes".
+    expect(await findByText('Biometry.OpenSettings')).toBeTruthy()
+    expect(queryByText('Biometry.OpenSettingsIos')).toBeNull()
 
     expect(toggleButton.props.accessibilityState.checked).toBe(false)
   })
@@ -233,7 +236,7 @@ describe('Biometry Screen', () => {
   test('shows settings popup and "Open settings" button works', async () => {
     mockedCheck.mockResolvedValue(RESULTS.BLOCKED)
 
-    const { findByTestId, findByText } = render(
+    const { findByTestId, findByText, queryByText } = render(
       <StoreProvider initialState={customStore}>
         <BasicAppContext>
           <AuthContext.Provider value={authContext}>
@@ -249,7 +252,9 @@ describe('Biometry Screen', () => {
     await waitFor(async () => {
       fireEvent(toggleButton, 'press')
     })
-    const openSettingsButton = await findByText('Biometry.OpenSettings')
+    // Only iOS reads BLOCKED, so the button names iOS's Settings app.
+    const openSettingsButton = await findByText('Biometry.OpenSettingsIos')
+    expect(queryByText('Biometry.OpenSettings')).toBeNull()
 
     fireEvent(openSettingsButton, 'press')
     expect(Linking.openSettings).toHaveBeenCalledTimes(1)
@@ -450,6 +455,9 @@ describe('Biometry Screen, when biometrics read as unavailable', () => {
     expect(await tree.findByText('Biometry.NotAllowedText1')).toBeTruthy()
     expect(tree.getByText('Biometry.NotAllowedText2')).toBeTruthy()
     expect(tree.queryByText('Biometry.NotEnabledText1')).toBeNull()
+    // An iOS-only state, so the link names iOS's Settings app (fr "Réglages", pt-BR "Ajustes").
+    expect(tree.getByText('Biometry.OpenSettingsIos')).toBeTruthy()
+    expect(tree.queryByText('Biometry.OpenSettings')).toBeNull()
 
     fireEvent.press(tree.getByTestId(testIdWithKey('BiometryOpenSettings')))
     expect(Linking.openSettings).toHaveBeenCalledTimes(1)

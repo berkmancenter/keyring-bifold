@@ -52,7 +52,13 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
   // The phone has Face ID, but Keyring is not allowed to use it (iOS Settings › Keyring › Face ID is off). Without
   // this the screen said biometrics were not set up on the device, which sent people to the wrong setting (IN-550).
   const [faceIdNotAllowed, setFaceIdNotAllowed] = useState(false)
-  const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | { title: string; description: string }>(null)
+  // action: the popup's button. The "allow Face ID" popups are iOS-only and name iOS's Settings app; the "set up
+  // biometrics" one is reached on Android too, so it keeps the platform-neutral label.
+  const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | {
+    title: string
+    description: string
+    action: string
+  }>(null)
   const [notConfirmedPopup, setNotConfirmedPopup] = useState(false)
   // While Face ID is being confirmed the switch is dimmed and ignores taps: it
   // shows the check is running, and a second tap would start a second probe on
@@ -195,6 +201,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
           setSettingsPopupConfig({
             title: t('Biometry.SetupBiometricsTitle'),
             description: t('Biometry.SetupBiometricsDesc'),
+            action: t('Biometry.OpenSettings'),
           })
         }
         break
@@ -203,6 +210,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
         setSettingsPopupConfig({
           title: t('Biometry.AllowBiometricsTitle'),
           description: t('Biometry.AllowBiometricsDesc'),
+          action: t('Biometry.OpenSettingsIos'),
         })
         break
       case RESULTS.DENIED:
@@ -238,6 +246,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
             setSettingsPopupConfig({
               title: t('Biometry.AllowBiometricsTitle'),
               description: t('Biometry.AllowBiometricsDesc'),
+              action: t('Biometry.OpenSettingsIos'),
             })
           } else {
             // Cancelled, a failed scan, locked out, or no answer: still off, say so.
@@ -265,7 +274,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
         <DismissiblePopupModal
           title={settingsPopupConfig.title}
           description={settingsPopupConfig.description}
-          onCallToActionLabel={t('Biometry.OpenSettings')}
+          onCallToActionLabel={settingsPopupConfig.action}
           onCallToActionPressed={onOpenSettingsTouched}
           onDismissPressed={onOpenSettingsDismissed}
         />
@@ -292,7 +301,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({
               testID={testIdWithKey('BiometryOpenSettings')}
               style={styles.settingsLink}
             >
-              <ThemedText style={{ color: ColorPalette.brand.link }}>{t('Biometry.OpenSettings')}</ThemedText>
+              <ThemedText style={{ color: ColorPalette.brand.link }}>{t('Biometry.OpenSettingsIos')}</ThemedText>
             </Pressable>
           </View>
         ) : (
