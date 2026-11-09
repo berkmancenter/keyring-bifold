@@ -6,6 +6,7 @@
  */
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react-native'
 import React from 'react'
+import { Pressable } from 'react-native'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
@@ -199,6 +200,30 @@ describe('with sending on', () => {
     expect(tree.queryByTestId(id('ChatActionWithdraw'))).toBeNull()
   })
 
+  test('your own file with words under it: Copy and Withdraw, never Edit (an edit would drop the file)', async () => {
+    const s = service([post('f1', 'The agenda', { kind: 'message', author: ME, files: [AGENDA] })])
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+    await longPress(tree, 'f1')
+    await waitFor(() => expect(tree.getByTestId(id('ChatActionWithdraw'))).toBeTruthy())
+    expect(tree.getByTestId(id('ChatActionCopy'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ChatActionEdit'))).toBeNull()
+  })
+
+  test("while the room's profile is still being read the notice shows, and Reply and reactions replace it", async () => {
+    let answer: (features: RecordFeatures) => void = () => undefined
+    const s = service([filePost('f1', AGENDA)])
+    s.recordFeaturesIn.mockImplementation(() => new Promise<RecordFeatures>((resolve) => (answer = resolve)))
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+    await longPress(tree, 'f1')
+    expectNoticeOnly(tree)
+    await act(async () => answer(EVERYTHING))
+    await waitFor(() => expect(tree.getByTestId(id('ChatActionReply'))).toBeTruthy())
+    expect(tree.getByTestId(id('ChatReactionBar'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ChatMessageActionsNotice'))).toBeNull()
+  })
+
   test('control: your own text message still offers Edit and Withdraw', async () => {
     const s = service([post('m1', 'We meet at 5', { kind: 'message', author: ME })])
     const tree = open(s)
@@ -261,14 +286,8 @@ describe('still opens nothing', () => {
     expect(tree.queryByTestId(id('ChatMessageActions'))).toBeNull()
   })
 
-  test('a removed file post', async () => {
-    const tree = open(service([filePost('f1', AGENDA, { status: 'retracted' })]))
-    await longPress(tree, 'f1')
-    expect(tree.queryByTestId(id('ChatMessageActions'))).toBeNull()
-  })
-
-  test.each(['sending', 'failed'] as const)('a file post still %s', (state) => {
-    const pending = pendingAsPost(
+  const fileOnItsWay = (state: 'sending' | 'failed' | 'sent') =>
+    pendingAsPost(
       {
         localId: 'l1',
         text: '',
@@ -279,9 +298,22 @@ describe('still opens nothing', () => {
       },
       ME
     )
+
+  test.each(['sending', 'failed'] as const)('a file post still %s', (state) => {
+    const pending = fileOnItsWay(state)
     expect(pending.files).toHaveLength(1)
     expect(canActOn(pending)).toBe(false)
-    expect(canActOn({ ...pending, delivery: undefined })).toBe(true)
+    // Control: the same post once it is in the room.
+    expect(canActOn(fileOnItsWay('sent'))).toBe(true)
+  })
+
+  // A removed post is drawn only where this screen saw it before, and its listing carries no files; the rule holds even
+  // for one that still names its file.
+  test('a removed post, even one that still names its file', () => {
+    const sent = fileOnItsWay('sent')
+    expect(sent.files).toHaveLength(1)
+    expect(canActOn({ ...sent, retracted: true })).toBe(false)
+    expect(canActOn(sent)).toBe(true)
   })
 })
 
@@ -294,7 +326,13 @@ describe('the file chip on its own', () => {
         <RoomFileChip file={AGENDA} ink="#000" edge="#ccc" onPress={onPress} onLongPress={onLongPress} />
       </BasicAppContext>
     )
-    fireEvent(tree.getByTestId(id(`RoomFileChip_${roomHandle(AGENDA.fileId)}`)), 'longPress')
+    // RNTL's fireEvent would find onLongPress on the chip's own props too, so hold the touchable itself: without the
+    // prop, Pressable fires onPress on a long press's release and the file opens.
+    const [touchable] = tree
+      .UNSAFE_getAllByType(Pressable)
+      .filter((p) => p.props.testID === id(`RoomFileChip_${roomHandle(AGENDA.fileId)}`))
+    expect(touchable.props.onLongPress).toBe(onLongPress)
+    act(() => touchable.props.onLongPress())
     expect(onLongPress).toHaveBeenCalledTimes(1)
     expect(onPress).not.toHaveBeenCalled()
   })

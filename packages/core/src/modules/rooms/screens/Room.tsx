@@ -16,7 +16,8 @@
  * A long press on a post offers Copy. Where sending is on and the room takes them (useRecordSending), it also offers a
  * reaction, a reply, and on the member's own message an edit or a withdrawal; where sending is on and the room takes
  * neither, the sheet says they aren't on in this room yet. A file or photo with no words has nothing to copy or edit:
- * its sheet offers a reaction and a reply where the room takes them, and otherwise says they aren't on here yet. A reaction or a change shows once the room has stored it.
+ * its sheet offers a reaction and a reply where the room takes them, and otherwise says they aren't on here yet. A post
+ * that carries a file is never edited (an edit writes new words alone, and would drop the file); it may be withdrawn. A reaction or a change shows once the room has stored it.
  *
  * The screen is the chat alone (rooms in Messages, R2, chat B). The header opens the room's details (RoomInfo), and
  * from there its files, its notes (titled records and the markers of removed ones, which the chat leaves out) and its
@@ -433,6 +434,8 @@ const Room: React.FC = () => {
         }
       : undefined
   const changing = actionFor && hasWords(actionFor) && records.canChange(actionFor) ? actionFor : undefined
+  // An edit writes new words alone, so on a post that carries a file it would drop the file: withdrawn, never edited.
+  const editable = changing && changing.files.length === 0 ? changing : undefined
   // A file with no words: with no reply or reaction to offer, the sheet would be empty, so it says why instead.
   const nothingToOffer = !!actionFor && !hasWords(actionFor) && !records.replies && !records.reactions
   const unavailable = roomsStatusText(t, roomCapabilities.listNotes, 'listNotes')
@@ -687,11 +690,11 @@ const Room: React.FC = () => {
               : undefined
           }
           onEdit={
-            changing
+            editable
               ? () => {
                   setActionFor(undefined)
                   setReplyTo(undefined)
-                  setEditing(changing)
+                  setEditing(editable)
                 }
               : undefined
           }
