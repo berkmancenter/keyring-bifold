@@ -6,7 +6,7 @@
  * second kind of rule: consent for a task, from one shared set of the people
  * this person trusts, one approval, and never the requester's own. Unlike "Ask
  * me before…", these rules are meant to hold tasks this phone sends (joining a
- * community borrows a key, `keys/export-secret`): the phone waits for the
+ * community mints a persona, `vta/webvh/dids/create`): the phone waits for the
  * approver's yes, which is the point. The approver needs no account on the
  * agent; membership in the set is enough (VTI docs/02-vta/task-consent.md,
  * "Membership in the approver set the policy names is sufficient").
@@ -33,7 +33,18 @@ export const TRUSTED_SET = 'keyring-trusted-approvers'
  */
 export const TRUSTED_TASKS = [
   { key: 'shareCredential', taskTypes: [`${SPEC}vault/credentials/present/0.1`], conditional: false },
-  { key: 'joinCommunity', taskTypes: [`${SPEC}keys/export-secret/0.1`], conditional: false },
+  // Joining a community mints its persona (one per community, VtaClient ensurePersona). Never the key borrow
+  // (`keys/export-secret`): the phone borrows persona keys again on its own (an in-memory key fetched when needed,
+  // a rotation), so a rule there would ask the approver about routine work.
+  {
+    key: 'joinCommunity',
+    taskTypes: [
+      `${SPEC}vta/webvh/dids/create/1.0`,
+      `${SPEC}vta/webvh/dids/create/1.1`,
+      `${SPEC}vta/webvh/dids/create/1.2`,
+    ],
+    conditional: false,
+  },
   { key: 'addDevice', taskTypes: [`${SPEC}acl/grant/0.1`, `${SPEC}acl/grant/0.2`], conditional: true },
   {
     key: 'changeApprovers',

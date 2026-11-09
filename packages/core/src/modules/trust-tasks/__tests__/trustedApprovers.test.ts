@@ -24,13 +24,13 @@ describe('trusted approvers', () => {
         minApprovals: 1,
         excludeRequester: true,
       },
-      {
-        taskType: `${SPEC}keys/export-secret/0.1`,
+      ...['1.0', '1.1', '1.2'].map((v) => ({
+        taskType: `${SPEC}vta/webvh/dids/create/${v}`,
         requires: 'consent',
         approverSet: TRUSTED_SET,
         minApprovals: 1,
         excludeRequester: true,
-      },
+      })),
     ])
     expect(trustedApproversView(row)).toEqual({
       approvers: [JORDAN],
@@ -60,13 +60,14 @@ describe('trusted approvers', () => {
   it('replaces its own rules rather than adding to them, and keeps each approver once', () => {
     const first = withTrustedApprovers(EMPTY_APPROVALS, [JORDAN], ['shareCredential', 'joinCommunity'])
     const second = withTrustedApprovers(first, [JORDAN, RILEY, JORDAN], ['joinCommunity'])
-    expect(second.rules).toHaveLength(1)
+    expect(second.rules.map((r) => r.taskType).every((u) => u.includes('dids/create'))).toBe(true)
+    expect(second.rules).toHaveLength(3)
     expect(second.sets[TRUSTED_SET]).toEqual([JORDAN, RILEY])
   })
 
   it('refuses an action another rule already holds, and says which', () => {
     const elsewhere = {
-      rules: [{ taskType: `${SPEC}keys/export-secret/0.1`, requires: 'consent' as const, approverSet: 'ops' }],
+      rules: [{ taskType: `${SPEC}vta/webvh/dids/create/1.1`, requires: 'consent' as const, approverSet: 'ops' }],
       sets: { ops: ['did:key:z6Mkops'] },
     }
     expect(() => withTrustedApprovers(elsewhere, [JORDAN], ['joinCommunity'])).toThrow(TrustedRuleRefused)
@@ -78,6 +79,18 @@ describe('trusted approvers', () => {
   it('refuses an approver that is not a DID, and an action it does not know', () => {
     expect(() => withTrustedApprovers(EMPTY_APPROVALS, ['jordan'], ['joinCommunity'])).toThrow(/not-a-did/)
     expect(() => withTrustedApprovers(EMPTY_APPROVALS, [JORDAN], ['launchRockets' as never])).toThrow(/unknown-action/)
+  })
+
+  it('never holds the routine key borrow, whatever is chosen', () => {
+    // The phone borrows persona keys again on its own (fetched when needed, a rotation): a rule there would ask
+    // the approver about routine work. Control: joining a community is held, through the persona mint.
+    const row = withTrustedApprovers(
+      EMPTY_APPROVALS,
+      [JORDAN],
+      ['shareCredential', 'joinCommunity', 'addDevice', 'changeApprovers']
+    )
+    expect(row.rules.map((r) => r.taskType)).not.toContain(`${SPEC}keys/export-secret/0.1`)
+    expect(row.rules.map((r) => r.taskType)).toContain(`${SPEC}vta/webvh/dids/create/1.2`)
   })
 
   it('follows an approver whose phone swapped its key, and says when nothing changed', () => {
