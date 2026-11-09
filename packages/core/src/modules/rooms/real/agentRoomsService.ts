@@ -1656,6 +1656,9 @@ export class AgentRoomsService implements RoomsService {
         body = write.value
       } else if (write.type === 'edit') {
         if (prior.kind !== 'message') throw new RoomsRefused('write', 'notThatKind', false, 'not a message')
+        // An edit's new version is words alone (`{ title: '', body, members }` below): a post that carries a file
+        // would lose it. Its author can withdraw it instead.
+        if (prior.file) throw new RoomsRefused('write', 'notThatKind', false, 'a post with a file is not edited')
         body = write.body
       } else {
         if (prior.kind !== 'message' && prior.kind !== 'reaction')

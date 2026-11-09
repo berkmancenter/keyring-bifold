@@ -484,6 +484,24 @@ describe('a new version', () => {
     },
   }
   const records = { r1: REACTION, m9: MESSAGE }
+  /** A captioned file of mine: a message whose body also carries a file. */
+  const WITH_FILE: Prior = {
+    version: 4,
+    body: {
+      ...MESSAGE.body,
+      key: 'f1',
+      file: {
+        fileId: 'A'.repeat(43),
+        name: 'minutes.pdf',
+        mediaType: 'application/pdf',
+        size: 1234,
+        digest: 'uEiDigest',
+        epoch: 3,
+        segmentSize: 65520,
+        blobRef: 'uEiBlobRef',
+      },
+    },
+  }
   const putPayload = (s: ReturnType<typeof setup>) =>
     (s.sendCompleted.mock.calls[0][2] as { payload: Record<string, unknown> }).payload
 
@@ -517,6 +535,14 @@ describe('a new version', () => {
     expect(body).not.toHaveProperty('file')
   })
 
+  it('a captioned file of mine can be withdrawn, and the withdrawal carries no file', async () => {
+    const s = setup({ listed: ALL, records: { ...records, f1: WITH_FILE }, head: 4 })
+    await send(s, { type: 'withdraw', key: 'f1' })
+    const { body } = s.sealedBody()
+    expect(body).toMatchObject({ key: 'f1', kind: 'message', body: '' })
+    expect(body).not.toHaveProperty('file')
+  })
+
   it('an edit keeps when it was written and says when it was edited', async () => {
     const s = setup({ listed: ALL, records, head: 4 })
     await send(s, { type: 'edit', key: 'm9', body: 'second' })
@@ -547,12 +573,18 @@ describe('a new version', () => {
     ['an edit of a reaction', { type: 'edit', key: 'r1', body: 'x' }, 'notThatKind'],
     ['a withdrawal of a note', { type: 'withdraw', key: 'n1' }, 'notThatKind'],
     ['an edit of a record with no kind', { type: 'edit', key: 'n1', body: 'x' }, 'notThatKind'],
+    [
+      'an edit of a message that carries a file (its words alone would drop it)',
+      { type: 'edit', key: 'f1', body: 'x' },
+      'notThatKind',
+    ],
   ])('refuses %s', async (_, write, code) => {
     const s = setup({
       listed: ALL,
       head: 4,
       records: {
         ...records,
+        f1: WITH_FILE,
         theirs: { ...MESSAGE, author: SOMEONE },
         gone: { ...MESSAGE, status: 'retracted' },
         n1: { version: 4, body: { title: 'Note', body: 'text' } },
