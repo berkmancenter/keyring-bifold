@@ -1223,7 +1223,8 @@ class VtiAgentController {
   }
 
   /** For tests: forget every rest, here and as read from the phone. */
-  forgetSignInRestsForTests(): void {
+  // prettier-ignore
+  forgetSignInRestsForTests(): void { // tier-exempt(deletes stored records): its body clears in-memory maps only (rests, restsRead, lastSignedInAt)
     this.rests.clear()
     this.restsRead = undefined
     this.lastSignedInAt = undefined
