@@ -4,7 +4,6 @@ import {
   Image,
   InteractionManager,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
@@ -33,6 +32,7 @@ import { InlineErrorConfig } from '../../../types/error'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { testIdWithKey } from '../../../utils/testable'
 import RCardPhotoCropModal from './RCardPhotoCropModal'
+import { KeyboardSpace } from '../../../components/views/KeyboardPaddedView'
 
 /** Adapts expo-image-manipulator's manipulateAsync to the injectable shape processRCardPhoto expects. */
 const rcardManipulateAsync: ManipulateAsyncFn = (uri, actions, saveOptions) =>
@@ -336,11 +336,10 @@ const RCardForm: React.FC<RCardFormProps> = ({ initialValues, title, legend, sub
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior="padding"
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
-      >
+      {/* Room for the keyboard: on iOS the padding is capped at what the keyboard covers, since React Native's
+          KeyboardAvoidingView padded this form away entirely on a first run (IN-525). Android keeps the
+          KeyboardAvoidingView it had. */}
+      <KeyboardSpace style={{ flex: 1 }} android={{ behavior: 'padding', keyboardVerticalOffset: 20 }}>
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
             <ScrollView
@@ -507,7 +506,7 @@ const RCardForm: React.FC<RCardFormProps> = ({ initialValues, title, legend, sub
             </Button>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
       {errorModal && (
         <PopupModal
           title={t('Global.SomethingWentWrong')}

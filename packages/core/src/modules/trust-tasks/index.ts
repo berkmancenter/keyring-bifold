@@ -42,6 +42,14 @@ export {
   selectCarriage,
   TRUST_TASKS_MIN_RCE_VERSION,
 } from './ceremony'
+export {
+  setSharedConnectEnabled,
+  isSharedConnectEnabled,
+  setSharedConnectLabelEnabled,
+  isSharedConnectLabelEnabled,
+  setSharedConnectInviteEnabled,
+  isSharedConnectInviteEnabled,
+} from './module/sharedConnectFlag'
 
 // 228 writer: DTG Credentials v1 shapes are written only when this is on (default off).
 export {

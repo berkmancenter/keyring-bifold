@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Linking, Platform, ScrollView, StyleSheet, View, AppState, DeviceEventEmitter } from 'react-native'
+import {
+  ActivityIndicator,
+  Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  AppState,
+  DeviceEventEmitter,
+} from 'react-native'
 import { check, PERMISSIONS, PermissionStatus, request, RESULTS } from 'react-native-permissions'
 import Keychain, { getSupportedBiometryType, BIOMETRY_TYPE } from 'react-native-keychain'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -13,8 +23,24 @@ import { useTheme } from '../../contexts/theme'
 import { testIdWithKey } from '../../utils/testable'
 import { BifoldError } from '../../types/error'
 import { EventTypes } from '../../constants'
+import { confirmBiometricKeychainAccess } from '../../services/keychain'
 
 const BIOMETRY_PERMISSION = PERMISSIONS.IOS.FACE_ID
+
+/**
+ * Whether the phone has Face ID but Keyring is not allowed to use it. react-native-permissions reads BLOCKED exactly
+ * then: the device reports Face ID as its biometry, and evaluating it fails with "biometry not available" (the app's
+ * permission is off). A phone with no Face ID, or none enrolled, reads UNAVAILABLE. iOS only: Android has no
+ * per-app biometrics permission. Read only when biometrics read as unavailable, to explain why.
+ */
+export const readFaceIdNotAllowed = async (): Promise<boolean> => {
+  if (Platform.OS !== 'ios') return false
+  try {
+    return (await check(BIOMETRY_PERMISSION)) === RESULTS.BLOCKED
+  } catch {
+    return false
+  }
+}
 
 export interface BiometryControlProps {
   biometryEnabled: boolean
@@ -24,11 +50,31 @@ export interface BiometryControlProps {
   children?: React.ReactNode
 }
 
-const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBiometryToggle, recommend, children }) => {
+const BiometryControl: React.FC<BiometryControlProps> = ({
+  biometryEnabled,
+  onBiometryToggle,
+  recommend,
+  children,
+}) => {
   const { t } = useTranslation()
   const { isBiometricsActive } = useAuth()
   const [biometryAvailable, setBiometryAvailable] = useState(false)
-  const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | { title: string; description: string }>(null)
+  // The phone has Face ID, but Keyring is not allowed to use it (iOS Settings › Keyring › Face ID is off). Without
+  // this the screen said biometrics were not set up on the device, which sent people to the wrong setting (IN-550).
+  const [faceIdNotAllowed, setFaceIdNotAllowed] = useState(false)
+  // action: the popup's button. The "allow Face ID" popups are iOS-only and name iOS's Settings app; the "set up
+  // biometrics" one is reached on Android too, so it keeps the platform-neutral label.
+  const [settingsPopupConfig, setSettingsPopupConfig] = useState<null | {
+    title: string
+    description: string
+    action: string
+  }>(null)
+  const [notConfirmedPopup, setNotConfirmedPopup] = useState(false)
+  // While Face ID is being confirmed the switch is dimmed and ignores taps: it
+  // shows the check is running, and a second tap would start a second probe on
+  // the same keychain item and fail the first.
+  const [confirming, setConfirming] = useState(false)
+  const confirmingRef = useRef(false)
   const { ColorPalette, Assets, Spacing } = useTheme()
 
   const styles = StyleSheet.create({
@@ -45,15 +91,26 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
     biometryAvailableRowGap: {
       rowGap: Spacing.md,
     },
+    settingsLink: {
+      minHeight: 44,
+      justifyContent: 'center',
+      alignSelf: 'flex-start',
+    },
   })
 
   useEffect(() => {
     isBiometricsActive()
-      .then((res) => {
+      .then(async (res) => {
         setBiometryAvailable(res)
+        setFaceIdNotAllowed(res ? false : await readFaceIdNotAllowed())
       })
       .catch((err) => {
-        const error = new BifoldError(t('Error.Title1050'), t('Error.Message1050'), (err as Error)?.message ?? err, 1050)
+        const error = new BifoldError(
+          t('Error.Title1050'),
+          t('Error.Message1050'),
+          (err as Error)?.message ?? err,
+          1050
+        )
         DeviceEventEmitter.emit(EventTypes.ERROR_ADDED, error)
       })
   }, [isBiometricsActive, t])
@@ -63,12 +120,18 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
       try {
         const active = await Keychain.getSupportedBiometryType()
         setBiometryAvailable(Boolean(active))
-      } catch(err) {
-        const error = new BifoldError(t('Error.Title1050'), t('Error.Message1050'), (err as Error)?.message ?? err, 1050)
+        setFaceIdNotAllowed(active ? false : await readFaceIdNotAllowed())
+      } catch (err) {
+        const error = new BifoldError(
+          t('Error.Title1050'),
+          t('Error.Message1050'),
+          (err as Error)?.message ?? err,
+          1050
+        )
         DeviceEventEmitter.emit(EventTypes.ERROR_ADDED, error)
       }
     }
-    
+
     const appStateListener = AppState.addEventListener('change', async (nextAppState) => {
       if (nextAppState === 'active') {
         await checkBiometrics()
@@ -148,6 +211,7 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
           setSettingsPopupConfig({
             title: t('Biometry.SetupBiometricsTitle'),
             description: t('Biometry.SetupBiometricsDesc'),
+            action: t('Biometry.OpenSettings'),
           })
         }
         break
@@ -156,11 +220,51 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
         setSettingsPopupConfig({
           title: t('Biometry.AllowBiometricsTitle'),
           description: t('Biometry.AllowBiometricsDesc'),
+          action: t('Biometry.OpenSettingsIos'),
         })
         break
       case RESULTS.DENIED:
-        // Has not been requested
-        await onRequestSystemBiometrics(newValue)
+        // On iOS, react-native-permissions reports DENIED for Face ID when the
+        // OS says Face ID is usable but the library's own "already requested"
+        // flag is missing. A reinstall wipes that flag while iOS keeps the
+        // app's Face ID grant, and then request() never resolves: it waits for
+        // the app to become active again after an alert that iOS never shows.
+        // So instead of request(), read back a throwaway Face ID-protected
+        // keychain item: iOS asks for permission if it never has, then scans.
+        // Turn on only if Face ID really opened it, so the wallet key is never
+        // stored behind Face ID that cannot open it.
+        if (Platform.OS === 'ios' && supported_type === BIOMETRY_TYPE.FACE_ID) {
+          if (confirmingRef.current) {
+            break
+          }
+          confirmingRef.current = true
+          setConfirming(true)
+          let opened = false
+          try {
+            opened = await confirmBiometricKeychainAccess(
+              t('Biometry.UnlockPromptTitle'),
+              t('Biometry.UnlockPromptDescription')
+            )
+          } finally {
+            confirmingRef.current = false
+            setConfirming(false)
+          }
+          if (opened) {
+            onBiometryToggle(newValue)
+          } else if ((await check(BIOMETRY_PERMISSION)) === RESULTS.BLOCKED) {
+            // Declined just now: say where to allow it, as for an earlier decline.
+            setSettingsPopupConfig({
+              title: t('Biometry.AllowBiometricsTitle'),
+              description: t('Biometry.AllowBiometricsDesc'),
+              action: t('Biometry.OpenSettingsIos'),
+            })
+          } else {
+            // Cancelled, a failed scan, locked out, or no answer: still off, say so.
+            setNotConfirmedPopup(true)
+          }
+        } else {
+          await onRequestSystemBiometrics(newValue)
+        }
         break
       default:
         break
@@ -169,11 +273,18 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
 
   return (
     <SafeAreaView style={{ flex: 1 }} edges={['left', 'right', 'bottom']}>
+      {notConfirmedPopup && (
+        <DismissiblePopupModal
+          title={t('Biometry.NotConfirmedTitle')}
+          description={t('Biometry.NotConfirmedDesc')}
+          onDismissPressed={() => setNotConfirmedPopup(false)}
+        />
+      )}
       {settingsPopupConfig && (
         <DismissiblePopupModal
           title={settingsPopupConfig.title}
           description={settingsPopupConfig.description}
-          onCallToActionLabel={t('Biometry.OpenSettings')}
+          onCallToActionLabel={settingsPopupConfig.action}
           onCallToActionPressed={onOpenSettingsTouched}
           onDismissPressed={onOpenSettingsDismissed}
         />
@@ -190,6 +301,19 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
               <ThemedText variant="bold"> {t('Biometry.Warning')}</ThemedText>
             </ThemedText>
           </View>
+        ) : faceIdNotAllowed ? (
+          <View style={styles.biometryAvailableRowGap} testID={testIdWithKey('BiometryNotAllowed')}>
+            <ThemedText>{t('Biometry.NotAllowedText1')}</ThemedText>
+            <ThemedText>{t('Biometry.NotAllowedText2')}</ThemedText>
+            <Pressable
+              onPress={() => Linking.openSettings()}
+              accessibilityRole="link"
+              testID={testIdWithKey('BiometryOpenSettings')}
+              style={styles.settingsLink}
+            >
+              <ThemedText style={{ color: ColorPalette.brand.link }}>{t('Biometry.OpenSettingsIos')}</ThemedText>
+            </Pressable>
+          </View>
         ) : (
           <View style={styles.biometryAvailableRowGap}>
             <ThemedText>{t('Biometry.NotEnabledText1')}</ThemedText>
@@ -200,20 +324,35 @@ const BiometryControl: React.FC<BiometryControlProps> = ({ biometryEnabled, onBi
           <View style={{ flexShrink: 1, marginRight: 10, justifyContent: 'center' }}>
             <ThemedText variant="bold">{t('Biometry.UseToUnlock')}</ThemedText>
           </View>
-          <View style={{ justifyContent: 'center' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            {/* The dimmed switch alone read as "off" while Face ID was checking: say it is working, and tell screen
+                readers so. */}
+            {confirming ? (
+              <ActivityIndicator
+                color={ColorPalette.brand.primary}
+                style={{ marginRight: Spacing.sm }}
+                accessible
+                accessibilityLabel={t('Biometry.Confirming')}
+                accessibilityLiveRegion="polite"
+                testID={testIdWithKey('BiometryConfirming')}
+              />
+            ) : null}
             <ToggleButton
               testID={testIdWithKey('ToggleBiometrics')}
               isEnabled={biometryEnabled}
               isAvailable={true}
               toggleAction={toggleSwitch}
-              disabled={false}
+              disabled={confirming}
               enabledIcon="check"
               disabledIcon="close"
             />
           </View>
         </View>
         {recommend && biometryAvailable ? (
-          <ThemedText style={{ color: ColorPalette.grayscale.mediumGrey }} testID={testIdWithKey('BiometryRecommended')}>
+          <ThemedText
+            style={{ color: ColorPalette.grayscale.mediumGrey }}
+            testID={testIdWithKey('BiometryRecommended')}
+          >
             {t('Biometry.Recommended')}
           </ThemedText>
         ) : null}
