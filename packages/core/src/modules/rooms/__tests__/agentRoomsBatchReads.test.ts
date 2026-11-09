@@ -85,7 +85,9 @@ function setUp(
   const sent = (type: string) => agentTask.mock.calls.filter(([t]) => t === type)
   const batches = () => sent(ROOMS_TASK.keysRead02).map(([, payload]) => payload.keys as string[])
   const singles = () => sent(ROOMS_TASK.keysRead).map(([, payload]) => payload.key as string)
-  return { service: new AgentRoomsService(b), agentTask, batches, singles }
+  const lines = () =>
+    (b.warn as jest.Mock).mock.calls.map(([line]) => String(line)).filter((l) => l.includes('keys/read'))
+  return { service: new AgentRoomsService(b), agentTask, batches, singles, lines }
 }
 
 /** As a screen comes to it: the room listed first, so the agent's served types are known. */
@@ -199,6 +201,57 @@ describe('which reads go together', () => {
     ])
     expect(setup.batches()).toEqual([['a', 'b']])
     expect(setup.singles()).toEqual([])
+  })
+})
+
+describe('what the log says', () => {
+  test('each batch is one line naming its type and how many keys it carries', async () => {
+    const setup = await listed(setUp(allRecords))
+    await Promise.all(setup.service.readNotes(ROOM, ['a', 'b', 'c']))
+    expect(setup.lines()).toEqual([
+      `rooms: ${ROOM.slice(0, 16)}…${ROOM.slice(-8)} read 3 keys in one ${ROOMS_TASK.keysRead02}`,
+    ])
+  })
+
+  test('a page past the cap is one line per batch', async () => {
+    const setup = await listed(setUp(allRecords))
+    const keys = Array.from({ length: READ_BATCH_MAX + 1 }, (_, i) => `k${i}`)
+    await Promise.all(setup.service.readNotes(ROOM, keys))
+    expect(setup.lines().map((l) => l.replace(/^.* read (\d+) keys in one .*$/, '$1'))).toEqual([
+      String(READ_BATCH_MAX),
+      '1',
+    ])
+  })
+
+  test('an agent with no batch read logs no batch line (control)', async () => {
+    const setup = await listed(setUp(undefined))
+    await Promise.all(setup.service.readNotes(ROOM, ['a', 'b', 'c']))
+    expect(setup.lines()).toEqual([])
+  })
+
+  test('a batch refused whole says so, how many keys went one at a time, and that no more batches follow', async () => {
+    const setup = await listed(
+      setUp(() => {
+        throw new VtiRefusal('unsupportedType', 'no')
+      })
+    )
+    await Promise.all(setup.service.readNotes(ROOM, ['a', 'b']))
+    expect(setup.lines()).toHaveLength(2)
+    expect(setup.lines()[1]).toMatch(
+      new RegExp(
+        `${ROOMS_TASK.keysRead02.replace(/[.]/g, '\\.')} refused \\(.+\\): 2 keys read one at a time, and no more batches this session$`
+      )
+    )
+  })
+
+  test('not a member of this room: the refusal line says nothing of later batches (control)', async () => {
+    const setup = await listed(
+      setUp(() => {
+        throw new VtiRefusal('taskFailed', 'no', { code: 'rooms/keys/read:notAMember' })
+      })
+    )
+    await Promise.all(setup.service.readNotes(ROOM, ['a', 'b']).map((p) => p.catch(() => undefined)))
+    expect(setup.lines()[1]).toMatch(/: 2 keys read one at a time$/)
   })
 })
 

@@ -917,6 +917,8 @@ export class AgentRoomsService implements RoomsService {
     let left = keys
     while (left.length > 0) {
       const asked = left.slice(0, READ_BATCH_MAX)
+      // A line per batch, so a report shows which read went out: nothing else on the agent path names a task's type.
+      this.backend.warn(`rooms: ${logRef(roomId)} read ${asked.length} keys in one ${type}`)
       let answers: ReturnType<typeof parseReadBatch>
       try {
         answers = parseReadBatch(
@@ -935,6 +937,11 @@ export class AgentRoomsService implements RoomsService {
         }
         // Not being a member of this room says nothing about the next room's batch.
         if (refusalCode(e) !== 'notAMember') this.batchRefused = true
+        this.backend.warn(
+          `rooms: ${logRef(roomId)} ${type} refused (${failureCategory(e)}): ${left.length} keys read one at a time${
+            this.batchRefused ? ', and no more batches this session' : ''
+          }`
+        )
         await Promise.all(
           left.map((key) =>
             this.readRecord(room, roomId, key).then(
