@@ -664,8 +664,8 @@ export const CONSENT_NOT_GIVEN = 'consentNotGiven'
 
 /**
  * Made when needed, never declared as a subclass: a class extending VtiRefusal is evaluated when this module loads,
- * and suites that stub vtiAgent with a hand-written factory would fail to load at all. Read it by its code
- * ({@link isConsentNotGiven}), never by class.
+ * and suites that stub vtiAgent with a hand-written factory would fail to load at all. Read it by its code,
+ * never by class.
  */
 export function consentNotGiven(taskType: string): VtiRefusal {
   return new VtiRefusal(
@@ -674,10 +674,6 @@ export function consentNotGiven(taskType: string): VtiRefusal {
     { taskType }
   )
 }
-
-/** A refusal that says a held task's consent was not given ({@link consentNotGiven}). */
-export const isConsentNotGiven = (error: unknown): error is VtiRefusal =>
-  error instanceof VtiRefusal && error.code === CONSENT_NOT_GIVEN
 
 /**
  * What a VTA's DID document tells a client: the mediator it is reached through.

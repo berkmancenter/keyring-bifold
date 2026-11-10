@@ -206,7 +206,11 @@ export function deviceRefusalOf(error: unknown): DeviceActionRefused {
   // which would read the second as the agent's own refusal and show its code.
   if (consentPendingOf(error)) return refusal('awaitingApproval')
   // By its code, not its class: suites that stub VtaClient with a hand-written export list (and a second module
-  // instance of it) would defeat instanceof; VtiRefusal comes from vtiAgent, which they don't stub.
+  // instance of it) would defeat instanceof; VtiRefusal comes from vtiAgent, which they don't stub. Keep the code a
+  // literal here, never imported from VtaClient: from a stubbed VtaClient an imported guard is undefined (a crash), and
+  // an imported CONSENT_NOT_GIVEN is undefined too, so the check would silently never match and the refusal would read
+  // as the agent's own again. consentNotGiven.test.ts builds the error with VtaClient's factory and reads it here, so
+  // the two copies cannot drift apart unseen.
   if (error instanceof VtiRefusal && error.code === 'consentNotGiven') return refusal('notApproved')
   if (!(error instanceof VtiRefusal)) return refusal(NO_ANSWER.test(message) ? 'noAnswer' : 'failed')
   const details = (error.details ?? {}) as { reason?: unknown }
