@@ -10,6 +10,7 @@ import {
   type RoomsBackend,
   type RoomsCommunity,
 } from '../real/agentRoomsService'
+import { CONSENT_HOLD_BACKOFF_MS, type ConsentHolds, storedConsentHolds } from '../real/consentHolds'
 import { parseReadBatch, ROOMS_TASK } from '../real/wire'
 import { VtiRefusal } from '../../trust-tasks/module/vtiAgent'
 
@@ -33,7 +34,17 @@ type Batch = (keys: string[], options: unknown) => unknown
 function setUp(
   batch: Batch | undefined,
   served: string[] = batch ? [ROOMS_TASK.keysRead02] : [],
-  { listing = [], alone }: { listing?: { key: string; version: number }[]; alone?: (key: string) => unknown } = {}
+  {
+    listing = [],
+    alone,
+    holds,
+    now,
+  }: {
+    listing?: { key: string; version: number }[]
+    alone?: (key: string) => unknown
+    holds?: ConsentHolds
+    now?: () => number
+  } = {}
 ) {
   const agentTask = jest.fn(async (type: string, payload: Record<string, unknown>, options?: unknown) => {
     switch (type) {
@@ -81,13 +92,14 @@ function setUp(
     hiddenOffers: async () => [],
     hideOffer: jest.fn(async () => undefined),
     warn: jest.fn(),
+    ...(holds ? { consentHolds: holds } : {}),
   }
   const sent = (type: string) => agentTask.mock.calls.filter(([t]) => t === type)
   const batches = () => sent(ROOMS_TASK.keysRead02).map(([, payload]) => payload.keys as string[])
   const singles = () => sent(ROOMS_TASK.keysRead).map(([, payload]) => payload.key as string)
   const lines = () =>
     (b.warn as jest.Mock).mock.calls.map(([line]) => String(line)).filter((l) => l.includes('keys/read'))
-  return { service: new AgentRoomsService(b), agentTask, batches, singles, lines }
+  return { service: new AgentRoomsService(b, undefined, now ? { now } : {}), agentTask, batches, singles, lines }
 }
 
 /** As a screen comes to it: the room listed first, so the agent's served types are known. */
@@ -472,6 +484,91 @@ describe('a batch refused whole', () => {
     expect(settled.map((s) => s.status)).toEqual(['rejected', 'rejected'])
     expect(setup.batches()).toEqual([])
     expect(setup.singles()).toEqual([])
+  })
+})
+
+describe('a hold is kept for a day, across launches', () => {
+  const AGENT = 'did:webvh:agent:mine'
+  const held = () => {
+    throw new VtiRefusal('taskFailed', 'held', { reason: 'auth:consent_required' })
+  }
+  /** What AsyncStorage would keep between launches: one per test, shared by every launch in it. */
+  const disk = () => {
+    const kept = new Map<string, string>()
+    return {
+      kept,
+      getItem: jest.fn(async (key: string) => kept.get(key) ?? null),
+      setItem: jest.fn(async (key: string, value: string) => void kept.set(key, value)),
+    }
+  }
+  const T0 = Date.parse('2026-11-10T20:00:00Z')
+  /** A launch: a new service, a new store over the same disk, the clock where the test puts it. */
+  const launch = async (storage: ReturnType<typeof disk>, at: number, batch: Batch, agent = AGENT) =>
+    listed(setUp(batch, undefined, { holds: storedConsentHolds(() => agent, storage), now: () => at }))
+
+  test('held: the next launch sends no batch, and reads one at a time', async () => {
+    const storage = disk()
+    const first = await launch(storage, T0, held)
+    await Promise.all(first.service.readNotes(ROOM, ['a', 'b']))
+    expect(first.batches()).toHaveLength(1)
+    expect(first.lines().at(-1)).toMatch(/2 keys read one at a time, and no more batches to this agent for a day$/)
+
+    const next = await launch(storage, T0 + 60_000, allRecords)
+    expect(await titles(next.service.readNotes(ROOM, ['c', 'd']))).toEqual(['Title c', 'Title d'])
+    expect(next.batches()).toEqual([])
+    expect(next.singles()).toEqual(['c', 'd'])
+  })
+
+  test('a day after the hold, batches go out again (control: the back-off ends)', async () => {
+    const storage = disk()
+    await Promise.all((await launch(storage, T0, held)).service.readNotes(ROOM, ['a', 'b']))
+    const justBefore = await launch(storage, T0 + CONSENT_HOLD_BACKOFF_MS - 1, allRecords)
+    await Promise.all(justBefore.service.readNotes(ROOM, ['c', 'd']))
+    expect(justBefore.batches()).toEqual([])
+    const after = await launch(storage, T0 + CONSENT_HOLD_BACKOFF_MS, allRecords)
+    await Promise.all(after.service.readNotes(ROOM, ['c', 'd']))
+    expect(after.batches()).toEqual([['c', 'd']])
+  })
+
+  test('what is kept cannot be read: no batch (fails toward not asking)', async () => {
+    const garbled = disk()
+    garbled.kept.set('rooms.consentHolds.v1', '{not json')
+    const g = await launch(garbled, T0, allRecords)
+    await Promise.all(g.service.readNotes(ROOM, ['a', 'b']))
+    expect(g.batches()).toEqual([])
+    expect(g.singles()).toEqual(['a', 'b'])
+
+    const broken = disk()
+    broken.getItem.mockRejectedValue(new Error('storage is gone'))
+    const k = await launch(broken, T0, allRecords)
+    await Promise.all(k.service.readNotes(ROOM, ['a', 'b']))
+    expect(k.batches()).toEqual([])
+  })
+
+  test('a refusal that is not a hold is not kept: the next launch batches (control)', async () => {
+    const storage = disk()
+    const first = await launch(storage, T0, () => {
+      throw new VtiRefusal('unsupportedType', 'no')
+    })
+    await Promise.all(first.service.readNotes(ROOM, ['a', 'b']))
+    expect(storage.setItem).not.toHaveBeenCalled()
+    const next = await launch(storage, T0 + 60_000, allRecords)
+    await Promise.all(next.service.readNotes(ROOM, ['c', 'd']))
+    expect(next.batches()).toEqual([['c', 'd']])
+  })
+
+  test("by agent: another agent's hold does not stop this one's batch (control)", async () => {
+    const storage = disk()
+    await Promise.all((await launch(storage, T0, held, 'did:webvh:agent:other')).service.readNotes(ROOM, ['a', 'b']))
+    const mine = await launch(storage, T0 + 60_000, allRecords)
+    await Promise.all(mine.service.readNotes(ROOM, ['c', 'd']))
+    expect(mine.batches()).toEqual([['c', 'd']])
+  })
+
+  test('nothing kept yet: the first launch batches (control)', async () => {
+    const fresh = await launch(disk(), T0, allRecords)
+    await Promise.all(fresh.service.readNotes(ROOM, ['a', 'b']))
+    expect(fresh.batches()).toEqual([['a', 'b']])
   })
 })
 

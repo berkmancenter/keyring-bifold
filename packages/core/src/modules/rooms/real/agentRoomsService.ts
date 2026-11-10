@@ -34,6 +34,7 @@ import { deriveCapabilities, deriveRoomCapabilities } from '../capabilities'
 import { inertFlags, toInertText } from '../inertText'
 import { chatMessageText, reactionValueOfBody } from '../roomPosts'
 import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
+import { consentPendingOf } from '../../trust-tasks/module/VtaClient'
 import { VtiRefusal } from '../../trust-tasks/module/vtiAgent'
 import { roomRef } from '../roomRef'
 import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
@@ -71,6 +72,7 @@ import {
   RoomsUnavailable,
 } from '../types'
 
+import type { ConsentHolds } from './consentHolds'
 import { OPEN_FILE_BYTES, openRoomFile, type OpenFileCopy } from './files/open'
 import { checkSender, type ResolveSender } from './files/sender'
 import { TextSenderCount } from './files/textSenderCount'
@@ -194,6 +196,11 @@ export interface RoomsBackend {
    * is asked, so a release that turns sending off has it off everywhere; tests set it themselves.
    */
   readonly recordSending?: boolean
+  /**
+   * When the agent last held a rooms task for consent, kept across launches (consentHolds.ts): a task it held is not
+   * sent to it again for a day. Absent (a backend with nowhere to keep it): a hold stops that task for this session only.
+   */
+  readonly consentHolds?: ConsentHolds
 }
 
 /** The picked file, and the room host's HTTPS Trust Task door, which an upload's single-use key sends to. */
@@ -886,7 +893,8 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * The `rooms/keys/read` a batch goes out as: the newest the agent serves that takes one. Nothing below 0.2 does, so
-   * with none of them, or once this session has had a batch refused, there is no batch.
+   * with none of them, or once this session has had a batch refused, there is no batch. A hold the agent met in the
+   * last day (consentHolds.ts) is asked in startBatch, which can wait for storage: it stops the batch too.
    *
    * @versionLadder rooms/keys/read
    */
@@ -897,7 +905,9 @@ export class AgentRoomsService implements RoomsService {
   }
 
   private startBatch(type: string, roomId: string, keys: string[]): void {
-    const answers = this.requireInRoom(roomId, 'readNote').then((room) => this.readBatches(type, room, roomId, keys))
+    const answers = this.requireInRoom(roomId, 'readNote').then(async (room) =>
+      (await this.heldRecently(type)) ? this.readEach(room, roomId, keys) : this.readBatches(type, room, roomId, keys)
+    )
     for (const key of keys) {
       const k = listedKey(roomId, key)
       const asked = answers
@@ -915,6 +925,33 @@ export class AgentRoomsService implements RoomsService {
       this.readsInFlight.set(k, asked)
     }
     holdingOpened.add(this)
+  }
+
+  /** Each of `keys` read on its own, at 0.1, every answer its own: what a batch that can't go out does instead. */
+  private async readEach(room: KnownRoom, roomId: string, keys: string[]): Promise<Map<string, OpenedRecord | Error>> {
+    const settled = new Map<string, OpenedRecord | Error>()
+    await Promise.all(
+      keys.map((key) =>
+        this.readRecord(room, roomId, key).then(
+          (opened) => settled.set(key, opened),
+          (alone: unknown) => settled.set(key, alone instanceof Error ? alone : new Error(String(alone)))
+        )
+      )
+    )
+    return settled
+  }
+
+  /**
+   * Did the agent hold `type` for consent in the last day? Asked as the task is about to go out, against the clock then
+   * (no timer: consentHolds.ts). Storage that can't be read answers yes: the batch is an optimisation, an approval
+   * request is not its to raise.
+   */
+  private async heldRecently(type: string): Promise<boolean> {
+    const holds = this.backend.consentHolds
+    if (!holds) return false
+    const held = await holds.heldRecently(type, this.now()).catch(() => true)
+    if (held) this.backend.warn(`rooms: ${type} held for consent by this agent in the last day: read one at a time`)
+    return held
   }
 
   /**
@@ -958,19 +995,19 @@ export class AgentRoomsService implements RoomsService {
         }
         // Not being a member of this room says nothing about the next room's batch.
         if (refusalCode(e) !== 'notAMember') this.batchRefused = true
+        // Held: the agent has already asked its approvers. Kept, so neither this session nor the next asks again today.
+        const held = consentPendingOf(e) !== undefined
+        if (held) await this.backend.consentHolds?.noteHeld(type, this.now()).catch(() => undefined)
         this.backend.warn(
           `rooms: ${logRef(roomId)} ${type} refused (${failureCategory(e)}): ${left.length} keys read one at a time${
-            this.batchRefused ? ', and no more batches this session' : ''
+            held && this.backend.consentHolds
+              ? ', and no more batches to this agent for a day'
+              : this.batchRefused
+                ? ', and no more batches this session'
+                : ''
           }`
         )
-        await Promise.all(
-          left.map((key) =>
-            this.readRecord(room, roomId, key).then(
-              (opened) => settled.set(key, opened),
-              (alone: unknown) => settled.set(key, alone instanceof Error ? alone : new Error(String(alone)))
-            )
-          )
-        )
+        for (const [key, answer] of await this.readEach(room, roomId, left)) settled.set(key, answer)
         return settled
       }
       const notReached: string[] = []
