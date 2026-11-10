@@ -100,6 +100,7 @@ jest.mock('../../trust-tasks/module/VtiIdentityStore', () => ({
 }))
 
 import {
+  VTI_BACKGROUND_HOLD_MAX_MS,
   VTI_FOREGROUND_CLAIM_MS,
   VTI_TURN_AFTER_REFUSALS,
   VtiSessionHeld,
@@ -451,6 +452,8 @@ describe('a polls listing read takes its turn between a step and a poll', () => 
   const pollAs = (who: { persona: string; community: string }) =>
     vtiAgent.connect(agent, lab, { persona: persona(who.persona, who.community), background: true })
   const listingWaiting = () => (vtiAgent as unknown as { listingWaiting: Map<unknown, unknown> }).listingWaiting.size
+  const stepsWaiting = () => (vtiAgent as unknown as { foregroundWaiting: Map<symbol, string> }).foregroundWaiting
+  const C = { community: 'did:webvh:c:community-c', persona: 'did:webvh:p:ccc' }
 
   it("makes the other community's rooms listing wait for it, not refuse: both are listed", async () => {
     const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
@@ -527,7 +530,6 @@ describe('a polls listing read takes its turn between a step and a poll', () => 
 
   it('while it waits, a poll that would switch the session waits behind it; one sharing the session goes on', async () => {
     mockAnswerMs = 60
-    const C = { community: 'did:webvh:c:community-c', persona: 'did:webvh:p:ccc' }
     const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
     const holdUp = nextHold()
     const roundA = rooms.communityTask(A.community, MEMBERSHIPS, {})
@@ -541,5 +543,44 @@ describe('a polls listing read takes its turn between a step and a poll', () => 
     const results = await Promise.allSettled([roundA, sameRound, read, switching])
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled'])
     expect(signIns()).toEqual([A.persona, B.persona, C.persona])
+  })
+
+  it('waits for a step waiting to sign in even once no hold is live, and goes after it', async () => {
+    const { done, release } = untilReleased()
+    const holdUp = nextHold()
+    const held = vtiAgent.holding(agent, lab, persona(A.persona, A.community), () => done, {
+      maxMs: 500,
+      claims: false,
+    })
+    await holdUp()
+    const step = vtiAgent.connect(agent, lab, { persona: persona(C.persona, C.community) })
+    await untilHolds(() => stepsWaiting().size === 1, 'the step never waited')
+    // A's hold has run out, and the step has not yet looked again (it does at its own timer): it is still waiting, with
+    // no hold live. The listing read goes after it, not in front of it.
+    clock += 501
+    const read = vtiAgent.holding(agent, lab, persona(B.persona, B.community), async (did) => did, asListing)
+    await step
+    await expect(read).resolves.toBe(B.persona)
+    expect(signIns()).toEqual([A.persona, C.persona, B.persona])
+    release()
+    await held
+  })
+
+  it("looks again by its own clock when it waits on a waiter, so a wake that never comes doesn't keep it", async () => {
+    const ghost = Symbol('a step that goes without saying so')
+    stepsWaiting().set(ghost, 'did:webvh:p:ghost')
+    releases.push(() => (vtiAgent as unknown as { holdsChanged: () => void }).holdsChanged())
+    const timers = global.setTimeout as unknown as jest.SpyInstance
+    const before = timers.mock.calls.length
+    const read = vtiAgent.holding(agent, lab, persona(B.persona, B.community), async (did) => did, asListing)
+    await untilHolds(() => listingWaiting() === 1, 'the listing read never waited')
+    // The step leaves its map with no `holdsChanged`: no hold is live and no claim runs, so only the wait's own clock can
+    // wake the read.
+    stepsWaiting().delete(ghost)
+    const own = timers.mock.calls.slice(before).find(([, ms]) => ms === VTI_BACKGROUND_HOLD_MAX_MS + 1)
+    expect(own).toBeDefined()
+    clock += VTI_BACKGROUND_HOLD_MAX_MS + 1
+    ;(own![0] as () => void)()
+    await expect(read).resolves.toBe(B.persona)
   })
 })

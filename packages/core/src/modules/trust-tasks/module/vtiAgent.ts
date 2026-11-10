@@ -1090,8 +1090,15 @@ class VtiAgentController {
     const holds = this.liveHolds().filter((h) => h.did !== did)
     const ordinary = holds.find((h) => !h.background)
     const polling = holds.find((h) => h.background)
-    // Waiting for an identity that holds nothing yet: what it waits on ends that wait (`holdsChanged`).
-    const waitingFor = (d: string, reason: string): SessionHold => ({ did: d, background, until: Infinity, reason })
+    // Waiting for an identity that holds nothing yet: what it waits on ends that wait (`holdsChanged`). Every other wait
+    // here is on a live hold, and so is timed by that hold's `until`; this one gets a clock of its own, so a wake that
+    // never came is re-checked rather than waited on for ever (`holdsMoved`).
+    const waitingFor = (d: string, reason: string): SessionHold => ({
+      did: d,
+      background,
+      until: this.now() + VTI_BACKGROUND_HOLD_MAX_MS,
+      reason,
+    })
     if (listing) {
       const held = ordinary ?? polling
       if (held) return { wait: held }
@@ -1116,17 +1123,21 @@ class VtiAgentController {
     const read = holds.find((h) => h.listing)
     if (read) return { wait: read }
     // A listing read waiting goes before a poll that would switch the session; a poll that shares the session as it is
-    // signed in finishes its round first, so a round is not split by a switch there and back.
+    // signed in finishes its round first, so a round is not split by a switch there and back. With no session open at
+    // all, a poll would open one rather than switch it, and waits too: the listing read is ahead of it.
     const reading = [...this.listingWaiting.values()].find((d) => d !== did)
     if (reading && did && did !== sessionDid) return { wait: waitingFor(reading, 'a listing read is waiting') }
     return polling ? { wait: polling } : undefined
   }
 
-  /** Resolves when a hold or a waiter comes or goes, or when the soonest hold or the claim runs out of time. */
-  private holdsMoved(): Promise<void> {
+  /**
+   * Resolves when a hold or a waiter comes or goes, or when the soonest hold, the claim or `until` (what the caller waits
+   * on, if it is not a hold) runs out of time. With none of those, nothing is timed: `Math.min()` is `Infinity`.
+   */
+  private holdsMoved(until = Infinity): Promise<void> {
     return new Promise((resolve) => {
       const claimEnds = this.claim && this.claim.until > this.now() ? [this.claim.until] : []
-      const soonest = Math.min(...this.liveHolds().map((h) => h.until), ...claimEnds)
+      const soonest = Math.min(...this.liveHolds().map((h) => h.until), ...claimEnds, until)
       const done = () => {
         if (timer) clearTimeout(timer)
         this.holdWatchers.delete(done)
@@ -1352,9 +1363,10 @@ class VtiAgentController {
           waitingIn.set(waiter, wantedDid)
           this.holdsChanged()
         }
-        await this.holdsMoved()
+        await this.holdsMoved(blocker.wait.until)
       }
     } finally {
+      // `listing` is fixed for the call, so the waiter is in one map at most and `||` skips nothing.
       if (this.foregroundWaiting.delete(waiter) || this.listingWaiting.delete(waiter)) this.holdsChanged()
     }
     const attempt = this.connectNow(agent, mediatorDid, options)
