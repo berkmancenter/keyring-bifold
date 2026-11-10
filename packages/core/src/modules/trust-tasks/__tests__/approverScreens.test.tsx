@@ -32,12 +32,10 @@ const CONN = 'c-jordan'
 
 const linked = (vtaDid?: string) => {
   const real = vtaAgent.getState()
-  jest
-    .spyOn(vtaAgent, 'getState')
-    .mockReturnValue({
-      ...real,
-      link: vtaDid ? ({ kind: 'linked', vtaDid } as never) : ({ kind: 'unlinked' } as never),
-    })
+  jest.spyOn(vtaAgent, 'getState').mockReturnValue({
+    ...real,
+    link: vtaDid ? ({ kind: 'linked', vtaDid } as never) : ({ kind: 'unlinked' } as never),
+  })
 }
 
 const show = async (element: React.ReactElement) => {
@@ -304,6 +302,19 @@ describe('Who approves', () => {
     expect(write).toHaveBeenCalledWith(AGENT, [AMY], ['shareCredential', 'joinCommunity'])
     expect(removed).toHaveBeenCalledWith(AGENT, JORDAN)
     expect(tree.queryByTestId(id(TrustedApproversIds.approver(JORDAN)))).toBeNull()
+  })
+
+  test('a removal the agent held for an approval marks nothing: they still approve until it is done', async () => {
+    kept([], { [JORDAN]: 'Jordan' })
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([AMY, JORDAN], ['shareCredential']))
+    jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([AMY, JORDAN], ['shareCredential']))
+    const removed = jest.spyOn(approverRole, 'approverRemoved').mockResolvedValue(undefined)
+    const tree = await show(<VtaTrustedApprovers />)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(TrustedApproversIds.remove(JORDAN))))
+    })
+    expect(removed).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(TrustedApproversIds.approver(JORDAN)))).toBeTruthy()
   })
 
   test('reads the rules as the agent holds them (the real view over an empty row says nobody)', async () => {
