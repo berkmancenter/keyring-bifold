@@ -240,21 +240,71 @@ describe('the offer sheet', () => {
     receivedAt: new Date().toISOString(),
   })
 
+  /** The app's owner check (Face ID, a fingerprint or the passcode), answering as given; the real one runs it. */
+  const owner = (answer: { ok: true } | { ok: false; reason: 'cancelled' | 'unavailable' }) => {
+    const confirmOwner = jest.fn(async () => answer as never)
+    vtaAgent.setOwnerChecks({ confirmOwner, deviceCanOwn: async () => true })
+    return confirmOwner
+  }
+
   beforeEach(() => {
     jest.spyOn(approverRole, 'restoreRoleOfferPrompts').mockResolvedValue(undefined)
   })
 
-  test('a yes names the DID this phone approves as on its own agent', async () => {
+  test('Accept asks Face ID first, with its reason, then names the DID this phone approves as on its own agent', async () => {
     linked('did:webvh:jordans-agent.example')
     approverRole.roleOfferPromptStore.set(offerFrom())
+    const confirm = owner({ ok: true })
     jest.spyOn(vtaAgent, 'approverDid').mockResolvedValue(JORDAN)
     const respond = jest.spyOn(approverRole, 'respondToRoleOffer').mockResolvedValue(undefined)
     const tree = await show(<ApproverOfferModal />)
     expect(tree.getByText('Approver.Action.shareCredential', { exact: false })).toBeTruthy()
+    expect(tree.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe('Approver.AcceptAsksFaceId')
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(ApproverOfferIds.yes)))
     })
+    expect(confirm).toHaveBeenCalledWith('Approver.AcceptReason')
     expect(respond).toHaveBeenCalledWith(AGENT, 'c-sam', true, JORDAN)
+  })
+
+  test('not confirmed at Face ID, nothing is read or sent and the offer stays; cancelling is not an error (control: the one above)', async () => {
+    linked('did:webvh:jordans-agent.example')
+    approverRole.roleOfferPromptStore.set(offerFrom())
+    const did = jest.spyOn(vtaAgent, 'approverDid').mockResolvedValue(JORDAN)
+    const respond = jest.spyOn(approverRole, 'respondToRoleOffer').mockResolvedValue(undefined)
+    owner({ ok: false, reason: 'cancelled' })
+    const tree = await show(<ApproverOfferModal />)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(ApproverOfferIds.yes)))
+    })
+    expect(did).not.toHaveBeenCalled()
+    expect(respond).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(ApproverOfferIds.sheet))).toBeTruthy()
+    expect(tree.queryByTestId(id(ApproverOfferIds.failed))).toBeNull()
+    // A check that could not run is said, and still sends nothing.
+    owner({ ok: false, reason: 'unavailable' })
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(ApproverOfferIds.yes)))
+    })
+    expect(respond).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(ApproverOfferIds.failed))).toBeTruthy()
+  })
+
+  test('Decline and Not now ask no Face ID', async () => {
+    linked('did:webvh:jordans-agent.example')
+    approverRole.roleOfferPromptStore.set(offerFrom('c-sam', 'Sam'))
+    approverRole.roleOfferPromptStore.set(offerFrom('c-riley', 'Riley'))
+    const confirm = owner({ ok: true })
+    const respond = jest.spyOn(approverRole, 'respondToRoleOffer').mockResolvedValue(undefined)
+    const tree = await show(<ApproverOfferModal />)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(ApproverOfferIds.notNow)))
+    })
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(ApproverOfferIds.no)))
+    })
+    expect(respond).toHaveBeenCalledWith(AGENT, 'c-riley', false, undefined)
+    expect(confirm).not.toHaveBeenCalled()
   })
 
   test('with no agent of its own, only a no can be sent, and it says why', async () => {
@@ -278,6 +328,7 @@ describe('the offer sheet', () => {
   test('an answer that did not go says so and the offer stays', async () => {
     linked('did:webvh:jordans-agent.example')
     approverRole.roleOfferPromptStore.set(offerFrom())
+    owner({ ok: true })
     jest.spyOn(vtaAgent, 'approverDid').mockRejectedValue(new DeviceActionRefused('unreachable'))
     const respond = jest.spyOn(approverRole, 'respondToRoleOffer')
     const tree = await show(<ApproverOfferModal />)

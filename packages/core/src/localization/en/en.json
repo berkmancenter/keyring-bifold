@@ -3680,6 +3680,8 @@
     "NotGivenBy": "{{names}} didn't approve",
     "NotGivenWhy": "{{names}} said no, or didn't answer in time, so your agent didn't go ahead.",
     "NotGivenNoNag": "Keyring won't ask {{names}} again on its own.",
-    "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead."
+    "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead.",
+    "AcceptReason": "Accept being {{asker}}'s approver",
+    "AcceptAsksFaceId": "Accept asks for Face ID. Decline is one tap."
   }
 }

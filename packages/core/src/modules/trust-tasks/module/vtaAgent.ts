@@ -2774,6 +2774,16 @@ export class VtaAgentController {
   }
 
   /**
+   * Saying yes to being someone's approver (the offer sheet's Accept): an owner act, so Face ID, a fingerprint or the
+   * passcode first, with `reason` (already in the person's language) on the prompt; then the DID this phone approves
+   * as. Not confirmed, it throws {@link OwnerNotConfirmed} before anything is read or sent.
+   */
+  async acceptAsApprover(agent: Agent, reason: string): Promise<string> {
+    await this.confirmOwner(reason)
+    return this.approverDid(agent)
+  }
+
+  /**
    * Who approves for this person, read from the agent's approvals row
    * (trustedApprovers.ts). Signs in if it must. Refuses with
    * {@link DeviceActionRefused}.
