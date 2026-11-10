@@ -1,0 +1,343 @@
+/**
+ * Becoming someone's trusted approver, both phones, through the REAL Trust Task pipeline (TrustTasksService.consume:
+ * schema, identity cross-check, recipient check, proof required). The signature is a stand-in that verifies only under
+ * the DID that made it, over the document as it was signed, so what is tested is the protocol's own decisions: who is
+ * asked, what is refused unverified, what answer counts, and what is kept for Sam to write on Sam's agent.
+ */
+import {
+  OFFER_OPEN_FOR,
+  ROLE_OFFER_ASK,
+  acceptedRoleOffers,
+  approverRoleEvents,
+  approversWithAccepted,
+  forgetRoleOffer,
+  handleRoleOfferRequest,
+  handleRoleOfferResponse,
+  offerApproverRole,
+  respondToRoleOffer,
+  restoreRoleOfferPrompts,
+  roleOfferPromptStore,
+} from '../../../src/modules/trust-tasks/approverRole'
+import { ROLE_ACTIONS, TYPE_URI } from '../../../src/modules/trust-tasks/approverRoleSpec'
+import { TRUSTED_TASKS } from '../../../src/modules/trust-tasks/module/trustedApprovers'
+import {
+  TRUSTED_APPROVERS_REMOTE_OFF,
+  setTrustedApproversEnabled,
+} from '../../../src/modules/trust-tasks/module/trustedApproversFlag'
+import { TrustTasksService } from '../../../src/modules/trust-tasks/services/TrustTasksService'
+import { memoryGenericRecords } from '../vrc/fixtures/memoryGenericRecords'
+import { readOneClock } from '../../helpers/oneClock'
+
+const mockSent: { connectionId: string; document: Record<string, unknown> }[] = []
+jest.mock('../../../src/modules/trust-tasks/ceremony', () => ({
+  sendTrustTaskDocument: async (_agent: unknown, connectionId: string, document: Record<string, unknown>) => {
+    mockSent.push({ connectionId, document })
+  },
+  getTrustTasksService: () => ({ retain: async () => undefined }),
+}))
+
+// A stand-in signature: names the DID that made it and the document it was made over.
+jest.mock('../../../src/modules/trust-tasks/documentProof', () => {
+  const over = (doc: Record<string, unknown>) => {
+    const { proof: _proof, ...rest } = doc
+    return JSON.stringify(rest)
+  }
+  return {
+    signDocumentProof: async (_agent: unknown, doc: Record<string, unknown>, did: string) => ({
+      ...doc,
+      proof: { type: 'DataIntegrityProof', cryptosuite: 'eddsa-jcs-2022', by: did, over: over(doc) },
+    }),
+    verifyDocumentProof: async (_agent: unknown, doc: Record<string, unknown>, controller: string) => {
+      const proof = doc.proof as { by?: string; over?: string } | undefined
+      return proof?.by === controller && proof.over === over(doc)
+    },
+  }
+})
+
+const SAM_AGENT = 'did:webvh:sams-agent.example'
+const JORDAN_APPROVES_AS = 'did:peer:2.jordans-phone'
+
+interface Side {
+  name: string
+  connectionId: string
+  /** My connection DID, and theirs. */
+  mine: string
+  theirs: string
+  /** My relationship DID with them, and theirs with me. */
+  myRel: string
+  theirRel?: string
+}
+const SAM: Side = {
+  name: 'sam',
+  connectionId: 'c-sam',
+  mine: 'did:conn:sam',
+  theirs: 'did:conn:jordan',
+  myRel: 'did:peer:sam-rel',
+  theirRel: 'did:peer:jordan-rel',
+}
+const JORDAN: Side = {
+  name: 'jordan',
+  connectionId: 'c-jordan',
+  mine: 'did:conn:jordan',
+  theirs: 'did:conn:sam',
+  myRel: 'did:peer:jordan-rel',
+  theirRel: 'did:peer:sam-rel',
+}
+
+let random = 0
+function phone(side: Side) {
+  const store = memoryGenericRecords()
+  const agent = {
+    context: {},
+    genericRecords: store,
+    w3cCredentials: { getAll: async () => [] },
+    kms: { randomBytes: ({ length }: { length: number }) => new Uint8Array(length).fill(++random) },
+    dependencyManager: {
+      resolve: () => ({
+        getAll: async () =>
+          side.theirRel
+            ? [
+                {
+                  connectionId: side.connectionId,
+                  myRelationshipDid: side.myRel,
+                  counterpartyRelationshipDid: side.theirRel,
+                },
+              ]
+            : [],
+      }),
+    },
+    modules: {
+      didcomm: { connections: { getById: async (id: string) => ({ id, did: side.mine, theirDid: side.theirs }) } },
+    },
+  } as any
+  return { agent, store, side }
+}
+type Phone = ReturnType<typeof phone>
+
+let pipeline: TrustTasksService
+const context = (to: Phone) => ({
+  connectionId: to.side.connectionId,
+  senderDid: to.side.theirs,
+  recipientDid: to.side.mine,
+})
+/** Deliver the last document sent to the other phone, as its dispatch would. */
+async function deliver(to: Phone, document = mockSent[mockSent.length - 1].document) {
+  const handle = String(document.type).includes('#response') ? handleRoleOfferResponse : handleRoleOfferRequest
+  await handle(to.agent, pipeline, document, context(to))
+}
+
+beforeEach(() => {
+  mockSent.length = 0
+  roleOfferPromptStore.clear()
+  TRUSTED_APPROVERS_REMOTE_OFF.off = false
+  setTrustedApproversEnabled(true)
+  pipeline = new TrustTasksService({ save: async () => undefined } as never)
+})
+afterAll(() => setTrustedApproversEnabled(false))
+
+readOneClock()
+
+describe('becoming a trusted approver', () => {
+  test("Sam asks, Jordan's phone shows the offer, Jordan says yes, and Sam's phone keeps it to write", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    const answered = jest.fn()
+    approverRoleEvents.on('answered', answered)
+
+    expect(await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity', 'shareCredential'])).toBe(
+      'sent'
+    )
+    expect(mockSent[0].document).toMatchObject({ type: TYPE_URI, payload: { agent: SAM_AGENT } })
+    await deliver(jordan)
+    expect(roleOfferPromptStore.get(JORDAN.connectionId)).toMatchObject({
+      agentDid: SAM_AGENT,
+      actions: ['joinCommunity', 'shareCredential'],
+    })
+
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    expect(roleOfferPromptStore.get(JORDAN.connectionId)).toBeUndefined()
+    await deliver(sam)
+
+    const [kept] = await acceptedRoleOffers(sam.agent)
+    expect(kept).toMatchObject({ agentDid: SAM_AGENT, acceptedAs: JORDAN_APPROVES_AS })
+    expect(answered).toHaveBeenCalledWith({ connectionId: SAM.connectionId, decision: 'accepted' })
+    expect(approversWithAccepted({ approvers: [], keys: [] }, kept)).toEqual({
+      approvers: [JORDAN_APPROVES_AS],
+      keys: ['shareCredential', 'joinCommunity'],
+    })
+    await forgetRoleOffer(sam.agent, kept.threadId)
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    approverRoleEvents.off('answered', answered)
+  })
+
+  test('a no is sent signed too, and Sam forgets the offer', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['addDevice'])
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, false)
+    expect(mockSent[1].document).toMatchObject({ payload: { decision: 'declined' }, proof: { by: JORDAN.myRel } })
+    await deliver(sam)
+    expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toEqual([])
+  })
+
+  test('an offer not signed by the relationship is never shown, and with no relationship nothing is read unverified', async () => {
+    const sam = phone(SAM)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const genuine = mockSent[0].document
+    const signedByStranger = { ...genuine, proof: { ...(genuine.proof as object), by: 'did:peer:stranger' } }
+    const altered = { ...genuine, payload: { ...(genuine.payload as object), agent: 'did:webvh:someone-else' } }
+
+    await deliver(phone(JORDAN), signedByStranger)
+    await deliver(phone(JORDAN), altered)
+    await deliver(phone({ ...JORDAN, theirRel: undefined }), genuine)
+    expect(roleOfferPromptStore.list()).toEqual([])
+    // Control: the genuine offer, on the relationship, is shown.
+    await deliver(phone(JORDAN), genuine)
+    expect(roleOfferPromptStore.list()).toHaveLength(1)
+  })
+
+  test("an answer counts only with this offer's challenge, signed by the relationship", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    const yes = mockSent[1].document
+    const unsigned = { ...yes, proof: { ...(yes.proof as object), by: 'did:peer:stranger' } }
+    const resign = async (doc: Record<string, unknown>) => {
+      const { signDocumentProof } = jest.requireMock('../../../src/modules/trust-tasks/documentProof')
+      const { proof: _p, ...rest } = doc
+      return signDocumentProof(null, rest, JORDAN.myRel)
+    }
+    const otherChallenge = await resign({
+      ...yes,
+      payload: { ...(yes.payload as object), challenge: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+    })
+
+    await deliver(sam, unsigned)
+    await deliver(sam, otherChallenge)
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    // Control: the real answer counts.
+    await deliver(sam, yes)
+    expect(await acceptedRoleOffers(sam.agent)).toHaveLength(1)
+  })
+
+  test('an answer on a thread Sam never offered counts for nothing, even one Jordan opened himself', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    // Jordan "offers" Sam a role (Sam's phone stores it as a request it received), then sends a yes on that same
+    // thread, with that offer's challenge, signed by his relationship key: everything but an offer Sam made.
+    await offerApproverRole(jordan.agent, JORDAN.connectionId, 'did:webvh:jordans-agent', ['joinCommunity'])
+    const planted = mockSent[0].document
+    await deliver(sam, planted)
+    const { signDocumentProof } = jest.requireMock('../../../src/modules/trust-tasks/documentProof')
+    const forged = await signDocumentProof(
+      null,
+      {
+        id: 'forged-yes',
+        type: `${TYPE_URI}#response`,
+        threadId: planted.id,
+        issuer: JORDAN.mine,
+        recipient: JORDAN.theirs,
+        issuedAt: new Date().toISOString(),
+        payload: {
+          decision: 'accepted',
+          challenge: (planted.payload as { challenge: string }).challenge,
+          approver: JORDAN_APPROVES_AS,
+          respondedAt: new Date().toISOString(),
+        },
+      },
+      JORDAN.myRel
+    )
+    await deliver(sam, forged)
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    // Control: the same forged shape on a thread Sam did offer, with its challenge, counts.
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const real = mockSent[1].document
+    const { proof: _p, ...unsigned } = forged
+    await deliver(
+      sam,
+      await signDocumentProof(
+        null,
+        {
+          ...unsigned,
+          threadId: real.id,
+          payload: { ...unsigned.payload, challenge: (real.payload as { challenge: string }).challenge },
+        },
+        JORDAN.myRel
+      )
+    )
+    expect(await acceptedRoleOffers(sam.agent)).toHaveLength(1)
+  })
+
+  test('a yes needs the DID the phone approves as, and nothing is sent without it', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    await expect(respondToRoleOffer(jordan.agent, JORDAN.connectionId, true)).rejects.toThrow(/DID/)
+    await expect(respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, 'jordan')).rejects.toThrow(/DID/)
+    expect(mockSent).toHaveLength(1)
+    expect(roleOfferPromptStore.get(JORDAN.connectionId)).toBeDefined()
+  })
+
+  test('an offer lapses: a late yes changes nothing, and an unanswered one is forgotten', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    const ask = sam.store.records.find((r) => r.tags.recordType === ROLE_OFFER_ASK)!
+    ask.content.askedAt = new Date(Date.now() - OFFER_OPEN_FOR - 1000).toISOString()
+    await deliver(sam)
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toEqual([])
+  })
+
+  test('with the switch off, nothing is offered, shown or kept; a release can turn it off whatever was saved', async () => {
+    const sam = phone(SAM)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const offer = mockSent[0].document
+
+    setTrustedApproversEnabled(false)
+    expect(await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])).toBe('off')
+    await deliver(phone(JORDAN), offer)
+    setTrustedApproversEnabled(true)
+    TRUSTED_APPROVERS_REMOTE_OFF.off = true
+    await deliver(phone(JORDAN), offer)
+    expect(mockSent).toHaveLength(1)
+    expect(roleOfferPromptStore.list()).toEqual([])
+    // Control: on, and not turned off remotely, the same offer is shown.
+    TRUSTED_APPROVERS_REMOTE_OFF.off = false
+    await deliver(phone(JORDAN), offer)
+    expect(roleOfferPromptStore.list()).toHaveLength(1)
+  })
+
+  test("an offer waits across a restart on Jordan's phone", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    roleOfferPromptStore.clear()
+    await restoreRoleOfferPrompts(jordan.agent)
+    expect(roleOfferPromptStore.get(JORDAN.connectionId)).toMatchObject({ agentDid: SAM_AGENT })
+  })
+
+  test('the actions an offer can name are exactly the ones a trusted approver rule holds', () => {
+    expect([...ROLE_ACTIONS]).toEqual(TRUSTED_TASKS.map((t) => t.key))
+  })
+
+  test('a new offer replaces an unanswered one on the same contact, and keeps a yes not yet written', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['addDevice'])
+    expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toHaveLength(1)
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    await deliver(sam)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['shareCredential'])
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([expect.objectContaining({ actions: ['addDevice'] })])
+  })
+})
