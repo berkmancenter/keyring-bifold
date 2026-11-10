@@ -352,6 +352,32 @@ describe('ending watches', () => {
     expect(s.agentTask).not.toHaveBeenCalled()
   })
 
+  test('an answer to a request sent before a lock is not the answer for the room armed again after it', async () => {
+    const releases: (() => void)[] = []
+    let calls = 0
+    const s = setUp({
+      answer: (p) => {
+        calls++
+        // Before the lock: armed. After it: the host refuses. Only the second may decide.
+        const reply =
+          calls === 1
+            ? armedAll(p)
+            : { member: p.member, host: p.host, watches: [{ roomId: 'room:1', armed: false, refused: 'hostRefused' }] }
+        return new Promise((r) => releases.push(() => r(reply)))
+      },
+    })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    s.watches.forget()
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    releases[0]()
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    releases[1]()
+    await s.watches.idle()
+    expect(s.agentTask).toHaveBeenCalledTimes(2)
+    expect(s.watches.watched('room:1')).toBe(false)
+  })
+
   test('forget (a lock): an answer that arrives after it is not kept, and nothing is cancelled', async () => {
     let release: (v: unknown) => void = () => undefined
     const s = setUp({ answer: (p) => new Promise((r) => (release = () => r(armedAll(p)))) })
