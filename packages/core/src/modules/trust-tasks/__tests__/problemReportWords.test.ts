@@ -17,7 +17,9 @@ describe('problemReportWords', () => {
     expect(problemReportWords({})).toBe('no code (no thread)')
   })
 
-  it('cuts every DID in the words to its prefix, and never reads args', () => {
+  it('cuts every DID in the words to its prefix', () => {
+    // This comment has no placeholder, so filling args would change nothing:
+    // the args line is proved by the placeholder row below, not here.
     const line = problemReportWords({
       body: { code: 'e.p.msg.unknown', comment: `from ${LONG_DID}, to ${LONG_DID}.`, args: ['secret-arg'] },
     })
