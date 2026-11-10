@@ -31,8 +31,12 @@ import { checkVtaReply } from './vtaReplyProof'
 const LOG_PREFIX = '[VTI] foreign approval'
 const TASK_ERROR = 'https://trusttasks.org/spec/trust-task-error/'
 const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
-/** task-consent/decision, newest first: the same ladder this phone's own agent is answered from. */
-export const FOREIGN_DECISION_TYPES = VTA_TASK_VERSIONS.consentDecision
+/**
+ * task-consent/decision, newest first: the same ladder this phone's own agent is answered from. Read when a decision
+ * is sent, never at import: vtaAgent imports this module, and a module that mocks or cycles through VtaClient would
+ * otherwise fail to load.
+ */
+export const foreignDecisionTypes = (): readonly string[] => VTA_TASK_VERSIONS.consentDecision
 /** How long a decision waits for the asking agent's reply. */
 export const FOREIGN_REPLY_WAIT_MS = 30_000
 
@@ -205,7 +209,7 @@ export async function sendForeignDecision(
   if (!isDigestMultibase(request.payloadDigest))
     throw new Error(`${LOG_PREFIX}: the request's payloadDigest is not a digestMultibase; not deciding it`)
   const versions = versionsFor(`foreign-decision:${request.issuer}`)
-  const { answer } = await versions.ask('consentDecision', FOREIGN_DECISION_TYPES, (type) =>
+  const { answer } = await versions.ask('consentDecision', foreignDecisionTypes(), (type) =>
     sendOnce(port, request, type, decision, reason, waitMs)
   )
   return answer

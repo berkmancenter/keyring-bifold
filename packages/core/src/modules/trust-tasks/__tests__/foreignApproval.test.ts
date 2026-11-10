@@ -6,7 +6,7 @@
  */
 import { ROLE_OFFER_PROMPT } from '../approverRole'
 import {
-  FOREIGN_DECISION_TYPES,
+  foreignDecisionTypes,
   approvedAgentOf,
   forgetForeignWaiters,
   sendForeignDecision,
@@ -137,7 +137,7 @@ describe('sending the decision to the asking agent', () => {
     const [envelope] = sent
     expect(envelope).toMatchObject({ from: JORDAN, to: [SAM_AGENT] })
     expect(envelope.body).toMatchObject({
-      type: FOREIGN_DECISION_TYPES[0],
+      type: foreignDecisionTypes()[0],
       issuer: JORDAN,
       recipient: SAM_AGENT,
       payload: { challenge: request.challenge, payloadDigest: DIGEST, decision: 'approve' },
@@ -161,15 +161,15 @@ describe('sending the decision to the asking agent', () => {
 
   test('a version the agent does not serve steps down once; any other refusal is not sent again', async () => {
     const { port, sent } = session((to) =>
-      (to.body as { type: string }).type === FOREIGN_DECISION_TYPES[0]
+      (to.body as { type: string }).type === foreignDecisionTypes()[0]
         ? replyTo(to, SAM_AGENT, {
             type: 'https://trusttasks.org/spec/trust-task-error/0.1',
-            payload: { code: 'unsupportedVersion', details: { servedVersions: [FOREIGN_DECISION_TYPES[1]] } },
+            payload: { code: 'unsupportedVersion', details: { servedVersions: [foreignDecisionTypes()[1]] } },
           })
         : replyTo(to)
     )
     await sendForeignDecision(port, request, 'approve', undefined, 500)
-    expect(sent.map((e) => (e.body as { type: string }).type)).toEqual([...FOREIGN_DECISION_TYPES])
+    expect(sent.map((e) => (e.body as { type: string }).type)).toEqual([...foreignDecisionTypes()])
 
     forgetAllVersions()
     const refused = session((to) =>
