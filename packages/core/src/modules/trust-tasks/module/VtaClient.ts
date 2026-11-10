@@ -163,7 +163,7 @@ export const VTA_TASK = {
   /**
    * Pushed by the agent, never sent: a room watched with `rooms/keys/watch/0.1` changed at its host (vta-service
    * `room_key_watch.rs`, trust-tasks-tf #1040). It names the room, the member, the host and the host's `latestVersion`
-   * and nothing about what changed. Rooms (ROOMS_TASK.keysChanged01) reads it from here.
+   * and nothing about what changed. Its type is matched here and only here; rooms reads the payload (wire.ts parseChanged).
    */
   roomsKeysChanged: 'https://trusttasks.org/spec/rooms/keys/changed/0.1',
   aclSwapKey: 'https://trusttasks.org/spec/acl/swap-key/0.1',

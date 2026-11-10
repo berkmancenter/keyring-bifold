@@ -25,8 +25,6 @@ export const ROOMS_TASK = {
   // as `rooms/keys/changed/0.1` (VTI #2457/#2461/#2463, trust-tasks-tf #1036/#1040; VTA 0.77, VTC 0.24). Declared
   // `Mutating`, as read 0.2 is: a hold of it is kept for a day (consentHolds.ts).
   keysWatch01: `${SPEC}rooms/keys/watch/0.1`,
-  // Pushed by the agent, never sent (VtaClient VTA_TASK.roomsKeysChanged, the same URI).
-  keysChanged01: `${SPEC}rooms/keys/changed/0.1`,
   keysRead: `${SPEC}rooms/keys/read/0.1`,
   membershipsList: `${SPEC}vtc/rooms/memberships/list/0.1`,
   // 0.4 renames a renewal's `renews` to `renewsAt` (VTC 0.16 serves only 0.4; 0.15 serves 0.2 and 0.4); 0.3 adds the
@@ -768,7 +766,10 @@ export function parseWatch(answer: unknown): { member: string; host: string; wat
   }
 }
 
-/** A room's change signal (`rooms/keys/changed/0.1`), or undefined when the payload is not one. */
+/**
+ * A room's change signal (`rooms/keys/changed/0.1`, VtaClient VTA_TASK.roomsKeysChanged, where its type is matched), or
+ * undefined when the payload is not one.
+ */
 export function parseChanged(
   payload: unknown
 ): { roomId: string; member: string; host: string; latestVersion: number } | undefined {

@@ -256,9 +256,10 @@ describe('the phone never sends an offered task', () => {
   // A rooms read, write or watch goes to the agent too, from the rooms backend rather than the client's own list.
   const ROOMS_REAL = join(__dirname, '..', '..', 'rooms', 'real')
   // What the phone asks its own agent: `rooms/keys` and `vault`. A host's and a community's tasks (`rooms/records`,
-  // `rooms/blobs`, `vtc`) never pass the agent's policy gate. `rooms/keys/changed` is pushed by the agent, never sent,
-  // so it is left out here: ROOMS_TASK names it for parsing, and PHONE_SENDS must not.
-  const toAgent = (uri: string) => /\/spec\/(rooms\/keys|vault)\//.test(uri) && !uri.includes('/rooms/keys/changed/')
+  // `rooms/blobs`, `vtc`) never pass the agent's policy gate. The one rooms/keys type the agent pushes rather than takes
+  // (`rooms/keys/changed`) is VtaClient's, not ROOMS_TASK's, so this needs no exception; the last row below keeps it
+  // off the list.
+  const toAgent = (uri: string) => /\/spec\/(rooms\/keys|vault)\//.test(uri)
   const roomsTypes = () => {
     const { ROOMS_TASK } = jest.requireActual('../../rooms/real/wire') as { ROOMS_TASK: Record<string, string> }
     const { UPLOAD_TASK } = jest.requireActual('../../rooms/real/files/upload') as {
