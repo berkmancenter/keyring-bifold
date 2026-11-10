@@ -624,7 +624,11 @@ describe('I want to join a community', () => {
     it('a Check again whose ask for the card fails still reads where the request stands', async () => {
       const tree = await standAt({ kind: 'pending', submission: { ...submission, status: 'approved' } })
       mockReadJoinState.mockClear()
-      mockAskForCard.mockRejectedValueOnce(new Error('the community did not answer'))
+      // Thrown before any promise exists, as an absent or broken ask throws: a rejection alone is caught by a
+      // plain .catch, and would pass without the guard this test is for.
+      mockAskForCard.mockImplementationOnce(() => {
+        throw new Error('the ask could not start')
+      })
       await act(async () => fireEvent.press(tree.getByTestId(testIdWithKey('JoinCheckAgain'))))
       expect(mockReadJoinState).toHaveBeenCalledWith(
         expect.anything(),
