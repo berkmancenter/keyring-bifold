@@ -15,6 +15,18 @@ jest.mock('../../trust-tasks/module/VtiCommunityStore', () => ({ GenericRecordsC
 jest.mock('../../trust-tasks/module/vtiVetting', () => ({ GenericRecordsVettingStore: class {} }))
 jest.mock('../../trust-tasks/module/vtiTsp', () => ({ GenericRecordsTspPeerRevisionStore: class {} }))
 jest.mock('../roomsLeave', () => ({ afterLeavingCommunity: jest.fn() }))
+// AsyncStorage as it is: Promises, and null for a key never written (the shared __mocks__ double answers plain values
+// and undefined, which the consent-hold store would read as unreadable, and so as held).
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const kept = new Map<string, string>()
+  return {
+    __esModule: true,
+    default: {
+      getItem: async (key: string) => kept.get(key) ?? null,
+      setItem: async (key: string, value: string) => void kept.set(key, value),
+    },
+  }
+})
 
 import { createAgentRoomsBackend } from '../real/agentRoomsBackend'
 
@@ -31,5 +43,20 @@ describe('agentTask', () => {
   test("a task with no options keeps the client's own defaults (control)", async () => {
     await createAgentRoomsBackend(agent).agentTask('t', { a: 1 })
     expect(mockTask).toHaveBeenCalledWith('t', { a: 1 }, undefined, undefined, undefined, undefined)
+  })
+})
+
+describe('consentHolds', () => {
+  // The back-off is optional on RoomsBackend and reads as "not held" where it is absent, so losing this wiring would
+  // quietly return a held batch read to stopping for one session only. This row is what notices.
+  const READ02 = 'https://trusttasks.org/spec/rooms/keys/read/0.2'
+  const T0 = Date.parse('2026-11-10T20:00:00Z')
+
+  test('the real backend keeps a hold, and a new backend (the next launch) reads it back', async () => {
+    const first = createAgentRoomsBackend(agent).consentHolds
+    expect(first).toBeDefined()
+    expect(await first?.heldRecently(READ02, T0)).toBe(false)
+    await first?.noteHeld(READ02, T0)
+    expect(await createAgentRoomsBackend(agent).consentHolds?.heldRecently(READ02, T0 + 1)).toBe(true)
   })
 })

@@ -47,6 +47,11 @@ describe('storedConsentHolds', () => {
     expect(await storedConsentHolds(() => A, disk(raw)).heldRecently(READ02, T0)).toBe(true)
   })
 
+  test('a store that answers undefined (no real one does): read as held, never as nothing stored', async () => {
+    const odd = { getItem: async () => undefined as unknown as string | null, setItem: jest.fn(async () => undefined) }
+    expect(await storedConsentHolds(() => A, odd).heldRecently(READ02, T0)).toBe(true)
+  })
+
   test('no agent linked: read as held, and nothing is written', async () => {
     const storage = disk()
     const holds = storedConsentHolds(() => undefined, storage)

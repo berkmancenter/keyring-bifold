@@ -43,6 +43,7 @@ interface Storage {
 
 /** The rows as stored; `undefined` when what is stored can't be read as rows. No row at all is no holds. */
 function parse(raw: string | null): Rows | undefined {
+  // Nothing stored is null, as AsyncStorage answers it. Anything else that is not rows, undefined included, reads as held.
   if (raw === null) return {}
   try {
     const rows: unknown = JSON.parse(raw)
@@ -76,7 +77,13 @@ export function storedConsentHolds(agentId: () => string | undefined, storage: S
       const agent = agentId()
       if (!agent) return
       // What can't be read is replaced: the hold being noted is what matters now, and it reads as held either way.
-      const rows = parse(await storage.getItem(KEY).catch(() => null)) ?? {}
+      // A read that throws at once is caught here as one that rejects.
+      const rows =
+        parse(
+          await Promise.resolve()
+            .then(() => storage.getItem(KEY))
+            .catch(() => null)
+        ) ?? {}
       const kept: Rows = {}
       for (const [a, byType] of Object.entries(rows)) {
         const live = Object.entries(byType).filter(

@@ -1014,6 +1014,8 @@ export class AgentRoomsService implements RoomsService {
         // Not being a member of this room says nothing about the next room's batch.
         if (refusalCode(e) !== 'notAMember') this.batchRefused = true
         // Held: the agent has already asked its approvers. Kept, so neither this session nor the next asks again today.
+        // Best effort: a write that fails leaves this session stopped (batchRefused) but the next launch unwarned, which
+        // is still better than failing the reads the person is waiting on. The kept row is what protects the approver.
         const held = consentPendingOf(e) !== undefined
         if (held) await this.backend.consentHolds?.noteHeld(type, this.now()).catch(() => undefined)
         this.backend.warn(
