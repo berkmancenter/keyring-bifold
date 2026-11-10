@@ -203,6 +203,7 @@
     "ApproverPickSend": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverSteppedDown": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverWait": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
+    "ApproverWaitCode": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitOpen": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "AskMe": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeDetails": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
@@ -2257,6 +2258,9 @@
     },
     {
       "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.approved"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.code"
     },
     {
       "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.notGiven"
