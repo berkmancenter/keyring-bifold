@@ -59,6 +59,14 @@ const ApproverWaitNote: React.FC = () => {
     const timer = setTimeout(() => setTick((n) => n + 1), left)
     return () => clearTimeout(timer)
   }, [granted])
+  // The same for "didn't approve": its own window, its own clock.
+  useEffect(() => {
+    if (!notGiven) return
+    const left = notGiven.at + NOT_GIVEN_SHOWN_MS - Date.now()
+    if (left <= 0) return
+    const timer = setTimeout(() => setTick((n) => n + 1), left)
+    return () => clearTimeout(timer)
+  }, [notGiven])
   const recent = granted && Date.now() - granted.at < APPROVED_SHOWN_MS ? granted : undefined
   const refused = notGiven && Date.now() - notGiven.at < NOT_GIVEN_SHOWN_MS ? notGiven : undefined
   // The newest of the two, when both are recent: a later hold clears both (vtaAgent).

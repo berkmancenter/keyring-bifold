@@ -684,6 +684,27 @@ describe('who a held task waits on', () => {
     expect(tree.queryByTestId(id(ApproverWaitNoteIds.waiting))).toBeNull()
   })
 
+  test('"didn\'t approve" clears on its own, on the note already on screen', async () => {
+    jest.useFakeTimers({ now: new Date('2026-11-10T19:00:00Z') })
+    try {
+      agentState({ awaitingConsentFor: undefined, consentNotGiven: { taskType: PERSONA_MINT, at: Date.now() } })
+      jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
+      const tree = await show(<ApproverWaitNote />)
+      expect(tree.getByTestId(id(ApproverWaitNoteIds.notGiven))).toBeTruthy()
+      // Only the clock moves; the mounted note must clear itself.
+      await act(async () => {
+        jest.advanceTimersByTime(NOT_GIVEN_SHOWN_MS - 1000)
+      })
+      expect(tree.getByTestId(id(ApproverWaitNoteIds.notGiven))).toBeTruthy()
+      await act(async () => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(tree.queryByTestId(id(ApproverWaitNoteIds.notGiven))).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test('the newer of a yes and a not-given is the one shown; an old not-given is not shown', async () => {
     jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
     agentState({
