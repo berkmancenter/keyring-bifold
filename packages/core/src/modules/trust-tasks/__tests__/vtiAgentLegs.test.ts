@@ -438,6 +438,46 @@ describe('what a community is asked, and how', () => {
     expect(await vtiAgent.ask(community, SUBMIT, {}, 200)).toBeUndefined()
   })
 
+  // IN-617: three problem-reports reached a tester's report as a bare type, and nothing said what they were about.
+  const LONG_DID = 'did:webvh:QmLongScidValue1234567890abcdef:host.example:someone'
+  const warned = () => logger.warn.mock.calls.map((call) => String(call[0]))
+
+  it("says a problem-report's code, words and thread, and the ask it answers, with no whole DID", async () => {
+    logger.warn.mockClear()
+    let thread = ''
+    await askOverDidcomm(SUBMIT, (sent) => {
+      thread = String((sent as { id?: string }).id)
+      return {
+        type: 'https://didcomm.org/report-problem/2.0/problem-report',
+        from: community,
+        thid: thread,
+        body: { code: 'e.p.msg.bad-request', comment: `unknown sender  ${LONG_DID}`, args: [LONG_DID] },
+      }
+    })
+    expect(thread).not.toBe('')
+    expect(warned()).toContain(
+      `vtiAgent: ${community} sent a problem-report on vtc/join-requests/submit: e.p.msg.bad-request — unknown sender did:webvh:QmLongScidValu… (thread ${thread})`
+    )
+    expect(warned().join('\n')).not.toContain(LONG_DID)
+  })
+
+  it('says a problem-report that answers no ask in flight, which the inbox then keeps none of', async () => {
+    mockTspVia[community] = 'did:webvh:their-mediator'
+    await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:stray-report') })
+    logger.warn.mockClear()
+    await Promise.resolve(
+      mockSessions.at(-1)!.onMessage({
+        type: 'https://didcomm.org/report-problem/2.0/problem-report',
+        from: community,
+        thid: 'urn:uuid:not-this-request',
+        body: { code: 'e.p.req.not-found' },
+      })
+    )
+    expect(warned()).toContain(
+      `vtiAgent: ${community} sent a problem-report on no request in flight: e.p.req.not-found (thread urn:uuid:not-this-request)`
+    )
+  })
+
   it('carries the same signed document over TSP', async () => {
     const same = 'did:webvh:c:tsp-signed'
     mockTspVia[same] = 'did:peer:lab'
