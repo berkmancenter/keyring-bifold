@@ -862,6 +862,7 @@ describe('a record the agent cannot open', () => {
 
   it.each([
     ['another refusal', refused('notFound')],
+    ['another refusal carrying a reason', Object.assign(refused('notFound'), { details: { reason: 'removed' } })],
     ['unknownEpoch with a reason Keyring does not know', unknownEpoch('somethingNew')],
     ['unknownEpoch with no details', refused('unknownEpoch')],
     ['a failure that is not a refusal', new Error('no answer')],
