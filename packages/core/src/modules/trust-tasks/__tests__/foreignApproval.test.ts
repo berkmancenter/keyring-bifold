@@ -216,7 +216,10 @@ describe("the controller, on Jordan's phone", () => {
     },
   })
 
-  function controller(answered?: 'accepted' | 'declined') {
+  function controller(
+    answered?: 'accepted' | 'declined',
+    answer: (sent: Record<string, unknown>) => Record<string, unknown> | undefined = (to) => replyTo(to)
+  ) {
     const checked: string[] = []
     const vta = new VtaAgentController()
     const confirmOwner = jest.fn(async () => ({ ok: true as const }))
@@ -235,7 +238,8 @@ describe("the controller, on Jordan's phone", () => {
       sendTo: jest.fn(async (_peer: string, plaintext: Record<string, unknown>) => {
         sent.push(plaintext)
         // Sam's agent's reply reaches this phone the way any message does: through the session's inbound.
-        setImmediate(() => internals.inbound(replyTo(plaintext)))
+        const reply = answer(plaintext)
+        if (reply) setImmediate(() => internals.inbound(reply))
       }),
     }
     const internals = vta as unknown as {
@@ -290,6 +294,25 @@ describe("the controller, on Jordan's phone", () => {
     expect(sent[0].body).toMatchObject({ recipient: SAM_AGENT, payload: { decision: 'approve' } })
     expect(vta.getState().approvals[0]).toMatchObject({ status: 'approved' })
     expect(vta.getState().activity.length).toBe(before)
+  })
+
+  test("past the deadline after a step-down, the card names Sam's agent, not Jordan's own (control: vtaDecide.test)", async () => {
+    // The first version is refused at once, so the second waits out the whole deadline and the outer one fires first.
+    const { vta, internals, sent } = controller('accepted', (to) =>
+      (to.body as { type: string }).type === foreignDecisionTypes()[0]
+        ? replyTo(to, SAM_AGENT, {
+            type: 'https://trusttasks.org/spec/trust-task-error/0.1',
+            payload: { code: 'unsupportedVersion', details: { servedVersions: [foreignDecisionTypes()[1]] } },
+          })
+        : undefined
+    )
+    internals.inbound(consentRequest(SAM_AGENT))
+    await flush()
+    await flush()
+    await expect(vta.decide('req-1', 'deny')).rejects.toThrow('the asking agent did not take the decision within 0.5 s')
+    expect(sent).toHaveLength(2)
+    expect(vta.getState().approvals[0]).toMatchObject({ status: 'failed' })
+    expect(String(vta.getState().approvals[0].error)).not.toMatch(/VTA/)
   })
 
   test("Sam's agent's reply is that wait's, never a request (it is not listed)", async () => {

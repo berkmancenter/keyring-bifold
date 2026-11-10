@@ -3623,7 +3623,8 @@ export class VtaAgentController {
           : Promise.reject(new DeviceActionRefused('notLinked'))
         : client.decideConsent(approval, decision, reason)
       if (!(await withDeadline(sending, ms))) {
-        throw new Error(`the VTA did not take the decision within ${ms / 1000} s`)
+        // Name the agent the decision went to: for someone else's, that is the asking agent, never this phone's own.
+        throw new Error(`${other ? 'the asking agent' : 'the VTA'} did not take the decision within ${ms / 1000} s`)
       }
       this.update(id, { status: decision === 'approve' ? 'approved' : 'denied' })
       // What this phone's own agent did; a decision for someone else's agent is not that.
