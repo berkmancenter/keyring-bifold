@@ -330,7 +330,7 @@ describe('My devices and the heartbeat, through the module, on a v0.65.0 agent',
     const { asked, port: p } = port(V0_65)
     await expect(listAgentDevices(p)).resolves.toEqual(expect.any(Array))
     expect(short(asked).sort()).toEqual(
-      ['acl/list/0.3', 'acl/list/0.2', 'acl/list/0.1', 'device/list/0.3', 'device/list/0.2'].sort()
+      ['acl/list/0.4', 'acl/list/0.3', 'acl/list/0.2', 'acl/list/0.1', 'device/list/0.3', 'device/list/0.2'].sort()
     )
   })
 
