@@ -14,7 +14,7 @@
  * @module trust-tasks/module/vtaOwner
  */
 
-import { ConsentNotGiven, consentPendingOf, refusedAsNotOnAcl } from './VtaClient'
+import { consentPendingOf, refusedAsNotOnAcl } from './VtaClient'
 import { StepUpDeclined } from './stepUp'
 import { VtiRefusal } from './vtiAgent'
 
@@ -205,7 +205,9 @@ export function deviceRefusalOf(error: unknown): DeviceActionRefused {
   // The two endings of one wait: still waiting, or the wait ended with no yes. Before the generic VtiRefusal cases,
   // which would read the second as the agent's own refusal and show its code.
   if (consentPendingOf(error)) return refusal('awaitingApproval')
-  if (error instanceof ConsentNotGiven) return refusal('notApproved')
+  // By its code, not its class: suites that stub VtaClient with a hand-written export list (and a second module
+  // instance of it) would defeat instanceof; VtiRefusal comes from vtiAgent, which they don't stub.
+  if (error instanceof VtiRefusal && error.code === 'consentNotGiven') return refusal('notApproved')
   if (!(error instanceof VtiRefusal)) return refusal(NO_ANSWER.test(message) ? 'noAnswer' : 'failed')
   const details = (error.details ?? {}) as { reason?: unknown }
   if (message === STEP_UP_REQUIRED || details.reason === STEP_UP_REQUIRED) return refusal('stepUpRequired')
