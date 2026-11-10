@@ -423,7 +423,10 @@ export interface CardAsk {
   retryAfter?: string
 }
 
-export type AskForCardOptions = Pick<ReadJoinStateOptions, 'mediatorDid' | 'communityStore' | 'identityStore' | 'status'>
+export type AskForCardOptions = Pick<
+  ReadJoinStateOptions,
+  'mediatorDid' | 'communityStore' | 'identityStore' | 'status'
+>
 
 /**
  * Check again, for a request the community approved whose card never came.
@@ -456,7 +459,8 @@ export async function askForCardIfOwed(
   })
   if (here.kind !== 'pending' || here.submission.status !== 'approved') return { polled: false }
   const poll = options.status ?? statusPollOf(agent, options)
-  const log = (line: string) => agent.config?.logger?.warn?.(`[VTI] join request at ${didPrefix(communityDid)}: ${line}`)
+  const log = (line: string) =>
+    agent.config?.logger?.warn?.(`[VTI] join request at ${didPrefix(communityDid)}: ${line}`)
   const first = await poll(communityDid, here.submission.requestId)
   // The community holds no such request: Check again's own read says so.
   if (!first) return { polled: false }

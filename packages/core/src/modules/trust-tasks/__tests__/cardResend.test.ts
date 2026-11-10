@@ -1,7 +1,7 @@
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 
 import type { JoinSubmission, VtiCommunityStore, VtiMembership } from '../module/VtiCommunityStore'
-import type { VtiIdentityStore } from '../module/VtiIdentityStore'
+import type { VtiIdentityStore, VtiPersona } from '../module/VtiIdentityStore'
 import { vtiAgent, type JoinRequestStatus } from '../module/vtiAgent'
 import { askForCardIfOwed, readJoinState, type StatusPoll } from '../module/vtiJoin'
 import { cardAskKey } from '../screens/cardAskKey'
@@ -46,15 +46,19 @@ const card: VtiMembership = {
 
 function stores(init: { submission?: JoinSubmission; membership?: VtiMembership } = {}) {
   let submission = init.submission
-  const communityStore = {
-    getMembership: jest.fn(async () => init.membership),
-    getSubmission: jest.fn(async () => submission),
-    saveSubmission: jest.fn(async (s: JoinSubmission) => void (submission = s)),
-  } as unknown as VtiCommunityStore
-  const identityStore = {
-    getPersona: jest.fn(async () => ({ did: PERSONA, communityDid: COMMUNITY })),
-  } as unknown as VtiIdentityStore
-  return { communityStore, identityStore, current: () => submission }
+  // Only what these reads call: the rest of each store is never reached.
+  const communityStore: Partial<VtiCommunityStore> = {
+    getMembership: async () => init.membership,
+    getSubmission: async () => submission,
+    saveSubmission: async (s: JoinSubmission) => void (submission = s),
+  }
+  const persona = { did: PERSONA, communityDid: COMMUNITY } as VtiPersona
+  const identityStore: Partial<VtiIdentityStore> = { getPersona: async () => persona }
+  return {
+    communityStore: communityStore as VtiCommunityStore,
+    identityStore: identityStore as VtiIdentityStore,
+    current: () => submission,
+  }
 }
 
 /** A status poll answering each ask from `answers` in turn, with what each was asked recorded. */
@@ -74,7 +78,7 @@ describe('the status poll, as sent and as read', () => {
     jest.spyOn(vtiAgent, 'ask').mockResolvedValue({
       type: `${STATUS}#response`,
       body: { payload },
-    } as unknown as DidCommV2PlaintextMessage)
+    } as DidCommV2PlaintextMessage)
   afterEach(() => jest.restoreAllMocks())
 
   it('carries resendCredentials only when asked', async () => {
@@ -123,7 +127,7 @@ describe('Check again on an approved request whose card never came', () => {
     expect(await askForCardIfOwed(agent, COMMUNITY, { ...s, status })).toEqual({ polled: true, resend: 'queued' })
     expect(asked).toEqual([{ requestId: 'r-1' }, { requestId: 'r-1', resendCredentials: true }])
     expect(warned()).toEqual([
-      '[VTI] join request at did:webvh:QmCommunityScid…: approved, credentialsDelivered false; asked for the card again: credentialResend queued',
+      '[VTI] join request at did:webvh:QmCommunitySci…: approved, credentialsDelivered false; asked for the card again: credentialResend queued',
     ])
     expect(warned().join('\n')).not.toContain(COMMUNITY)
   })
@@ -134,7 +138,7 @@ describe('Check again on an approved request whose card never came', () => {
     expect(await askForCardIfOwed(agent, COMMUNITY, { ...s, status })).toEqual({ polled: true })
     expect(asked).toEqual([{ requestId: 'r-1' }])
     expect(warned()).toEqual([
-      '[VTI] join request at did:webvh:QmCommunityScid…: approved, credentialsDelivered absent; the card was not asked for again',
+      '[VTI] join request at did:webvh:QmCommunitySci…: approved, credentialsDelivered absent; the card was not asked for again',
     ])
   })
 
