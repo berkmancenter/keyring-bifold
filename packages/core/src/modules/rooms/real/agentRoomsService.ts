@@ -1030,10 +1030,15 @@ export class AgentRoomsService implements RoomsService {
         for (const [key, answer] of await this.readEach(room, roomId, left)) settled.set(key, answer)
         return settled
       }
+      // An answer with no `results` reads as no answer for any key, so say so, as every other branch here does: the
+      // keys' own failures ("could not be read") would otherwise be all a report shows.
+      if (!answers)
+        this.backend.warn(`rooms: ${logRef(roomId)} ${type} answered with no results: ${asked.length} keys not read`)
       const notReached: string[] = []
       await Promise.all(
         asked.map(async (key) => {
           const answer = answers?.get(key)
+          // Left unsettled: startBatch fails this key's read ("could not be read"), as for a key the answer leaves out.
           if (!answer) return
           if (!('code' in answer)) {
             settled.set(key, await this.kept(roomId, answer, drops))
