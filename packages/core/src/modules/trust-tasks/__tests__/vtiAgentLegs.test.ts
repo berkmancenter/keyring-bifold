@@ -443,7 +443,14 @@ describe('what a community is asked, and how', () => {
   /** What reaches the release log (`releaseWarn`, console.warn): a tester's report, whatever logger the agent has. */
   const released = () => {
     const spy = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
-    return { lines: () => spy.mock.calls.map((call) => String(call[0])), restore: () => spy.mockRestore() }
+    // The lines are read before the spy is restored: restoring it clears what it recorded.
+    return {
+      stop: (): string[] => {
+        const lines = spy.mock.calls.map((call) => String(call[0]))
+        spy.mockRestore()
+        return lines
+      },
+    }
   }
 
   it("says a problem-report's code, words and thread, and the ask it answers, with no whole DID", async () => {
@@ -458,12 +465,12 @@ describe('what a community is asked, and how', () => {
         body: { code: 'e.p.msg.bad-request', comment: `unknown sender  ${LONG_DID}`, args: [LONG_DID] },
       }
     })
-    log.restore()
+    const lines = log.stop()
     expect(thread).not.toBe('')
-    expect(log.lines()).toContain(
+    expect(lines).toContain(
       `vtiAgent: ${community} sent a problem-report on vtc/join-requests/submit: e.p.msg.bad-request — unknown sender did:webvh:QmLongScidValu… (thread ${thread})`
     )
-    expect(log.lines().join('\n')).not.toContain(LONG_DID)
+    expect(lines.join('\n')).not.toContain(LONG_DID)
   })
 
   it('says a problem-report that answers no ask in flight, which the inbox then keeps none of', async () => {
@@ -478,8 +485,7 @@ describe('what a community is asked, and how', () => {
         body: { code: 'e.p.req.not-found' },
       })
     )
-    log.restore()
-    expect(log.lines()).toContain(
+    expect(log.stop()).toContain(
       `vtiAgent: ${community} sent a problem-report on no request in flight: e.p.req.not-found (thread urn:uuid:not-this-request)`
     )
   })
