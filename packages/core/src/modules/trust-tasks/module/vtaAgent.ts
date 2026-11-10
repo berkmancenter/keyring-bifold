@@ -30,9 +30,17 @@ import { classifyDid, type DidResolverAgent } from './classifyDid'
 import { VTI_PERSONA_KEYS_HELD_EVENT } from './communityChanged'
 import { setCurrentAgentDid } from './currentAgent'
 import { checkConsentRequest, consentMatchCode, consentOutcome, type ConsentOutcome } from './consentCheck'
+import { approvedAgentOf, sendForeignDecision, takeForeignReply } from './foreignApproval'
 import type { StepUpRequest } from './stepUp'
 import { releaseWarn } from './releaseLog'
 import { approvalsView, withPhoneRule, type ApprovalsModel, type ApprovalsView } from './approvalRules'
+import {
+  TrustedRuleRefused,
+  trustedApproversView,
+  withTrustedApprovers,
+  type TrustedApproversView,
+  type TrustedKey,
+} from './trustedApprovers'
 import { VtiRefusal, vtiAgent } from './vtiAgent'
 import {
   ManagerKeyUnresolved,
@@ -112,6 +120,13 @@ export interface ApprovalRulesState {
   canChange: boolean
 }
 
+/** Who approves for this person, as the agent holds it (trusted-approver plan §4). */
+export interface TrustedApproversState {
+  view: TrustedApproversView
+  /** The row's version, as read or as written. */
+  version: number
+}
+
 export interface VtiApproval extends VtaConsentRequest {
   /** The request document's id. */
   id: string
@@ -127,6 +142,11 @@ export interface VtiApproval extends VtaConsentRequest {
    * not. Log-only for now — a request that fails is still listed.
    */
   requestCheck?: 'verified' | string
+  /**
+   * Set when the request is from another person's agent, one this phone agreed to approve for (foreignApproval.ts):
+   * that agent, and the person who asked. The decision goes to that agent, not to this phone's own.
+   */
+  forAgent?: { agentDid: string; asker: string }
 }
 
 export interface VtaAgentState {
@@ -136,6 +156,11 @@ export interface VtaAgentState {
   approvals: VtiApproval[]
   /** A task of ours the VTA is holding for someone else's consent. */
   awaitingConsentFor?: string
+  /**
+   * The last task of ours the agent said someone approved (its `task-consent/granted` notice), and when: the hold
+   * {@link awaitingConsentFor} named, released. Only a yes is told this way; a no or a lapse is not told at all.
+   */
+  consentGranted?: { taskType: string; at: number }
   /**
    * The agent holds this phone's own `device/set-wake` for consent: an
    * approval rule covers the notification setting, so switching notifications
@@ -292,6 +317,8 @@ export interface VtaAgentDeps {
   ) => Pick<VtaClient, 'connect' | 'disconnect' | 'task'>
   /** How long a key fetch waits for the current agent's session (KEY_FETCH_WAIT_MS); shorter in tests. */
   keyFetchWaitMs?: number
+  /** For tests: the check a consent request passes before it is listed (checkConsentRequest). */
+  checkConsentRequest?: typeof checkConsentRequest
   /** The client a session with a linked agent that is not the current one opens (withAgentSession). */
   agentClient?: (agent: Agent, vtaDid: string, store: VtiIdentityStore) => VtaClient
   /** The client a key fetch opens for a linked agent that is not the current one (fetchKeyCopy). */
@@ -836,7 +863,7 @@ export class VtaAgentController {
         }
       },
       onInbound: (plaintext) => this.inbound(plaintext),
-      onConsentPending: ({ taskType }) => this.set({ awaitingConsentFor: taskType }),
+      onConsentPending: ({ taskType }) => this.set({ awaitingConsentFor: taskType, consentGranted: undefined }),
       onStepUp: (request, context) => this.askStepUp(request, context),
       onRepliesStalled: (stalled) => {
         if (this.current?.client === client) this.set({ repliesStalled: stalled })
@@ -1031,6 +1058,7 @@ export class VtaAgentController {
       managerDid: undefined,
       approvals: [],
       awaitingConsentFor: undefined,
+      consentGranted: undefined,
       error: undefined,
       reconnectGaveUp: false,
       ownsAgent: false,
@@ -1186,6 +1214,8 @@ export class VtaAgentController {
   /** One look: the requests seen, or undefined when the agent could not be reached. */
   private async lookAt(agent: Agent, vtaDid: string): Promise<VtiApproval[] | undefined> {
     const seen: VtiApproval[] = []
+    // Each request is checked before it is kept; the look waits for every check.
+    const checks: Promise<void>[] = []
     // Time since the last message, counted in the look's own sleeps: not the
     // clock, which a phone (or a test) can move under it.
     let sinceLast = 0
@@ -1197,7 +1227,20 @@ export class VtaAgentController {
         onInbound: (plaintext: DidCommV2PlaintextMessage) => {
           sinceLast = 0
           const kept = keepManagerMessage(plaintext, this.now())
-          if (kept && 'approval' in kept && !seen.some((a) => a.id === kept.approval.id)) seen.push(kept.approval)
+          if (!kept || !('approval' in kept)) return
+          const { approval } = kept
+          const approver = (client as Partial<Pick<VtaClient, 'managerDid'>>).managerDid
+          checks.push(
+            this.passesCheck(
+              agent,
+              vtaDid,
+              approver,
+              approval.id,
+              plaintext.body as unknown as Record<string, unknown>
+            ).then((ok) => {
+              if (ok && !seen.some((a) => a.id === approval.id)) seen.push({ ...approval, requestCheck: 'verified' })
+            })
+          )
         },
       }
     )
@@ -1210,6 +1253,7 @@ export class VtaAgentController {
         await new Promise((resolve) => setTimeout(resolve, step))
         sinceLast += step
       }
+      await Promise.all(checks)
       return seen
     } catch {
       return undefined
@@ -1450,6 +1494,7 @@ export class VtaAgentController {
       managerDid: undefined,
       approvals: [],
       awaitingConsentFor: undefined,
+      consentGranted: undefined,
       wakeBlockedByRule: undefined,
       error: undefined,
       ownsAgent: false,
@@ -2706,6 +2751,80 @@ export class VtaAgentController {
     })
   }
 
+  /**
+   * The DID this phone approves as when it says yes to being someone's
+   * approver: its manager DID on its own linked agent, where that agent's
+   * consent requests reach it. Signs in if it must. Refuses with
+   * {@link DeviceActionRefused} `notLinked` when there is none.
+   */
+  async approverDid(agent: Agent): Promise<string> {
+    const client = await this.signedIn(agent, this.linkedAgent())
+    if (!client.managerDid) throw new DeviceActionRefused('notLinked')
+    return client.managerDid
+  }
+
+  /**
+   * Saying yes to being someone's approver (the offer sheet's Accept): an owner act, so Face ID, a fingerprint or the
+   * passcode first, with `reason` (already in the person's language) on the prompt; then the DID this phone approves
+   * as. Not confirmed, it throws {@link OwnerNotConfirmed} before anything is read or sent.
+   */
+  async acceptAsApprover(agent: Agent, reason: string): Promise<string> {
+    await this.confirmOwner(reason)
+    return this.approverDid(agent)
+  }
+
+  /**
+   * Who approves for this person, read from the agent's approvals row
+   * (trustedApprovers.ts). Signs in if it must. Refuses with
+   * {@link DeviceActionRefused}.
+   */
+  async trustedApprovers(agent: Agent): Promise<TrustedApproversState> {
+    const client = await this.signedIn(agent, this.linkedAgent())
+    const model = await client.readApprovals().catch((error: unknown) => {
+      throw this.refused(error)
+    })
+    return { view: trustedApproversView(model), version: model.version }
+  }
+
+  /**
+   * Set who approves for this person and for what (trusted-approver plan §4
+   * step 3), on the row as the agent holds it now: read, change only the
+   * trusted rules, write against the version read, and on a clash read and
+   * apply once more, as {@link setApprovalRule} does. Empty `approvers` or
+   * `keys` removes them. Asks the person to confirm first; nothing is sent
+   * without it. If the agent holds rule changes for the approver's yes, the
+   * write waits for it like any held task.
+   */
+  async setTrustedApprovers(
+    agent: Agent,
+    approvers: readonly string[],
+    keys: readonly TrustedKey[]
+  ): Promise<TrustedApproversState> {
+    const vtaDid = this.linkedAgent()
+    await this.confirmOwner('Change who approves for you')
+    releaseWarn('[VTI] trusted approvers: owner confirmed; writing the rules')
+    return this.withinOwnerDeadline(async () => {
+      const client = await this.signedIn(agent, vtaDid)
+      const served = await client.supportedTypes()
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const model = await client.readApprovals()
+          if (model.unreadable)
+            throw new DeviceActionRefused('failed', 'the approval rules hold something Keyring cannot read')
+          const next = withTrustedApprovers(model, approvers, keys, served)
+          const version = await client.writeApprovals(next, model.version)
+          releaseWarn(`[VTI] trusted approvers: rules written, version ${model.version} → ${version}`)
+          return { view: trustedApproversView(next), version }
+        } catch (error) {
+          if (error instanceof TrustedRuleRefused) throw new DeviceActionRefused('failed', error.message)
+          const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
+          if (details?.reason === 'conflict' && attempt === 0) continue
+          throw this.refused(error)
+        }
+      }
+    })
+  }
+
   /** "Send me a test request" ({@link VtaClient.sendTestRequest}). Signs in if it must. */
   async sendTestRequest(agent: Agent): Promise<Awaited<ReturnType<VtaClient['sendTestRequest']>>> {
     const client = await this.signedIn(agent, this.linkedAgent())
@@ -3408,38 +3527,87 @@ export class VtaAgentController {
   }
 
   private inbound(plaintext: DidCommV2PlaintextMessage) {
+    // The answer to a decision sent to another person's agent is that wait's, never a request.
+    if (takeForeignReply(plaintext)) return
     const kept = keepManagerMessage(plaintext, Date.now())
     if (kept && 'approval' in kept) {
       const { approval } = kept
       if (this.state.approvals.some((a) => a.id === approval.id)) return
-      this.set({ approvals: [approval, ...this.state.approvals] })
-      void this.checkRequest(approval.id, plaintext.body as unknown as Record<string, unknown>)
-      // Asked by a device this phone has not seen named: read the list once,
-      // in the background, so the card can say which device asked.
-      const agent = this.agent
-      if (agent && !this.state.knownDevices?.[approval.requester]) void this.agentDevices(agent).catch(() => undefined)
+      const current = this.current
+      if (!current) return
+      void this.listIfChecked(current, approval, plaintext.body as unknown as Record<string, unknown>)
       return
     }
-    if (kept && 'granted' in kept) this.set({ awaitingConsentFor: undefined })
+    if (kept && 'granted' in kept) {
+      const taskType = this.state.awaitingConsentFor
+      this.set({ awaitingConsentFor: undefined, ...(taskType ? { consentGranted: { taskType, at: Date.now() } } : {}) })
+    }
   }
 
-  /** Check a consent request against the linked agent and this phone, and log the verdict (log-only). */
-  private async checkRequest(id: string, doc: Record<string, unknown>) {
-    const current = this.current
-    const approver = current?.client.managerDid
-    if (!current || !approver) return
-    const log = current.agent.config?.logger
-    const verdict = await checkConsentRequest(current.agent, doc, { vtaDid: current.vtaDid, approver }).catch(() => ({
+  /**
+   * List a consent request only once it passes the check, and only on the
+   * agent it arrived through: the session may have moved on while it ran.
+   */
+  private async listIfChecked(
+    current: { client: VtaClient; vtaDid: string; store: VtiIdentityStore; agent: Agent },
+    approval: VtiApproval,
+    doc: Record<string, unknown>
+  ) {
+    // From another person's agent that this phone approves for: checked against that agent, as its issuer. Any other
+    // request is checked against the agent it arrived through, as before.
+    const other = await approvedAgentOf(current.agent, doc).catch(() => undefined)
+    const issuer = other?.agentDid ?? current.vtaDid
+    const ok = await this.passesCheck(current.agent, issuer, current.client.managerDid, approval.id, doc)
+    if (!ok || this.current?.vtaDid !== current.vtaDid) return
+    if (this.state.approvals.some((a) => a.id === approval.id)) return
+    const listed: VtiApproval = {
+      ...approval,
+      requestCheck: 'verified',
+      ...(other ? { forAgent: { agentDid: other.agentDid, asker: other.asker } } : {}),
+    }
+    this.set({ approvals: [listed, ...this.state.approvals] })
+    if (other) {
+      releaseWarn(`[VTI] approval asked by ${didPrefix(other.agentDid)}, an agent this phone approves for`)
+      return
+    }
+    // Asked by a device this phone has not seen named: read the list once,
+    // in the background, so the card can say which device asked.
+    const agent = this.agent
+    if (agent && !this.state.knownDevices?.[approval.requester]) void this.agentDevices(agent).catch(() => undefined)
+  }
+
+  /**
+   * The check a consent request passes before a person sees it, as
+   * `ConsentRequest::verify` does: its proof, its signer is its issuer, that
+   * issuer is the agent it arrived through, it is addressed to this phone, and
+   * it has not expired (consentCheck.ts). A request that does not pass is not
+   * shown (pnm_cnm_subtask §4.2); the reason is in the log.
+   */
+  private async passesCheck(
+    agent: Agent,
+    vtaDid: string,
+    approver: string | undefined,
+    id: string,
+    doc: Record<string, unknown>
+  ): Promise<boolean> {
+    const log = agent.config?.logger
+    if (!approver) {
+      log?.warn?.(
+        `[TrustTasks:VtaAgent] consent request ${id} not shown: no identity at ${didPrefix(vtaDid)} to check it against`
+      )
+      return false
+    }
+    const check = this.deps.checkConsentRequest ?? checkConsentRequest
+    const verdict = await check(agent, doc, { vtaDid, approver }).catch(() => ({
       ok: false as const,
       reason: 'proof' as const,
     }))
-    const requestCheck = verdict.ok ? 'verified' : verdict.reason
-    if (verdict.ok) log?.info?.(`[TrustTasks:VtaAgent] consent request ${id} verified`)
-    else
-      log?.warn?.(
-        `[TrustTasks:VtaAgent] consent request ${id} did not pass the check (${verdict.reason}); listed anyway`
-      )
-    this.update(id, { requestCheck })
+    if (verdict.ok) {
+      log?.info?.(`[TrustTasks:VtaAgent] consent request ${id} verified`)
+      return true
+    }
+    log?.warn?.(`[TrustTasks:VtaAgent] consent request ${id} did not pass the check (${verdict.reason}); not shown`)
+    return false
   }
 
   /**
@@ -3460,12 +3628,27 @@ export class VtaAgentController {
     if (decision === 'approve') await this.confirmOwner(APPROVE_REASON)
     try {
       const ms = this.deps.decisionDeadlineMs ?? DECISION_DEADLINE_MS
-      const sending = client.decideConsent(approval, decision, reason)
+      const other = approval.forAgent
+      const managerDid = client.managerDid
+      // Asked by another person's agent: the decision goes to that agent (foreignApproval.ts), as this phone.
+      const sending = other
+        ? managerDid && this.current
+          ? sendForeignDecision(
+              { agent: this.current.agent, managerDid, sendTo: (peer, plaintext) => client.sendTo(peer, plaintext) },
+              { issuer: other.agentDid, challenge: approval.challenge, payloadDigest: approval.payloadDigest },
+              decision,
+              reason,
+              ms
+            )
+          : Promise.reject(new DeviceActionRefused('notLinked'))
+        : client.decideConsent(approval, decision, reason)
       if (!(await withDeadline(sending, ms))) {
-        throw new Error(`the VTA did not take the decision within ${ms / 1000} s`)
+        // Name the agent the decision went to: for someone else's, that is the asking agent, never this phone's own.
+        throw new Error(`${other ? 'the asking agent' : 'the VTA'} did not take the decision within ${ms / 1000} s`)
       }
       this.update(id, { status: decision === 'approve' ? 'approved' : 'denied' })
-      this.note(decision === 'approve' ? 'approved' : 'denied')
+      // What this phone's own agent did; a decision for someone else's agent is not that.
+      if (!other) this.note(decision === 'approve' ? 'approved' : 'denied')
     } catch (error) {
       this.update(id, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
       throw error
