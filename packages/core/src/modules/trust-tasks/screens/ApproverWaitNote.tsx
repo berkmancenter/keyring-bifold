@@ -8,7 +8,7 @@
  * that action (approverRole.ts, `approversWaitedOn`); a hold by some other rule shows nothing here.
  *
  * A no, or a request that lapsed, is not told to the asking phone (VTI task-consent.md, "Pending vs denied"): the
- * only sign is that the question changed, so the phone stops asking (VtaClient's ConsentNotGiven) and this says the
+ * only sign is that the question changed, so the phone stops asking (VtaClient's consentNotGiven refusal) and this says the
  * approver didn't approve (frame 6b). It never says "said no": a no and a lapse look the same from here.
  *
  * Shown only while the trusted-approvers switch is on.

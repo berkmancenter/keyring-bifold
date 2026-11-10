@@ -163,7 +163,7 @@ export interface VtaAgentState {
   consentGranted?: { taskType: string; at: number }
   /**
    * The last task of ours whose hold ended without consent, and when: the question {@link awaitingConsentFor} named
-   * was answered no or lapsed (VtaClient's ConsentNotGiven). The phone cannot tell which, and the task was not run.
+   * was answered no or lapsed (VtaClient's consentNotGiven refusal). The phone cannot tell which, and the task was not run.
    */
   consentNotGiven?: { taskType: string; at: number }
   /**

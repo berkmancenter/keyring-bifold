@@ -6,7 +6,7 @@
  * does (vta-cli-common consent.rs, `ConsentOutcome::Resolved`). Without a challenge on both, the two cannot be told
  * apart, and the wait goes on as before.
  */
-import { ConsentNotGiven, VtaClient, consentPendingOf } from '../module/VtaClient'
+import { VtaClient, consentNotGiven, consentPendingOf, isConsentNotGiven } from '../module/VtaClient'
 import { VtaAgentController } from '../module/vtaAgent'
 import { deviceRefusalOf } from '../module/vtaOwner'
 import { VtiRefusal } from '../module/vtiAgent'
@@ -67,9 +67,9 @@ afterEach(() => {
 describe('a held task whose question changed', () => {
   it('stops at the first new challenge with ConsentNotGiven, and says so once', async () => {
     const { outcome, asksAgain, onConsentNotGiven } = await hold(held('c-1'), [held('c-1'), held('c-2'), held('c-3')])
-    expect(outcome?.error).toBeInstanceOf(ConsentNotGiven)
-    expect((outcome?.error as ConsentNotGiven).taskType).toBe(PERSONA_MINT)
-    expect((outcome?.error as ConsentNotGiven).code).toBe('consentNotGiven')
+    expect(isConsentNotGiven(outcome?.error)).toBe(true)
+    expect((outcome?.error as { details?: { taskType?: string } }).details?.taskType).toBe(PERSONA_MINT)
+    expect((outcome?.error as { code?: string }).code).toBe('consentNotGiven')
     // Once pending, once changed: never a third question.
     expect(asksAgain).toBe(2)
     expect(onConsentNotGiven).toHaveBeenCalledTimes(1)
@@ -78,7 +78,7 @@ describe('a held task whose question changed', () => {
 
   it('reads the challenge from the signed request when details carry none', async () => {
     const { outcome, asksAgain } = await hold(held('c-1', 'request'), [held('c-2', 'request')])
-    expect(outcome?.error).toBeInstanceOf(ConsentNotGiven)
+    expect(isConsentNotGiven(outcome?.error)).toBe(true)
     expect(asksAgain).toBe(1)
   })
 
@@ -91,7 +91,7 @@ describe('a held task whose question changed', () => {
 
   it('without a challenge to compare, the wait goes on as before, to its end', async () => {
     const { outcome, asksAgain, onConsentNotGiven } = await hold(held(), [held('c-2')])
-    expect(outcome?.error).not.toBeInstanceOf(ConsentNotGiven)
+    expect(isConsentNotGiven(outcome?.error)).toBe(false)
     expect(asksAgain).toBeGreaterThan(2)
     expect(onConsentNotGiven).not.toHaveBeenCalled()
   })
@@ -105,7 +105,7 @@ describe('a held task whose question changed', () => {
   it("an owner act refused this way reads as not approved, never as the agent's refusal (control: still waiting)", () => {
     // addDevice and the other owner acts read a refusal through deviceRefusalOf: without its own case, this one fell
     // through to "Your agent refused this (consentNotGiven)".
-    const ended = deviceRefusalOf(new ConsentNotGiven('https://trusttasks.org/spec/vta/acl/grant/1.0'))
+    const ended = deviceRefusalOf(consentNotGiven('https://trusttasks.org/spec/vta/acl/grant/1.0'))
     expect(ended.reason).toBe('notApproved')
     expect(ended.message).not.toMatch(/consentNotGiven|refused/)
     expect(deviceRefusalOf(held('c-1')).reason).toBe('awaitingApproval')

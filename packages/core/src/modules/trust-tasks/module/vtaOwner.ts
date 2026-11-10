@@ -87,7 +87,7 @@ export class DeviceCannotOwn extends Error {
  * - `awaitingApproval` — the agent holds the act for someone else's approval,
  *   which did not come in time.
  * - `notApproved` — the agent held the act for someone else's approval, and the
- *   question ended without a yes: they said no, or it lapsed (ConsentNotGiven).
+ *   question ended without a yes: they said no, or it lapsed (VtaClient's consentNotGiven refusal).
  *   Not the agent's refusal: it did what its rule says.
  * - `noAnswer` — the agent said nothing in time; the act may or may not have
  *   happened, so the list is worth reading again.
