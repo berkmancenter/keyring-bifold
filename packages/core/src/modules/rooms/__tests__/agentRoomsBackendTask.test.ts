@@ -33,3 +33,18 @@ describe('agentTask', () => {
     expect(mockTask).toHaveBeenCalledWith('t', { a: 1 }, undefined, undefined, undefined, undefined)
   })
 })
+
+describe('consentHolds', () => {
+  // The back-off is optional on RoomsBackend and reads as "not held" where it is absent, so losing this wiring would
+  // quietly return a held batch read to stopping for one session only. This row is what notices.
+  const READ02 = 'https://trusttasks.org/spec/rooms/keys/read/0.2'
+  const T0 = Date.parse('2026-11-10T20:00:00Z')
+
+  test('the real backend keeps a hold, and a new backend (the next launch) reads it back', async () => {
+    const first = createAgentRoomsBackend(agent).consentHolds
+    expect(first).toBeDefined()
+    expect(await first?.heldRecently(READ02, T0)).toBe(false)
+    await first?.noteHeld(READ02, T0)
+    expect(await createAgentRoomsBackend(agent).consentHolds?.heldRecently(READ02, T0 + 1)).toBe(true)
+  })
+})

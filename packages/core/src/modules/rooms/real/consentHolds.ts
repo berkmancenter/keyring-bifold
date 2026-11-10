@@ -37,13 +37,14 @@ export interface ConsentHolds {
 type Rows = Record<string, Record<string, number>>
 
 interface Storage {
-  getItem(key: string): Promise<string | null>
+  getItem(key: string): Promise<string | null | undefined>
   setItem(key: string, value: string): Promise<void>
 }
 
 /** The rows as stored; `undefined` when what is stored can't be read as rows. No row at all is no holds. */
-function parse(raw: string | null): Rows | undefined {
-  if (raw === null) return {}
+function parse(raw: string | null | undefined): Rows | undefined {
+  // Nothing stored: AsyncStorage answers null (its jest double, undefined).
+  if (raw === null || raw === undefined) return {}
   try {
     const rows: unknown = JSON.parse(raw)
     if (typeof rows !== 'object' || rows === null || Array.isArray(rows)) return undefined
@@ -76,7 +77,13 @@ export function storedConsentHolds(agentId: () => string | undefined, storage: S
       const agent = agentId()
       if (!agent) return
       // What can't be read is replaced: the hold being noted is what matters now, and it reads as held either way.
-      const rows = parse(await storage.getItem(KEY).catch(() => null)) ?? {}
+      // A read that throws at once is caught here as one that rejects.
+      const rows =
+        parse(
+          await Promise.resolve()
+            .then(() => storage.getItem(KEY))
+            .catch(() => null)
+        ) ?? {}
       const kept: Rows = {}
       for (const [a, byType] of Object.entries(rows)) {
         const live = Object.entries(byType).filter(
