@@ -213,10 +213,18 @@ describe('Check again on an approved request whose card never came', () => {
 
 describe('every other read of the request', () => {
   it('never asks for the card again: only Check again does', async () => {
-    const s = stores({ submission: approved() })
+    // An open request is polled; the answer says approved and not acknowledged, and still nothing asks for the card.
+    const s = stores({ submission: approved({ status: 'pending' }) })
     const { status, asked } = polls({ requestId: 'r-1', status: 'approved', credentialsDelivered: false })
     expect(await readJoinState(agent, COMMUNITY, { ...s, status })).toMatchObject({ kind: 'pending' })
     expect(asked).toEqual([{ requestId: 'r-1' }])
+  })
+
+  it('does not poll a request already known as approved: so before this, Check again asked nothing at all', async () => {
+    const s = stores({ submission: approved() })
+    const { status, asked } = polls({ requestId: 'r-1', status: 'approved', credentialsDelivered: false })
+    expect(await readJoinState(agent, COMMUNITY, { ...s, status })).toMatchObject({ kind: 'pending' })
+    expect(asked).toEqual([])
   })
 })
 

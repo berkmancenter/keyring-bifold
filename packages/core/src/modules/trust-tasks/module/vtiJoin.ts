@@ -441,9 +441,10 @@ export type AskForCardOptions = Pick<
  * Check again, for a request the community approved whose card never came.
  *
  * Approved with no card held reads as `pending` (`stateOfSubmission`), and the
- * card comes only by delivery. Check again only asked the status, which said
- * approved every time, and nothing asked for the card itself, so nothing sent
- * it again (IN-617). The community re-sends what it already issued when asked
+ * card comes only by delivery. For a request already known as approved, Check
+ * again asked the community nothing at all (`readJoinState` polls only an open
+ * request), and nothing asked for the card itself, so nothing sent it again
+ * (IN-617). The community re-sends what it already issued when asked
  * (`resendCredentials`, vtc-service 0.12.0).
  *
  * What makes this fire: `credentialsDelivered` is true only once the community

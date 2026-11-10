@@ -327,9 +327,10 @@ const VtiJoin: React.FC<VtiJoinProps> = ({ config }) => {
       // Approved, and the card never came: ask the community to send it again
       // first. Only here, on the person's own Check again. A failed ask changes
       // nothing, and the status is read as before.
-      const asked = await askForCardIfOwed(agent, communityDid, { mediatorDid: config?.mediatorDid }).catch(
-        () => undefined
-      )
+      // Through a promise, so even a throw before the ask starts is caught.
+      const asked = await Promise.resolve()
+        .then(() => askForCardIfOwed(agent, communityDid, { mediatorDid: config?.mediatorDid }))
+        .catch(() => undefined)
       if (asked?.resend) setCardAsk(asked)
       // It polled the community already: read what it stored, without asking again.
       await (asked?.polled ? rereadStanding() : askStanding())
