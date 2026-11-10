@@ -236,14 +236,15 @@ export function useRoomPosts(
   useEffect(() => {
     if (!service || !enabled || !live || !listed) return
     let current = true
-    const tick = (signalled = false) => {
+    const tick = () => {
       if (skips.current > 0) {
         skips.current--
         return
       }
       if (listingsInFlight.current > 0) return
       // Watched: a change is told and read at once (below), and this tick is only the fallback for a signal lost.
-      if (!signalled && service.roomWatched?.(roomId) && Date.now() - askedAt.current < ROOM_WATCHED_POLL_MS) return
+      // A signal spends the watch before it ticks, so the tick it starts is never held here.
+      if (service.roomWatched?.(roomId) && Date.now() - askedAt.current < ROOM_WATCHED_POLL_MS) return
       askedAt.current = Date.now()
       const sentOn = openedAt.current
       counted(listingsInFlight, () =>
@@ -296,7 +297,7 @@ export function useRoomPosts(
     // The room's watch said it changed: read it now, once. A listing already out reads it, and arms the watch again
     // from what it found, so a change it missed is signalled again at once.
     const stopHearing = service.onRoomChanged?.((changed) => {
-      if (changed === roomId) tick(true)
+      if (changed === roomId) tick()
     })
     return () => {
       current = false
