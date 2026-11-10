@@ -814,6 +814,8 @@ describe('every community kept from for now', () => {
     type Mode = 'answers' | 'kept' | 'unreachable' | 'listsNone'
     const twoCommunities = () => {
       let mode: Mode = 'answers'
+      // The first community lists the other's room too: one listed now by a community that answered.
+      let alsoListedHere = false
       const base = backend()
       const { b } = backend({
         communities: async () => [COMMUNITY, OTHER],
@@ -826,7 +828,12 @@ describe('every community kept from for now', () => {
           }
         }),
         communityTask: jest.fn(async (did: string, type: string, payload: Record<string, unknown>) => {
-          if (did !== OTHER.did) return base.communityTask(did, type, payload)
+          if (did !== OTHER.did) {
+            const answer = (await base.communityTask(did, type, payload)) as { items: unknown[] }
+            if (!alsoListedHere || payload.cursor) return answer
+            const moved = { roomId: OTHER_ROOM, host: HOST, label: 'Moved here', visibility: 'attributed' }
+            return { ...answer, items: [...answer.items, { ...moved, actions: ['read'], state: 'admitted' }] }
+          }
           if (mode === 'kept') throw kept()
           if (mode === 'unreachable') throw new Error('community unreachable')
           if (mode === 'listsNone') return { items: [] }
@@ -851,7 +858,7 @@ describe('every community kept from for now', () => {
         mode = now
         return (await service.listMyRooms()).find((r) => r.roomId === OTHER_ROOM)
       }
-      return { service, list }
+      return { service, list, listHereToo: () => (alsoListedHere = true) }
     }
 
     it('lists it, and opens it, with its name and rights as last read, not as custody', async () => {
@@ -871,6 +878,15 @@ describe('every community kept from for now', () => {
       await list('kept')
       expect(await service.getRoom(ROOM)).toMatchObject({ source: 'community', communityDid: COMMUNITY.did })
       expect(await service.getRoom(CUSTODY_ROOM)).toMatchObject({ source: 'custody' })
+    })
+
+    it('a room another community lists now is that one’s, not the kept copy (control)', async () => {
+      const { list, listHereToo } = twoCommunities()
+      await list('answers')
+      listHereToo()
+      const now = await list('kept')
+      expect(now).toMatchObject({ communityDid: COMMUNITY.did, verbs: ['read'] })
+      expect(String(now?.name)).toBe('Moved here')
     })
 
     it('a first listing with the community kept has nothing earlier: custody, as today (control)', async () => {
