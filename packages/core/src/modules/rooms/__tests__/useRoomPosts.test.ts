@@ -689,7 +689,7 @@ describe('a post the agent cannot open', () => {
   test('a refusal of another operation, or with a code that is not a reason, gives no reason (control)', async () => {
     const { service, noteUnread } = failing({
       a: new RoomsRefused('listNotes', 'beyondChain', false),
-      b: new RoomsRefused('readNote', 'noRight', false),
+      b: new RoomsRefused('readNote', 'notFound', false),
     })
     const { result } = await open(service)
     expect(result.current.posts?.filter((p) => p.unread).map((p) => [p.key, p.unreadWhy])).toEqual([

@@ -5,8 +5,8 @@ import {
   type RoomsCommunity,
 } from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
-import { RoomsRefused, RoomsUnavailable } from '../types'
-import { logRef } from '../roomsLogWords'
+import { RECORD_UNOPENED_REASONS, RoomsRefused, RoomsUnavailable } from '../types'
+import { failureCategory, logRef } from '../roomsLogWords'
 import { postOf, reactionValueOf } from '../roomPosts'
 
 const SPEC = 'https://trusttasks.org/spec/'
@@ -858,6 +858,7 @@ describe('a record the agent cannot open', () => {
     const error = await service.readNote(ROOM, 'n1').catch((e: unknown) => e)
     expect(error).toBeInstanceOf(RoomsRefused)
     expect(error).toMatchObject({ operation: 'readNote', code: reason, retryable, refusal })
+    expect(failureCategory(error)).toBe(`refused (${reason})`)
   })
 
   it.each([
@@ -869,6 +870,14 @@ describe('a record the agent cannot open', () => {
   ])('passes %s on as it came (control)', async (_what, refusal) => {
     const { service } = failingRead(refusal)
     await expect(service.readNote(ROOM, 'n1')).rejects.toBe(refusal)
+  })
+
+  it('logs every reason readNote can throw as itself, never as other', () => {
+    expect(RECORD_UNOPENED_REASONS.length).toBeGreaterThan(0)
+    const unknown = RECORD_UNOPENED_REASONS.filter(
+      (reason) => failureCategory(new RoomsRefused('readNote', reason, false)) !== `refused (${reason})`
+    )
+    expect(unknown).toEqual([])
   })
 
   it("logs a page's unopened records as reasons and counts, in one line, and nothing for none", () => {
