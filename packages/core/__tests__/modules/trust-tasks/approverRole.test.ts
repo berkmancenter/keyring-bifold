@@ -605,6 +605,19 @@ describe('stepping down', () => {
     }
   })
 
+  test('a step-down while an offer is still open changes nothing: there is no yes on that offer to take back', async () => {
+    const { sam, jordan } = await approving(true)
+    await stepDownAsApprover(jordan.agent, JORDAN.connectionId)
+    const stepDown = mockSent[0].document
+    // Sam asks again: the record is now an open offer, carrying the same approver as before.
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const [record] = sam.store.records
+    record.content = { ...record.content, acceptedAs: JORDAN_APPROVES_AS }
+    await stepDownTo(sam, stepDown)
+    expect(await askOnSam(sam)).toMatchObject({ state: 'open' })
+    expect((await askOnSam(sam))?.steppedDown).toBeUndefined()
+  })
+
   test('with the switch off, nothing is sent and an arriving step-down changes nothing', async () => {
     const { sam, jordan } = await approving(true)
     setTrustedApproversEnabled(false)
