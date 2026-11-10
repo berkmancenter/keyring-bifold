@@ -3677,6 +3677,8 @@
     "WaitMayNeedOpen": "{{names}}'s phone may not buzz. If not, {{names}} needs to open Keyring to answer.",
     "NamesOr": " or ",
     "ApprovedBy": "Approved by {{names}}",
-    "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead."
+    "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead.",
+    "AcceptReason": "Accept being {{asker}}'s approver",
+    "AcceptAsksFaceId": "Accept asks for Face ID. Decline is one tap."
   }
 }
