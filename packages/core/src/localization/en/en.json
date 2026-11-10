@@ -1124,7 +1124,11 @@
     "ThingCards": "the cards it keeps",
     "ForAgentAsksTo": "{{asker}}'s agent asks you to approve: {{action}}",
     "ForAgentAsksSomething": "{{asker}}'s agent asks you to approve something Keyring can't describe yet.",
-    "ForAgentNote": "You approve for {{asker}}. Your answer goes to {{asker}}'s agent, not yours."
+    "ForAgentNote": "You approve for {{asker}}. Your answer goes to {{asker}}'s agent, not yours.",
+    "ForAgentTaskDoes": "{{asker}}'s agent didn't describe it. This task would {{action}}.",
+    "ForAgentApproveIf": "Approve only if you know {{asker}} meant to do this.",
+    "ForAgentOutcomeUnknown": "Keyring can't tell what this would do. Approve only if you know {{asker}} meant to do it.",
+    "ForAgentMatchCode": "This request's code:"
   },
   "TabStack": {
     "Messages": "Message",
@@ -2703,6 +2707,8 @@
       "stepUpDeclined": "You declined the extra check, so your agent didn't do this.",
       "notConfirmed": "Keyring couldn't confirm it's you.",
       "awaitingApproval": "Your agent is waiting for someone else to approve this. Try again once they have.",
+      "notServed": "Your agent doesn't support asking before this, so nothing changed.",
+      "notApproved": "Your approver didn't approve this in time, so your agent didn't do it. They may have said no.",
       "noAnswer": "Your agent didn't answer. Check My Agent before trying again.",
       "unreachable": "Keyring couldn't reach your agent. Check your connection and try again.",
       "failed": "Your agent couldn't do that.",
@@ -3680,6 +3686,9 @@
     "WaitMayNeedOpen": "{{names}}'s phone may not buzz. If not, {{names}} needs to open Keyring to answer.",
     "NamesOr": " or ",
     "ApprovedBy": "Approved by {{names}}",
+    "NotGivenBy": "{{names}} didn't approve",
+    "NotGivenWhy": "{{names}} said no, or didn't answer in time, so your agent didn't go ahead.",
+    "NotGivenNoNag": "Keyring won't ask {{names}} again on its own.",
     "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead.",
     "AcceptReason": "Accept being {{asker}}'s approver",
     "AcceptAsksLock": "Accept asks for {{method}}. Decline is one tap."

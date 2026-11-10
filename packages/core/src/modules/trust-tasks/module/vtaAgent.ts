@@ -162,6 +162,11 @@ export interface VtaAgentState {
    */
   consentGranted?: { taskType: string; at: number }
   /**
+   * The last task of ours whose hold ended without consent, and when: the question {@link awaitingConsentFor} named
+   * was answered no or lapsed (VtaClient's consentNotGiven refusal). The phone cannot tell which, and the task was not run.
+   */
+  consentNotGiven?: { taskType: string; at: number }
+  /**
    * The agent holds this phone's own `device/set-wake` for consent: an
    * approval rule covers the notification setting, so switching notifications
    * cannot take effect from this phone. Settings → Notifications says so.
@@ -863,7 +868,10 @@ export class VtaAgentController {
         }
       },
       onInbound: (plaintext) => this.inbound(plaintext),
-      onConsentPending: ({ taskType }) => this.set({ awaitingConsentFor: taskType, consentGranted: undefined }),
+      onConsentPending: ({ taskType }) =>
+        this.set({ awaitingConsentFor: taskType, consentGranted: undefined, consentNotGiven: undefined }),
+      onConsentNotGiven: ({ taskType }) =>
+        this.set({ awaitingConsentFor: undefined, consentNotGiven: { taskType, at: Date.now() } }),
       onStepUp: (request, context) => this.askStepUp(request, context),
       onRepliesStalled: (stalled) => {
         if (this.current?.client === client) this.set({ repliesStalled: stalled })
@@ -1059,6 +1067,7 @@ export class VtaAgentController {
       approvals: [],
       awaitingConsentFor: undefined,
       consentGranted: undefined,
+      consentNotGiven: undefined,
       error: undefined,
       reconnectGaveUp: false,
       ownsAgent: false,
@@ -1495,6 +1504,7 @@ export class VtaAgentController {
       approvals: [],
       awaitingConsentFor: undefined,
       consentGranted: undefined,
+      consentNotGiven: undefined,
       wakeBlockedByRule: undefined,
       error: undefined,
       ownsAgent: false,
@@ -2487,7 +2497,13 @@ export class VtaAgentController {
         .listAcl()
         .then((entries) => entries.find((e) => mine.includes(e.subject)))
         .catch(() => undefined)
-      const grant = (expiresAt?: string) => client.grantAdmin(did, { label, ...(expiresAt ? { expiresAt } : {}) })
+      // The new device gets this phone's own purposes, which is the most it may be given (VTI-ACL-107).
+      const grant = (expiresAt?: string) =>
+        client.grantAdmin(did, {
+          label,
+          ...(expiresAt ? { expiresAt } : {}),
+          ...(own?.purposes ? { purposes: own.purposes } : {}),
+        })
       const entry = await grant(own?.expiresAt)
         .catch((error: unknown) => {
           const expiresAt = own?.expiresAt ? undefined : ownExpiryFromRefusal(error)
@@ -2816,7 +2832,8 @@ export class VtaAgentController {
           releaseWarn(`[VTI] trusted approvers: rules written, version ${model.version} → ${version}`)
           return { view: trustedApproversView(next), version }
         } catch (error) {
-          if (error instanceof TrustedRuleRefused) throw new DeviceActionRefused('failed', error.message)
+          if (error instanceof TrustedRuleRefused)
+            throw new DeviceActionRefused(error.reason === 'not-served' ? 'notServed' : 'failed', error.message)
           const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
           if (details?.reason === 'conflict' && attempt === 0) continue
           throw this.refused(error)
@@ -3540,7 +3557,11 @@ export class VtaAgentController {
     }
     if (kept && 'granted' in kept) {
       const taskType = this.state.awaitingConsentFor
-      this.set({ awaitingConsentFor: undefined, ...(taskType ? { consentGranted: { taskType, at: Date.now() } } : {}) })
+      this.set({
+        awaitingConsentFor: undefined,
+        consentNotGiven: undefined,
+        ...(taskType ? { consentGranted: { taskType, at: Date.now() } } : {}),
+      })
     }
   }
 

@@ -1062,7 +1062,11 @@
     "ThingCards": "les cartes qu'il conserve",
     "ForAgentAsksTo": "L’agent de {{asker}} vous demande d’approuver : {{action}}",
     "ForAgentAsksSomething": "L’agent de {{asker}} vous demande d’approuver quelque chose que Keyring ne sait pas encore décrire.",
-    "ForAgentNote": "Vous approuvez pour {{asker}}. Votre réponse va à son agent, pas au vôtre."
+    "ForAgentNote": "Vous approuvez pour {{asker}}. Votre réponse va à son agent, pas au vôtre.",
+    "ForAgentTaskDoes": "L'agent de {{asker}} ne l'a pas décrit. Cette tâche consisterait à {{action}}.",
+    "ForAgentApproveIf": "N'approuvez que si vous savez que {{asker}} voulait le faire.",
+    "ForAgentOutcomeUnknown": "Keyring ne peut pas dire ce que cela ferait. N'approuvez que si vous savez que {{asker}} voulait le faire.",
+    "ForAgentMatchCode": "Le code de cette demande :"
   },
   "TabStack": {
     "Messages": "Messages",
@@ -2664,6 +2668,8 @@
       "stepUpDeclined": "Vous avez refusé la vérification supplémentaire, votre agent ne l'a donc pas fait.",
       "notConfirmed": "Keyring n'a pas pu confirmer que c'est vous.",
       "awaitingApproval": "Votre agent attend l'approbation de quelqu'un d'autre. Réessayez quand ce sera fait.",
+      "notServed": "Votre agent ne permet pas de demander avant cette action, donc rien n'a changé.",
+      "notApproved": "Votre approbateur n'a pas approuvé à temps, donc votre agent ne l'a pas fait. Il a peut-être refusé.",
       "noAnswer": "Votre agent n'a pas répondu. Vérifiez Mon agent avant de réessayer.",
       "unreachable": "Keyring n'a pas pu joindre votre agent. Vérifiez votre connexion et réessayez.",
       "failed": "Votre agent n'a pas pu faire cela.",
@@ -3638,6 +3644,9 @@
     "WaitMayNeedOpen": "Le téléphone de {{names}} ne sonnera peut-être pas. Sinon, {{names}} doit ouvrir Keyring pour répondre.",
     "NamesOr": " ou ",
     "ApprovedBy": "Approuvé par {{names}}",
+    "NotGivenBy": "{{names}} n'a pas approuvé",
+    "NotGivenWhy": "{{names}} a dit non, ou n'a pas répondu à temps : votre agent n'a donc pas continué.",
+    "NotGivenNoNag": "Keyring ne redemandera pas à {{names}} de lui-même.",
     "ApprovedGoAhead": "{{names}} a dit oui : votre agent peut continuer.",
     "AcceptReason": "Accepter d’être l’approbateur de {{asker}}",
     "AcceptAsksLock": "Pour accepter, confirmez {{method}}. Refuser se fait en un geste."
