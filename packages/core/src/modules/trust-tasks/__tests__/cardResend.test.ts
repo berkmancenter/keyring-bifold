@@ -74,11 +74,14 @@ function polls(...answers: (JoinRequestStatus | undefined)[]) {
 beforeEach(() => logger.warn.mockClear())
 
 describe('the status poll, as sent and as read', () => {
-  const answering = (payload: Record<string, unknown>) =>
-    jest.spyOn(vtiAgent, 'ask').mockResolvedValue({
+  const answering = (payload: Record<string, unknown>) => {
+    const answer: DidCommV2PlaintextMessage = {
+      id: 'urn:uuid:status-answer',
       type: `${STATUS}#response`,
       body: { payload },
-    } as DidCommV2PlaintextMessage)
+    }
+    return jest.spyOn(vtiAgent, 'ask').mockResolvedValue(answer)
+  }
   afterEach(() => jest.restoreAllMocks())
 
   it('carries resendCredentials only when asked', async () => {
