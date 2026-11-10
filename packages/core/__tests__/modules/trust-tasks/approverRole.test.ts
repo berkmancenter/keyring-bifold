@@ -277,6 +277,34 @@ describe('becoming a trusted approver', () => {
     expect(await acceptedRoleOffers(sam.agent)).toHaveLength(1)
   })
 
+  test("a yes on another thread counts for nothing, even with this offer's challenge", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    const { signDocumentProof } = jest.requireMock('../../../src/modules/trust-tasks/documentProof')
+    const { proof: _p, ...yes } = mockSent[1].document
+    await deliver(sam, await signDocumentProof(null, { ...yes, threadId: 'another-thread' }, JORDAN.myRel))
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    // Control: the same yes on the offer's own thread counts.
+    await deliver(sam, mockSent[1].document)
+    expect(await acceptedRoleOffers(sam.agent)).toHaveLength(1)
+  })
+
+  test('an old yes sent again after the offer closed does not bring it back', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    const yes = mockSent[1].document
+    await deliver(sam, yes)
+    await closeRoleOffer(sam.agent, SAM.connectionId)
+    await deliver(sam, yes)
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+  })
+
   test('a yes needs the DID the phone approves as, and nothing is sent without it', async () => {
     const sam = phone(SAM)
     const jordan = phone(JORDAN)
