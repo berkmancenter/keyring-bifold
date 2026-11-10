@@ -38,9 +38,12 @@ import { respondWith, type TrustTasksService } from './services/TrustTasksServic
 
 const LOG_PREFIX = '[TrustTasks:ApproverRole]'
 
-/** genericRecords recordType of an offer this phone sent, kept until it is answered (and, on a yes, applied). */
+/**
+ * genericRecords recordType of the offer this phone sent to a contact: one per connection, its state changed in place
+ * (open, accepted, closed) rather than deleted, so this feature never deletes stored records and goes out over the air.
+ */
 export const ROLE_OFFER_ASK = 'keyring.approver-role-offer-ask'
-/** genericRecords recordType of an offer waiting for this phone's person. */
+/** genericRecords recordType of an offer from a contact to this phone's person: one per connection, as above. */
 export const ROLE_OFFER_PROMPT = 'keyring.approver-role-offer-prompt'
 
 const DAY = 24 * 60 * 60 * 1000
@@ -79,11 +82,28 @@ const proofUnder = (agent: Agent, controller: string) => ({
 
 const lapsed = (at: string, now = Date.now()) => !(now - Date.parse(at) < OFFER_OPEN_FOR)
 
+/** The one record of `recordType` on `connectionId`, its content replaced; saved the first time. */
+async function keepOn(
+  agent: Pick<Agent, 'genericRecords'>,
+  recordType: string,
+  connectionId: string,
+  content: object
+): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType, connectionId })) ?? []
+  if (existing) {
+    existing.content = { ...content }
+    await agent.genericRecords.update(existing)
+  } else {
+    await agent.genericRecords.save({ content: { ...content }, tags: { recordType, connectionId } })
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Asking (Sam's phone)
 
-/** An offer this phone sent, as kept until it is answered. */
+/** The offer this phone sent to a contact. `accepted`: a yes not yet written on the agent. */
 export interface RoleOfferAsk {
+  state: 'open' | 'accepted' | 'closed'
   connectionId: string
   threadId: string
   agentDid: string
@@ -97,8 +117,8 @@ export interface RoleOfferAsk {
 export type OfferResult = 'sent' | 'off' | 'noRelationship'
 
 /**
- * Ask the contact on `connectionId` to approve `actions` on the agent `agentDid`. A new offer replaces an earlier
- * unanswered one on the same connection. Refuses an unknown action or an agent that is not a DID before sending.
+ * Ask the contact on `connectionId` to approve `actions` on the agent `agentDid`. A new offer replaces the earlier
+ * one on the same connection, answered or not: an answer to the earlier one then counts for nothing. Refuses an unknown action or an agent that is not a DID before sending.
  */
 export async function offerApproverRole(
   agent: Agent,
@@ -132,9 +152,8 @@ export async function offerApproverRole(
   }
   const signed = await signDocumentProof(agent, document, relationship.myRelationshipDid as string)
 
-  for (const earlier of await asksOn(agent, connectionId))
-    if (!(earlier.content as unknown as RoleOfferAsk).acceptedAs) await agent.genericRecords.deleteById(earlier.id)
   const ask: RoleOfferAsk = {
+    state: 'open',
     connectionId,
     threadId: id,
     agentDid,
@@ -142,10 +161,7 @@ export async function offerApproverRole(
     challenge,
     askedAt: new Date().toISOString(),
   }
-  await agent.genericRecords.save({
-    content: { ...ask },
-    tags: { recordType: ROLE_OFFER_ASK, connectionId, threadId: id },
-  })
+  await keepOn(agent, ROLE_OFFER_ASK, connectionId, ask)
   const { getTrustTasksService, sendTrustTaskDocument } = ceremony()
   await getTrustTasksService(agent).retain(agent.context, signed, 'request', connectionId)
   await sendTrustTaskDocument(agent, connectionId, signed)
@@ -153,15 +169,7 @@ export async function offerApproverRole(
   return 'sent'
 }
 
-async function asksOn(agent: Pick<Agent, 'genericRecords'>, connectionId?: string) {
-  return (
-    (await agent.genericRecords.findAllByQuery(
-      connectionId ? { recordType: ROLE_OFFER_ASK, connectionId } : { recordType: ROLE_OFFER_ASK }
-    )) ?? []
-  )
-}
-
-/** The contact's answer to my offer arrives: a yes is kept (to be applied), a no forgets the offer. */
+/** The contact's answer to my offer arrives: a yes is kept (to be written on the agent), a no closes the offer. */
 export async function handleRoleOfferResponse(
   agent: Agent,
   service: TrustTasksService,
@@ -183,43 +191,39 @@ export async function handleRoleOfferResponse(
   if (outcome.kind !== 'handled') return
 
   const [record] =
-    (await agent.genericRecords.findAllByQuery({
-      recordType: ROLE_OFFER_ASK,
-      connectionId: context.connectionId,
-      threadId: String(document.threadId ?? ''),
-    })) ?? []
+    (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, connectionId: context.connectionId })) ??
+    []
   if (!record) return
   const ask = record.content as unknown as RoleOfferAsk
-  if (ask.acceptedAs || lapsed(ask.askedAt)) return
+  if (ask.state !== 'open' || ask.threadId !== String(document.threadId ?? '') || lapsed(ask.askedAt)) return
   const answer = document.payload as RoleOfferResponsePayload
   // An answer that does not carry this offer's challenge back answers nothing; the offer stays for the real one.
   if (!sameChallenge(ask.challenge, String(answer?.challenge ?? ''))) return
 
   if (answer.decision === 'accepted') {
     if (!answer.approver || !DID.test(answer.approver)) return
-    record.content = { ...ask, acceptedAs: answer.approver }
-    await agent.genericRecords.update(record)
+    record.content = { ...ask, state: 'accepted', acceptedAs: answer.approver }
   } else {
-    await agent.genericRecords.deleteById(record.id)
+    record.content = { ...ask, state: 'closed' }
   }
+  await agent.genericRecords.update(record)
   approverRoleEvents.emit('answered', { connectionId: context.connectionId, decision: answer.decision })
 }
 
-/** The yeses waiting to be written on my agent; lapsed unanswered offers are forgotten on the way. */
+/** The yeses waiting to be written on my agent. */
 export async function acceptedRoleOffers(agent: Pick<Agent, 'genericRecords'>): Promise<RoleOfferAsk[]> {
-  const accepted: RoleOfferAsk[] = []
-  for (const record of await asksOn(agent)) {
-    const ask = record.content as unknown as RoleOfferAsk
-    if (ask.acceptedAs) accepted.push(ask)
-    else if (lapsed(ask.askedAt)) await agent.genericRecords.deleteById(record.id)
-  }
-  return accepted
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  return records
+    .map((record) => record.content as unknown as RoleOfferAsk)
+    .filter((ask) => ask.state === 'accepted' && !!ask.acceptedAs)
 }
 
-/** Forget an offer once its yes is written on the agent (or the person chose not to). */
-export async function forgetRoleOffer(agent: Pick<Agent, 'genericRecords'>, threadId: string): Promise<void> {
-  for (const record of (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, threadId })) ?? [])
-    await agent.genericRecords.deleteById(record.id)
+/** Close the offer on `connectionId` once its yes is written on the agent (or the person chose not to write it). */
+export async function closeRoleOffer(agent: Pick<Agent, 'genericRecords'>, connectionId: string): Promise<void> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, connectionId })) ?? []
+  if (!record) return
+  record.content = { ...(record.content as object), state: 'closed' }
+  await agent.genericRecords.update(record)
 }
 
 /**
@@ -238,8 +242,9 @@ export function approversWithAccepted(
 // ---------------------------------------------------------------------------------------------------------------
 // Answering (Jordan's phone)
 
-/** An offer waiting for this phone's person. */
+/** An offer from a contact. `open` until this phone's person answers it. */
 export interface RoleOfferPrompt {
+  open: boolean
   connectionId: string
   /** The asking contact's name, from the relationship. */
   asker: string
@@ -298,6 +303,7 @@ export async function handleRoleOfferRequest(
   const payload = document.payload as RoleOfferPayload
   const credentials = await agent.w3cCredentials.getAll()
   const prompt: RoleOfferPrompt = {
+    open: true,
     connectionId: context.connectionId,
     asker: resolveContactDisplayInfo(credentials, relationship.counterpartyRelationshipDid as string).name ?? '',
     agentDid: payload.agent,
@@ -312,28 +318,14 @@ export async function handleRoleOfferRequest(
   approverRoleEvents.emit('offer', { connectionId: context.connectionId })
 }
 
-async function forgetPrompt(agent: Pick<Agent, 'genericRecords'>, connectionId: string): Promise<void> {
-  for (const record of (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_PROMPT, connectionId })) ??
-    [])
-    await agent.genericRecords.deleteById(record.id)
-}
+const keepPrompt = (agent: Pick<Agent, 'genericRecords'>, prompt: RoleOfferPrompt) =>
+  keepOn(agent, ROLE_OFFER_PROMPT, prompt.connectionId, prompt)
 
-async function keepPrompt(agent: Pick<Agent, 'genericRecords'>, prompt: RoleOfferPrompt): Promise<void> {
-  await forgetPrompt(agent, prompt.connectionId)
-  await agent.genericRecords.save({
-    content: { ...prompt },
-    tags: { recordType: ROLE_OFFER_PROMPT, connectionId: prompt.connectionId },
-  })
-}
-
-/** Bring back the offers kept on this phone (at start). A lapsed one is removed, not shown. */
+/** Bring back the offers kept on this phone (at start) that are still open. A lapsed one is not shown. */
 export async function restoreRoleOfferPrompts(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
   for (const record of (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_PROMPT })) ?? []) {
     const prompt = record.content as unknown as RoleOfferPrompt
-    if (!prompt?.connectionId || !prompt.receivedAt || lapsed(prompt.receivedAt)) {
-      await agent.genericRecords.deleteById(record.id)
-      continue
-    }
+    if (!prompt?.open || !prompt.connectionId || !prompt.receivedAt || lapsed(prompt.receivedAt)) continue
     if (!roleOfferPromptStore.get(prompt.connectionId)) roleOfferPromptStore.set(prompt)
   }
 }
@@ -371,7 +363,7 @@ export async function respondToRoleOffer(
   await sendTrustTaskDocument(agent, connectionId, signed)
 
   roleOfferPromptStore.take(connectionId)
-  await forgetPrompt(agent, connectionId).catch((error: unknown) =>
-    agent.config?.logger?.warn(`${LOG_PREFIX} could not drop an offer: ${(error as Error)?.message ?? error}`)
+  await keepPrompt(agent, { ...prompt, open: false }).catch((error: unknown) =>
+    agent.config?.logger?.warn(`${LOG_PREFIX} could not close an offer: ${(error as Error)?.message ?? error}`)
   )
 }

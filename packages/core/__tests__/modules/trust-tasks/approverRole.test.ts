@@ -10,7 +10,7 @@ import {
   acceptedRoleOffers,
   approverRoleEvents,
   approversWithAccepted,
-  forgetRoleOffer,
+  closeRoleOffer,
   handleRoleOfferRequest,
   handleRoleOfferResponse,
   offerApproverRole,
@@ -165,12 +165,17 @@ describe('becoming a trusted approver', () => {
       approvers: [JORDAN_APPROVES_AS],
       keys: ['shareCredential', 'joinCommunity'],
     })
-    await forgetRoleOffer(sam.agent, kept.threadId)
+    await closeRoleOffer(sam.agent, SAM.connectionId)
     expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    // Nothing is deleted: one record per contact on each phone, its state changed in place.
+    expect(sam.store.records.map((r) => [r.tags.recordType, r.content.state])).toEqual([[ROLE_OFFER_ASK, 'closed']])
+    expect(jordan.store.records.map((r) => r.content.open)).toEqual([false])
+    expect(sam.store.deleteById).not.toHaveBeenCalled()
+    expect(jordan.store.deleteById).not.toHaveBeenCalled()
     approverRoleEvents.off('answered', answered)
   })
 
-  test('a no is sent signed too, and Sam forgets the offer', async () => {
+  test("a no is sent signed too, and closes the offer on Sam's phone", async () => {
     const sam = phone(SAM)
     const jordan = phone(JORDAN)
     await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['addDevice'])
@@ -178,7 +183,8 @@ describe('becoming a trusted approver', () => {
     await respondToRoleOffer(jordan.agent, JORDAN.connectionId, false)
     expect(mockSent[1].document).toMatchObject({ payload: { decision: 'declined' }, proof: { by: JORDAN.myRel } })
     await deliver(sam)
-    expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toEqual([])
+    expect(sam.store.records.map((r) => r.content.state)).toEqual(['closed'])
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
   })
 
   test('an offer not signed by the relationship is never shown, and with no relationship nothing is read unverified', async () => {
@@ -282,7 +288,7 @@ describe('becoming a trusted approver', () => {
     expect(roleOfferPromptStore.get(JORDAN.connectionId)).toBeDefined()
   })
 
-  test('an offer lapses: a late yes changes nothing, and an unanswered one is forgotten', async () => {
+  test('an offer lapses: a late yes changes nothing', async () => {
     const sam = phone(SAM)
     const jordan = phone(JORDAN)
     await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
@@ -292,7 +298,10 @@ describe('becoming a trusted approver', () => {
     ask.content.askedAt = new Date(Date.now() - OFFER_OPEN_FOR - 1000).toISOString()
     await deliver(sam)
     expect(await acceptedRoleOffers(sam.agent)).toEqual([])
-    expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toEqual([])
+    // Control: the same yes inside the window counts.
+    ask.content.askedAt = new Date().toISOString()
+    await deliver(sam)
+    expect(await acceptedRoleOffers(sam.agent)).toHaveLength(1)
   })
 
   test('with the switch off, nothing is offered, shown or kept; a release can turn it off whatever was saved', async () => {
@@ -328,16 +337,20 @@ describe('becoming a trusted approver', () => {
     expect([...ROLE_ACTIONS]).toEqual(TRUSTED_TASKS.map((t) => t.key))
   })
 
-  test('a new offer replaces an unanswered one on the same contact, and keeps a yes not yet written', async () => {
+  test('a new offer replaces the earlier one on the same contact: a yes to the earlier one counts for nothing', async () => {
     const sam = phone(SAM)
     const jordan = phone(JORDAN)
     await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
     await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['addDevice'])
     expect(sam.store.records.filter((r) => r.tags.recordType === ROLE_OFFER_ASK)).toHaveLength(1)
-    await deliver(jordan)
     await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
     await deliver(sam)
-    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['shareCredential'])
+    expect(await acceptedRoleOffers(sam.agent)).toEqual([])
+    // Control: the yes to the current offer counts.
+    await deliver(jordan, mockSent[1].document)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    await deliver(sam)
     expect(await acceptedRoleOffers(sam.agent)).toEqual([expect.objectContaining({ actions: ['addDevice'] })])
   })
 })
