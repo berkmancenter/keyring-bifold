@@ -504,6 +504,8 @@ export interface RoomsService {
    */
   listNotes(roomId: string, options?: { sinceVersion?: number }): Promise<NoteList>
   readNote(roomId: string, key: string): Promise<Note>
+  /** Several records, one promise each in the order asked: together where the agent can. Each settles as `readNote` would. */
+  readNotes?(roomId: string, keys: readonly string[]): Promise<Note>[]
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
   /** Sends what the preview showed; with an attachment, `options` reports the upload and can cancel it (nothing is written). */
   confirmWrite(token: string, options?: RoomsTransferOptions): Promise<{ key: string; version: number }>

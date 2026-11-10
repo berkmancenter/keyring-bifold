@@ -325,8 +325,10 @@ export function useRoomPosts(
     // read that fails holds the rest until every read has answered; then the page is drawn whole, the failed post
     // marked as unread.
     let drawn = readSoFar().length
-    const asks = unread.map((summary) =>
-      service.readNote(roomId, summary.key).then((note) => {
+    const keys = unread.map((summary) => summary.key)
+    const answers = service.readNotes?.(roomId, keys) ?? keys.map((key) => service.readNote(roomId, key))
+    const asks = unread.map((summary, i) =>
+      answers[i].then((note) => {
         read.set(readKey(summary), note)
         if (!current) return
         const soFar = readSoFar()
