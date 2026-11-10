@@ -324,12 +324,14 @@ const VtaTrustedApprovers: React.FC = () => {
                     ? t('Approver.CheckHeld')
                     : checked.kind === 'letThrough'
                       ? t('Approver.CheckNotOn')
-                      : checked.kind === 'needsTestRule'
-                        ? t('Approver.CheckNeedsTestRule', {
-                            task: t('AskMe.Task.contextsCreate'),
-                            interpolation: { escapeValue: false },
-                          })
-                        : t('Approver.CheckUnknown')}
+                      : checked.kind === 'wouldReachOthers'
+                        ? t('Approver.CheckWouldReachOthers')
+                        : checked.kind === 'needsTestRule'
+                          ? t('Approver.CheckNeedsTestRule', {
+                              task: t('AskMe.Task.contextsCreate'),
+                              interpolation: { escapeValue: false },
+                            })
+                          : t('Approver.CheckUnknown')}
                 </ThemedText>
                 {checked.kind === 'letThrough' && checked.kept ? (
                   <ThemedText style={styles.muted}>{t('AskMe.TestLetThroughKept')}</ThemedText>

@@ -3618,6 +3618,7 @@
     "CheckNotOn": "Les approbations ne sont pas activées là où votre agent est hébergé, donc votre approbateur ne sera pas encore consulté.",
     "CheckNeedsTestRule": "Pour vérifier, activez d'abord « {{task}} » dans « Me demander avant… ».",
     "CheckUnknown": "Keyring n'a pas pu savoir si votre agent attend. Réessayez plus tard.",
+    "CheckWouldReachOthers": "Keyring n'a pas envoyé le test : la règle qu'il utilise consulterait plus que ce téléphone.",
     "Covers": "Demande l’accord de {{name}} :",
     "HeldElsewhere": "Déjà couvert par une autre règle : {{actions}}",
     "Accepted": "A dit oui",

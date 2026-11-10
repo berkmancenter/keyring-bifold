@@ -520,6 +520,9 @@ describe('Who approves', () => {
 })
 
 describe('Who approves: checking the agent waits for them (a live probe, only on a tap)', () => {
+  const ME_PHONE = 'did:peer:2.this-phone'
+  const MY_SET = `keyring-phone:${ME_PHONE}`
+  const CREATE_TEST = 'https://trusttasks.org/spec/vta/contexts/create/1.0'
   const held = (approvers: string[]) =>
     ({ view: { approvers, keys: ['joinCommunity'], heldElsewhere: [] }, version: 3 }) as TrustedApproversState
   const setup = (canTest = true) => {
@@ -527,7 +530,10 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
     jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
     jest.spyOn(approverRole, 'approvingFor').mockResolvedValue([])
     jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([JORDAN]))
-    const rules = jest.spyOn(vtaAgent, 'approvalRules').mockResolvedValue({ view: { canTest } } as never)
+    const rules = jest.spyOn(vtaAgent, 'approvalRules').mockResolvedValue({
+      view: { canTest },
+      model: { rules: [{ taskType: CREATE_TEST, approverSet: MY_SET }], sets: { [MY_SET]: [ME_PHONE] } },
+    } as never)
     const probe = jest.spyOn(vtaAgent, 'sendTestRequest')
     return { rules, probe }
   }
@@ -577,6 +583,18 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
     await tap(tree)
     expect(probe).not.toHaveBeenCalled()
     expect(said(tree)).toHaveTextContent(/Approver\.CheckNeedsTestRule/)
+  })
+
+  test('a test rule whose set was edited to hold others is not sent: it would ask them too (control: this phone alone)', async () => {
+    const { rules, probe } = setup()
+    rules.mockResolvedValue({
+      view: { canTest: true },
+      model: { rules: [{ taskType: CREATE_TEST, approverSet: MY_SET }], sets: { [MY_SET]: [ME_PHONE, JORDAN] } },
+    } as never)
+    const tree = await show(<VtaTrustedApprovers />)
+    await tap(tree)
+    expect(probe).not.toHaveBeenCalled()
+    expect(said(tree)).toHaveTextContent(/Approver\.CheckWouldReachOthers/)
   })
 
   test('with the switch off, there is no check at all (control: on, it is there)', async () => {

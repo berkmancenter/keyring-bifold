@@ -3660,6 +3660,7 @@
     "CheckNotOn": "Approvals aren't switched on where your agent is hosted, so your approver won't be asked yet.",
     "CheckNeedsTestRule": "To check, first turn on \"{{task}}\" in \"Ask me before…\".",
     "CheckUnknown": "Keyring couldn't tell whether your agent waits. Try again later.",
+    "CheckWouldReachOthers": "Keyring didn't send the test: the rule it uses would ask more than this phone.",
     "Covers": "Needs {{name}}'s yes:",
     "HeldElsewhere": "Already held by another rule: {{actions}}",
     "Accepted": "Said yes",

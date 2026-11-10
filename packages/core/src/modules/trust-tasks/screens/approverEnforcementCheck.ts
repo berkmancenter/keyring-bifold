@@ -23,12 +23,15 @@ import { vtaAgent } from '../module/vtaAgent'
  * - `held`: the agent asked before acting, so approvals are on where it is hosted.
  * - `letThrough`: it acted without asking; `kept` when the test context could not be deleted again.
  * - `needsTestRule`: this phone's own rule on the test task is not on, so the probe would prove nothing.
+ * - `wouldReachOthers`: the set that rule names holds more than this phone (edited elsewhere), so the test would
+ *   ask them too: not sent.
  * - `unknown`: no answer, or an error: nothing is concluded.
  */
 export type EnforcementCheck =
   | { kind: 'held' }
   | { kind: 'letThrough'; kept: boolean }
   | { kind: 'needsTestRule' }
+  | { kind: 'wouldReachOthers' }
   | { kind: 'unknown' }
 
 /** The last result on each agent, for this session only. */
@@ -40,6 +43,21 @@ export const lastEnforcementCheck = (vtaDid: string | undefined): EnforcementChe
 /** Tests only. */
 export const forgetEnforcementChecks = () => lastByAgent.clear()
 
+/**
+ * The test rule's set holds this phone alone. Matched by value, as the rule names it (approvalRules.ts phoneSetName:
+ * `keyring-phone:<managerDid>`, written with that one member): canTest knows the rule by its set's name only, and a set
+ * edited elsewhere could hold others, whom the test request would then ask too.
+ */
+const PHONE_SET = 'keyring-phone:'
+function onlyThisPhone(model: { rules: { taskType: string; approverSet?: string }[]; sets: Record<string, string[]> }) {
+  const rule = model.rules.find(
+    (r) => r.taskType.endsWith('/vta/contexts/create/1.0') && r.approverSet?.startsWith(PHONE_SET)
+  )
+  if (!rule?.approverSet) return false
+  const members = model.sets[rule.approverSet] ?? []
+  return members.length === 1 && members[0] === rule.approverSet.slice(PHONE_SET.length)
+}
+
 /** Run the probe once, on this phone's linked agent. Never throws: a failure is `unknown`. */
 export async function checkEnforcement(agent: Agent): Promise<EnforcementCheck> {
   const vtaDid = vtaAgent.getState().vtaDid
@@ -48,6 +66,8 @@ export async function checkEnforcement(agent: Agent): Promise<EnforcementCheck> 
     const rules = await vtaAgent.approvalRules(agent)
     if (!rules.view.canTest) {
       result = { kind: 'needsTestRule' }
+    } else if (!onlyThisPhone(rules.model)) {
+      result = { kind: 'wouldReachOthers' }
     } else {
       const sent = await vtaAgent.sendTestRequest(agent)
       result = sent.kind === 'held' ? { kind: 'held' } : { kind: 'letThrough', kept: !sent.cleanedUp }
