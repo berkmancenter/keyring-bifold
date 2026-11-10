@@ -95,6 +95,8 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     // A rooms task this agent held for consent is not sent to it again for a day (consentHolds.ts): by the agent linked
     // at each ask, so another agent linked later starts clear.
     consentHolds: storedConsentHolds(() => vtaAgent.agentAddress()),
+    // A watched room's change, pushed by the linked agent on this phone's own channel: no identity switch to hear it.
+    onRoomSignal: (listener) => vtaAgent.onRoomSignal(listener),
     agentServedTypes: async () => (await vtaAgent.roomsClient(agent))?.supportedTypes(),
     agentTask: async (type, payload, options) =>
       (await client()).task(

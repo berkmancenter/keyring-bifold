@@ -35,6 +35,11 @@ import type { HostCheck, Identity, Note, NoteList, NoteSummary, RoomsService } f
 export const POSTS_PAGE = 10
 /** How often a room in view asks for new posts. */
 export const ROOM_POLL_MS = 10_000
+/**
+ * How often a room in view asks for new posts while its watch is armed (`RoomsService.roomWatched`): a change comes as
+ * a signal and is read at once, so this is only for a signal lost on the way (a socket that dropped, a host that forgot).
+ */
+export const ROOM_WATCHED_POLL_MS = 120_000
 /** After a poll that failed, the ticks that pass before the next one. */
 export const POLL_SKIPS_AFTER_FAILURE = 2
 
@@ -181,6 +186,8 @@ export function useRoomPosts(
   }, [])
   // The poll of the room while it is polled, for `pollNow`.
   const tickNow = useRef<(() => void) | undefined>(undefined)
+  /** When the last listing of the room was asked: a watched room's poll waits ROOM_WATCHED_POLL_MS from it. */
+  const askedAt = useRef(0)
   const reads = useRef<{ service?: RoomsService; roomId: string; notes: Map<string, Note> }>({
     roomId,
     notes: new Map(),
@@ -198,6 +205,7 @@ export function useRoomPosts(
     if (!service || !enabled) return
     let current = true
     const sentOn = openedAt.current
+    askedAt.current = Date.now()
     counted(listingsInFlight, () => service.listNotes(roomId)).then(
       (list) => {
         skips.current = 0
@@ -219,15 +227,24 @@ export function useRoomPosts(
   }, [service, roomId, enabled, generation, notePoll])
 
   const listed = !!listing
+  // In view and listed: the room's watch is armed from the newest version held (each poll arms it again, above).
+  const newest = listing ? newestVersion(listing.notes) : undefined
+  useEffect(() => {
+    if (!service?.watchRoom || !enabled || !live || newest === undefined) return
+    service.watchRoom(roomId, newest)
+  }, [service, roomId, enabled, live, newest])
   useEffect(() => {
     if (!service || !enabled || !live || !listed) return
     let current = true
-    const tick = () => {
+    const tick = (signalled = false) => {
       if (skips.current > 0) {
         skips.current--
         return
       }
       if (listingsInFlight.current > 0) return
+      // Watched: a change is told and read at once (below), and this tick is only the fallback for a signal lost.
+      if (!signalled && service.roomWatched?.(roomId) && Date.now() - askedAt.current < ROOM_WATCHED_POLL_MS) return
+      askedAt.current = Date.now()
       const sentOn = openedAt.current
       counted(listingsInFlight, () =>
         service.listNotes(roomId, { sinceVersion: newestVersion(listingNow.current?.notes ?? []) })
@@ -252,6 +269,8 @@ export function useRoomPosts(
             return
           }
           const merged = current && now ? mergeNewer(now, newer) : undefined
+          // Armed again from what is held now: a signal's watch is spent, and a poll may have moved the room.
+          if (current) service.watchRoom?.(roomId, newestVersion((merged?.listing ?? now)?.notes ?? []))
           if (!merged) return
           setListing(merged.listing)
           // New posts go first (the chat draws them at its bottom); the posts already shown stay shown.
@@ -274,8 +293,14 @@ export function useRoomPosts(
       skips.current = 0
       tick()
     }
+    // The room's watch said it changed: read it now, once. A listing already out reads it, and arms the watch again
+    // from what it found, so a change it missed is signalled again at once.
+    const stopHearing = service.onRoomChanged?.((changed) => {
+      if (changed === roomId) tick(true)
+    })
     return () => {
       current = false
+      stopHearing?.()
       clearInterval(timer)
       resumed.current = true
       tickNow.current = undefined

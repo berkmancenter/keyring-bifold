@@ -240,9 +240,12 @@ describe('the phone never sends an offered task', () => {
 
   it('every task the client sends its agent is on the list of what the phone sends', () => {
     // A rule set elsewhere on one that is missing would hold the phone without the screen saying so.
-    const { VTA_TASK } = jest.requireActual('../module/VtaClient') as { VTA_TASK: Record<string, string> }
-    // Pushed by the agent, never sent to it (VtaClient UNSOLICITED).
-    const received = new Set([VTA_TASK.consentRequest, VTA_TASK.consentGranted])
+    const { VTA_TASK, UNSOLICITED } = jest.requireActual('../module/VtaClient') as {
+      VTA_TASK: Record<string, string>
+      UNSOLICITED: ReadonlySet<string>
+    }
+    // Pushed by the agent, never sent to it: the client's own list of them.
+    const received = UNSOLICITED
     const unlisted = Object.values(VTA_TASK).filter(
       (uri) =>
         !received.has(uri) && !PHONE_SENDS.includes(uri) && !(TEST_REQUEST_TASKS as readonly string[]).includes(uri)
