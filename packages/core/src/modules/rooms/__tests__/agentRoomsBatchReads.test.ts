@@ -511,7 +511,7 @@ describe('a hold is kept for a day, across launches', () => {
     const first = await launch(storage, T0, held)
     await Promise.all(first.service.readNotes(ROOM, ['a', 'b']))
     expect(first.batches()).toHaveLength(1)
-    expect(first.lines().at(-1)).toMatch(/2 keys read one at a time, and no more batches to this agent for a day$/)
+    expect(first.lines().slice(-1)[0]).toMatch(/2 keys read one at a time, and no more batches to this agent for a day$/)
 
     const next = await launch(storage, T0 + 60_000, allRecords)
     expect(await titles(next.service.readNotes(ROOM, ['c', 'd']))).toEqual(['Title c', 'Title d'])
