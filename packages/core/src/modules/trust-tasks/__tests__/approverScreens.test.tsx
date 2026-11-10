@@ -285,16 +285,32 @@ describe('Who approves', () => {
     expect(tree.getByTestId(id(TrustedApproversIds.add(CONN)))).toBeTruthy()
   })
 
-  test('a write the agent held for an approval closes nothing either: it is not on the agent yet', async () => {
+  test('a write the agent holds for an approval closes nothing: it is not on the agent yet, and it says so', async () => {
+    // A held task comes back as a refusal (VtaClient consentPendingOf → awaitingApproval), so the write rejects.
     kept([ask({ state: 'accepted', acceptedAs: JORDAN })])
     jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([AMY], ['shareCredential']))
-    // Answers the rules as read back, without Jordan.
-    jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([AMY], ['shareCredential']))
+    jest.spyOn(vtaAgent, 'setTrustedApprovers').mockRejectedValue(new DeviceActionRefused('awaitingApproval'))
     const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(<VtaTrustedApprovers />)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
     })
+    expect(close).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(TrustedApproversIds.error))).toBeTruthy()
+  })
+
+  test('a yes whose every action another rule holds writes no rule naming them, and closes nothing', async () => {
+    // nextTrustedRules leaves out what is held elsewhere; with nothing left, the write holds no trusted set at all,
+    // so what was written does not name the approver.
+    kept([ask({ state: 'accepted', acceptedAs: JORDAN, actions: ['addDevice'] })])
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], [], ['addDevice']))
+    const write = jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([], [], ['addDevice']))
+    const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
+    const tree = await show(<VtaTrustedApprovers />)
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
+    })
+    expect(write).toHaveBeenCalledWith(AGENT, [JORDAN], [])
     expect(close).not.toHaveBeenCalled()
   })
 

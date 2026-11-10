@@ -204,7 +204,9 @@ export async function handleRoleOfferResponse(
   if (ask.state !== 'open' || ask.threadId !== String(document.threadId ?? '') || lapsed(ask.askedAt)) return
   const answer = document.payload as RoleOfferResponsePayload
   // An answer that does not carry this offer's challenge back answers nothing; the offer stays for the real one.
-  if (!sameChallenge(ask.challenge, String(answer?.challenge ?? ''))) return
+  // Refused on an empty challenge too: sameChallenge holds for two empty strings, and this check must not rest on
+  // every offer having one.
+  if (!ask.challenge || !sameChallenge(ask.challenge, String(answer?.challenge ?? ''))) return
 
   if (answer.decision === 'accepted') {
     if (!answer.approver || !DID.test(answer.approver)) return
