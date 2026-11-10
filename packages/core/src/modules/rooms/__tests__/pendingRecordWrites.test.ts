@@ -10,6 +10,7 @@ import {
   landed,
   PENDING_WRITE_MAX_MS,
   type PendingWrite,
+  type PendingWriteAsked,
   usePendingWrites,
   withPendingWrites,
 } from '../pendingRecordWrites'
@@ -39,8 +40,10 @@ const myReaction = (key: string, on: string, value: string) =>
 
 const M1 = post('m1', 'Hi all', { version: 4 })
 let ids = 0
-const write = (w: Omit<PendingWrite, 'id'> & Partial<Pick<PendingWrite, 'id'>>): PendingWrite =>
-  ({ id: ++ids, ...w }) as PendingWrite
+const write = (w: PendingWriteAsked & { id?: number; written?: PendingWrite['written'] }): PendingWrite => ({
+  ...w,
+  id: w.id ?? ++ids,
+})
 
 const mineOn = (posts: RoomPost[], on: string) =>
   foldRoomRecords(posts)
@@ -128,8 +131,8 @@ describe('usePendingWrites', () => {
 
   test('lays a write while it is written, keeps it once written, and lets go when the list carries it', async () => {
     let finish!: (w: { key: string; version: number }) => void
-    const { result, rerender } = renderHook(({ posts }) => usePendingWrites(posts), {
-      initialProps: { posts: [M1] as RoomPost[] },
+    const { result, rerender } = renderHook((props: { posts: RoomPost[] }) => usePendingWrites(props.posts), {
+      initialProps: { posts: [M1] },
     })
     let done!: Promise<void>
     act(() => {
