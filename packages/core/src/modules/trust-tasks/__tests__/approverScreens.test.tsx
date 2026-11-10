@@ -260,9 +260,10 @@ describe('the offer sheet', () => {
     expect(tree.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe(
       'Approver.AcceptAsksLock|CreateAgent.Lock.fingerprint'
     )
+    tree.unmount()
     lock.mockResolvedValue('unknown')
     const other = await show(<ApproverOfferModal />)
-    expect(other.getAllByTestId(id(ApproverOfferIds.faceId)).at(-1)?.props.children).toBe(
+    expect(other.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe(
       'Approver.AcceptAsksLock|CreateAgent.Lock.unknown'
     )
   })
