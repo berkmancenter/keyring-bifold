@@ -71,6 +71,9 @@ export async function checkEnforcement(agent: Agent): Promise<EnforcementCheck> 
     const rules = await vtaAgent.approvalRules(agent)
     if (!rules.view.canTest) {
       result = { kind: 'needsTestRule' }
+    } else if (!vtaAgent.getState().managerDid) {
+      // Not knowing who this phone is says nothing about the person's rules: couldn't tell, never "would ask others".
+      result = { kind: 'unknown' }
     } else if (!onlyThisPhone(rules.model, vtaAgent.getState().managerDid)) {
       result = { kind: 'wouldReachOthers' }
     } else {

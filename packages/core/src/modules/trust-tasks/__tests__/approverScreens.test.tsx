@@ -547,7 +547,8 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
   const CREATE_TEST = 'https://trusttasks.org/spec/vta/contexts/create/1.0'
   const held = (approvers: string[]) =>
     ({ view: { approvers, keys: ['joinCommunity'], heldElsewhere: [] }, version: 3 }) as TrustedApproversState
-  const setup = (canTest = true) => {
+  // null: signed in as no one known (a default would replace an explicit undefined).
+  const setup = (canTest = true, signedInAs: string | null = ME_PHONE) => {
     jest.spyOn(approverRole, 'acceptedRoleOffers').mockResolvedValue([])
     jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
     jest.spyOn(approverRole, 'approvingFor').mockResolvedValue([])
@@ -559,7 +560,7 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
     const probe = jest.spyOn(vtaAgent, 'sendTestRequest')
     // The phone signed in as the one member of its own set: the sole-member check compares with this, not the set name.
     const real = vtaAgent.getState.bind(vtaAgent)
-    jest.spyOn(vtaAgent, 'getState').mockImplementation(() => ({ ...real(), managerDid: ME_PHONE }))
+    jest.spyOn(vtaAgent, 'getState').mockImplementation(() => ({ ...real(), managerDid: signedInAs ?? undefined }))
     return { rules, probe }
   }
   const tap = async (tree: Awaited<ReturnType<typeof show>>) =>
@@ -632,6 +633,15 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
     await tap(tree)
     expect(probe).not.toHaveBeenCalled()
     expect(said(tree)).toHaveTextContent(/Approver\.CheckWouldReachOthers/)
+  })
+
+  test("no manager DID known reads as couldn't tell, never as a rule that would ask others; nothing is sent (control: the edited set above)", async () => {
+    const { probe } = setup(true, null)
+    const tree = await show(<VtaTrustedApprovers />)
+    await tap(tree)
+    expect(probe).not.toHaveBeenCalled()
+    expect(said(tree)).toHaveTextContent(/Approver\.CheckUnknown/)
+    expect(said(tree)).not.toHaveTextContent(/WouldReachOthers/)
   })
 
   test('with the switch off, there is no check at all (control: on, it is there)', async () => {
