@@ -24,6 +24,8 @@
  */
 import { consentPendingOf } from '../../trust-tasks/module/VtaClient'
 
+import { failureCategory, loggedRefusalCode } from '../roomsLogWords'
+
 import type { ConsentHolds } from './consentHolds'
 import { parseChanged, parseWatch, refusalCode, ROOMS_TASK } from './wire'
 
@@ -193,7 +195,8 @@ export class RoomWatches {
       )
     } catch (e) {
       const code = refusalCode(e)
-      let why = code ? `refused (${code})` : 'no answer'
+      // By kind only, as every rooms line says a refusal (roomsLogWords): a code off the list reads as `other`.
+      let why = code ? failureCategory(e) : 'no answer'
       if (consentPendingOf(e)) {
         // The agent has asked its approvers already. Kept, so no session asks again today (consentHolds.ts).
         await this.deps.consentHolds?.noteHeld(ROOMS_TASK.keysWatch01, this.deps.now()).catch(() => undefined)
@@ -230,7 +233,7 @@ export class RoomWatches {
         this.polled(
           roomId,
           outcome?.refused
-            ? `refused (${outcome.refused}${outcome.hostCode ? `: ${outcome.hostCode}` : ''})`
+            ? `refused (${loggedRefusalCode(outcome.refused)}${outcome.hostCode ? `: ${loggedRefusalCode(outcome.hostCode)}` : ''})`
             : 'not armed'
         )
     }

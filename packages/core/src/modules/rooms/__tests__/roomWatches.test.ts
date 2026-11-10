@@ -214,6 +214,23 @@ describe('polling stays the fallback', () => {
     expect(s.agentTask).toHaveBeenCalledTimes(1)
   })
 
+  test("a host's code off the rooms log list is logged as other, never as the host wrote it", async () => {
+    const s = setUp({
+      answer: (p) => ({
+        member: p.member,
+        host: p.host,
+        watches: [
+          { roomId: 'room:1', armed: false, refused: 'hostRefused', hostCode: 'rooms/watch:did:key:zSecretName' },
+        ],
+      }),
+    })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    await s.watches.idle()
+    const said = s.warn.mock.calls.map(([l]) => l).join('\n')
+    expect(said).toMatch(/refused \(hostRefused: other\)/)
+    expect(said).not.toContain('zSecretName')
+  })
+
   test('armed with no time it lapses: polled', async () => {
     const s = setUp({
       answer: (p) => ({ member: p.member, host: p.host, watches: [{ roomId: 'room:1', armed: true }] }),
