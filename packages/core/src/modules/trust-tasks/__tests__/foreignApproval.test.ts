@@ -234,7 +234,8 @@ describe("the controller, on Jordan's phone", () => {
       decideConsent: jest.fn(async () => ({ status: 'granted' })),
       sendTo: jest.fn(async (_peer: string, plaintext: Record<string, unknown>) => {
         sent.push(plaintext)
-        setImmediate(() => takeForeignReply(replyTo(plaintext) as never))
+        // Sam's agent's reply reaches this phone the way any message does: through the session's inbound.
+        setImmediate(() => internals.inbound(replyTo(plaintext)))
       }),
     }
     const internals = vta as unknown as {
