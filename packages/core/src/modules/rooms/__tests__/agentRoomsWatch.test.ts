@@ -115,13 +115,16 @@ test("the agent's signal for that room reaches a listener, once; one naming anot
   const s = await listed(setUp())
   s.service.watchRoom(ROOM, 4)
   await s.settle()
-  const heard = jest.fn()
+  // Spent before anyone hears it: the room's tick then reads at once, never held by the watched room's 120 s wait.
+  const watchedWhenHeard: boolean[] = []
+  const heard = jest.fn((roomId: string) => void watchedWhenHeard.push(s.service.roomWatched(roomId)))
   const stop = s.service.onRoomChanged(heard)
   s.push(changed({ member: 'did:key:someone-else' }))
   expect(heard).not.toHaveBeenCalled()
   s.push(changed())
   s.push(changed())
   expect(heard.mock.calls).toEqual([[ROOM]])
+  expect(watchedWhenHeard).toEqual([false])
   stop()
 })
 
