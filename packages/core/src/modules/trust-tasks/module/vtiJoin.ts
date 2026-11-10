@@ -12,6 +12,7 @@
  * @module trust-tasks/module/vtiJoin
  */
 
+import { didPrefix } from './didPrefix'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import type { Agent } from '@credo-ts/core'
 import { DeviceEventEmitter } from 'react-native'
@@ -296,10 +297,32 @@ export interface ReadJoinStateOptions {
   communityStore?: VtiCommunityStore
   identityStore?: VtiIdentityStore
   /** The status poll; by default connects as the community's persona and asks. */
-  status?: (communityDid: string, requestId?: string) => Promise<JoinRequestStatus | undefined>
+  status?: StatusPoll
   /** Whether a held card still stands; by default its status-list bit. */
   cardStatus?: (membership: VtiMembership) => Promise<{ revoked: boolean; at?: string }>
 }
+
+/** One `join-requests/status` poll; `resendCredentials` only ever from `askForCardIfOwed`. */
+export type StatusPoll = (
+  communityDid: string,
+  requestId?: string,
+  ask?: { resendCredentials?: boolean }
+) => Promise<JoinRequestStatus | undefined>
+
+/** The status poll as the phone makes it: connected as the community's persona. */
+const statusPollOf =
+  (agent: Agent, options: { mediatorDid?: string; identityStore?: VtiIdentityStore }): StatusPoll =>
+  async (did, requestId, ask = {}) => {
+    const persona = await (options.identityStore ?? new GenericRecordsIdentityStore(agent)).getPersona(did)
+    // No identity to ask with is not an answer: nothing is known, so the
+    // request is not taken for lost.
+    if (!persona) throw new Error('vtiJoin: no identity to ask with')
+    await vtiAgent.connect(agent, options.mediatorDid, {
+      persona,
+      peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
+    })
+    return vtiAgent.status(did, { requestId, ...(ask.resendCredentials ? { resendCredentials: true } : {}) })
+  }
 
 export async function readJoinState(
   agent: Agent,
@@ -367,19 +390,7 @@ export async function readJoinState(
 
   const open = !submission.acknowledgedAt || submission.status === 'pending' || submission.status === 'deferred'
   if (open && options.poll !== false && !options.local) {
-    const poll =
-      options.status ??
-      (async (did: string, requestId?: string) => {
-        const persona = await (options.identityStore ?? new GenericRecordsIdentityStore(agent)).getPersona(did)
-        // No identity to ask with is not an answer: nothing is known, so the
-        // request is not taken for lost.
-        if (!persona) throw new Error('vtiJoin: no identity to ask with')
-        await vtiAgent.connect(agent, options.mediatorDid, {
-          persona,
-          peerRevisionStore: new GenericRecordsTspPeerRevisionStore(agent),
-        })
-        return vtiAgent.status(did, { requestId })
-      })
+    const poll = options.status ?? statusPollOf(agent, options)
     try {
       const polled = await poll(communityDid, submission.requestId)
       // The community holds no such request: the send never reached it, or it
@@ -397,6 +408,76 @@ export async function readJoinState(
     }
   }
   return stateOfSubmission(submission)
+}
+
+/** What Check again's ask for the card came to (`askForCardIfOwed`). */
+export interface CardAsk {
+  /** Whether the community was asked at all: not when nothing here waits on a card. */
+  polled: boolean
+  /**
+   * The community's answer to the re-send, when one was asked: `unsupported`
+   * when it named none, which the spec reads as re-delivery not supported.
+   */
+  resend?: 'queued' | 'notNeeded' | 'rateLimited' | 'unsupported'
+  /** With `rateLimited`: the earliest a re-send is honoured again; absent, no more will be. */
+  retryAfter?: string
+}
+
+export type AskForCardOptions = Pick<ReadJoinStateOptions, 'mediatorDid' | 'communityStore' | 'identityStore' | 'status'>
+
+/**
+ * Check again, for a request the community approved whose card never came.
+ *
+ * Approved with no card held reads as `pending` (`stateOfSubmission`), and the
+ * card comes only by delivery. A delivery the phone collected but did not keep
+ * counts at the community as delivered, so nothing would ever send it again,
+ * and Check again only asked the status: approved, every time (IN-617). The
+ * community re-sends what it already issued when asked (`resendCredentials`,
+ * vtc-service 0.12.0), and says whether it holds this member's acknowledgement
+ * (`credentialsDelivered`).
+ *
+ * Only for a request this phone already knows as approved and holds no card
+ * for, and only after the community's own answer says `credentialsDelivered:
+ * false`: a community that predates the field omits it, and would refuse a
+ * poll carrying `resendCredentials` (its schema takes no unknown member). Never
+ * from a background poll: the person asks. The community rate-limits it too.
+ * Throws as a poll does; nothing is changed then.
+ */
+export async function askForCardIfOwed(
+  agent: Agent,
+  communityDid: string,
+  options: AskForCardOptions = {}
+): Promise<CardAsk> {
+  const store = options.communityStore ?? new GenericRecordsCommunityStore(agent)
+  const here = await readJoinState(agent, communityDid, {
+    local: true,
+    communityStore: store,
+    identityStore: options.identityStore,
+  })
+  if (here.kind !== 'pending' || here.submission.status !== 'approved') return { polled: false }
+  const poll = options.status ?? statusPollOf(agent, options)
+  const log = (line: string) => agent.config?.logger?.warn?.(`[VTI] join request at ${didPrefix(communityDid)}: ${line}`)
+  const first = await poll(communityDid, here.submission.requestId)
+  // The community holds no such request: Check again's own read says so.
+  if (!first) return { polled: false }
+  await recordStatus(store, communityDid, first)
+  if (first.status !== 'approved' || first.credentialsDelivered !== false) {
+    log(
+      `${first.status}, credentialsDelivered ${
+        first.credentialsDelivered === undefined ? 'absent' : String(first.credentialsDelivered)
+      }; the card was not asked for again`
+    )
+    return { polled: true }
+  }
+  const again = await poll(communityDid, first.requestId ?? here.submission.requestId, { resendCredentials: true })
+  if (again) await recordStatus(store, communityDid, again)
+  const resend = again?.credentialResend ?? 'unsupported'
+  log(
+    `approved, credentialsDelivered false; asked for the card again: credentialResend ${
+      again?.credentialResend ?? 'absent'
+    }${again?.retryAfter ? `, retryAfter ${again.retryAfter}` : ''}`
+  )
+  return { polled: true, resend, ...(again?.retryAfter ? { retryAfter: again.retryAfter } : {}) }
 }
 
 /** A submission as a join state, from what the community last said about it. */
