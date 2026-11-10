@@ -1,3 +1,5 @@
+import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
+
 import { VtiMediatorSession, type VtiClientIdentity, type VtiMediatorEndpoints } from '../module/VtiMediatorTransport'
 
 // IN-617: three problem-reports reached a tester's report as a bare type, each
@@ -26,15 +28,11 @@ const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
 function sessionOpening(plaintext: Record<string, unknown>) {
   const onMessage = jest.fn()
   const session = new VtiMediatorSession(agent, identity, mediator, { onMessage })
-  const internals = session as unknown as {
-    unpack: () => Promise<unknown>
-    acknowledge: (ids: string[]) => Promise<void>
-    handleFrame: (raw: string) => Promise<void>
-  }
-  internals.unpack = async () => plaintext
-  const acknowledge = jest.fn(async () => undefined)
-  internals.acknowledge = acknowledge
-  const receive = () => internals.handleFrame(JSON.stringify({ protected: 'e30', ciphertext: 'x' }))
+  // The decrypt step and the acknowledgement stand in; the frame handling is the shipping one.
+  session['unpack'] = async () => plaintext as DidCommV2PlaintextMessage
+  const acknowledge = jest.fn(async (_ids: string[]) => undefined)
+  session['acknowledge'] = acknowledge
+  const receive = () => session['handleFrame'](JSON.stringify({ protected: 'e30', ciphertext: 'x' }))
   return { receive, acknowledge, onMessage }
 }
 
@@ -55,8 +53,8 @@ describe("the mediator's own problem-report", () => {
     })
     await receive()
     expect(warned()).toEqual([
-      '[TrustTasks:VtiMediatorTransport] mediator.example sent a problem-report for did:webvh:QmApplicantScid…: ' +
-        'e.p.msg.forwarding — no session for did:webvh:QmApplicantScid… (thread b3c1f0de-0000-4000-8000-000000000001)',
+      '[TrustTasks:VtiMediatorTransport] mediator.example sent a problem-report for did:webvh:QmApplicantSci…: ' +
+        'e.p.msg.forwarding — no session for did:webvh:QmApplicantSci… (thread b3c1f0de-0000-4000-8000-000000000001)',
     ])
     expect(warned().join('\n')).not.toContain(identity.did)
     // As before: the mediator's own message is neither handed on nor acknowledged.

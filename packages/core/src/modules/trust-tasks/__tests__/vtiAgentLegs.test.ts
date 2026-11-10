@@ -466,7 +466,7 @@ describe('what a community is asked, and how', () => {
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:stray-report') })
     logger.warn.mockClear()
     await Promise.resolve(
-      mockSessions.at(-1)!.onMessage({
+      mockSessions[mockSessions.length - 1].onMessage({
         type: 'https://didcomm.org/report-problem/2.0/problem-report',
         from: community,
         thid: 'urn:uuid:not-this-request',

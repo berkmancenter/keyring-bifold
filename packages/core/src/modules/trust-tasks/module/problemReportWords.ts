@@ -30,8 +30,7 @@ export function problemReportWords(
       return `${options.hideDids ? 'a DID' : didPrefix(did)}${match.slice(did.length)}`
     })
   const code = typeof body.code === 'string' && body.code ? scrub(body.code).slice(0, 80) : 'no code'
-  const comment =
-    typeof body.comment === 'string' ? scrub(body.comment.replace(/\s+/g, ' ').trim()).slice(0, 200) : ''
+  const comment = typeof body.comment === 'string' ? scrub(body.comment.replace(/\s+/g, ' ').trim()).slice(0, 200) : ''
   const thread = [message.thid, message.pthid].find((id): id is string => typeof id === 'string' && id.length > 0)
   return `${code}${comment ? ` — ${comment}` : ''} (${thread ? `thread ${scrub(thread).slice(0, 64)}` : 'no thread'})`
 }
