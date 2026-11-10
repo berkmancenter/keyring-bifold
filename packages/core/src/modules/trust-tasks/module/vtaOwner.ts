@@ -209,8 +209,8 @@ export function deviceRefusalOf(error: unknown): DeviceActionRefused {
   // instance of it) would defeat instanceof; VtiRefusal comes from vtiAgent, which they don't stub. Keep the code a
   // literal here, never imported from VtaClient: from a stubbed VtaClient an imported guard is undefined (a crash), and
   // an imported CONSENT_NOT_GIVEN is undefined too, so the check would silently never match and the refusal would read
-  // as the agent's own again. consentNotGiven.test.ts builds the error with VtaClient's factory and reads it here, so
-  // the two copies cannot drift apart unseen.
+  // as the agent's own again. So this copy of the code is deliberate, and it is guarded: consentNotGiven.test.ts builds
+  // the error with VtaClient's factory and reads it here, so drift on either side fails that row.
   if (error instanceof VtiRefusal && error.code === 'consentNotGiven') return refusal('notApproved')
   if (!(error instanceof VtiRefusal)) return refusal(NO_ANSWER.test(message) ? 'noAnswer' : 'failed')
   const details = (error.details ?? {}) as { reason?: unknown }
