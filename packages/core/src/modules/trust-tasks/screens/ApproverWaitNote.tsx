@@ -47,6 +47,10 @@ const ApproverWaitNote: React.FC = () => {
   const { agent } = useAgent()
   const { ColorPalette } = useTheme()
   const held = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentFor)
+  // One code, for the one task named beside it. "Their screen shows the same one" is true only because at most one
+  // hold is pending at a time: VtaClient.task throws before onConsentPending when waitForConsent is false (every rooms
+  // task), and a waiting task holds the serial queue. Whoever lets a second waiting task run beside it (a
+  // waitForConsent: true outside that queue) makes this line false without any test failing; look here first.
   const heldCode = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentCode)
   const granted = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().consentGranted)
   const notGiven = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().consentNotGiven)
