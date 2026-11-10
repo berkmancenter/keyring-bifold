@@ -44,18 +44,23 @@ export const lastEnforcementCheck = (vtaDid: string | undefined): EnforcementChe
 export const forgetEnforcementChecks = () => lastByAgent.clear()
 
 /**
- * The test rule's set holds this phone alone. Matched by value, as the rule names it (approvalRules.ts phoneSetName:
- * `keyring-phone:<managerDid>`, written with that one member): canTest knows the rule by its set's name only, and a set
- * edited elsewhere could hold others, whom the test request would then ask too.
+ * The test rule's set holds this phone alone: exactly one member, and that member is this phone's manager DID. The
+ * rule is found by its set's name (approvalRules.ts phoneSetName, `keyring-phone:<managerDid>`), but the name is not
+ * taken as the identity: a set edited elsewhere could hold others, whom the test request would then ask too, and the
+ * check must hold on its own, not only because canTest ran first. No managerDid known: false.
  */
 const PHONE_SET = 'keyring-phone:'
-function onlyThisPhone(model: { rules: { taskType: string; approverSet?: string }[]; sets: Record<string, string[]> }) {
+export function onlyThisPhone(
+  model: { rules: { taskType: string; approverSet?: string }[]; sets: Record<string, string[]> },
+  managerDid: string | undefined
+) {
+  if (!managerDid) return false
   const rule = model.rules.find(
     (r) => r.taskType.endsWith('/vta/contexts/create/1.0') && r.approverSet?.startsWith(PHONE_SET)
   )
   if (!rule?.approverSet) return false
   const members = model.sets[rule.approverSet] ?? []
-  return members.length === 1 && members[0] === rule.approverSet.slice(PHONE_SET.length)
+  return members.length === 1 && members[0] === managerDid
 }
 
 /** Run the probe once, on this phone's linked agent. Never throws: a failure is `unknown`. */
@@ -66,7 +71,7 @@ export async function checkEnforcement(agent: Agent): Promise<EnforcementCheck> 
     const rules = await vtaAgent.approvalRules(agent)
     if (!rules.view.canTest) {
       result = { kind: 'needsTestRule' }
-    } else if (!onlyThisPhone(rules.model)) {
+    } else if (!onlyThisPhone(rules.model, vtaAgent.getState().managerDid)) {
       result = { kind: 'wouldReachOthers' }
     } else {
       const sent = await vtaAgent.sendTestRequest(agent)

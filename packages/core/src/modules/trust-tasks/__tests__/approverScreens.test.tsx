@@ -26,7 +26,7 @@ import ApproverWaitNote, {
 } from '../screens/ApproverWaitNote'
 import * as ownerConfirm from '../module/ownerConfirm'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
-import { forgetEnforcementChecks } from '../screens/approverEnforcementCheck'
+import { forgetEnforcementChecks, onlyThisPhone } from '../screens/approverEnforcementCheck'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
@@ -557,6 +557,9 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
       model: { rules: [{ taskType: CREATE_TEST, approverSet: MY_SET }], sets: { [MY_SET]: [ME_PHONE] } },
     } as never)
     const probe = jest.spyOn(vtaAgent, 'sendTestRequest')
+    // The phone signed in as the one member of its own set: the sole-member check compares with this, not the set name.
+    const real = vtaAgent.getState.bind(vtaAgent)
+    jest.spyOn(vtaAgent, 'getState').mockImplementation(() => ({ ...real(), managerDid: ME_PHONE }))
     return { rules, probe }
   }
   const tap = async (tree: Awaited<ReturnType<typeof show>>) =>
@@ -605,6 +608,18 @@ describe('Who approves: checking the agent waits for them (a live probe, only on
     await tap(tree)
     expect(probe).not.toHaveBeenCalled()
     expect(said(tree)).toHaveTextContent(/Approver\.CheckNeedsTestRule/)
+  })
+
+  test("the sole-member check holds on its own: another phone's set holding only that phone is not this phone's (control: ours)", () => {
+    // Unreachable through the screen (canTest refuses another phone's rule first), so checked here: the set's name is
+    // how the rule is found, never who it is.
+    const ruleFor = (did: string) => ({
+      rules: [{ taskType: 'https://trusttasks.org/spec/vta/contexts/create/1.0', approverSet: `keyring-phone:${did}` }],
+      sets: { [`keyring-phone:${did}`]: [did] },
+    })
+    expect(onlyThisPhone(ruleFor('did:peer:2.other-phone'), 'did:peer:2.this-phone')).toBe(false)
+    expect(onlyThisPhone(ruleFor('did:peer:2.this-phone'), undefined)).toBe(false)
+    expect(onlyThisPhone(ruleFor('did:peer:2.this-phone'), 'did:peer:2.this-phone')).toBe(true)
   })
 
   test('a test rule whose set was edited to hold others is not sent: it would ask them too (control: this phone alone)', async () => {
