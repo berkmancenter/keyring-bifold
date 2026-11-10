@@ -29,6 +29,7 @@ import {
   type RoleOfferPrompt,
 } from '../approverRole'
 import { releaseWarn } from '../module/releaseLog'
+import { ownerLockKind, type OwnerLockKind } from '../module/ownerConfirm'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent } from '../module/vtaAgent'
 import { OwnerNotConfirmed } from '../module/vtaOwner'
@@ -60,6 +61,15 @@ const ApproverOfferModal: React.FC = () => {
   const [prompt, setPrompt] = useState<RoleOfferPrompt | undefined>(() => (on ? firstShown() : undefined))
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
+  // The person's own lock, named as VtaCreateAgent names it: not everyone has Face ID.
+  const [lockKind, setLockKind] = useState<OwnerLockKind>('unknown')
+  useEffect(() => {
+    let live = true
+    void ownerLockKind().then((kind) => live && setLockKind(kind))
+    return () => {
+      live = false
+    }
+  }, [])
   const linked = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().link.kind === 'linked')
 
   useEffect(() => {
@@ -186,7 +196,7 @@ const ApproverOfferModal: React.FC = () => {
               testID={testIdWithKey(ApproverOfferIds.notNow)}
             />
             <ThemedText style={[styles.muted, styles.centred]} testID={testIdWithKey(ApproverOfferIds.faceId)}>
-              {t('Approver.AcceptAsksFaceId')}
+              {t('Approver.AcceptAsksLock', { method: t(`CreateAgent.Lock.${lockKind}`) })}
             </ThemedText>
           </ScrollView>
         </SafeAreaView>

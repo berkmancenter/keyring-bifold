@@ -3556,6 +3556,6 @@
     "NotGivenNoNag": "O Keyring não vai perguntar a {{names}} de novo por conta própria.",
     "ApprovedGoAhead": "{{names}} disse sim, então seu agente pode seguir.",
     "AcceptReason": "Aceitar ser aprovador de {{asker}}",
-    "AcceptAsksFaceId": "Aceitar pede o Face ID. Recusar é um toque."
+    "AcceptAsksLock": "Para aceitar, confirme {{method}}. Recusar é um toque."
   }
 }
