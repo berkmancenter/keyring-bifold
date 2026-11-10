@@ -176,6 +176,16 @@ describe('Check again on an approved request whose card never came', () => {
     expect(warned()[0]).toContain('asked for the card again: credentialResend absent')
   })
 
+  it('says a request gone between the two polls as gone, not as a re-send not supported', async () => {
+    const s = stores({ submission: approved() })
+    const { status, asked } = polls({ requestId: 'r-1', status: 'approved', credentialsDelivered: false }, undefined)
+    expect(await askForCardIfOwed(agent, COMMUNITY, { ...s, status })).toEqual({ polled: false, resend: 'notFound' })
+    expect(asked).toEqual([{ requestId: 'r-1' }, { requestId: 'r-1', resendCredentials: true }])
+    expect(warned()).toEqual([
+      '[VTI] join request at did:webvh:QmCommunitySci…: approved, credentialsDelivered false; asked for the card again: the community holds no such request now',
+    ])
+  })
+
   it('keeps when it may ask again, and records what the community said', async () => {
     const s = stores({ submission: approved() })
     const { status } = polls(
@@ -211,7 +221,9 @@ describe('the line under an approved request', () => {
   it.each([
     [{ polled: true, resend: 'queued' as const }, 'Join.CardAskedAgain'],
     [{ polled: true, resend: 'rateLimited' as const, retryAfter: '2026-11-10T06:00:00Z' }, 'Join.CardAskedRecently'],
-    [{ polled: true, resend: 'rateLimited' as const }, 'Join.CardAskStopped'],
+    // Not final: status/0.1 has a community only SHOULD send retryAfter, and no way to say "no more".
+    [{ polled: true, resend: 'rateLimited' as const }, 'Join.CardAskedRecently'],
+    [{ polled: false, resend: 'notFound' as const }, undefined],
     [{ polled: true, resend: 'notNeeded' as const }, undefined],
     [{ polled: true, resend: 'unsupported' as const }, undefined],
     [{ polled: true }, undefined],

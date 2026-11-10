@@ -2026,7 +2026,6 @@
     "WillShowWhenAccepted": "Keyring l'affiche ici et dans Votre agent quand elle est acceptée.",
     "CardAskedAgain": "{{community}} a accepté votre demande, mais votre carte de membre n'est pas arrivée. Keyring a demandé à {{community}} de la renvoyer.",
     "CardAskedRecently": "Keyring a demandé à {{community}} de renvoyer votre carte il y a peu. Vérifiez à nouveau plus tard.",
-    "CardAskStopped": "{{community}} ne renvoie plus votre carte. Demandez à l'un de ses administrateurs de vérifier.",
     "AskedAs": "Vous avez demandé à rejoindre en tant que",
     "SeeFullPersonaId": "Voir l'identifiant de persona complet",
     "ViewCommunity": "Voir la communauté",

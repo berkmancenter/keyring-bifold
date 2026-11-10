@@ -393,7 +393,11 @@ export interface JoinRequestStatus {
   credentialsDelivered?: boolean
   /** The answer to `resendCredentials`; absent when it was not asked, or is not supported. */
   credentialResend?: 'queued' | 'notNeeded' | 'rateLimited'
-  /** With `rateLimited`: the earliest a re-send is honoured again. Absent there: no more will be. */
+  /**
+   * With `rateLimited`: the earliest a re-send is honoured again. The spec has
+   * a community only SHOULD send it, so its absence says nothing more: not that
+   * no more will be honoured.
+   */
   retryAfter?: string
 }
 

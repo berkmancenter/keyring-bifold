@@ -412,14 +412,23 @@ export async function readJoinState(
 
 /** What Check again's ask for the card came to (`askForCardIfOwed`). */
 export interface CardAsk {
-  /** Whether the community was asked at all: not when nothing here waits on a card. */
+  /**
+   * Whether the community's answer is already stored, so the screen reads it
+   * rather than asking again. Not when nothing here waits on a card, nor when
+   * the community holds no such request: the screen's own read records that.
+   */
   polled: boolean
   /**
-   * The community's answer to the re-send, when one was asked: `unsupported`
-   * when it named none, which the spec reads as re-delivery not supported.
+   * The community's answer to the re-send, when one was asked. `unsupported`:
+   * it named none, which the spec reads as re-delivery not supported.
+   * `notFound`: between the two polls, the community stopped holding the
+   * request.
    */
-  resend?: 'queued' | 'notNeeded' | 'rateLimited' | 'unsupported'
-  /** With `rateLimited`: the earliest a re-send is honoured again; absent, no more will be. */
+  resend?: 'queued' | 'notNeeded' | 'rateLimited' | 'unsupported' | 'notFound'
+  /**
+   * With `rateLimited`, when the community says: the earliest a re-send is
+   * honoured again. It only SHOULD say, so its absence is not a refusal.
+   */
   retryAfter?: string
 }
 
@@ -432,16 +441,20 @@ export type AskForCardOptions = Pick<
  * Check again, for a request the community approved whose card never came.
  *
  * Approved with no card held reads as `pending` (`stateOfSubmission`), and the
- * card comes only by delivery. A delivery the phone collected but did not keep
- * counts at the community as delivered, so nothing would ever send it again,
- * and Check again only asked the status: approved, every time (IN-617). The
- * community re-sends what it already issued when asked (`resendCredentials`,
- * vtc-service 0.12.0), and says whether it holds this member's acknowledgement
- * (`credentialsDelivered`).
+ * card comes only by delivery. Check again only asked the status, which said
+ * approved every time, and nothing asked for the card itself, so nothing sent
+ * it again (IN-617). The community re-sends what it already issued when asked
+ * (`resendCredentials`, vtc-service 0.12.0).
+ *
+ * What makes this fire: `credentialsDelivered` is true only once the community
+ * holds the member's ACKNOWLEDGEMENT of the card (vtc/members/vmc), not once
+ * the card was sent or collected. A card the phone collected and then did not
+ * keep is never acknowledged, so it stays false, and that is the case this is
+ * for. Do not read it as "the card was delivered".
  *
  * Only for a request this phone already knows as approved and holds no card
  * for, and only after the community's own answer says `credentialsDelivered:
- * false`: a community that predates the field omits it, and would refuse a
+ * false`. A community that predates the field omits it, and would refuse a
  * poll carrying `resendCredentials` (its schema takes no unknown member). Never
  * from a background poll: the person asks. The community rate-limits it too.
  * Throws as a poll does; nothing is changed then.
@@ -474,14 +487,20 @@ export async function askForCardIfOwed(
     return { polled: true }
   }
   const again = await poll(communityDid, first.requestId ?? here.submission.requestId, { resendCredentials: true })
-  if (again) await recordStatus(store, communityDid, again)
-  const resend = again?.credentialResend ?? 'unsupported'
+  // Gone between the two polls: not an answer to the re-send. The screen's own
+  // read finds it gone and says so, as for any request the community no longer holds.
+  if (!again) {
+    log('approved, credentialsDelivered false; asked for the card again: the community holds no such request now')
+    return { polled: false, resend: 'notFound' }
+  }
+  await recordStatus(store, communityDid, again)
+  const resend = again.credentialResend ?? 'unsupported'
   log(
     `approved, credentialsDelivered false; asked for the card again: credentialResend ${
-      again?.credentialResend ?? 'absent'
-    }${again?.retryAfter ? `, retryAfter ${again.retryAfter}` : ''}`
+      again.credentialResend ?? 'absent'
+    }${again.retryAfter ? `, retryAfter ${again.retryAfter}` : ''}`
   )
-  return { polled: true, resend, ...(again?.retryAfter ? { retryAfter: again.retryAfter } : {}) }
+  return { polled: true, resend, ...(again.retryAfter ? { retryAfter: again.retryAfter } : {}) }
 }
 
 /** A submission as a join state, from what the community last said about it. */
