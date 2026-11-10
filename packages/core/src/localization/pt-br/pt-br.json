@@ -3551,6 +3551,9 @@
     "WaitMayNeedOpen": "O telefone de {{names}} pode não tocar. Se não tocar, {{names}} precisa abrir o Keyring para responder.",
     "NamesOr": " ou ",
     "ApprovedBy": "Aprovado por {{names}}",
+    "NotGivenBy": "{{names}} não aprovou",
+    "NotGivenWhy": "{{names}} disse não, ou não respondeu a tempo, então seu agente não continuou.",
+    "NotGivenNoNag": "O Keyring não vai perguntar a {{names}} de novo por conta própria.",
     "ApprovedGoAhead": "{{names}} disse sim, então seu agente pode seguir."
   }
 }

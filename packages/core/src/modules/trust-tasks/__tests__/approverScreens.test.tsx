@@ -19,7 +19,11 @@ import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../mod
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import { DeviceActionRefused } from '../module/vtaOwner'
 import ApproverAskRow, { ApproverAskRowIds } from '../screens/ApproverAskRow'
-import ApproverWaitNote, { APPROVED_SHOWN_MS, ApproverWaitNoteIds } from '../screens/ApproverWaitNote'
+import ApproverWaitNote, {
+  APPROVED_SHOWN_MS,
+  ApproverWaitNoteIds,
+  NOT_GIVEN_SHOWN_MS,
+} from '../screens/ApproverWaitNote'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -578,5 +582,35 @@ describe('who a held task waits on', () => {
     })
     tree = await show(<ApproverWaitNote />)
     expect(tree.queryByTestId(id(ApproverWaitNoteIds.approved))).toBeNull()
+  })
+
+  test("after the question changed it says they didn't approve and names the action, never that they said no", async () => {
+    agentState({ awaitingConsentFor: undefined, consentNotGiven: { taskType: PERSONA_MINT, at: Date.now() } })
+    jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
+    const tree = await show(<ApproverWaitNote />)
+    expect(tree.getByTestId(id(ApproverWaitNoteIds.notGiven))).toBeTruthy()
+    expect(tree.getByText('Approver.NotGivenBy')).toBeTruthy()
+    expect(tree.getByTestId(id(ApproverWaitNoteIds.notGivenAction))).toHaveTextContent('Approver.Action.joinCommunity')
+    expect(tree.queryByTestId(id(ApproverWaitNoteIds.approved))).toBeNull()
+    expect(tree.queryByTestId(id(ApproverWaitNoteIds.waiting))).toBeNull()
+  })
+
+  test('the newer of a yes and a not-given is the one shown; an old not-given is not shown', async () => {
+    jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
+    agentState({
+      consentGranted: { taskType: PERSONA_MINT, at: Date.now() - 1000 },
+      consentNotGiven: { taskType: PERSONA_MINT, at: Date.now() },
+    })
+    expect((await show(<ApproverWaitNote />)).getByTestId(id(ApproverWaitNoteIds.notGiven))).toBeTruthy()
+    agentState({
+      consentGranted: { taskType: PERSONA_MINT, at: Date.now() },
+      consentNotGiven: { taskType: PERSONA_MINT, at: Date.now() - 1000 },
+    })
+    expect((await show(<ApproverWaitNote />)).getByTestId(id(ApproverWaitNoteIds.approved))).toBeTruthy()
+    agentState({
+      consentGranted: undefined,
+      consentNotGiven: { taskType: PERSONA_MINT, at: Date.now() - NOT_GIVEN_SHOWN_MS - 1000 },
+    })
+    expect((await show(<ApproverWaitNote />)).queryByTestId(id(ApproverWaitNoteIds.notGiven))).toBeNull()
   })
 })

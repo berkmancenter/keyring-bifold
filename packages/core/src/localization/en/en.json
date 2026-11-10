@@ -3677,6 +3677,9 @@
     "WaitMayNeedOpen": "{{names}}'s phone may not buzz. If not, {{names}} needs to open Keyring to answer.",
     "NamesOr": " or ",
     "ApprovedBy": "Approved by {{names}}",
+    "NotGivenBy": "{{names}} didn't approve",
+    "NotGivenWhy": "{{names}} said no, or didn't answer in time, so your agent didn't go ahead.",
+    "NotGivenNoNag": "Keyring won't ask {{names}} again on its own.",
     "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead."
   }
 }

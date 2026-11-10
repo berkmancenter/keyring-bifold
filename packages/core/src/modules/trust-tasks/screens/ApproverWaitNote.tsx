@@ -5,9 +5,11 @@
  * someone approved (its `task-consent/granted` notice), it says that, for a while.
  *
  * Only what the phone knows. A hold names no approver, so the names are the ones this phone wrote on its agent for
- * that action (approverRole.ts, `approversWaitedOn`); a hold by some other rule shows nothing here. A no, or a request
- * that lapsed, is not told to the asking phone at all (VTI task-consent.md, "Pending vs denied"), so there is no
- * "declined" state: the task's own error says it did not go through.
+ * that action (approverRole.ts, `approversWaitedOn`); a hold by some other rule shows nothing here.
+ *
+ * A no, or a request that lapsed, is not told to the asking phone (VTI task-consent.md, "Pending vs denied"): the
+ * only sign is that the question changed, so the phone stops asking (VtaClient's ConsentNotGiven) and this says the
+ * approver didn't approve (frame 6b). It never says "said no": a no and a lapse look the same from here.
  *
  * Shown only while the trusted-approvers switch is on.
  *
@@ -22,6 +24,7 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import { approversWaitedOn } from '../approverRole'
+import { trustedKeyOf } from '../module/trustedApprovers'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent } from '../module/vtaAgent'
 
@@ -29,10 +32,14 @@ export const ApproverWaitNoteIds = {
   waiting: 'ApproverWait',
   open: 'ApproverWaitOpen',
   approved: 'ApproverApproved',
+  notGiven: 'ApproverNotGiven',
+  notGivenAction: 'ApproverNotGivenAction',
 } as const
 
 /** How long "Approved by …" stays after the agent's notice. */
 export const APPROVED_SHOWN_MS = 2 * 60 * 1000
+/** How long "… didn't approve" stays after the wait ended without consent. */
+export const NOT_GIVEN_SHOWN_MS = 10 * 60 * 1000
 
 const ApproverWaitNote: React.FC = () => {
   const { t } = useTranslation()
@@ -40,9 +47,13 @@ const ApproverWaitNote: React.FC = () => {
   const { ColorPalette } = useTheme()
   const held = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentFor)
   const granted = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().consentGranted)
+  const notGiven = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().consentNotGiven)
   const on = isTrustedApproversEnabled()
   const recent = granted && Date.now() - granted.at < APPROVED_SHOWN_MS ? granted : undefined
-  const taskType = held ?? recent?.taskType
+  const refused = notGiven && Date.now() - notGiven.at < NOT_GIVEN_SHOWN_MS ? notGiven : undefined
+  // The newest of the two, when both are recent: a later hold clears both (vtaAgent).
+  const ended = recent && refused ? (refused.at > recent.at ? refused : recent) : (recent ?? refused)
+  const taskType = held ?? ended?.taskType
   const [names, setNames] = useState<{ taskType: string; names: string[] }>()
 
   useEffect(() => {
@@ -73,6 +84,21 @@ const ApproverWaitNote: React.FC = () => {
         <ThemedText style={styles.muted} testID={testIdWithKey(ApproverWaitNoteIds.open)}>
           {t('Approver.WaitMayNeedOpen', words)}
         </ThemedText>
+      </View>
+    )
+  }
+  if (ended === refused) {
+    const action = trustedKeyOf(taskType)
+    return (
+      <View style={styles.card} testID={testIdWithKey(ApproverWaitNoteIds.notGiven)}>
+        <ThemedText variant="bold">{t('Approver.NotGivenBy', words)}</ThemedText>
+        {action ? (
+          <ThemedText style={styles.muted} testID={testIdWithKey(ApproverWaitNoteIds.notGivenAction)}>
+            {t(`Approver.Action.${action}`)}
+          </ThemedText>
+        ) : null}
+        <ThemedText>{t('Approver.NotGivenWhy', words)}</ThemedText>
+        <ThemedText style={styles.muted}>{t('Approver.NotGivenNoNag', words)}</ThemedText>
       </View>
     )
   }

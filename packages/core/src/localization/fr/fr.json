@@ -3635,6 +3635,9 @@
     "WaitMayNeedOpen": "Le téléphone de {{names}} ne sonnera peut-être pas. Sinon, {{names}} doit ouvrir Keyring pour répondre.",
     "NamesOr": " ou ",
     "ApprovedBy": "Approuvé par {{names}}",
+    "NotGivenBy": "{{names}} n'a pas approuvé",
+    "NotGivenWhy": "{{names}} a dit non, ou n'a pas répondu à temps : votre agent n'a donc pas continué.",
+    "NotGivenNoNag": "Keyring ne redemandera pas à {{names}} de lui-même.",
     "ApprovedGoAhead": "{{names}} a dit oui : votre agent peut continuer."
   }
 }
