@@ -444,10 +444,18 @@ describe('what a community is asked, and how', () => {
   const released = () => {
     const spy = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
     // The lines are read before the spy is restored: restoring it clears what it recorded.
+    //
+    // And never empty. These tests pair a line that must be there with a whole
+    // DID that must not be, and the second means something only while the
+    // capture holds something: an empty capture contains no DID because it
+    // contains nothing. When restoring first emptied it, the DID check stayed
+    // green while testing nothing. So a capture that caught nothing fails here,
+    // whatever the test goes on to assert.
     return {
       stop: (): string[] => {
         const lines = spy.mock.calls.map((call) => String(call[0]))
         spy.mockRestore()
+        expect(lines.length).toBeGreaterThan(0)
         return lines
       },
     }
