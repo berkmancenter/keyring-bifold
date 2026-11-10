@@ -392,9 +392,15 @@ describe('becoming a trusted approver', () => {
     const forged = phone(JORDAN)
     await deliver(forged, { ...offer, proof: { ...(offer.proof as object), by: 'did:peer:stranger' } })
     expect(notTaken(forged)).toEqual([expect.stringMatching(/did not pass its check/)])
-    // Never the contents: no action, agent or challenge in any line.
-    for (const line of [...notTaken(off), ...notTaken(noRelationship), ...notTaken(forged)])
-      expect(line).not.toMatch(/joinCommunity|did:webvh|challenge/)
+    // Never the contents: no action, agent or challenge in any line. The challenge is checked by its value, so a leak
+    // is caught however it is written, not only one that spells out the word.
+    const { challenge, agent: askedAgent } = offer.payload as { challenge: string; agent: string }
+    expect(challenge.length).toBeGreaterThan(8)
+    for (const line of [...notTaken(off), ...notTaken(noRelationship), ...notTaken(forged)]) {
+      expect(line).not.toContain(challenge)
+      expect(line).not.toContain(askedAgent)
+      expect(line).not.toMatch(/joinCommunity/)
+    }
 
     const shown = phone(JORDAN)
     await deliver(shown, offer)
