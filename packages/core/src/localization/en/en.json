@@ -3329,6 +3329,7 @@
     "AgentBadge": "AI agent",
     "PostRemoved": "Removed",
     "PostUnread": "This message couldn't be read.",
+    "PostCannotOpen": "This message can't be opened here.",
     "QuoteUnavailable": "Original message isn't available",
     "QuoteNote": "Note",
     "QuoteNoAuthor": "A member",
