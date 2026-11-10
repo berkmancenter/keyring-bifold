@@ -60,7 +60,10 @@ function ceremony(): typeof import('./ceremony') {
   return require('./ceremony')
 }
 
-/** 'offer' (a prompt arrived), 'answered' (an answer to one of my offers arrived). */
+/**
+ * 'offer' (a prompt arrived or was brought back), 'promptCleared' (this phone answered one), 'answered' (an answer to
+ * one of my offers arrived), 'asked' (this phone sent an offer).
+ */
 export const approverRoleEvents = new EventEmitter()
 
 interface Relationship {
@@ -112,6 +115,8 @@ export interface RoleOfferAsk {
   askedAt: string
   /** Set when the contact said yes: the DID their phone approves as. */
   acceptedAs?: string
+  /** Closed with the yes written on the agent: the contact approves for this person (as far as this phone wrote). */
+  written?: boolean
 }
 
 export type OfferResult = 'sent' | 'off' | 'noRelationship'
@@ -166,6 +171,7 @@ export async function offerApproverRole(
   await getTrustTasksService(agent).retain(agent.context, signed, 'request', connectionId)
   await sendTrustTaskDocument(agent, connectionId, signed)
   agent.config?.logger?.info(`${LOG_PREFIX} offer sent on connection ${connectionId}: ${chosen.join(', ')}`)
+  approverRoleEvents.emit('asked', { connectionId })
   return 'sent'
 }
 
@@ -218,12 +224,31 @@ export async function acceptedRoleOffers(agent: Pick<Agent, 'genericRecords'>): 
     .filter((ask) => ask.state === 'accepted' && !!ask.acceptedAs)
 }
 
-/** Close the offer on `connectionId` once its yes is written on the agent (or the person chose not to write it). */
-export async function closeRoleOffer(agent: Pick<Agent, 'genericRecords'>, connectionId: string): Promise<void> {
+/**
+ * Close the offer on `connectionId`: `written` once its yes is written on the agent, else the person chose not to
+ * write it.
+ */
+export async function closeRoleOffer(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string,
+  written = false
+): Promise<void> {
   const [record] = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, connectionId })) ?? []
   if (!record) return
-  record.content = { ...(record.content as object), state: 'closed' }
+  record.content = { ...(record.content as object), state: 'closed', written }
   await agent.genericRecords.update(record)
+  approverRoleEvents.emit('asked', { connectionId })
+}
+
+/** `did` was taken off the agent's approvers: the offer it said yes to no longer reads as written. */
+export async function approverRemoved(agent: Pick<Agent, 'genericRecords'>, did: string): Promise<void> {
+  for (const record of (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []) {
+    const ask = record.content as unknown as RoleOfferAsk
+    if (ask.acceptedAs !== did || !ask.written) continue
+    record.content = { ...ask, written: false }
+    await agent.genericRecords.update(record)
+    approverRoleEvents.emit('asked', { connectionId: ask.connectionId })
+  }
 }
 
 /**
@@ -239,6 +264,60 @@ export function approversWithAccepted(
   return { approvers: [...new Set([...held.approvers, ask.acceptedAs])], keys }
 }
 
+/** The offer this phone sent on `connectionId`, if any, in whatever state it is now (the contact's row reads it). */
+export async function roleOfferAskOn(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string
+): Promise<RoleOfferAsk | undefined> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, connectionId })) ?? []
+  const ask = record?.content as unknown as RoleOfferAsk | undefined
+  if (!ask) return undefined
+  // An open offer past its time answers nothing (handleRoleOfferResponse): it reads as closed, so it can be sent again.
+  return ask.state === 'open' && lapsed(ask.askedAt) ? { ...ask, state: 'closed' } : ask
+}
+
+/**
+ * What to write on the agent once `ask`'s yes is taken: {@link approversWithAccepted}, less any action another rule
+ * already holds (the agent's rule there is someone else's, and `withTrustedApprovers` refuses to cover it).
+ */
+export function nextTrustedRules(
+  view: { approvers: readonly string[]; keys: readonly RoleAction[]; heldElsewhere: readonly RoleAction[] },
+  ask: Pick<RoleOfferAsk, 'acceptedAs' | 'actions'>
+): { approvers: string[]; keys: RoleAction[] } {
+  const next = approversWithAccepted(view, ask)
+  return { approvers: next.approvers, keys: next.keys.filter((key) => !view.heldElsewhere.includes(key)) }
+}
+
+/** What to write on the agent to take `did` off: the others keep every action; with nobody left, nothing is held. */
+export function withoutApprover(
+  view: { approvers: readonly string[]; keys: readonly RoleAction[] },
+  did: string
+): { approvers: string[]; keys: RoleAction[] } {
+  const approvers = view.approvers.filter((member) => member !== did)
+  return { approvers, keys: approvers.length ? [...view.keys] : [] }
+}
+
+/**
+ * Names for the approvers this phone has offered the role to, by the DID each said yes as: the contact's name from
+ * the relationship. An approver set on the agent some other way has no name here; the screen says so.
+ */
+export async function approverNames(agent: Agent): Promise<Record<string, string>> {
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  const asks = records.map((record) => record.content as unknown as RoleOfferAsk).filter((ask) => !!ask.acceptedAs)
+  if (!asks.length) return {}
+  const relationships: Relationship[] = await agent.dependencyManager
+    .resolve(RelationshipDidRepository)
+    .getAll(agent.context)
+  const credentials = await agent.w3cCredentials.getAll()
+  const names: Record<string, string> = {}
+  for (const ask of asks) {
+    const theirs = relationships.find((r) => r.connectionId === ask.connectionId)?.counterpartyRelationshipDid
+    const name = theirs ? resolveContactDisplayInfo(credentials, theirs).name : undefined
+    if (name) names[ask.acceptedAs as string] = name
+  }
+  return names
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Answering (Jordan's phone)
 
@@ -252,6 +331,9 @@ export interface RoleOfferPrompt {
   actions: RoleAction[]
   request: Record<string, unknown>
   receivedAt: string
+  /** Set once this phone's person answered; with `accepted`, the DID the yes named. */
+  answered?: 'accepted' | 'declined'
+  answeredAs?: string
 }
 
 class RoleOfferPromptStore {
@@ -326,7 +408,9 @@ export async function restoreRoleOfferPrompts(agent: Pick<Agent, 'genericRecords
   for (const record of (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_PROMPT })) ?? []) {
     const prompt = record.content as unknown as RoleOfferPrompt
     if (!prompt?.open || !prompt.connectionId || !prompt.receivedAt || lapsed(prompt.receivedAt)) continue
-    if (!roleOfferPromptStore.get(prompt.connectionId)) roleOfferPromptStore.set(prompt)
+    if (roleOfferPromptStore.get(prompt.connectionId)) continue
+    roleOfferPromptStore.set(prompt)
+    approverRoleEvents.emit('offer', { connectionId: prompt.connectionId })
   }
 }
 
@@ -363,7 +447,26 @@ export async function respondToRoleOffer(
   await sendTrustTaskDocument(agent, connectionId, signed)
 
   roleOfferPromptStore.take(connectionId)
-  await keepPrompt(agent, { ...prompt, open: false }).catch((error: unknown) =>
+  approverRoleEvents.emit('promptCleared', { connectionId })
+  const kept: RoleOfferPrompt = {
+    ...prompt,
+    open: false,
+    answered: accept ? 'accepted' : 'declined',
+    ...(accept ? { answeredAs: approverDid } : {}),
+  }
+  await keepPrompt(agent, kept).catch((error: unknown) =>
     agent.config?.logger?.warn(`${LOG_PREFIX} could not close an offer: ${(error as Error)?.message ?? error}`)
   )
+}
+
+/**
+ * The people this phone's person said yes to ("People I approve for"), newest first. Only what this phone answered:
+ * whether the asker then wrote the rule on their agent is theirs to say.
+ */
+export async function approvingFor(agent: Pick<Agent, 'genericRecords'>): Promise<RoleOfferPrompt[]> {
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_PROMPT })) ?? []
+  return records
+    .map((record) => record.content as unknown as RoleOfferPrompt)
+    .filter((prompt) => prompt?.answered === 'accepted')
+    .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
 }

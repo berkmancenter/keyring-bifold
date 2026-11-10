@@ -8,9 +8,15 @@ import {
   OFFER_OPEN_FOR,
   ROLE_OFFER_ASK,
   acceptedRoleOffers,
+  approverNames,
+  approverRemoved,
   approverRoleEvents,
   approversWithAccepted,
+  approvingFor,
   closeRoleOffer,
+  nextTrustedRules,
+  roleOfferAskOn,
+  withoutApprover,
   handleRoleOfferRequest,
   handleRoleOfferResponse,
   offerApproverRole,
@@ -53,6 +59,13 @@ jest.mock('../../../src/modules/trust-tasks/documentProof', () => {
     },
   }
 })
+
+// Contact names as the relationship gives them (the stored-card lookup is not what is under test).
+jest.mock('../../../src/modules/vrc/utils/rcardDisplayUtils', () => ({
+  resolveContactDisplayInfo: (_credentials: unknown, did: string) => ({
+    name: ({ 'did:peer:jordan-rel': 'Jordan', 'did:peer:sam-rel': 'Sam' } as Record<string, string>)[did],
+  }),
+}))
 
 const SAM_AGENT = 'did:webvh:sams-agent.example'
 const JORDAN_APPROVES_AS = 'did:peer:2.jordans-phone'
@@ -380,5 +393,116 @@ describe('becoming a trusted approver', () => {
     await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
     await deliver(sam)
     expect(await acceptedRoleOffers(sam.agent)).toEqual([expect.objectContaining({ actions: ['addDevice'] })])
+  })
+})
+
+describe('what the screens read', () => {
+  /** Sam asks for `actions`, Jordan answers, and the answer reaches Sam. */
+  async function asked(actions: Parameters<typeof offerApproverRole>[3], accept: boolean) {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, actions)
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, accept, accept ? JORDAN_APPROVES_AS : undefined)
+    await deliver(sam)
+    return { sam, jordan }
+  }
+
+  test("the contact's row reads where the offer stands: open, then said yes, then written, then removed", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toBeUndefined()
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'open' })
+    await deliver(jordan)
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, true, JORDAN_APPROVES_AS)
+    await deliver(sam)
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'accepted' })
+
+    await closeRoleOffer(sam.agent, SAM.connectionId, true)
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'closed', written: true })
+    await approverRemoved(sam.agent, 'did:peer:2.someone-else')
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ written: true })
+    await approverRemoved(sam.agent, JORDAN_APPROVES_AS)
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'closed', written: false })
+    expect(sam.store.deleteById).not.toHaveBeenCalled()
+  })
+
+  test('an open offer past its time reads as closed, so it can be asked again (control: one inside its time is open)', async () => {
+    const sam = phone(SAM)
+    const now = Date.now()
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const [record] = sam.store.records
+    record.content.askedAt = new Date(now - OFFER_OPEN_FOR + 60_000).toISOString()
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'open' })
+    record.content.askedAt = new Date(now - OFFER_OPEN_FOR - 60_000).toISOString()
+    expect(await roleOfferAskOn(sam.agent, SAM.connectionId)).toMatchObject({ state: 'closed' })
+    clock.mockRestore()
+  })
+
+  test('adding a yes leaves out an action another rule holds; removing the last approver holds nothing', () => {
+    const view = {
+      approvers: ['did:peer:2.amy'],
+      keys: ['shareCredential' as const],
+      heldElsewhere: ['addDevice' as const],
+    }
+    const ask = { acceptedAs: JORDAN_APPROVES_AS, actions: ['addDevice' as const, 'joinCommunity' as const] }
+    expect(nextTrustedRules(view, ask)).toEqual({
+      approvers: ['did:peer:2.amy', JORDAN_APPROVES_AS],
+      keys: ['shareCredential', 'joinCommunity'],
+    })
+    // Control: with nothing held elsewhere, the offered action is kept.
+    expect(nextTrustedRules({ ...view, heldElsewhere: [] }, ask).keys).toEqual([
+      'shareCredential',
+      'joinCommunity',
+      'addDevice',
+    ])
+    const two = { approvers: ['did:peer:2.amy', JORDAN_APPROVES_AS], keys: ['shareCredential' as const] }
+    expect(withoutApprover(two, JORDAN_APPROVES_AS)).toEqual({
+      approvers: ['did:peer:2.amy'],
+      keys: ['shareCredential'],
+    })
+    expect(withoutApprover({ approvers: [JORDAN_APPROVES_AS], keys: ['shareCredential'] }, JORDAN_APPROVES_AS)).toEqual(
+      {
+        approvers: [],
+        keys: [],
+      }
+    )
+  })
+
+  test('an approver is named from the relationship the offer went over; a no names nobody', async () => {
+    const yes = await asked(['joinCommunity'], true)
+    expect(await approverNames(yes.sam.agent)).toEqual({ [JORDAN_APPROVES_AS]: 'Jordan' })
+    const no = await asked(['joinCommunity'], false)
+    expect(await approverNames(no.sam.agent)).toEqual({})
+  })
+
+  test("People I approve for: the yeses Jordan's phone sent, not the noes", async () => {
+    const yes = await asked(['joinCommunity'], true)
+    expect(await approvingFor(yes.jordan.agent)).toEqual([
+      expect.objectContaining({ asker: 'Sam', answered: 'accepted', answeredAs: JORDAN_APPROVES_AS, open: false }),
+    ])
+    const no = await asked(['joinCommunity'], false)
+    expect(await approvingFor(no.jordan.agent)).toEqual([])
+  })
+
+  test('the offer sheet hears an offer brought back at start, and hears it answered', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    const offer = jest.fn()
+    const cleared = jest.fn()
+    approverRoleEvents.on('offer', offer)
+    approverRoleEvents.on('promptCleared', cleared)
+    await offerApproverRole(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    await deliver(jordan)
+    roleOfferPromptStore.clear()
+    offer.mockClear()
+    await restoreRoleOfferPrompts(jordan.agent)
+    expect(offer).toHaveBeenCalledWith({ connectionId: JORDAN.connectionId })
+    await respondToRoleOffer(jordan.agent, JORDAN.connectionId, false)
+    expect(cleared).toHaveBeenCalledWith({ connectionId: JORDAN.connectionId })
+    approverRoleEvents.off('offer', offer)
+    approverRoleEvents.off('promptCleared', cleared)
   })
 })

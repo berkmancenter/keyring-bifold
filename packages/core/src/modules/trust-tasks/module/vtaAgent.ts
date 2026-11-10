@@ -2721,6 +2721,18 @@ export class VtaAgentController {
   }
 
   /**
+   * The DID this phone approves as when it says yes to being someone's
+   * approver: its manager DID on its own linked agent, where that agent's
+   * consent requests reach it. Signs in if it must. Refuses with
+   * {@link DeviceActionRefused} `notLinked` when there is none.
+   */
+  async approverDid(agent: Agent): Promise<string> {
+    const client = await this.signedIn(agent, this.linkedAgent())
+    if (!client.managerDid) throw new DeviceActionRefused('notLinked')
+    return client.managerDid
+  }
+
+  /**
    * Who approves for this person, read from the agent's approvals row
    * (trustedApprovers.ts). Signs in if it must. Refuses with
    * {@link DeviceActionRefused}.
