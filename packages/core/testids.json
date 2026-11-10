@@ -161,6 +161,7 @@
     "AgentUnreachableRetry": ["src/modules/trust-tasks/screens/AgentUnreachableNotice.tsx"],
     "AgentVetterCard": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentVetterLapsed": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
+    "AgentWhoApprovesRow": ["src/modules/trust-tasks/screens/RequestsSection.tsx"],
     "AllowCameraUse": ["src/components/modals/CameraDisclosureModal.tsx"],
     "AppGuides": ["src/screens/Settings.tsx"],
     "AppSettingCancel": ["src/screens/PINVerify.tsx"],
@@ -180,6 +181,26 @@
       "src/modules/trust-tasks/screens/MyAgent.ids.ts",
       "src/modules/trust-tasks/screens/RequestCard.tsx"
     ],
+    "ApproverApproved": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
+    "ApproverAsk": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverAskAgain": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverAskButton": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverAskError": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverAskStatus": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverAskedActions": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverOffer": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferBody": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferFaceId": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferFailed": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferNeedsAgent": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferNo": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferNotNow": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferYes": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverPickCancel": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverPickSend": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverSteppedDown": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverWait": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
+    "ApproverWaitOpen": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "AskMe": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeDetails": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeElsewhere": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
@@ -227,6 +248,9 @@
     "BiometricConfirmationScroll": ["src/components/modals/BiometricConfirmationModal.tsx"],
     "Biometrics": ["src/screens/Settings.tsx"],
     "BiometricsUnlock": ["src/screens/PINEnter.tsx"],
+    "BiometryConfirming": ["src/components/inputs/BiometryControl.tsx"],
+    "BiometryNotAllowed": ["src/components/inputs/BiometryControl.tsx"],
+    "BiometryOpenSettings": ["src/components/inputs/BiometryControl.tsx"],
     "BiometryRecommended": ["src/components/inputs/BiometryControl.tsx"],
     "BodyText": [
       "src/components/listItems/NotificationListItem.tsx",
@@ -260,7 +284,9 @@
     "ChangePIN": ["src/screens/PINChange.tsx"],
     "ChatActionCopy": ["src/components/chat/Chat.ids.ts"],
     "ChatActionDeleteForMe": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionEdit": ["src/components/chat/Chat.ids.ts"],
     "ChatActionReply": ["src/components/chat/Chat.ids.ts"],
+    "ChatActionWithdraw": ["src/components/chat/Chat.ids.ts"],
     "ChatActionsButton": ["src/components/chat/Chat.ids.ts"],
     "ChatAttachCamera": ["src/components/chat/Chat.ids.ts"],
     "ChatAttachLibrary": ["src/components/chat/Chat.ids.ts"],
@@ -276,6 +302,7 @@
     "ChatHeaderTitle": ["src/modules/vrc/components/ChatHeaderTitle.tsx"],
     "ChatMessageActions": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageActionsBackdrop": ["src/components/chat/Chat.ids.ts"],
+    "ChatMessageActionsNotice": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageImage": ["src/components/chat/Chat.ids.ts"],
     "ChatMessageReactions": ["src/components/chat/Chat.ids.ts"],
     "ChatPendingPhoto": ["src/components/chat/Chat.ids.ts"],
@@ -714,6 +741,7 @@
     "JoinAsOption": ["src/modules/trust-tasks/screens/JoinAs.tsx"],
     "JoinAsk": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinAsks": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
+    "JoinCardAsk": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinChanged": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinCheckAgain": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
     "JoinCheckingAgent": ["src/modules/trust-tasks/screens/VtiJoin.ids.ts"],
@@ -1079,6 +1107,7 @@
     "RemovedPhone": ["src/modules/trust-tasks/screens/RemovedPhoneCard.tsx"],
     "RequestAsks": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "RequestExpired": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
+    "RequestForAgent": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "RequestNotTaken": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "RequestNotTakenDetail": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
     "RequestNotTakenDetailsToggle": ["src/modules/trust-tasks/screens/RequestCard.tsx"],
@@ -1100,12 +1129,17 @@
     "RevokedOrNotAvailable": ["src/components/misc/Card11Pure.tsx"],
     "RoomComposer": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerAttach": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerContextCancel": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerContextName": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerContextText": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerEditing": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerFile": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerFileRefused": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerFileRemove": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerInput": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerPostingAs": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerPostingAsButton": ["src/modules/rooms/components/RoomComposer.tsx"],
+    "RoomComposerReplying": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerSend": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomComposerUnavailable": ["src/modules/rooms/components/RoomComposer.tsx"],
     "RoomDetailsOpen": ["src/modules/rooms/components/RoomHeader.tsx"],
@@ -1277,6 +1311,11 @@
       "src/modules/rooms/screens/RoomPart.tsx"
     ],
     "RoomWhere": ["src/modules/rooms/components/RoomHeader.tsx"],
+    "RoomWithdrawBackdrop": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
+    "RoomWithdrawConfirm": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
+    "RoomWithdrawKeep": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
+    "RoomWithdrawLayout": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
+    "RoomWithdrawSheet": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
     "RoomsCard": ["src/modules/rooms/components/RoomsCard.tsx"],
     "RoomsCardBadge": ["src/modules/rooms/components/RoomsCard.tsx"],
     "RoomsCardDetail": ["src/modules/rooms/components/RoomsCard.tsx"],
@@ -1468,6 +1507,11 @@
     "TrustTaskApprovalTitle": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskApprove": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
     "TrustTaskDeny": ["src/screens/TrustTaskApprovalCard.tsx", "src/screens/TrustTaskApprovalModal.tsx"],
+    "TrustedApproverStepDownError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApprovers": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversApprovingFor": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversNone": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "UndoToast": ["src/components/toast/UndoToast.tsx"],
     "UndoToastUndo": ["src/components/toast/UndoToast.tsx"],
     "UnverifiedProofView": ["src/screens/ProofDetails.tsx"],
@@ -1834,6 +1878,9 @@
       "src/components/chat/MessageActions.tsx": "ChatIds.actionsBackdrop"
     },
     {
+      "src/components/chat/MessageActions.tsx": "ChatIds.actionsNotice"
+    },
+    {
       "src/components/chat/MessageActions.tsx": "testID"
     },
     {
@@ -2153,6 +2200,69 @@
     },
     {
       "src/modules/rooms/screens/RoomInfo.tsx": "PART_TEST_ID[part]"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.body"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.faceId"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.failed"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.needsAgent"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.no"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.notNow"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.sheet"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.yes"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.again"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.ask"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.asked"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.cancel"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.error"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.pick(action)"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.row"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.send"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.status"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.steppedDown"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.approved"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.open"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.waiting"
     },
     {
       "src/modules/trust-tasks/screens/CommunityMark.tsx": "VtiCommunityIds.logo"
@@ -2773,6 +2883,48 @@
       "src/modules/trust-tasks/screens/VtaLink.tsx": "VtaLinkIds.waitingForPhone"
     },
     {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.accepted(ask.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.add(ask.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.approver(did)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.approvingFor"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.error"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.none"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.notNow(ask.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.remove(did)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.screen"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.stepDown(prompt.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.stepDownCancel(prompt.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.stepDownConfirm(prompt.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.stepDownError"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.steppedDown(did)"
+    },
+    {
       "src/modules/trust-tasks/screens/VtiCommunity.tsx": "VtiCommunityIds.applyToCommunityButton"
     },
     {
@@ -2957,6 +3109,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.asks"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.cardAsk"
     },
     {
       "src/modules/trust-tasks/screens/VtiJoin.tsx": "VtiJoinIds.changed"

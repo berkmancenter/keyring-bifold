@@ -61,7 +61,9 @@ import { GenericRecordsTspProbeStore, runTspProbe, type TspProbeOutcome, type Ts
 import { fetchWaitingIfBusy } from './vtcBusy'
 import { isAgentsOwnPersona } from './agentOwnIdentity'
 import { didPrefix } from './didPrefix'
+import { PROBLEM_REPORT, problemReportWords } from './problemReportWords'
 import { VTI_JOIN_STATUS_LATE_EVENT } from './communityChanged'
+import { listKeyed, putKeyed } from './keyedRecords'
 import { releaseWarn } from './releaseLog'
 import { isTspFrameUnopenable } from './tspFrameUnopenable'
 import { httpsLogoUrl } from './communityBrand'
@@ -99,7 +101,6 @@ const ELECTIONS_READS = [
   'https://trusttasks.org/spec/vtc/elections/show/0.3',
   'https://trusttasks.org/spec/vtc/elections/show/0.2',
 ]
-const PROBLEM_REPORT = 'https://didcomm.org/report-problem/2.0/problem-report'
 /*
  * Every document `ask` sends is signed. `ask` carries only DIDComm and TSP,
  * and over those a VTC takes a document only when its proof is by its
@@ -216,7 +217,7 @@ export const VTI_TURN_AFTER_REFUSALS = 2
 /** How long a hold (`holding`) keeps others waiting when its caller names no time: a stuck hold must not freeze sign-ins. */
 export const VTI_HOLD_MAX_MS = 10 * 60_000
 
-/** How long a background hold keeps others waiting when its caller names no time. */
+/** How long a background hold, or a listing read's (`holding`'s `listing`), keeps others waiting when its caller names no time. */
 export const VTI_BACKGROUND_HOLD_MAX_MS = 2 * 60_000
 
 /**
@@ -241,10 +242,57 @@ export class VtiSessionHeld extends Error {
   }
 }
 
+/**
+ * After an identity's sign-in fails, how long a background sign-in (a poll, the persona inbox) leaves that identity
+ * alone: this long after the first failure, doubling with each failure after it, up to `VTI_SIGNIN_REST_MAX_MS`. An
+ * identity whose mediator is down, or whose agent is gone, took 10-26 s per try and blocked every other sign-in behind
+ * it, retried every 30 s from launch (rooms-slow, 11-05). The person's own steps always try; a success ends the rest.
+ */
+export const VTI_SIGNIN_REST_FIRST_MS = 30_000
+export const VTI_SIGNIN_REST_MAX_MS = 6 * 60 * 60 * 1000
+/**
+ * A rest only grows while some other sign-in succeeded this recently: the phone is online, so the failing identity is
+ * the trouble. Offline, every identity fails alike, and none should be left alone for longer than the first step.
+ */
+export const VTI_SIGNIN_ONLINE_WITHIN_MS = 10 * 60 * 1000
+
+/** What is kept of an identity's failed sign-ins, across launches. */
+export interface VtiSignInRest {
+  did: string
+  failedAt: number
+  /** Failures in a row; 0 once it signs in. */
+  count: number
+}
+
+/** When a background sign-in may try this identity again (0: now). */
+export const signInRestUntil = (rest: VtiSignInRest | undefined): number =>
+  !rest || rest.count < 1
+    ? 0
+    : rest.failedAt + Math.min(VTI_SIGNIN_REST_FIRST_MS * 2 ** (rest.count - 1), VTI_SIGNIN_REST_MAX_MS)
+
+const SIGNIN_REST_RECORD = 'keyring/vti-signin-rest'
+const SIGNIN_REST_KIND = 'rest'
+
+/**
+ * A background sign-in refused because this identity's last sign-in failed and its rest has not run out
+ * (`VTI_SIGNIN_REST_FIRST_MS`). Nothing was tried or disconnected. The message names no DID.
+ */
+export class VtiSignInResting extends Error {
+  constructor(readonly until: number) {
+    super(
+      `vtiAgent: this identity's last sign-in failed; background sign-ins try it again from ${new Date(until).toISOString()}`
+    )
+    // A literal, so a caller can read it by name (a class name does not survive minifying).
+    this.name = 'VtiSignInResting'
+  }
+}
+
 /** One hold on the session (`holding`). */
 interface SessionHold {
   did: string
   background: boolean
+  /** A screen's listing read (`holding`'s `listing`): a poll waits for it rather than being refused. */
+  listing?: boolean
   until: number
   reason?: string
 }
@@ -339,7 +387,23 @@ export interface JoinRequestStatus {
   code?: string
   reason?: string
   decidedAt?: string
+  /**
+   * While `approved`: whether the community holds this member's acknowledgement
+   * that the membership card arrived. Absent from a community that predates it
+   * (vtc-service before 0.12.0), which does not take `resendCredentials` either.
+   */
+  credentialsDelivered?: boolean
+  /** The answer to `resendCredentials`; absent when it was not asked, or is not supported. */
+  credentialResend?: 'queued' | 'notNeeded' | 'rateLimited'
+  /**
+   * With `rateLimited`: the earliest a re-send is honoured again. The spec has
+   * a community only SHOULD send it, so its absence says nothing more: not that
+   * no more will be honoured.
+   */
+  retryAfter?: string
 }
+
+const CREDENTIAL_RESENDS = ['queued', 'notNeeded', 'rateLimited'] as const
 
 export const joinRequestRefusal = (refusal: unknown): JoinRequestRefusal | undefined => {
   if (!(refusal instanceof VtiRefusal)) return undefined
@@ -711,6 +775,22 @@ class VtiAgentController {
         }`
       )
     }
+    // A DIDComm problem-report, said with its code, words and the thread it
+    // answers: three reached a tester's report as a bare type (IN-617). Said
+    // through releaseWarn, as the transport says the mediator's own, so it
+    // reaches a report whatever logger the agent has. One threaded on an ask
+    // is that ask's refusal (below), so it is said twice on purpose: here as
+    // received, with its thread, and again by whatever logs the ask's failure.
+    // Any other goes to the inbox, which keeps none of it.
+    if (type === PROBLEM_REPORT) {
+      const who = hidden ? 'the community' : didPrefix(plaintext.from)
+      releaseWarn(
+        `vtiAgent: ${who} sent a problem-report on ${entry ? taskName(entry.type) : 'no request in flight'}: ${problemReportWords(
+          plaintext,
+          { hideDids: hidden }
+        )}`
+      )
+    }
     if (entry) {
       this.settle(
         entry,
@@ -987,6 +1067,8 @@ class VtiAgentController {
   /** The holds on the session (`holding`), and the ordinary connects waiting for one to end, by DID. */
   private readonly holds = new Map<symbol, SessionHold>()
   private readonly foregroundWaiting = new Map<symbol, string>()
+  /** The listing reads waiting for the session (`holding`'s `listing`), by DID: a poll as another identity waits for them. */
+  private readonly listingWaiting = new Map<symbol, string>()
   private readonly holdWatchers = new Set<() => void>()
   /** The DID an ordinary connect last signed in as, and until when a background one leaves it (`VTI_FOREGROUND_CLAIM_MS`). */
   private claim?: { did: string; until: number }
@@ -996,6 +1078,11 @@ class VtiAgentController {
   now: () => number = () => Date.now()
   /** When the current session's socket opened (`VTI_BACKLOG_GRACE_MS`). */
   private openedAt = 0
+  /** Each identity's failed sign-ins (`VTI_SIGNIN_REST_FIRST_MS`), kept across launches; read once, on first need. */
+  private readonly rests = new Map<string, VtiSignInRest>()
+  private restsRead?: Promise<void>
+  /** When any identity last signed in (`VTI_SIGNIN_ONLINE_WITHIN_MS`). */
+  private lastSignedInAt?: number
 
   /** The live holds; one past its time is dropped, and said once. */
   private liveHolds(): SessionHold[] {
@@ -1012,20 +1099,47 @@ class VtiAgentController {
 
   /**
    * What stops a connect as `did` from going ahead now: `wait` until the holds named end, `refuse` with
-   * `VtiSessionHeld`, or nothing. An ordinary connect waits only for another DID's ordinary hold — a background one is
-   * a poll and gives way. A background connect waits for another DID's background hold, and is refused by anything an
-   * ordinary caller holds, waits for, or signed in as within `VTI_FOREGROUND_CLAIM_MS` — that last one only until the
-   * same identity has been refused by it `VTI_TURN_AFTER_REFUSALS` times running (`byClaim`): then it is its turn. No
-   * DID (a new identity) never switches an open session, so nothing stops it then.
+   * `VtiSessionHeld`, or nothing. Three kinds of caller, in this order of way: a step's (ordinary), a screen's listing
+   * read (`listing`), a poll (`background`).
+   *
+   * - An ordinary connect waits only for another DID's ordinary hold, a listing read's included. A poll's hold gives
+   *   way to it.
+   * - A listing read waits for another DID's hold of any kind, and for an ordinary connect waiting for the session: it
+   *   switches nothing away, and nothing refuses it.
+   * - A background connect is refused by a step's hold, by an ordinary connect waiting, or by the DID an ordinary
+   *   connect signed in as within `VTI_FOREGROUND_CLAIM_MS` (that last only until the same identity has been refused by
+   *   it `VTI_TURN_AFTER_REFUSALS` times running: `byClaim`, then it is its turn). It waits for another DID's listing
+   *   read that holds the session, for one waiting for it when this connect would switch the session, and for another
+   *   DID's poll.
+   *
+   * No DID (a new identity) never switches an open session, so nothing stops it then.
    */
   private blockerFor(
     did: string | undefined,
-    background: boolean
+    background: boolean,
+    listing = false
   ): { wait: SessionHold } | { refuse: VtiSessionHeld; byClaim?: true } | undefined {
     const holds = this.liveHolds().filter((h) => h.did !== did)
     const ordinary = holds.find((h) => !h.background)
+    const polling = holds.find((h) => h.background)
+    // Waiting for an identity that holds nothing yet: what it waits on ends that wait (`holdsChanged`). Every other wait
+    // here is on a live hold, and so is timed by that hold's `until`; this one gets a clock of its own, so a wake that
+    // never came is re-checked rather than waited on for ever (`holdsMoved`).
+    const waitingFor = (d: string, reason: string): SessionHold => ({
+      did: d,
+      background,
+      until: this.now() + VTI_BACKGROUND_HOLD_MAX_MS,
+      reason,
+    })
+    if (listing) {
+      const held = ordinary ?? polling
+      if (held) return { wait: held }
+      const step = [...this.foregroundWaiting.values()].find((d) => d !== did)
+      return step ? { wait: waitingFor(step, 'an identity is waiting to sign in') } : undefined
+    }
     if (!background) return ordinary ? { wait: ordinary } : undefined
-    if (ordinary) return { refuse: new VtiSessionHeld(ordinary.did, ordinary.reason) }
+    const step = holds.find((h) => !h.background && !h.listing)
+    if (step) return { refuse: new VtiSessionHeld(step.did, step.reason) }
     const waiting = [...this.foregroundWaiting.values()].find((d) => d !== did)
     if (waiting) return { refuse: new VtiSessionHeld(waiting, 'an identity is waiting to sign in') }
     const sessionDid = this.state.did ?? this.state.signingInAs
@@ -1038,15 +1152,24 @@ class VtiAgentController {
       (!did || (this.refusedByClaim.get(did) ?? 0) < VTI_TURN_AFTER_REFUSALS)
     )
       return { refuse: new VtiSessionHeld(this.claim.did, 'signed in for a step just now'), byClaim: true }
-    const polling = holds.find((h) => h.background)
+    const read = holds.find((h) => h.listing)
+    if (read) return { wait: read }
+    // A listing read waiting goes before a poll that would switch the session; a poll that shares the session as it is
+    // signed in finishes its round first, so a round is not split by a switch there and back. With no session open at
+    // all, a poll would open one rather than switch it, and waits too: the listing read is ahead of it.
+    const reading = [...this.listingWaiting.values()].find((d) => d !== did)
+    if (reading && did && did !== sessionDid) return { wait: waitingFor(reading, 'a listing read is waiting') }
     return polling ? { wait: polling } : undefined
   }
 
-  /** Resolves when a hold or a waiter comes or goes, or when the soonest hold or the claim runs out of time. */
-  private holdsMoved(): Promise<void> {
+  /**
+   * Resolves when a hold or a waiter comes or goes, or when the soonest hold, the claim or `until` (what the caller waits
+   * on, if it is not a hold) runs out of time. With none of those, nothing is timed: `Math.min()` is `Infinity`.
+   */
+  private holdsMoved(until = Infinity): Promise<void> {
     return new Promise((resolve) => {
       const claimEnds = this.claim && this.claim.until > this.now() ? [this.claim.until] : []
-      const soonest = Math.min(...this.liveHolds().map((h) => h.until), ...claimEnds)
+      const soonest = Math.min(...this.liveHolds().map((h) => h.until), ...claimEnds, until)
       const done = () => {
         if (timer) clearTimeout(timer)
         this.holdWatchers.delete(done)
@@ -1088,6 +1211,13 @@ class VtiAgentController {
    * `claims: false`: an ordinary hold that leaves no claim (`VTI_FOREGROUND_CLAIM_MS`) behind it. A screen's listing
    * read (the polls) is the person's, so it does not give way while it runs, but it is no step to protect after: each
    * one renewed the claim, and kept another community's reads from the session while the screen was open (11-03).
+   *
+   * `listing`: a screen's listing read (the polls). It takes its turn, between a step and a poll (`blockerFor`): it
+   * waits for another identity's hold of any kind, a poll's included, so it never switches a rooms listing away
+   * mid-read; and a poll as another identity waits for it rather than being refused. While a polls read held the
+   * session as an ordinary caller, both communities' rooms listings were refused and the list showed neither (rooms
+   * slow, 11-04). It is never refused and leaves no claim; without `maxMs` it keeps others waiting at most
+   * `VTI_BACKGROUND_HOLD_MAX_MS`.
    */
   async holding<T>(
     agent: Agent,
@@ -1100,14 +1230,17 @@ class VtiAgentController {
       maxMs?: number
       background?: boolean
       claims?: boolean
+      listing?: boolean
     } = {}
   ): Promise<T> {
     const background = opts.background === true
+    const listing = !background && opts.listing === true
     const key = Symbol(persona.did)
     const hold = (): SessionHold => ({
       did: persona.did,
       background,
-      until: this.now() + (opts.maxMs ?? (background ? VTI_BACKGROUND_HOLD_MAX_MS : VTI_HOLD_MAX_MS)),
+      ...(listing ? { listing } : {}),
+      until: this.now() + (opts.maxMs ?? (background || listing ? VTI_BACKGROUND_HOLD_MAX_MS : VTI_HOLD_MAX_MS)),
       reason: opts.reason,
     })
     // Taken as the sign-in settles, before any other caller waiting on it runs; if the session was not left as
@@ -1116,9 +1249,9 @@ class VtiAgentController {
       await this.signIn(
         agent,
         mediatorDid,
-        { persona, peerRevisionStore: opts.peerRevisionStore, background },
+        { persona, peerRevisionStore: opts.peerRevisionStore, background, listing },
         { key, hold },
-        opts.claims !== false
+        opts.claims !== false && !listing
       )
     try {
       return await fn(persona.did)
@@ -1126,6 +1259,57 @@ class VtiAgentController {
       this.holds.delete(key)
       this.holdsChanged()
     }
+  }
+
+  /**
+   * Throws `VtiSignInResting` while `did`'s rest runs, unless the session is already open as it. A rest can outlive an
+   * open session: `noteSignIn` runs only when a sign-in named a DID, so a connect that named none can leave the session
+   * open as an identity whose rest, kept from an earlier launch, has not run out.
+   */
+  private refuseIfResting(did: string): void {
+    if (this.session?.isOpen && this.state.did === did) return
+    const until = signInRestUntil(this.rests.get(did))
+    if (until > this.now()) throw new VtiSignInResting(until)
+  }
+
+  /** Read the rests kept on this phone, once. One that can't be read leaves none: everything is tried. */
+  private readRests(agent: Agent): Promise<void> {
+    this.restsRead ??= listKeyed<VtiSignInRest>(agent, SIGNIN_REST_RECORD, SIGNIN_REST_KIND)
+      .then((kept) => {
+        for (const rest of kept) if (rest?.did && !this.rests.has(rest.did)) this.rests.set(rest.did, rest)
+      })
+      .catch(() => undefined)
+    return this.restsRead
+  }
+
+  /**
+   * Note how a sign-in as `did` ended. A success ends its rest. A failure starts one, or doubles it while the phone is
+   * online (`VTI_SIGNIN_ONLINE_WITHIN_MS`). Kept on the phone without waiting for the write.
+   */
+  private noteSignIn(agent: Agent, did: string, signedIn: boolean): void {
+    const now = this.now()
+    const before = this.rests.get(did)
+    if (signedIn) this.lastSignedInAt = now
+    if (signedIn && !before?.count) return
+    const online = this.lastSignedInAt !== undefined && now - this.lastSignedInAt <= VTI_SIGNIN_ONLINE_WITHIN_MS
+    const count = signedIn ? 0 : online ? (before?.count ?? 0) + 1 : Math.max(before?.count ?? 0, 1)
+    const rest: VtiSignInRest = { did, failedAt: signedIn ? 0 : now, count }
+    this.rests.set(did, rest)
+    if (!signedIn)
+      releaseWarn(
+        `vtiAgent: sign-in as ${didPrefix(did)} failed (${count} in a row); background sign-ins leave it until ${new Date(signInRestUntil(rest)).toISOString()}`
+      )
+    void putKeyed(agent, SIGNIN_REST_RECORD, SIGNIN_REST_KIND, did, rest as unknown as Record<string, unknown>).catch(
+      () => undefined
+    )
+  }
+
+  /** For tests: forget every rest, here and as read from the phone. */
+  // prettier-ignore
+  forgetSignInRestsForTests(): void { // tier-exempt(deletes stored records): its body clears in-memory maps only (rests, restsRead, lastSignedInAt)
+    this.rests.clear()
+    this.restsRead = undefined
+    this.lastSignedInAt = undefined
   }
 
   /**
@@ -1160,6 +1344,8 @@ class VtiAgentController {
        * nothing disconnected.
        */
       background?: boolean
+      /** A screen's listing read (`holding`'s `listing`): waits its turn, never refused, switches no hold away. */
+      listing?: boolean
     } = {}
   ): Promise<void> {
     return this.signIn(agent, mediatorDid, options)
@@ -1175,14 +1361,22 @@ class VtiAgentController {
   ): Promise<void> {
     const wantedDid = options.persona?.did ?? options.identity?.did
     const background = options.background === true
+    const listing = !background && options.listing === true
     const waiter = Symbol(wantedDid ?? 'new identity')
     let saidWaiting = false
+    // A background sign-in leaves alone an identity whose last sign-in failed, until its rest runs out: refused before
+    // it queues, and again once the sign-in it queued behind settles (which may have been that identity failing).
+    if (background && wantedDid) {
+      await this.readRests(agent)
+      this.refuseIfResting(wantedDid)
+    }
     try {
       for (;;) {
         if (this.connecting) releaseWarn('vtiAgent: connect waits for an earlier sign-in to settle')
         while (this.connecting) await this.connecting.catch(() => undefined)
         // Checked after the earlier sign-in settles, and nothing awaited between this and `connecting` being set.
-        const blocker = this.blockerFor(wantedDid, background)
+        if (background && wantedDid) this.refuseIfResting(wantedDid)
+        const blocker = this.blockerFor(wantedDid, background, listing)
         if (!blocker) break
         if ('refuse' in blocker) {
           if ('byClaim' in blocker && wantedDid)
@@ -1195,22 +1389,29 @@ class VtiAgentController {
             `vtiAgent: connect waits for a hold on the session${blocker.wait.reason ? ` (${blocker.wait.reason})` : ''} to end`
           )
         }
-        if (!background && wantedDid && !this.foregroundWaiting.has(waiter)) {
-          this.foregroundWaiting.set(waiter, wantedDid)
+        // A step waiting refuses polls as another identity; a listing read waiting makes them wait instead.
+        const waitingIn = listing ? this.listingWaiting : this.foregroundWaiting
+        if (!background && wantedDid && !waitingIn.has(waiter)) {
+          waitingIn.set(waiter, wantedDid)
           this.holdsChanged()
         }
-        await this.holdsMoved()
+        await this.holdsMoved(blocker.wait.until)
       }
     } finally {
-      if (this.foregroundWaiting.delete(waiter)) this.holdsChanged()
+      // `listing` is fixed for the call, so the waiter is in one map at most and `||` skips nothing.
+      if (this.foregroundWaiting.delete(waiter) || this.listingWaiting.delete(waiter)) this.holdsChanged()
     }
     const attempt = this.connectNow(agent, mediatorDid, options)
     this.connecting = attempt
     try {
       await attempt
+    } catch (error) {
+      if (wantedDid) this.noteSignIn(agent, wantedDid, false)
+      throw error
     } finally {
       if (this.connecting === attempt) this.connecting = undefined
     }
+    if (wantedDid) this.noteSignIn(agent, wantedDid, true)
     if (!background && wantedDid && claims) {
       // Nobody else's refusals are cleared here, by a renewal or by a new claim: the count is the waiter's, and another
       // claim only makes the wait longer. It starts afresh when that identity gets through, below.
@@ -2139,9 +2340,21 @@ class VtiAgentController {
    * poll, which is how a request whose first answer was lost is found again.
    * Undefined when the community holds no such request (`notFound`); other
    * refusals surface as `VtiRefusal`.
+   *
+   * `resendCredentials` asks the community to deliver again the cards it
+   * already issued for an approved request. Its schema refuses unknown
+   * members, so a community that predates the field refuses the whole poll:
+   * set it only after this community's own answer said `credentialsDelivered:
+   * false` (vtiJoin `askForCardIfOwed`).
    */
-  async status(communityDid: string, options: { requestId?: string } = {}): Promise<JoinRequestStatus | undefined> {
-    const answer = await this.ask(communityDid, STATUS, options.requestId ? { requestId: options.requestId } : {})
+  async status(
+    communityDid: string,
+    options: { requestId?: string; resendCredentials?: boolean } = {}
+  ): Promise<JoinRequestStatus | undefined> {
+    const answer = await this.ask(communityDid, STATUS, {
+      ...(options.requestId ? { requestId: options.requestId } : {}),
+      ...(options.resendCredentials ? { resendCredentials: true } : {}),
+    })
     if (!answer) throw this.sentNoAnswer(communityDid, STATUS)
     const refusal = refusalOf(answer)
     if (refusal) {
@@ -2168,6 +2381,15 @@ class VtiAgentController {
       ...(status === 'rejected'
         ? { code: text(payload.code), reason: text(payload.reason), decidedAt: text(payload.decidedAt) }
         : {}),
+      // The delivery members mean the request was approved: only ever with `approved`.
+      ...(status === 'approved' && typeof payload.credentialsDelivered === 'boolean'
+        ? { credentialsDelivered: payload.credentialsDelivered }
+        : {}),
+      ...(status === 'approved' &&
+      CREDENTIAL_RESENDS.includes(payload.credentialResend as (typeof CREDENTIAL_RESENDS)[number])
+        ? { credentialResend: payload.credentialResend as (typeof CREDENTIAL_RESENDS)[number] }
+        : {}),
+      ...(status === 'approved' && text(payload.retryAfter) ? { retryAfter: text(payload.retryAfter) } : {}),
     }
   }
 
