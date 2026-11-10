@@ -345,6 +345,8 @@ describe('the session claim', () => {
       await polls.communityTask(A.community, 'https://trusttasks.org/spec/vtc/elections/tickets/issue/0.1', {})
       await polls.sendCompleted(A.community, {})
       expect(holding.mock.calls.map((call) => call[4]?.claims)).toEqual([false, false, true, true])
+      // A listing read takes its turn (rooms slow, 11-04); a ticket request holds as an ordinary caller.
+      expect(holding.mock.calls.map((call) => call[4]?.listing)).toEqual([true, true, undefined, undefined])
     } finally {
       holding.mockRestore()
     }
@@ -436,5 +438,108 @@ describe('the session claim', () => {
     expect(vtiAgent.getState().did).toBe(B.persona)
     release()
     await held
+  })
+})
+
+// Rooms slow (11-04): a polls read held the session as an ordinary caller, so while it ran, the other community's rooms
+// listing was refused and the list showed neither community; and a polls read that came while a rooms listing was being
+// read as the other identity switched the session and cut it off. A listing read now takes its turn: after a step,
+// before a poll.
+describe('a polls listing read takes its turn between a step and a poll', () => {
+  const lab = 'did:peer:lab'
+  const asListing = { reason: 'polls', claims: false, listing: true }
+  const pollAs = (who: { persona: string; community: string }) =>
+    vtiAgent.connect(agent, lab, { persona: persona(who.persona, who.community), background: true })
+  const listingWaiting = () => (vtiAgent as unknown as { listingWaiting: Map<unknown, unknown> }).listingWaiting.size
+
+  it("makes the other community's rooms listing wait for it, not refuse: both are listed", async () => {
+    const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
+    const { done, release } = untilReleased()
+    const holdUp = nextHold()
+    const read = vtiAgent.holding(agent, lab, persona(A.persona, A.community), () => done, asListing)
+    await holdUp()
+    let listed = false
+    const listing = rooms.communityTask(B.community, MEMBERSHIPS, {}).then((r) => ((listed = true), r))
+    await new Promise((r) => realSetTimeout(r, 30))
+    expect(listed).toBe(false)
+    expect(vtiAgent.getState().did).toBe(A.persona)
+    release()
+    await read
+    await expect(listing).resolves.toEqual({ items: [] })
+    expect(signIns()).toEqual([A.persona, B.persona])
+  })
+
+  it('an ordinary hold, as a polls read was, still refuses that listing (control)', async () => {
+    const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
+    const { done, release } = untilReleased()
+    const holdUp = nextHold()
+    const read = vtiAgent.holding(agent, lab, persona(A.persona, A.community), () => done, {
+      reason: 'polls',
+      claims: false,
+    })
+    await holdUp()
+    await expect(rooms.communityTask(B.community, MEMBERSHIPS, {})).rejects.toBeInstanceOf(VtiSessionHeld)
+    release()
+    await read
+  })
+
+  it('waits for a rooms listing being read as the other identity, and cuts nothing off', async () => {
+    mockAnswerMs = 60
+    const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
+    const holdUp = nextHold()
+    const listing = rooms.communityTask(B.community, MEMBERSHIPS, {})
+    await holdUp()
+    const read = vtiAgent.holding(agent, lab, persona(A.persona, A.community), async (did) => did, asListing)
+    await expect(listing).resolves.toEqual({ items: [] })
+    await expect(read).resolves.toBe(A.persona)
+    expect(signIns()).toEqual([B.persona, A.persona])
+  })
+
+  it('an ordinary connect, as a polls read was, cuts that listing off (control)', async () => {
+    mockAnswerMs = 60
+    const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
+    const holdUp = nextHold()
+    const listing = rooms.communityTask(B.community, MEMBERSHIPS, {})
+    await holdUp()
+    await vtiAgent.connect(agent, lab, { persona: persona(A.persona, A.community) })
+    await expect(listing).rejects.toThrow()
+    expect(signIns()).toEqual([B.persona, A.persona])
+  })
+
+  it("lets a step go first: it waits for a step's hold, is not refused by it, and the step still refuses a poll", async () => {
+    const { done, release } = untilReleased()
+    const holdUp = nextHold()
+    const step = vtiAgent.holding(agent, lab, persona(A.persona, A.community), () => done, { reason: 'a step' })
+    await holdUp()
+    let read = false
+    const reading = vtiAgent
+      .holding(agent, lab, persona(B.persona, B.community), async (did) => did, asListing)
+      .then((did) => ((read = true), did))
+    await new Promise((r) => realSetTimeout(r, 30))
+    expect(read).toBe(false)
+    await expect(pollAs(B)).rejects.toBeInstanceOf(VtiSessionHeld)
+    release()
+    await step
+    // A step's claim keeps polls off, not a listing read: it goes as soon as the step lets go.
+    await expect(reading).resolves.toBe(B.persona)
+    expect(signIns()).toEqual([A.persona, B.persona])
+  })
+
+  it('while it waits, a poll that would switch the session waits behind it; one sharing the session goes on', async () => {
+    mockAnswerMs = 60
+    const C = { community: 'did:webvh:c:community-c', persona: 'did:webvh:p:ccc' }
+    const rooms = createAgentRoomsBackend(agent, { mediatorDid: lab })
+    const holdUp = nextHold()
+    const roundA = rooms.communityTask(A.community, MEMBERSHIPS, {})
+    await holdUp()
+    const read = vtiAgent.holding(agent, lab, persona(B.persona, B.community), async (did) => did, asListing)
+    await untilHolds(() => listingWaiting() === 1, 'the listing read never waited')
+    // Not refused, as it would be behind a step: it waits its turn.
+    const switching = pollAs(C)
+    // A's round goes on as signed in: no switch to B and back in the middle of it.
+    const sameRound = rooms.communityTask(A.community, OFFERS, {})
+    const results = await Promise.allSettled([roundA, sameRound, read, switching])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled'])
+    expect(signIns()).toEqual([A.persona, B.persona, C.persona])
   })
 })
