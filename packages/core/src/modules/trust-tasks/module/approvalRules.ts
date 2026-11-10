@@ -76,7 +76,9 @@ export class NotServed extends Error {
  * With no answer (an agent that serves no discovery, or did not reply), every
  * version Keyring knows: an older agent takes that, and the one it dispatches
  * is covered. On a current agent whose discovery went unanswered that row can
- * be refused; the person is told and can try again.
+ * be refused; the person is told and can try again. Refusing there as well was
+ * tried (11-10, #1008) and broke the owner's rules on every agent that serves
+ * no discovery (34 rows), so it is not done.
  */
 export const ruleVersionsFor = (taskType: string, served?: readonly string[]): readonly string[] => {
   if (!served) return versionsOf(taskType)

@@ -22,6 +22,7 @@ import {
   withPhoneRule,
 } from '../module/approvalRules'
 import { synthesizeRego, validateApprovals } from '../module/approvalsPolicy'
+import { deviceRefusalOf } from '../module/vtaOwner'
 
 const ME = 'did:key:z6MkThisPhone'
 const OTHER = 'did:key:z6MkOtherPhone'
@@ -137,6 +138,14 @@ describe('a task agents serve in more than one version', () => {
     // The rules it writes are a row the agent takes.
     const both = withPhoneRule(EMPTY_APPROVALS, DELETE_11, true, ME)
     expect(() => validateApprovals(both.rules, both.sets)).not.toThrow()
+  })
+
+  it('a not-served refusal reaches the person in its own words, without the task URI (control: a plain error)', () => {
+    // Left to the generic branch it read "Your agent couldn't do that." and the reason was dropped.
+    const said = deviceRefusalOf(new NotServed(DELETE_11))
+    expect(said.reason).toBe('notServed')
+    expect(said.message).not.toMatch(/https?:|trusttasks/)
+    expect(deviceRefusalOf(new Error('something else')).reason).toBe('failed')
   })
 
   it('a rule only on a version the agent no longer dispatches reads off, to be turned on again', () => {
