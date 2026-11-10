@@ -231,6 +231,19 @@ describe('polling stays the fallback', () => {
     expect(said).not.toContain('zSecretName')
   })
 
+  test('a watch refused whole with a code off the list is logged as other, never with the code it came with', async () => {
+    const s = setUp({
+      answer: () => {
+        throw new VtiRefusal('taskFailed', 'no', { code: 'rooms/keys/watch:did:key:zSecretName' })
+      },
+    })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    await s.watches.idle()
+    const said = s.warn.mock.calls.map(([l]) => l).join('\n')
+    expect(said).toMatch(/refused \(other\)/)
+    expect(said).not.toContain('zSecretName')
+  })
+
   test('armed with no time it lapses: polled', async () => {
     const s = setUp({
       answer: (p) => ({ member: p.member, host: p.host, watches: [{ roomId: 'room:1', armed: true }] }),
