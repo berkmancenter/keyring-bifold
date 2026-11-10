@@ -407,7 +407,7 @@ export class AgentRoomsService implements RoomsService {
   /** How many times opened records were dropped (a lock, a leave): a read asked before the last one is not kept. */
   private drops = 0
   /** Each room's `recordMembers`, for the epoch it was read at: a writer may rely on it until the epoch moves. */
-  private recordMembers = new Map<string, { epoch: number; listed: string[]; found: boolean; current: boolean }>()
+  private recordMembers = new Map<string, { epoch: number; listed: string[]; current: boolean }>()
   /** Rooms whose dropped replies and reactions were logged this run: once per room and member until a lock. */
   private recordsDroppedSaid = new Set<string>()
   /** The log-only count of text posts' signatures; made on the first post read, by a build that fetches documents. */
@@ -1633,21 +1633,14 @@ export class AgentRoomsService implements RoomsService {
         await this.backend.agentTask(ROOMS_TASK.keysProfileRead, { roomId: room.roomId, host })
       )
       const { listed } = profile
-      const found = profile.status === 'found'
-      const current = found && !profile.stale
+      const current = profile.status === 'found' && !profile.stale
       if (epoch !== undefined) {
-        this.recordMembers.set(k, { epoch, listed, found, current })
+        this.recordMembers.set(k, { epoch, listed, current })
         holdingOpened.add(this)
       }
       return said(
         'read',
-        await this.noticeRecordsOn(
-          room.roomId,
-          member,
-          epoch,
-          { found, current },
-          { listed, canSeal, unresolved: false }
-        )
+        await this.noticeRecordsOn(room.roomId, member, epoch, { current }, { listed, canSeal, unresolved: false })
       )
     } catch (e) {
       return said(`not read (${failureCategory(e)})`, { listed: [], canSeal, unresolved: true })
@@ -1656,20 +1649,20 @@ export class AgentRoomsService implements RoomsService {
 
   /**
    * Notes a room whose replies or reactions this phone saw on and that no longer takes them (`recordsWereOn`). A
-   * profile read that permits them keeps that they're on. One read at the room's current epoch that permits neither,
-   * while the agent still seals, says they were on: never a stale profile, none at all, one that can't be read, or an
-   * agent that stops sealing, which keep today's "not on yet". It changes only the words: what may be sent is decided
-   * from the same features either way.
+   * profile that permits them (only a `found` one can: it lists members) keeps that they're on. One read at the room's
+   * current epoch that permits neither, while the agent still seals, says they were on: never a stale profile, none at
+   * all, one that can't be read, or an agent that stops sealing, which keep today's "not on yet". It changes only the
+   * words: what may be sent is decided from the same features either way.
    */
   private async noticeRecordsOn(
     roomId: string,
     member: string,
     epoch: number | undefined,
-    profile: { found: boolean; current: boolean },
+    profile: { current: boolean },
     features: RecordFeatures
   ): Promise<RecordFeatures> {
     if (takesRepliesOrReactions(features)) {
-      if (profile.found) await keepRecordsOn(roomId, member, epoch).catch(() => undefined)
+      await keepRecordsOn(roomId, member, epoch).catch(() => undefined)
       return features
     }
     if (!profile.current || !features.canSeal) return features
