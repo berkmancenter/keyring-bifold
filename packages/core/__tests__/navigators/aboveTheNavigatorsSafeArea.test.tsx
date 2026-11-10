@@ -31,6 +31,7 @@ import { render } from '@testing-library/react-native'
 import fs from 'fs'
 import path from 'path'
 import React from 'react'
+import { Modal } from 'react-native'
 
 import { BasicAppContext } from '../helpers/app'
 
@@ -171,8 +172,8 @@ describe('what RootStack mounts above the navigators', () => {
         </BasicAppContext>
       )
       // The real safe-area module's provider renders no children under jest (it waits for native insets), so the
-      // sheet's words are not reachable here; what is, is that the sheet's modal mounted (switched off, it is null).
-      expect(view.toJSON()).not.toBeNull()
+      // sheet's words are not reachable here; what is, is that the sheet's modal mounted (switched off, there is none).
+      expect(view.UNSAFE_root.findAllByType(Modal).length).toBeGreaterThan(0)
     } finally {
       roleOfferPromptStore.clear()
       setTrustedApproversEnabled(false)

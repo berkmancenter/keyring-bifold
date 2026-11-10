@@ -216,6 +216,20 @@ describe('the offer sheet', () => {
     expect(respond).not.toHaveBeenCalled()
   })
 
+  test('an offer on screen goes when the switch is turned off', async () => {
+    linked('did:webvh:jordans-agent.example')
+    approverRole.roleOfferPromptStore.set(offerFrom())
+    const tree = await show(<ApproverOfferModal />)
+    expect(tree.getByTestId(id(ApproverOfferIds.sheet))).toBeTruthy()
+    setTrustedApproversEnabled(false)
+    tree.rerender(
+      <BasicAppContext>
+        <ApproverOfferModal />
+      </BasicAppContext>
+    )
+    expect(tree.queryByTestId(id(ApproverOfferIds.sheet))).toBeNull()
+  })
+
   test('with the switch off nothing is shown or brought back (control: on, the same offer is shown)', async () => {
     linked('did:webvh:jordans-agent.example')
     approverRole.roleOfferPromptStore.set(offerFrom())
