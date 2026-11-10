@@ -250,6 +250,39 @@ describe('the phone never sends an offered task', () => {
     expect(unlisted).toEqual([])
   })
 
+  // A rooms read, write or watch goes to the agent too, from the rooms backend rather than the client's own list.
+  const ROOMS_REAL = join(__dirname, '..', '..', 'rooms', 'real')
+  const toAgent = (uri: string) => /\/spec\/(rooms\/keys|vault)\//.test(uri)
+
+  it('every rooms task the phone asks its agent is on the list of what the phone sends', () => {
+    // A rule set elsewhere on one that is missing (a class rule on `Mutating` names read 0.2 and watch 0.1) would hold
+    // each room read and ask its approvers every time, without the screen saying which rule is to blame.
+    const { ROOMS_TASK } = jest.requireActual('../../rooms/real/wire') as { ROOMS_TASK: Record<string, string> }
+    const asked = Object.values(ROOMS_TASK).filter(toAgent)
+    expect(asked.length).toBeGreaterThan(10)
+    expect(asked.filter((uri) => !PHONE_SENDS.includes(uri))).toEqual([])
+  })
+
+  it("the rooms tasks sent to the agent are the ones that rule names: rooms/keys and vault, never a host's or a community's", () => {
+    // Ties the rule above to the code: each ROOMS_TASK the rooms backend hands to agentTask or agentStep.
+    const { ROOMS_TASK } = jest.requireActual('../../rooms/real/wire') as { ROOMS_TASK: Record<string, string> }
+    const names = readdirSync(ROOMS_REAL)
+      .filter((f) => f.endsWith('.ts'))
+      .flatMap((f) => [
+        ...readFileSync(join(ROOMS_REAL, f), 'utf8').matchAll(
+          /\.agent(?:Task|Step)\(\s*(?:'[^']*',\s*(?:'[^']*'|"[^"]*"),\s*)?ROOMS_TASK\.(\w+)/g
+        ),
+      ])
+      .map((m) => m[1])
+    expect(names.length).toBeGreaterThan(8)
+    for (const name of names)
+      expect([name, ROOMS_TASK[name]]).toEqual([name, expect.stringMatching(/\/spec\/(rooms\/keys|vault)\//)])
+  })
+
+  it('a signal the agent pushes is not on the list: the phone receives rooms/keys/changed, it never sends it', () => {
+    expect(PHONE_SENDS.filter((uri) => uri.includes('/rooms/keys/changed/'))).toEqual([])
+  })
+
   it('the app has no caller of createContext', () => {
     const src = join(__dirname, '..', '..', '..')
     const walk = (dir: string): string[] =>
