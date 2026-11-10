@@ -14,7 +14,7 @@
  * @module trust-tasks/module/vtaOwner
  */
 
-import { consentPendingOf, refusedAsNotOnAcl } from './VtaClient'
+import { ConsentNotGiven, consentPendingOf, refusedAsNotOnAcl } from './VtaClient'
 import { StepUpDeclined } from './stepUp'
 import { VtiRefusal } from './vtiAgent'
 
@@ -86,6 +86,9 @@ export class DeviceCannotOwn extends Error {
  * - `notConfirmed` — the extra check could not confirm it was the person.
  * - `awaitingApproval` — the agent holds the act for someone else's approval,
  *   which did not come in time.
+ * - `notApproved` — the agent held the act for someone else's approval, and the
+ *   question ended without a yes: they said no, or it lapsed (ConsentNotGiven).
+ *   Not the agent's refusal: it did what its rule says.
  * - `noAnswer` — the agent said nothing in time; the act may or may not have
  *   happened, so the list is worth reading again.
  * - `unreachable` — Keyring could not sign in to the agent.
@@ -104,6 +107,7 @@ export type DeviceRefusalReason =
   | 'stepUpDeclined'
   | 'notConfirmed'
   | 'awaitingApproval'
+  | 'notApproved'
   | 'noAnswer'
   | 'unreachable'
   | 'failed'
@@ -123,6 +127,7 @@ const PLAIN_WORDS: Record<DeviceRefusalReason, string> = {
   stepUpDeclined: 'You declined the extra check, so your agent did not do this.',
   notConfirmed: "Keyring couldn't confirm it's you.",
   awaitingApproval: 'Your agent is waiting for someone else to approve this.',
+  notApproved: "It wasn't approved in time, so your agent didn't do it.",
   noAnswer: "Your agent didn't answer. Check the list before trying again.",
   unreachable: "Keyring couldn't reach your agent. Check your connection and try again.",
   failed: "Your agent couldn't do that.",
@@ -197,7 +202,10 @@ export function deviceRefusalOf(error: unknown): DeviceActionRefused {
   const refusal = (reason: DeviceRefusalReason) => new DeviceActionRefused(reason, message)
   if (error instanceof StepUpDeclined) return refusal('stepUpDeclined')
   if (error instanceof OwnerNotConfirmed) return refusal('notConfirmed')
+  // The two endings of one wait: still waiting, or the wait ended with no yes. Before the generic VtiRefusal cases,
+  // which would read the second as the agent's own refusal and show its code.
   if (consentPendingOf(error)) return refusal('awaitingApproval')
+  if (error instanceof ConsentNotGiven) return refusal('notApproved')
   if (!(error instanceof VtiRefusal)) return refusal(NO_ANSWER.test(message) ? 'noAnswer' : 'failed')
   const details = (error.details ?? {}) as { reason?: unknown }
   if (message === STEP_UP_REQUIRED || details.reason === STEP_UP_REQUIRED) return refusal('stepUpRequired')

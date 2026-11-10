@@ -8,6 +8,7 @@
  */
 import { ConsentNotGiven, VtaClient, consentPendingOf } from '../module/VtaClient'
 import { VtaAgentController } from '../module/vtaAgent'
+import { deviceRefusalOf } from '../module/vtaOwner'
 import { VtiRefusal } from '../module/vtiAgent'
 
 jest.mock('react-native-config', () => ({ __esModule: true, default: {} }))
@@ -99,6 +100,15 @@ describe('a held task whose question changed', () => {
     expect(consentPendingOf(held('c-1'))?.challenge).toBe('c-1')
     expect(consentPendingOf(held('c-1', 'request'))?.challenge).toBe('c-1')
     expect(consentPendingOf(held())?.challenge).toBeUndefined()
+  })
+
+  it("an owner act refused this way reads as not approved, never as the agent's refusal (control: still waiting)", () => {
+    // addDevice and the other owner acts read a refusal through deviceRefusalOf: without its own case, this one fell
+    // through to "Your agent refused this (consentNotGiven)".
+    const ended = deviceRefusalOf(new ConsentNotGiven('https://trusttasks.org/spec/vta/acl/grant/1.0'))
+    expect(ended.reason).toBe('notApproved')
+    expect(ended.message).not.toMatch(/consentNotGiven|refused/)
+    expect(deviceRefusalOf(held('c-1')).reason).toBe('awaitingApproval')
   })
 })
 
