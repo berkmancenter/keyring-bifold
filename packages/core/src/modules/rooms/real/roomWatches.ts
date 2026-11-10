@@ -109,6 +109,9 @@ export class RoomWatches {
     const changed = parseChanged(payload)
     if (!changed) return undefined
     const w = this.watches.get(changed.roomId)
+    // Not checked against expiresAt, as watched() is: that asks whether the poll can wait, this whether the push names a
+    // watch armed here. A signal sent before the lease ended and delivered after it is still that watch's one signal,
+    // and accepting it costs one read; refusing it would leave a real change to the next poll.
     if (w?.state !== 'armed' || w.member !== changed.member || w.host !== changed.host) return undefined
     // The agent has forgotten it: one arming, one signal. The read that follows arms it again.
     this.watches.set(changed.roomId, { state: 'fired', member: w.member, host: w.host, since: w.since })

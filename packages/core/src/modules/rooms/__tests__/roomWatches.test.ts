@@ -183,6 +183,17 @@ describe('a signal', () => {
     expect(s.watches.watched('room:1')).toBe(true)
   })
 
+  test("after its lease has lapsed: still that watch's one signal, though the room no longer counts as watched", async () => {
+    let now = T0
+    const s = setUp({ now: () => now })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    await s.watches.idle()
+    now = Date.parse(LATER) + 1
+    expect(s.watches.watched('room:1')).toBe(false)
+    expect(s.watches.signal(signal('room:1'))).toBe('room:1')
+    expect(s.watches.signal(signal('room:1'))).toBeUndefined()
+  })
+
   test('before its watch is armed (the answer not in yet): nothing is read', () => {
     const s = setUp({ answer: () => new Promise(() => undefined) })
     s.watches.want('room:1', MEMBER, HOST, 4)
