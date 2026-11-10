@@ -256,8 +256,8 @@ describe('the phone never sends an offered task', () => {
   // A rooms read, write or watch goes to the agent too, from the rooms backend rather than the client's own list.
   const ROOMS_REAL = join(__dirname, '..', '..', 'rooms', 'real')
   // What the phone asks its own agent: `rooms/keys` and `vault`. A host's and a community's tasks (`rooms/records`,
-  // `rooms/blobs`, `vtc`) never pass the agent's policy gate. `rooms/keys/changed` is pushed by the agent, never sent:
-  // should it ever join ROOMS_TASK (to parse it), take it out here, or the first test below fails for the wrong reason.
+  // `rooms/blobs`, `vtc`) never pass the agent's policy gate. `rooms/keys/changed` is pushed by the agent, never sent,
+  // so it is left out here: ROOMS_TASK names it for parsing, and PHONE_SENDS must not.
   const toAgent = (uri: string) => /\/spec\/(rooms\/keys|vault)\//.test(uri) && !uri.includes('/rooms/keys/changed/')
   const roomsTypes = () => {
     const { ROOMS_TASK } = jest.requireActual('../../rooms/real/wire') as { ROOMS_TASK: Record<string, string> }
@@ -300,10 +300,12 @@ describe('the phone never sends an offered task', () => {
     const sites = walk(ROOMS_REAL).flatMap((file) => {
       const src = readFileSync(file, 'utf8')
       return [
-        ...[...src.matchAll(/\.agentTask\(\s*([^,]+?)\s*,/g)].map((m) => m[1].trim()),
-        ...[...src.matchAll(new RegExp(String.raw`\.agentStep\(\s*${arg},\s*${arg},\s*([^,]+?)\s*,`, 'g'))].map((m) =>
-          m[1].trim()
-        ),
+        ...[...src.matchAll(/\.agentTask\s*(?:<[^>]*>)?\s*\(\s*([^,]+?)\s*,/g)].map((m) => m[1].trim()),
+        ...[
+          ...src.matchAll(
+            new RegExp(String.raw`\.agentStep\s*(?:<[^>]*>)?\s*\(\s*${arg},\s*${arg},\s*([^,]+?)\s*,`, 'g')
+          ),
+        ].map((m) => m[1].trim()),
       ]
     })
     expect(sites.length).toBeGreaterThan(12)
