@@ -3679,6 +3679,6 @@
     "ApprovedBy": "Approved by {{names}}",
     "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead.",
     "AcceptReason": "Accept being {{asker}}'s approver",
-    "AcceptAsksFaceId": "Accept asks for Face ID. Decline is one tap."
+    "AcceptAsksLock": "Accept asks for {{method}}. Decline is one tap."
   }
 }

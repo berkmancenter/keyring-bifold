@@ -41,6 +41,16 @@ const ApproverWaitNote: React.FC = () => {
   const held = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentFor)
   const granted = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().consentGranted)
   const on = isTrustedApproversEnabled()
+  // The window needs a clock as well as an event: nothing else re-renders this note once the agent goes quiet, so
+  // without a timer "Approved by …" would stay up past APPROVED_SHOWN_MS for as long as the screen is open.
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!granted) return
+    const left = granted.at + APPROVED_SHOWN_MS - Date.now()
+    if (left <= 0) return
+    const timer = setTimeout(() => setTick((n) => n + 1), left)
+    return () => clearTimeout(timer)
+  }, [granted])
   const recent = granted && Date.now() - granted.at < APPROVED_SHOWN_MS ? granted : undefined
   const taskType = held ?? recent?.taskType
   const [names, setNames] = useState<{ taskType: string; names: string[] }>()

@@ -20,6 +20,7 @@ import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import { DeviceActionRefused } from '../module/vtaOwner'
 import ApproverAskRow, { ApproverAskRowIds } from '../screens/ApproverAskRow'
 import ApproverWaitNote, { APPROVED_SHOWN_MS, ApproverWaitNoteIds } from '../screens/ApproverWaitNote'
+import * as ownerConfirm from '../module/ownerConfirm'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -247,6 +248,25 @@ describe('the offer sheet', () => {
     jest.spyOn(approverRole, 'restoreRoleOfferPrompts').mockResolvedValue(undefined)
   })
 
+  test("the sheet names the person's own lock, not always Face ID (control: the unknown fallback)", async () => {
+    // The shared stub drops a key's values; this one shows them, so the lock word that reaches the line is visible.
+    const words = (key: string, opts?: { method?: string }) => (opts?.method ? `${key}|${opts.method}` : key)
+    // eslint-disable-next-line @typescript-eslint/no-var-requires -- the mapped mock module itself, not a namespace copy
+    const i18nMock = require('react-i18next')
+    jest.spyOn(i18nMock, 'useTranslation').mockReturnValue({ t: words, i18n: { language: 'en' } } as never)
+    approverRole.roleOfferPromptStore.set(offerFrom())
+    const lock = jest.spyOn(ownerConfirm, 'ownerLockKind').mockResolvedValue('fingerprint')
+    const tree = await show(<ApproverOfferModal />)
+    expect(tree.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe(
+      'Approver.AcceptAsksLock|CreateAgent.Lock.fingerprint'
+    )
+    lock.mockResolvedValue('unknown')
+    const other = await show(<ApproverOfferModal />)
+    expect(other.getAllByTestId(id(ApproverOfferIds.faceId)).at(-1)?.props.children).toBe(
+      'Approver.AcceptAsksLock|CreateAgent.Lock.unknown'
+    )
+  })
+
   test('Accept asks Face ID first, with its reason, then names the DID this phone approves as on its own agent', async () => {
     linked('did:webvh:jordans-agent.example')
     approverRole.roleOfferPromptStore.set(offerFrom())
@@ -255,7 +275,7 @@ describe('the offer sheet', () => {
     const respond = jest.spyOn(approverRole, 'respondToRoleOffer').mockResolvedValue(undefined)
     const tree = await show(<ApproverOfferModal />)
     expect(tree.getByText('Approver.Action.shareCredential', { exact: false })).toBeTruthy()
-    expect(tree.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe('Approver.AcceptAsksFaceId')
+    expect(tree.getByTestId(id(ApproverOfferIds.faceId)).props.children).toBe('Approver.AcceptAsksLock')
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(ApproverOfferIds.yes)))
     })
@@ -617,17 +637,35 @@ describe('who a held task waits on', () => {
     expect(who).not.toHaveBeenCalled()
   })
 
-  test("after the agent's grant notice it says who approved, for a while, then nothing", async () => {
-    agentState({ awaitingConsentFor: undefined, consentGranted: { taskType: PERSONA_MINT, at: Date.now() } })
-    jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
-    let tree = await show(<ApproverWaitNote />)
-    expect(tree.getByTestId(id(ApproverWaitNoteIds.approved))).toBeTruthy()
-    expect(tree.queryByTestId(id(ApproverWaitNoteIds.waiting))).toBeNull()
+  test("after the agent's grant notice it says who approved, for a while, then nothing, on the note already on screen", async () => {
+    jest.useFakeTimers({ now: new Date('2026-11-10T19:00:00Z') })
+    try {
+      agentState({ awaitingConsentFor: undefined, consentGranted: { taskType: PERSONA_MINT, at: Date.now() } })
+      jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
+      const tree = await show(<ApproverWaitNote />)
+      expect(tree.getByTestId(id(ApproverWaitNoteIds.approved))).toBeTruthy()
+      expect(tree.queryByTestId(id(ApproverWaitNoteIds.waiting))).toBeNull()
+      // Nothing about the agent changes: only the clock moves, and the same mounted note must clear itself.
+      await act(async () => {
+        jest.advanceTimersByTime(APPROVED_SHOWN_MS - 1000)
+      })
+      expect(tree.getByTestId(id(ApproverWaitNoteIds.approved))).toBeTruthy()
+      await act(async () => {
+        jest.advanceTimersByTime(2000)
+      })
+      expect(tree.queryByTestId(id(ApproverWaitNoteIds.approved))).toBeNull()
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test('a grant notice already older than the window shows nothing when the note mounts', async () => {
     agentState({
       awaitingConsentFor: undefined,
       consentGranted: { taskType: PERSONA_MINT, at: Date.now() - APPROVED_SHOWN_MS - 1000 },
     })
-    tree = await show(<ApproverWaitNote />)
+    jest.spyOn(approverRole, 'approversWaitedOn').mockResolvedValue(['Jordan'])
+    const tree = await show(<ApproverWaitNote />)
     expect(tree.queryByTestId(id(ApproverWaitNoteIds.approved))).toBeNull()
   })
 })

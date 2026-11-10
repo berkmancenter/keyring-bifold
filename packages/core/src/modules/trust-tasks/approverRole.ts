@@ -558,6 +558,10 @@ export async function handleRoleStepDown(
     []
   const ask = record?.content as unknown as RoleOfferAsk | undefined
   if (!record || !ask?.acceptedAs || ask.acceptedAs !== payload.approver || ask.agentDid !== payload.agent) return
+  // An offer still open on this connection: a step-down never counts against it. Narrow but real: if this phone sent
+  // a NEW offer that crossed the step-down in flight, the step-down is dropped here, the asker is not told, and the
+  // earlier written approver stays on the agent until removed. Once the new offer reaches the approver it resets
+  // their prompt, so they cannot step down after it; only the in-flight crossing reaches this line.
   if (ask.state === 'open') return
   // A yes not yet written is simply taken back; a written one stays written (the agent still holds it) until removed.
   record.content = {

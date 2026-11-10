@@ -3637,6 +3637,6 @@
     "ApprovedBy": "Approuvé par {{names}}",
     "ApprovedGoAhead": "{{names}} a dit oui : votre agent peut continuer.",
     "AcceptReason": "Accepter d’être l’approbateur de {{asker}}",
-    "AcceptAsksFaceId": "Accepter demande Face ID. Refuser se fait en un geste."
+    "AcceptAsksLock": "Pour accepter, confirmez {{method}}. Refuser se fait en un geste."
   }
 }
