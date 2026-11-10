@@ -11,6 +11,7 @@ import { join } from 'path'
 import {
   EMPTY_APPROVALS,
   NotOffered,
+  NotServed,
   OFFERED_TASKS,
   PHONE_SENDS,
   TEST_REQUEST_TASKS,
@@ -124,13 +125,15 @@ describe('a task agents serve in more than one version', () => {
   const deleteSwitch = (model: Parameters<typeof approvalsView>[0], served?: string[]) =>
     approvalsView(model, ME, served).offered.find((o) => o.key === 'contextsDelete')
 
-  it('one rule per version the agent dispatches, else every version Keyring knows', () => {
+  it('one rule per version the agent dispatches; with no answer, every version Keyring knows', () => {
     const rules = (served?: string[]) => versions(withPhoneRule(EMPTY_APPROVALS, DELETE_11, true, ME, served).rules)
     expect(rules([DELETE_11, CREATE])).toEqual([DELETE_11])
     expect(rules([DELETE_10, DELETE_11])).toEqual([DELETE_11, DELETE_10])
     expect(rules([DELETE_10, CREATE])).toEqual([DELETE_10])
     expect(rules(undefined)).toEqual([DELETE_11, DELETE_10])
-    expect(rules([CREATE])).toEqual([DELETE_11, DELETE_10])
+    // An answer that names none of its versions: refused, never a row naming types the agent may have retired (an
+    // agent refuses the whole row for one retired type; VTI main retires contexts/delete 1.0).
+    expect(() => rules([CREATE])).toThrow(NotServed)
     // The rules it writes are a row the agent takes.
     const both = withPhoneRule(EMPTY_APPROVALS, DELETE_11, true, ME)
     expect(() => validateApprovals(both.rules, both.sets)).not.toThrow()
