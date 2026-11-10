@@ -68,10 +68,10 @@ describe('RoomPostBubble: the long press inside the retry', () => {
   })
 })
 
-// A post the agent could not open says so when its reason is one no retry changes (removed, beyondChain), and keeps
+// A post the agent could not open says so when its reason is one a plain retry does not change (removed, beyondChain), and keeps
 // "couldn't be read" otherwise. The words name no cause: several room settings and membership changes lead here.
 describe('RoomPostBubble: a post that was not opened', () => {
-  test.each(['removed', 'beyondChain'] as const)("says it can't be opened here when the agent says %s", (reason) => {
+  test.each(['removed', 'beyondChain'] as const)("says it can't be opened when the agent says %s", (reason) => {
     const { getByTestId, queryByTestId, getByText } = show({ post: post({ unread: true, unreadWhy: reason }) })
     expect(getByTestId(id('RoomPostCannotOpen'))).toBeTruthy()
     expect(getByText('Rooms.PostCannotOpen')).toBeTruthy()
