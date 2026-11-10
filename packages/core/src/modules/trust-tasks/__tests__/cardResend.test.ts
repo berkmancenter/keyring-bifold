@@ -220,11 +220,20 @@ describe('every other read of the request', () => {
     expect(asked).toEqual([{ requestId: 'r-1' }])
   })
 
-  it('does not poll a request already known as approved: so before this, Check again asked nothing at all', async () => {
+  // readJoinState polls only an open request: one not yet acknowledged, or pending, or deferred. An approved
+  // request whose answer came is none of those, so before askForCardIfOwed nothing asked about it at all.
+  it('does not poll an acknowledged request that is neither pending nor deferred', async () => {
     const s = stores({ submission: approved() })
     const { status, asked } = polls({ requestId: 'r-1', status: 'approved', credentialsDelivered: false })
     expect(await readJoinState(agent, COMMUNITY, { ...s, status })).toMatchObject({ kind: 'pending' })
     expect(asked).toEqual([])
+  })
+
+  it('polls an approved request not yet acknowledged, and still never asks for the card', async () => {
+    const s = stores({ submission: approved({ acknowledgedAt: undefined }) })
+    const { status, asked } = polls({ requestId: 'r-1', status: 'approved', credentialsDelivered: false })
+    await readJoinState(agent, COMMUNITY, { ...s, status })
+    expect(asked).toEqual([{ requestId: 'r-1' }])
   })
 })
 
