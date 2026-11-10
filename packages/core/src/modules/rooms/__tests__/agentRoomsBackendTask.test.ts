@@ -15,6 +15,18 @@ jest.mock('../../trust-tasks/module/VtiCommunityStore', () => ({ GenericRecordsC
 jest.mock('../../trust-tasks/module/vtiVetting', () => ({ GenericRecordsVettingStore: class {} }))
 jest.mock('../../trust-tasks/module/vtiTsp', () => ({ GenericRecordsTspPeerRevisionStore: class {} }))
 jest.mock('../roomsLeave', () => ({ afterLeavingCommunity: jest.fn() }))
+// AsyncStorage as it is: Promises, and null for a key never written (the shared __mocks__ double answers plain values
+// and undefined, which the consent-hold store would read as unreadable, and so as held).
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const kept = new Map<string, string>()
+  return {
+    __esModule: true,
+    default: {
+      getItem: async (key: string) => kept.get(key) ?? null,
+      setItem: async (key: string, value: string) => void kept.set(key, value),
+    },
+  }
+})
 
 import { createAgentRoomsBackend } from '../real/agentRoomsBackend'
 

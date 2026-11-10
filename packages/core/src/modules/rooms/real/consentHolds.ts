@@ -37,14 +37,14 @@ export interface ConsentHolds {
 type Rows = Record<string, Record<string, number>>
 
 interface Storage {
-  getItem(key: string): Promise<string | null | undefined>
+  getItem(key: string): Promise<string | null>
   setItem(key: string, value: string): Promise<void>
 }
 
 /** The rows as stored; `undefined` when what is stored can't be read as rows. No row at all is no holds. */
-function parse(raw: string | null | undefined): Rows | undefined {
-  // Nothing stored: AsyncStorage answers null (its jest double, undefined).
-  if (raw === null || raw === undefined) return {}
+function parse(raw: string | null): Rows | undefined {
+  // Nothing stored is null, as AsyncStorage answers it. Anything else that is not rows, undefined included, reads as held.
+  if (raw === null) return {}
   try {
     const rows: unknown = JSON.parse(raw)
     if (typeof rows !== 'object' || rows === null || Array.isArray(rows)) return undefined
