@@ -15,8 +15,13 @@ const DID_IN_TEXT = /did:[a-z0-9]+:[^\s"'<>,;()[\]{}]+/gi
  * Three problem-reports reached a tester's report as a bare type, and nothing
  * said what they were about (IN-617). The `comment` is the sender's own words,
  * so a DID in it is cut to its prefix, or said as "a DID" where even a prefix
- * would say too much (`hideDids`: hidden vetting). `args` are never read: they
- * fill the comment's placeholders and can carry anything.
+ * would say too much (`hideDids`: hidden vetting).
+ *
+ * `args` are never read, and that is the privacy line: report-problem/2.0
+ * keeps a comment's values out of the comment, in `args`, filled into its
+ * `{1}`, `{2}` placeholders. The values are where a DID, a key id or a
+ * person's data would be, and they are not scrubbed, so the line carries the
+ * comment with its placeholders unfilled.
  */
 export function problemReportWords(
   message: { body?: unknown; thid?: unknown; pthid?: unknown },

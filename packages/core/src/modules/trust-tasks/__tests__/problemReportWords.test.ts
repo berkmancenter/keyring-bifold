@@ -26,6 +26,13 @@ describe('problemReportWords', () => {
     expect(line).not.toContain('secret-arg')
   })
 
+  it("leaves a comment's placeholders unfilled: the values in args are never read", () => {
+    const line = problemReportWords({
+      body: { code: 'e.p.msg.unknown-recipient', comment: 'No route to {1} for {2}', args: [LONG_DID, 'key-1'] },
+    })
+    expect(line).toBe('e.p.msg.unknown-recipient — No route to {1} for {2} (no thread)')
+  })
+
   it('says a DID as "a DID" when even a prefix would say too much', () => {
     expect(problemReportWords({ body: { code: 'e.p.x', comment: `vetter ${LONG_DID}` } }, { hideDids: true })).toBe(
       'e.p.x — vetter a DID (no thread)'

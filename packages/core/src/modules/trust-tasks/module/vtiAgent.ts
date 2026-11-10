@@ -758,12 +758,15 @@ class VtiAgentController {
       )
     }
     // A DIDComm problem-report, said with its code, words and the thread it
-    // answers: three reached a tester's report as a bare type (IN-617). One
-    // threaded on an ask is that ask's refusal (below); any other goes to the
-    // inbox, which keeps none of it.
+    // answers: three reached a tester's report as a bare type (IN-617). Said
+    // through releaseWarn, as the transport says the mediator's own, so it
+    // reaches a report whatever logger the agent has. One threaded on an ask
+    // is that ask's refusal (below), so it is said twice on purpose: here as
+    // received, with its thread, and again by whatever logs the ask's failure.
+    // Any other goes to the inbox, which keeps none of it.
     if (type === PROBLEM_REPORT) {
       const who = hidden ? 'the community' : didPrefix(plaintext.from)
-      this.agent?.config?.logger?.warn?.(
+      releaseWarn(
         `vtiAgent: ${who} sent a problem-report on ${entry ? taskName(entry.type) : 'no request in flight'}: ${problemReportWords(
           plaintext,
           { hideDids: hidden }

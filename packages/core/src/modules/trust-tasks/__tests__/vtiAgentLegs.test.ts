@@ -440,10 +440,14 @@ describe('what a community is asked, and how', () => {
 
   // IN-617: three problem-reports reached a tester's report as a bare type, and nothing said what they were about.
   const LONG_DID = 'did:webvh:QmLongScidValue1234567890abcdef:host.example:someone'
-  const warned = () => logger.warn.mock.calls.map((call) => String(call[0]))
+  /** What reaches the release log (`releaseWarn`, console.warn): a tester's report, whatever logger the agent has. */
+  const released = () => {
+    const spy = jest.spyOn(console, 'warn').mockImplementation(() => undefined)
+    return { lines: () => spy.mock.calls.map((call) => String(call[0])), restore: () => spy.mockRestore() }
+  }
 
   it("says a problem-report's code, words and thread, and the ask it answers, with no whole DID", async () => {
-    logger.warn.mockClear()
+    const log = released()
     let thread = ''
     await askOverDidcomm(SUBMIT, (sent) => {
       thread = String((sent as { id?: string }).id)
@@ -454,17 +458,18 @@ describe('what a community is asked, and how', () => {
         body: { code: 'e.p.msg.bad-request', comment: `unknown sender  ${LONG_DID}`, args: [LONG_DID] },
       }
     })
+    log.restore()
     expect(thread).not.toBe('')
-    expect(warned()).toContain(
+    expect(log.lines()).toContain(
       `vtiAgent: ${community} sent a problem-report on vtc/join-requests/submit: e.p.msg.bad-request — unknown sender did:webvh:QmLongScidValu… (thread ${thread})`
     )
-    expect(warned().join('\n')).not.toContain(LONG_DID)
+    expect(log.lines().join('\n')).not.toContain(LONG_DID)
   })
 
   it('says a problem-report that answers no ask in flight, which the inbox then keeps none of', async () => {
     mockTspVia[community] = 'did:webvh:their-mediator'
     await vtiAgent.connect(agent, 'did:peer:lab', { persona: persona('did:webvh:p:stray-report') })
-    logger.warn.mockClear()
+    const log = released()
     await Promise.resolve(
       mockSessions[mockSessions.length - 1].onMessage({
         type: 'https://didcomm.org/report-problem/2.0/problem-report',
@@ -473,7 +478,8 @@ describe('what a community is asked, and how', () => {
         body: { code: 'e.p.req.not-found' },
       })
     )
-    expect(warned()).toContain(
+    log.restore()
+    expect(log.lines()).toContain(
       `vtiAgent: ${community} sent a problem-report on no request in flight: e.p.req.not-found (thread urn:uuid:not-this-request)`
     )
   })
