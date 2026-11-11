@@ -510,7 +510,11 @@ describe('the entry points, behind the state-verified approvers switch', () => {
       const want = [onGuardian.has(name), onSocial.has(name)].map((on) => (on ? 'unsupportedCesr' : 'valid'))
       for (const d of nestedSaids(name)) {
         const m = edited({ [said(name)]: (t) => t.split(`"d":"${d}"`).join(`"d":"${recode(d, code)}"`) }, {})
-        materialOutcomes.push({ label: `${name}: nested block ${d.slice(0, 8)} -> ${code}`, got: run(m), want })
+        materialOutcomes.push({
+          label: `${name}: nested block ${d.slice(0, 8)} -> ${code}`,
+          got: run(m).map(String),
+          want,
+        })
       }
       for (const u of ctx.tels.get(registryOf(name))!.updateTexts) {
         const d = (JSON.parse(u) as { d: string }).d
@@ -518,7 +522,11 @@ describe('the entry points, behind the state-verified approvers switch', () => {
           {},
           { [registryOf(name)]: (t) => (t === u ? t.replace(`"d":"${d}"`, `"d":"${recode(d, code)}"`) : t) }
         )
-        materialOutcomes.push({ label: `${name}: TEL update ${d.slice(0, 8)} -> ${code}`, got: run(m), want })
+        materialOutcomes.push({
+          label: `${name}: TEL update ${d.slice(0, 8)} -> ${code}`,
+          got: run(m).map(String),
+          want,
+        })
       }
     }
     expect(
