@@ -3592,7 +3592,7 @@
     "AskCaption": "{{name}} voit exactement ce que vous choisissez et peut refuser d’être votre approbateur.",
     "Waiting": "En attente de {{name}}",
     "AskAgain": "Redemander",
-    "Change": "Modifier ce que {{name}} approuve",
+    "Change": "Ajouter à ce que {{name}} approuve",
     "StillApproves": "{{name}} approuve encore :",
     "ChangeCaption": "Envoie une nouvelle demande à {{name}}. Ce que {{name}} approuve aujourd'hui reste en place jusqu'à ce que {{name}} accepte à nouveau et que vous l'ajoutiez.",
     "SaidYes": "{{name}} a dit oui. Ajoutez cette personne dans Mon agent, sous Qui approuve.",

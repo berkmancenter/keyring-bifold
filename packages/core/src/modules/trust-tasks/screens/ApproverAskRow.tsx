@@ -202,7 +202,9 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
       </View>
     )
   } else if (state === 'open' && ask) {
-    // Mock frame 1c: sent, waiting. A re-offer ("Change what … approves") also says what is still in force meanwhile.
+    // Mock frame 1c: sent, waiting. A re-offer ("Add to what … approves") also says what is still in force meanwhile.
+    // It can only ADD: the agent's rules name one shared set, so narrowing what one approver covers is not something
+    // a per-approver offer can do (a set-level action, not built).
     const inForce = writtenAsOf(ask) ? writtenActionsOf(ask) : []
     body = (
       <View style={styles.card}>
