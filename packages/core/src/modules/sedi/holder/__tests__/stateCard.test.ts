@@ -254,8 +254,9 @@ describe('the state card: checking, and checked live', () => {
         )
       )
     )
-  const live = (answer: () => Promise<RootKel>) => {
-    const resolveRootKel = jest.fn(answer)
+  const live = (answer: (did: string) => Promise<RootKel>) => {
+    // Takes the did:webs it is asked for, as a RootKelResolver does, so a row can read what was fetched.
+    const resolveRootKel = jest.fn((did: string) => answer(did))
     const check = (evidence: GuardianEvidence = card) =>
       checkHeldCard(evidence, NOW, () => undefined, { resolveRootKel })
     return { resolveRootKel, check }
