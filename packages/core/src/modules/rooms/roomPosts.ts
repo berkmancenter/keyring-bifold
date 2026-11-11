@@ -218,5 +218,14 @@ export function withRepliesToReactions(posts: RoomPost[]): RoomPost[] {
 }
 
 /** Newest first: by time, then by version, so records with no time keep a stable order. */
-export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'>>(notes: T[]): T[] =>
-  [...notes].sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? '') || b.version - a.version)
+/**
+ * Newest first, by when the host first stored each record (`createdAt`) where it says, else by its last change
+ * (`updatedAt`), as before: an edit or a curation does not move an old message to the top (chat plan §7 decision 3).
+ * A record with no `createdAt` is placed by its `updatedAt`, so a listing from an agent that predates it reads as today.
+ */
+export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'> & { createdAt?: string }>(
+  notes: T[]
+): T[] => {
+  const at = (n: T) => n.createdAt ?? n.updatedAt ?? ''
+  return [...notes].sort((a, b) => at(b).localeCompare(at(a)) || b.version - a.version)
+}

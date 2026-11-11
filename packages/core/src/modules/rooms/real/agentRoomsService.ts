@@ -46,6 +46,7 @@ import type {
   Identity,
   Note,
   NoteList,
+  NoteSummary,
   OfferPreview,
   OpenedFile,
   Room,
@@ -113,6 +114,7 @@ import {
   type HeldRoom,
   type OfferRecord,
   type OpenedRecord,
+  type RecordMeta,
   parseProfileRecordMembers,
   type RecordMembers,
   type RenewalRecord,
@@ -377,6 +379,13 @@ const roomFileOf = (file: FileManifest, record: Pick<OpenedRecord, 'author' | 'u
   sender: record.sender ?? 'unconfirmed',
   ...(record.sender === 'confirmed' && record.author ? { sharedBy: { did: record.author } } : {}),
   ...(record.updatedAt ? { sharedAt: record.updatedAt } : {}),
+})
+
+/** A record's host times and first writer, as a note carries them: only those the agent passed on. */
+const hostTimesOf = (r: RecordMeta): Pick<NoteSummary, 'createdAt' | 'createdBy' | 'bodyStoredAt'> => ({
+  ...(r.createdAt ? { createdAt: r.createdAt } : {}),
+  ...(r.createdBy ? { createdBy: { did: r.createdBy } } : {}),
+  ...(r.bodyStoredAt ? { bodyStoredAt: r.bodyStoredAt } : {}),
 })
 
 interface KnownRoom extends Room {
@@ -838,6 +847,7 @@ export class AgentRoomsService implements RoomsService {
         title: r.title !== undefined ? toInertText(r.title) : undefined,
         author: r.author ? { did: r.author } : undefined,
         updatedAt: r.updatedAt,
+        ...hostTimesOf(r),
         status: r.status,
         pinned: false,
       })),
@@ -1073,6 +1083,7 @@ export class AgentRoomsService implements RoomsService {
       title: opened.title !== undefined ? toInertText(opened.title) : undefined,
       author: opened.author ? { did: opened.author } : undefined,
       updatedAt: opened.updatedAt,
+      ...hostTimesOf(opened),
       status: opened.status,
       pinned: false,
       body,
