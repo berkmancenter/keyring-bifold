@@ -127,6 +127,7 @@ import {
   VTI_SIGNIN_ONLINE_WITHIN_MS,
   VTI_SIGNIN_REST_FIRST_MS,
   VTI_SIGNIN_REST_MAX_MS,
+  VtiNoOwnSession,
   VtiSentNoAnswer,
   isVtiReadTask,
   signInRestUntil,
@@ -135,6 +136,7 @@ import {
 import { fakeAgent } from '../../../../__tests__/helpers/cardVault'
 import { VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
 import { OFFERS_LIST_TYPES } from '../../rooms/real/wire'
+import { dropAllOwnSessions, dropOwnSession, keepOwnSession, ownSessionFor } from '../module/vtiOwnSessions'
 
 const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() }
 const agent = { config: { logger } } as never
@@ -861,5 +863,80 @@ describe('an identity whose sign-in failed rests from background sign-ins', () =
     const tries = mockStarts
     expect(await refusedName(tryAs(DEAD, true, withRecords))).toBe('VtiSignInResting')
     expect(mockStarts).toBe(tries)
+  })
+})
+
+// Sessions phase B (rooms-slow §8b): an identity the shared session is not signed in as asks over its own session, its
+// listener, so nothing waits on a sign-in or a hold of the shared session.
+describe('an ask as an identity, over its own session', () => {
+  type SentAs = Sent & { from: string; body: Sent['body'] & { issuer: string; proof?: { signer: string } } }
+  const own = () => {
+    const sent: SentAs[] = []
+    return { sent, session: { sendTo: async (_to: string, message: unknown) => void sent.push(message as SentAs) } }
+  }
+  afterEach(() => dropAllOwnSessions())
+
+  it('goes out on that session, from and signed as the identity; its answer comes back there; the shared session sends nothing', async () => {
+    const community = 'did:webvh:c:own-one'
+    const shared = await connectTo(community, 'didcomm', 'did:webvh:p:shared-one')
+    const mine = own()
+    keepOwnSession('did:webvh:p:own-one', mine.session)
+    expect(vtiAgent.ownSessionOpen('did:webvh:p:own-one')).toBe(true)
+    const asked = vtiAgent.askAs(persona('did:webvh:p:own-one'), community, STATUS, {}, 1000)
+    await until(() => mine.sent.length === 1)
+    const [message] = mine.sent
+    expect([message.from, message.body.issuer, message.body.proof?.signer]).toEqual([
+      'did:webvh:p:own-one',
+      'did:webvh:p:own-one',
+      'did:webvh:p:own-one',
+    ])
+    expect(shared.didcomm).toHaveLength(0)
+    expect(
+      vtiAgent.answerFromListener('did:webvh:p:own-one', didcommReply(message, STATUS, { status: 'pending' }) as never)
+    ).toBe('answered')
+    expect(await asked).toMatchObject({ body: { payload: { status: 'pending' } } })
+  })
+
+  it('goes over DIDComm even to a community the shared session would ask over TSP', async () => {
+    const community = 'did:webvh:c:own-tsp'
+    const shared = await connectTo(community, 'tsp', 'did:webvh:p:shared-tsp')
+    const mine = own()
+    keepOwnSession('did:webvh:p:own-tsp', mine.session)
+    const asked = vtiAgent.askAs(persona('did:webvh:p:own-tsp'), community, STATUS, {}, 1000)
+    await until(() => mine.sent.length === 1)
+    expect([shared.tsp.length, mockPacked.length]).toEqual([0, 0])
+    vtiAgent.answerFromListener('did:webvh:p:own-tsp', didcommReply(mine.sent[0], STATUS, {}) as never)
+    await asked
+  })
+
+  it('throws, sending nothing, for an identity whose own session is not open', async () => {
+    const community = 'did:webvh:c:own-none'
+    const shared = await connectTo(community, 'didcomm', 'did:webvh:p:shared-none')
+    expect(vtiAgent.ownSessionOpen('did:webvh:p:no-session')).toBe(false)
+    await expect(vtiAgent.askAs(persona('did:webvh:p:no-session'), community, STATUS, {}, 1000)).rejects.toBeInstanceOf(
+      VtiNoOwnSession
+    )
+    expect(shared.didcomm).toHaveLength(0)
+  })
+
+  it('the identity the shared session is signed in as has no own session here: it asks the shared way (control)', async () => {
+    const community = 'did:webvh:c:own-shared'
+    await connectTo(community, 'didcomm', 'did:webvh:p:shared-self')
+    keepOwnSession('did:webvh:p:shared-self', own().session)
+    expect(vtiAgent.ownSessionOpen('did:webvh:p:shared-self')).toBe(false)
+    await expect(
+      vtiAgent.askAs(persona('did:webvh:p:shared-self'), community, STATUS, {}, 1000)
+    ).rejects.toBeInstanceOf(VtiNoOwnSession)
+  })
+
+  it("a listener that stops drops only its own session, never a newer one's (control)", () => {
+    const older = own().session
+    const newer = own().session
+    keepOwnSession('did:webvh:p:own-two', older)
+    keepOwnSession('did:webvh:p:own-two', newer)
+    dropOwnSession('did:webvh:p:own-two', older)
+    expect(ownSessionFor('did:webvh:p:own-two')).toBe(newer)
+    dropOwnSession('did:webvh:p:own-two', newer)
+    expect(ownSessionFor('did:webvh:p:own-two')).toBeUndefined()
   })
 })
