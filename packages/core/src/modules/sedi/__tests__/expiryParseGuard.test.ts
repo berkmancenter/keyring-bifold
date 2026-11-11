@@ -59,13 +59,9 @@ describe('expiryParseGuard: dates are parsed only in readExpiry', () => {
     expect(helperRange(chain.text)).toBeDefined()
     expect(parsesIn(tree()).filter((p) => p.inHelper).length).toBeGreaterThan(0)
   })
-  it('G3: control: a parse added outside the helper is caught', () => {
-    const files = [...tree(), { path: join(ROOT, 'guardian', 'extra.ts'), text: 'const x = new Date(s)\n' }]
-    expect(
-      parsesIn(files)
-        .filter((p) => !p.inHelper)
-        .map((p) => p.file)
-    ).toEqual([join('guardian', 'extra.ts')])
+  it('G3: control: a parse added outside the helper is caught (an isolated file, so G1 is the only tree row)', () => {
+    const files = [{ path: join(ROOT, 'guardian', 'extra.ts'), text: 'const x = new Date(s)\n' }]
+    expect(parsesIn(files).map((p) => [p.file, p.inHelper])).toEqual([[join('guardian', 'extra.ts'), false]])
   })
   it('G4: control: `new Date()` (now) and comment lines are not parses', () => {
     const files = [
