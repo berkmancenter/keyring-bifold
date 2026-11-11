@@ -1500,7 +1500,7 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
     expect(fetch.asked).toEqual([`${BASE}/keri.cesr`, `${BASE}/did.json`])
   })
@@ -1510,8 +1510,8 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
-      [AMY]: { kind: 'verified', state: 'State of Example', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+      [AMY]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
     expect(fetch.asked).toHaveLength(2)
   })
@@ -1534,7 +1534,7 @@ describe('a root read from its did:webs', () => {
     expect((await guardianStandings(sam.agent, { fetch: host(true) }))[JORDAN].kind).toBe('unreachable')
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
     expect(fetch.asked).toHaveLength(2)
   })
@@ -1592,7 +1592,7 @@ describe('a root read from its did:webs', () => {
     const fetch = host()
     const replacement = jest.fn(async () => ({ ok: true as const, aid: ROOT, kel: served('keri.cesr') }))
     expect(await guardianStandings(sam.agent, { fetch, resolveRootKel: replacement })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
     expect(replacement).toHaveBeenCalledWith(DID)
     expect(fetch.asked).toEqual([])
@@ -1623,7 +1623,7 @@ describe('a root read from its did:webs', () => {
     websModule.setRootKelResolver(replacement)
     try {
       expect(await guardianStandings(sam.agent)).toEqual({
-        [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+        [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
       })
       expect(replacement).toHaveBeenCalledTimes(1)
     } finally {
@@ -1632,6 +1632,47 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch: host(true) })).toEqual({
       [JORDAN]: { kind: 'unreachable', state: 'State of Example' },
     })
+  })
+
+  test("L1: a root fetched live: Who approves names the host it came from and says the alias check is not supported (control: from the card's copy, no such line)", async () => {
+    const sam = await kept()
+    ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
+    jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+      view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
+      version: 2,
+    } as TrustedApproversState)
+    const screen = async () => {
+      const tree = render(
+        <BasicAppContext>
+          <VtaTrustedApprovers />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+    const copy = await screen()
+    expect(copy.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+    expect(copy.queryByTestId(id(TrustedApproversIds.guardianFetchedLive(JORDAN)))).toBeNull()
+    copy.unmount()
+    rootAtWebs()
+    global.fetch = host() as never
+    const live = await screen()
+    expect(live.getByTestId(id(TrustedApproversIds.guardianFetchedLive(JORDAN))).props.children).toBe(
+      'Approver.GuardianFetchedLive'
+    )
+    expect(live.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+  })
+
+  test('L2: the live line, in every language, names the host and says the designated-alias check is not done (control: the key exists in all three)', () => {
+    const en = require('../../../localization/en/en.json').Approver.GuardianFetchedLive as string
+    const fr = require('../../../localization/fr/fr.json').Approver.GuardianFetchedLive as string
+    const pt = require('../../../localization/pt-br/pt-br.json').Approver.GuardianFetchedLive as string
+    for (const s of [en, fr, pt]) expect(s).toContain('{{host}}')
+    expect(en).toBe("Fetched live from {{host}}; the designated-alias check isn't supported yet.")
+    expect(fr).toMatch(/pas encore/)
+    expect(pt).toMatch(/ainda não/)
   })
 
   test('D9: Who approves says "Couldn\'t reach the state", not "Couldn\'t verify" and not verified (control: the state card line rows above)', async () => {

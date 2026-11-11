@@ -32,7 +32,14 @@ import { EventEmitter } from 'events'
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
 import { K0_TEST_WARD, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
-import { ourRootKelResolver, resolveRootKel, type RootKel, type RootKelResolver, type WebsFetch } from '../sedi/webs'
+import {
+  ourRootKelResolver,
+  parseWebsDid,
+  resolveRootKel,
+  type RootKel,
+  type RootKelResolver,
+  type WebsFetch,
+} from '../sedi/webs'
 
 import {
   ROLE_OFFER_ASK,
@@ -78,7 +85,16 @@ export type GuardianEvidence = Pick<GuardianEvidencePayload, 'guardianSaid' | 'h
  * Every other outcome is a refusal, kept with its reason for the details line and the log.
  */
 export type GuardianVerdict =
-  | { ok: true; root: string; state: string; demo?: true; checkedAt: string; expires?: string }
+  | {
+      ok: true
+      root: string
+      state: string
+      demo?: true
+      checkedAt: string
+      expires?: string
+      /** The host the root's KEL was actually fetched from on this check (its did:webs), when it was fetched live. */
+      fetchedFrom?: string
+    }
   | { ok: false; reason: string; detail: string; checkedAt: string }
 
 /** Kept on the offer's record (RoleOfferAsk.guardian): the card a contact sent, as whom, and the last verdict. */
@@ -100,7 +116,7 @@ export interface GuardianOnAsk {
  * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
  */
 export type GuardianStanding =
-  | { kind: 'verified'; state: string; demo?: true }
+  | { kind: 'verified'; state: string; demo?: true; fetchedFrom?: string }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
 
@@ -222,11 +238,13 @@ export async function checkGuardianEvidenceResolving(
     if (!ward || roots.length === 0) return checkWith(evidence, ward, now, onThrow, [])
     const resolves = deps.resolves ?? new Map()
     const resolvedKels: Uint8Array[] = []
+    const fetchedFrom = new Map<string, string>()
     for (const root of roots) {
-      let pending = resolves.get(root.webs)
+      const did = root.webs
+      let pending = resolves.get(did)
       if (!pending) {
-        pending = resolverFor(deps)(root.webs)
-        resolves.set(root.webs, pending)
+        pending = resolverFor(deps)(did)
+        resolves.set(did, pending)
       }
       const r = await pending
       if (!r.ok)
@@ -239,8 +257,13 @@ export async function checkGuardianEvidenceResolving(
           checkedAt,
         }
       resolvedKels.push(r.kel)
+      // The host of the DID that was fetched, so the screen names where it came from, never a host it did not use.
+      const parsed = parseWebsDid(did)
+      if (parsed.ok) fetchedFrom.set(root.aid, parsed.value.host)
     }
-    return checkWith(evidence, ward, now, onThrow, resolvedKels)
+    const verdict = checkWith(evidence, ward, now, onThrow, resolvedKels)
+    const host = verdict.ok === true ? fetchedFrom.get(verdict.root) : undefined
+    return host && verdict.ok === true ? { ...verdict, fetchedFrom: host } : verdict
   } catch (e) {
     const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
     onThrow(message)
@@ -682,7 +705,12 @@ async function verdictNow(
 /** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
 function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
   if (verdict.ok === true)
-    return { kind: 'verified', state: verdict.state, ...(verdict.demo ? { demo: true as const } : {}) }
+    return {
+      kind: 'verified',
+      state: verdict.state,
+      ...(verdict.demo ? { demo: true as const } : {}),
+      ...(verdict.fetchedFrom ? { fetchedFrom: verdict.fetchedFrom } : {}),
+    }
   if (verdict.reason === 'stateNotResolved')
     return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
   return { kind: 'unverified', outcome: verdict.reason }
@@ -692,7 +720,11 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
   !!a &&
   a.ok === b.ok &&
   (a.ok === true && b.ok === true
-    ? a.root === b.root && a.state === b.state && a.demo === b.demo && a.expires === b.expires
+    ? a.root === b.root &&
+      a.state === b.state &&
+      a.demo === b.demo &&
+      a.expires === b.expires &&
+      a.fetchedFrom === b.fetchedFrom
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**
