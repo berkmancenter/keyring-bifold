@@ -47,9 +47,10 @@ export interface CheckOptions {
  * - `unsupportedCesr`: Keyring can't verify this. It uses a code or a KERI feature (a delegated event, a weighted
  *   threshold, witnesses, a digest code other than E/I) that this package does not verify yet.
  * - `malformedCesr`: this can't be read. A KEL stream does not add up as CESR (cut short, counts wrong, trailing
- *   bytes, empty), or a credential's or TEL event's text is not a JSON object.
+ *   bytes, empty), a credential's or TEL event's text is not a JSON object, or one registry or credential is
+ *   presented twice.
  * - `kelNotReplaying`: the stream reads, but the KEL it carries does not verify (a SAID, prior, pre-rotation or
- *   controller signature fails, or it is duplicitous). The material may have been constructed or edited, so the
+ *   controller signature fails, or it is duplicitous), or two presented streams claim the same prefix. The material may have been constructed or edited, so the
  *   whole presentation is refused, even when that KEL is not on the chain being checked. It carries the prefix the
  *   KEL claims, and nothing of its contents.
  */
@@ -80,6 +81,15 @@ function build(material: ChainMaterial, options: CheckOptions): Built {
   for (const bytes of material.kels) {
     const r = replayKel(digest, bytes)
     if (r.ok) {
+      // Two presented KELs for one prefix contradict each other, as duplicity within one stream does: refused, never
+      // resolved by which came last (a truncated copy beside the real one would otherwise choose the history read).
+      if (kels.has(r.state.pre))
+        return {
+          ok: false,
+          reason: 'kelNotReplaying',
+          prefix: r.state.pre,
+          detail: `two presented KELs claim ${r.state.pre}`,
+        }
       kels.set(r.state.pre, r)
       continue
     }
@@ -93,12 +103,18 @@ function build(material: ChainMaterial, options: CheckOptions): Built {
     const prefix = r.pre ?? ''
     return { ok: false, reason: 'kelNotReplaying', prefix, detail: `a presented KEL (${prefix}) does not replay` }
   }
+  // A registry or credential presented twice is refused the same way: one SAID, two presentations, never a winner.
   const tels = new Map<string, TelInput>()
-  for (const t of material.tels) tels.set(parseObject<{ d: string }>(t.ripText, 'a TEL rip').d, t)
+  for (const t of material.tels) {
+    const rd = parseObject<{ d: string }>(t.ripText, 'a TEL rip').d
+    if (tels.has(rd)) throw new MalformedMaterial(`registry ${rd} presented twice`)
+    tels.set(rd, t)
+  }
   const creds = new Map<string, string>()
   for (const text of material.creds) {
     const end = text.lastIndexOf('}')
     const said = parseObject<{ d: string }>(text.slice(0, end + 1), 'a credential').d
+    if (creds.has(said)) throw new MalformedMaterial(`credential ${said} presented twice`)
     creds.set(said, text)
   }
   return {

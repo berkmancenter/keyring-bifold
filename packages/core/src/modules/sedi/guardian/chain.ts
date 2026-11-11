@@ -235,6 +235,23 @@ export function verifyTel(
     if (!anchored(ev)) return refuse('telUnanchored', `${ev.d} has no seal in the issuer KEL`)
     prior = ev
   }
+  // Completeness: the newest event presented must be the newest the issuer's KEL anchors for this registry. Each
+  // presented event being anchored (above) is not enough: withhold the revocation and the issuance becomes the head,
+  // and the holder has that disclosure. The KEL is the evidence: it carries a seal for every event the issuer made.
+  let sealedHead = -1
+  for (const h of issuerKel.history) {
+    for (const s of h?.anchors ?? []) {
+      if (s.i !== rip.d) continue
+      const n = typeof s.s === 'string' && /^[0-9a-f]+$/.test(s.s) ? parseInt(s.s, 16) : NaN
+      if (Number.isNaN(n)) return refuse('telBroken', `a seal for registry ${rip.d} has an unreadable sn`)
+      if (n > sealedHead) sealedHead = n
+    }
+  }
+  if (sealedHead !== parseInt(prior.n, 16))
+    return refuse(
+      'statusNotCurrent',
+      `the issuer KEL anchors registry events to n=${sealedHead.toString(16)}, the newest presented is n=${prior.n}`
+    )
   return { ok: true, rip, updates: ups.map((u) => u.ev), head: prior }
 }
 
