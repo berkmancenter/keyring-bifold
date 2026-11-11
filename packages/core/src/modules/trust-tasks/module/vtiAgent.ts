@@ -536,13 +536,12 @@ type Listener = () => void
  */
 /** What an ask goes out on: the shared session, or an identity's own (sessions phase B, `askAs`). */
 interface AskVia {
+  /** TSP may carry it only on a carrier that sends frames: the shared session, whose TSP session this controller holds. */
   carrier: OwnSession & { sendTspFrame?: (bytes: Uint8Array) => Promise<void> }
   /** Who asks: the document's issuer, and the identity its answer must come back to. */
   did: string
   /** Who signs the document: the identity asking, when its signing key is borrowed. */
   signer?: VtiPersona
-  /** TSP may carry it: only the shared session, whose TSP session this controller holds. */
-  tsp: boolean
 }
 
 interface AskEntry {
@@ -1790,14 +1789,7 @@ class VtiAgentController {
     const session = this.session
     const did = this.state.did
     if (!session || !did) throw new Error('vtiAgent: not connected')
-    return this.askOn(
-      { carrier: session, did, signer: this.persona, tsp: true },
-      communityDid,
-      type,
-      payload,
-      timeoutMs,
-      prepared
-    )
+    return this.askOn({ carrier: session, did, signer: this.persona }, communityDid, type, payload, timeoutMs, prepared)
   }
 
   /**
@@ -1829,7 +1821,7 @@ class VtiAgentController {
       `vtiAgent: ${taskName(type)} asked as ${didPrefix(persona.did)} over its own session (no sign-in)`
     )
     return this.askOn(
-      { carrier: own, did: persona.did, signer: persona, tsp: false },
+      { carrier: own, did: persona.did, signer: persona },
       communityDid,
       type,
       payload,
@@ -1938,7 +1930,7 @@ class VtiAgentController {
     // it. The reply arrives through `deliver()` either way — `receiveTspFrame`
     // presents an opened TSP envelope as the same plaintext shape — so nothing
     // downstream of `ask` needs to know which envelope carried it.
-    if (this.agent && this.tsp && via.tsp && carrier.sendTspFrame) {
+    if (this.agent && this.tsp && carrier.sendTspFrame) {
       await this.preferDidcommAcrossMediators(communityDid)
       const carriage = await chooseCarriage(this.agent, communityDid, this.canInitiateTsp(), {
         decided: this.carriageByPeer,
