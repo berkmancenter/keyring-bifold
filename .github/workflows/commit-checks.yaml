@@ -30,6 +30,7 @@ jobs:
             sha=$(echo "$data" | jq -r '.sha')
             author_login=$(echo "$data" | jq -r '.author.login // empty')
             message=$(echo "$data" | jq -r '.commit.message')
+            parents=$(echo "$data" | jq -r '.parents | length')
             verified=$(echo "$data" | jq -r '.commit.verification.verified')
             reason=$(echo "$data" | jq -r '.commit.verification.reason')
 
@@ -38,6 +39,28 @@ jobs:
             if [ "$author_login" = "dependabot[bot]" ]; then
               if [ "$verified" != "true" ]; then
                 echo "::error::Commit $sha (dependabot) is not cryptographically verified by GitHub (reason: $reason)"
+                fail=1
+              fi
+              continue
+            fi
+
+            # A merge commit's sign-off is skipped, and its signature is not.
+            #
+            # `git pull` on a shared branch writes "Merge remote-tracking
+            # branch ..." with no trailer and no chance to add one, so every
+            # such pull made a branch unmergeable until its history was
+            # rewritten — which on 2026-10-15 meant rewriting 42 commits of a
+            # branch whose tree had already shipped. The sign-off attests to
+            # authorship, and a merge introduces no new authored lines of its
+            # own; the signature still proves who made it, so that check stays.
+            #
+            # The cost, stated rather than hidden: a conflict resolved inside a
+            # merge IS authored work, and it is no longer covered by a trailer.
+            # Reviewers see those resolutions in the PR diff, which is where
+            # they would be judged anyway.
+            if [ "$parents" -gt 1 ]; then
+              if [ "$verified" != "true" ]; then
+                echo "::error::Merge commit $sha is not cryptographically verified by GitHub (reason: $reason)"
                 fail=1
               fi
               continue
