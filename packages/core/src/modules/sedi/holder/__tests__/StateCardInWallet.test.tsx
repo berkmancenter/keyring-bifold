@@ -165,6 +165,19 @@ describe('the state card in Credentials', () => {
     expect(tree.queryByTestId(id('StateCardWhatChecked'))).toBeNull()
   })
 
+  test("a root renamed on this phone's list, keeping its AID: the card on screen takes the new name", async () => {
+    const tree = await wallet()
+    expect(tree.getByTestId(id('CommunityPassTitle')).props.children).toBe(K0_TEST_ROOT.name)
+    const name = K0_TEST_ROOT.name
+    try {
+      ;(K0_TEST_ROOT as { name: string }).name = 'Renamed state'
+      tree.rerender(screen())
+      expect(tree.getByTestId(id('CommunityPassTitle')).props.children).toBe('Renamed state')
+    } finally {
+      ;(K0_TEST_ROOT as { name: string }).name = name
+    }
+  })
+
   test('the chain is checked once for the card, not on each render of the list', async () => {
     const check = jest.spyOn(guardianEvidence, 'checkGuardianEvidence')
     const tree = await wallet()

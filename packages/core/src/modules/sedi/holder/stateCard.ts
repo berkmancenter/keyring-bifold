@@ -70,13 +70,17 @@ export function checkHeldCard(evidence: GuardianEvidence, now: Date, onThrow: (m
   }
 }
 
-/** What a check depends on besides the card: when this changes, the card is checked again. */
+/**
+ * What a check depends on besides the card: when this changes, the card is checked again. Each root by its AID and
+ * its name, since the title the card shows is the name on the kept verdict: a root renamed on this list (as K0 was,
+ * "Test state (K0)" to "State of Example") must not leave the old name on a card already checked.
+ */
 export const checkKeyOf = (evidence: GuardianEvidence): string =>
   [
     evidence.guardianSaid,
     isStateVerifiedApproversEnabled() ? 'sv' : '-',
     trustedStateRoots()
-      .map((root) => root.aid)
+      .map((root) => `${root.aid}=${root.name}`)
       .join(','),
   ].join('|')
 

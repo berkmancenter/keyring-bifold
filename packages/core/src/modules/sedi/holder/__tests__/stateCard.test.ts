@@ -162,15 +162,33 @@ describe('the state card: what it says', () => {
     expect(view(refused('revoked'), { ...card, guardianSaid: 'Eother' }).demoNote).toBeUndefined()
   })
 
-  test('the check is keyed by the card and the switches it reads, so a change is checked again', () => {
+  test('the check is keyed by the card and the switch it reads, so a change is checked again', () => {
     const on = checkKeyOf(card)
     expect(checkKeyOf(card)).toBe(on)
     expect(checkKeyOf({ ...card, guardianSaid: 'Eother' })).not.toBe(on)
     setStateVerifiedApproversEnabled(false)
     expect(checkKeyOf(card)).not.toBe(on)
-    setStateVerifiedApproversEnabled(true)
+  })
+
+  test('the key moves when the root list gains or loses a root (here: K0 trusted, then none)', () => {
+    const withK0 = checkKeyOf(card)
     ;(global as { __DEV__?: boolean }).__DEV__ = false
     setTrustTestStateEnabled(false)
-    expect(checkKeyOf(card)).not.toBe(on)
+    expect(checkKeyOf(card)).not.toBe(withK0)
+    setTrustTestStateEnabled(true)
+    expect(checkKeyOf(card)).toBe(withK0)
+  })
+
+  test('the key moves when a root on the list is renamed, keeping its AID, so the card never keeps an old name', () => {
+    const before = checkKeyOf(card)
+    const name = K0_TEST_ROOT.name
+    try {
+      ;(K0_TEST_ROOT as { name: string }).name = 'Renamed state'
+      expect(checkKeyOf(card)).not.toBe(before)
+      expect(view(checked()).title).toBe('Renamed state')
+    } finally {
+      ;(K0_TEST_ROOT as { name: string }).name = name
+    }
+    expect(checkKeyOf(card)).toBe(before)
   })
 })
