@@ -17,7 +17,7 @@
  * @module trust-tasks/module/sessionsPerIdentitySwitch
  */
 export const SESSIONS_PER_IDENTITY: { on: boolean; remoteOff: boolean } = {
-  on: false,
+  on: true,
   remoteOff: false,
 }
 
