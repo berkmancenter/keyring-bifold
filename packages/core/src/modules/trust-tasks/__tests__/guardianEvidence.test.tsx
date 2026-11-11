@@ -41,6 +41,7 @@ import {
   holdK0TestGuardianCard,
   stateWardOf,
   evidenceBytes,
+  resetGuardianCheckMemo,
   guardianStandings,
   handleGuardianEvidence,
   holdGuardianEvidence,
@@ -52,10 +53,17 @@ import {
 import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
 import {
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
+  isStateVerifiedApproversEnabled,
   setStateVerifiedApproversEnabled,
 } from '../module/stateVerifiedApproversFlag'
-import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../module/trustedApproversFlag'
-import { setTrustTestStateEnabled } from '../module/trustTestStateFlag'
+import {
+  TRUSTED_APPROVERS_REMOTE_OFF,
+  isTrustedApproversEnabled,
+  setTrustedApproversEnabled,
+} from '../module/trustedApproversFlag'
+import { isTrustTestStateEnabled, setTrustTestStateEnabled } from '../module/trustTestStateFlag'
+import { setUpSediDemo, turnOffSediDemo } from '../developerTestState'
+import * as evidenceModule from '../guardianEvidence'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import ApproverOfferModal, { ApproverOfferIds } from '../components/ApproverOfferModal'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
@@ -218,6 +226,8 @@ beforeEach(() => {
   cardQuestions.reset()
   approverRole.roleOfferPromptStore.clear()
   allOn()
+  // Each row is a fresh run of the app: record ids repeat across rows (r1, r2, …), so nothing memoised carries over.
+  resetGuardianCheckMemo()
 })
 afterAll(() => {
   setTrustedApproversEnabled(false)
@@ -255,10 +265,12 @@ describe("on the person's phone: a card arrives", () => {
   test('a valid K0 card is kept on the ask in place, valid, named by our list', async () => {
     const sam = await arrives(card('G-ok'))
     expect(sam.consume).toHaveBeenCalledTimes(1)
-    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'Test state (K0)' })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'State of Example', demo: true })
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
     expect(sam.raw.genericRecords.deleteById).not.toHaveBeenCalled()
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
   })
 
   test("the wrong ward: kept, couldn't verify as wardMismatch (control: the same card, Sam's ward, is valid)", async () => {
@@ -355,14 +367,18 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
     const sam = await arrives(card('G-ok'))
     expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
     asBuild(true)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
   })
 
-  test('a release with the setting on verifies the K0 card as "Test state (K0)" (control: switched off again, it does not)', async () => {
+  test('a release with the setting on verifies the K0 card as "State of Example" (control: switched off again, it does not)', async () => {
     asBuild(false)
     setTrustTestStateEnabled(true)
     const sam = await arrives(card('G-ok'))
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
     setTrustTestStateEnabled(false)
     expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
   })
@@ -387,16 +403,23 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
     const other = await arrives(card('G-untrusted'))
     expect(await guardianStandings(other.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
     const sam = await arrives(card('G-ok'))
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
   })
 
-  test('the name shown is the test state, never one the card claims (control: the K0 root is named so)', () => {
+  test("the name and the demo mark shown are our entry's, never what the card claims (control: the K0 root is named so)", () => {
     asBuild(false)
     setTrustTestStateEnabled(true)
-    expect(stateRoots.K0_TEST_ROOT.name).toBe('Test state (K0)')
-    const claims = { ...card('G-ok'), state: 'Utah', name: 'Utah' } as unknown as GuardianEvidence
+    expect(stateRoots.K0_TEST_ROOT).toMatchObject({ name: 'State of Example', demo: true })
+    const claims = { ...card('G-ok'), state: 'Utah', name: 'Utah', demo: false } as unknown as GuardianEvidence
     const verdict = checkGuardianEvidence(claims, SAM_WARD, new Date(), () => undefined)
-    expect(verdict).toMatchObject({ ok: true, state: 'Test state (K0)', root: stateRoots.K0_TEST_ROOT.aid })
+    expect(verdict).toMatchObject({
+      ok: true,
+      state: 'State of Example',
+      demo: true,
+      root: stateRoots.K0_TEST_ROOT.aid,
+    })
   })
 })
 
@@ -455,7 +478,7 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
   })
 
-  test('a tester build, end to end: Jordan holds the test card, Sam is the test ward, and it verifies as "Test state (K0)"', async () => {
+  test('a tester build, end to end: Jordan holds the test card, Sam is the test ward, and it verifies as "State of Example"', async () => {
     g.__DEV__ = false
     const jordan = phone()
     await holdK0TestGuardianCard(jordan.agent)
@@ -464,7 +487,142 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     await becomeK0TestWard(sam.agent)
     sam.ask()
     await handleGuardianEvidence(sam.agent, sam.service, documentOf(held), context)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
+  })
+})
+
+describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the SEDI demo"', () => {
+  const allSwitchesOff = () => {
+    setTrustedApproversEnabled(false)
+    setStateVerifiedApproversEnabled(false)
+    setTrustTestStateEnabled(false)
+  }
+  const states = () => [isTrustedApproversEnabled(), isStateVerifiedApproversEnabled(), isTrustTestStateEnabled()]
+  beforeEach(allSwitchesOff)
+  afterEach(() => setTrustTestStateEnabled(false))
+
+  test('from everything off: all three switches on, the K0 card held and the K0 ward set (control: before it, all off)', async () => {
+    expect(states()).toEqual([false, false, false])
+    const phoneA = phone()
+    expect(await setUpSediDemo(phoneA.agent)).toBe('done')
+    expect(states()).toEqual([true, true, true])
+    expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
+    expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
+  })
+
+  test.each([
+    ['the SEDI/KERI umbrella off', () => (SEDI_KERI_REMOTE_OFF.off = true)],
+    ['trusted approvers turned off remotely', () => (TRUSTED_APPROVERS_REMOTE_OFF.off = true)],
+    ['state-verified approvers turned off remotely', () => (STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true)],
+  ])(
+    '%s: it says so and does nothing, no switch on and nothing kept (control: cleared, it sets up)',
+    async (_, kill) => {
+      kill()
+      const phoneA = phone()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('remoteOff')
+      allOn()
+      allSwitchesOff()
+      // The kill above is cleared by allOn; the switches it would have turned on must still be off, and nothing kept.
+      expect(states()).toEqual([false, false, false])
+      expect(await heldGuardianEvidence(phoneA.agent)).toBeUndefined()
+      expect(await stateWardOf(phoneA.agent)).toBeNull()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('done')
+      expect(states()).toEqual([true, true, true])
+    }
+  )
+
+  test('the umbrella off: the raw switches stay off too, read before anything is turned on (control: the row above)', async () => {
+    SEDI_KERI_REMOTE_OFF.off = true
+    const phoneA = phone()
+    await setUpSediDemo(phoneA.agent)
+    SEDI_KERI_REMOTE_OFF.off = false
+    expect(states()).toEqual([false, false, false])
+  })
+
+  test('the undo turns the three switches off and deletes nothing: the card and ward stay kept (control: set up, all on)', async () => {
+    const phoneA = phone()
+    await setUpSediDemo(phoneA.agent)
+    expect(states()).toEqual([true, true, true])
+    turnOffSediDemo()
+    expect(states()).toEqual([false, false, false])
+    expect(phoneA.rows.filter((r) => r.tags.recordType === GUARDIAN_EVIDENCE_HELD)).toHaveLength(1)
+    expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
+  })
+
+  test.todo(
+    'the one-tap and its undo also set the holder state-card switch (setStateCardEnabled, feat/sedi-holder-card)'
+  )
+
+  // Each way the one-tap can stop is its own result (ac, #1033): a card over the size cap is not "a release turned
+  // this off". The steps are reached through the module object (developerTestState requires it lazily), so a spy on
+  // it stands in for the card or ward failing.
+  describe('a step that fails says which step, and the switches it turned on stay on', () => {
+    afterEach(() => {
+      jest.restoreAllMocks()
+      SEDI_KERI_REMOTE_OFF.off = false
+    })
+
+    test('the card over the size cap: cardNotHeld, never remoteOff; switches on, ward still set (control: no failure, done)', async () => {
+      const control = phone()
+      expect(await setUpSediDemo(control.agent)).toBe('done')
+      allSwitchesOff()
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockResolvedValue('tooLarge')
+      const phoneA = phone()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('cardNotHeld')
+      expect(states()).toEqual([true, true, true])
+      expect(await heldGuardianEvidence(phoneA.agent)).toBeUndefined()
+      expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
+    })
+
+    test('the card step throws: cardNotHeld (control: it resolves done, setup is done)', async () => {
+      const spy = jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockRejectedValueOnce(new Error('storage'))
+      expect(await setUpSediDemo(phone().agent)).toBe('cardNotHeld')
+      spy.mockRestore()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+
+    test('the ward step fails: wardNotSet, the card still held and the switches on (control: no failure, done)', async () => {
+      jest.spyOn(evidenceModule, 'becomeK0TestWard').mockRejectedValue(new Error('storage'))
+      const phoneA = phone()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('wardNotSet')
+      expect(states()).toEqual([true, true, true])
+      expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
+      expect(await stateWardOf(phoneA.agent)).toBeNull()
+      jest.restoreAllMocks()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+
+    test('both steps fail: the card is named first, and both were attempted (control: the ward-only row above)', async () => {
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockResolvedValue('tooLarge')
+      const ward = jest.spyOn(evidenceModule, 'becomeK0TestWard').mockRejectedValue(new Error('storage'))
+      expect(await setUpSediDemo(phone().agent)).toBe('cardNotHeld')
+      expect(ward).toHaveBeenCalledTimes(1)
+    })
+
+    test('a kill landing during the card step: remoteOff, not cardNotHeld; the raw switches stay on (control: no kill, done)', async () => {
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockImplementation(async () => {
+        SEDI_KERI_REMOTE_OFF.off = true
+        return 'off'
+      })
+      expect(await setUpSediDemo(phone().agent)).toBe('remoteOff')
+      SEDI_KERI_REMOTE_OFF.off = false
+      expect(states()).toEqual([true, true, true])
+      jest.restoreAllMocks()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+  })
+})
+
+describe('the demo state is marked on our list, never inferred', () => {
+  test('isDemoStateRoot is true for the K0 entry only (control: another AID, and an entry named the same, are not)', () => {
+    expect(stateRoots.isDemoStateRoot(stateRoots.K0_TEST_ROOT.aid)).toBe(true)
+    expect(stateRoots.isDemoStateRoot(prov.aids['mal-root'])).toBe(false)
+    expect(stateRoots.isDemoStateRoot('State of Example')).toBe(false)
   })
 })
 
@@ -492,7 +650,9 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     await setStateWard(sam.agent, SAM_WARD)
     sam.ask({ state: 'closed', written: true, writtenAs: JORDAN })
     await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
   })
 
   test("on open the card is checked again: a changed ward turns a kept valid into couldn't verify, written in place", async () => {
@@ -528,7 +688,9 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     await approverRole.offerApproverRole(sam.agent, CONN, SAM_AGENT, ['joinCommunity', 'addDevice'])
     expect(sam.askRecord().state).toBe('open')
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
 
     const other = phone()
     other.ask({ state: 'closed', written: true, writtenAs: JORDAN })
@@ -544,6 +706,174 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     })
     const sam = await arrives(card('G-ok'))
     expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'checkFailed' })
+  })
+})
+
+describe('Who approves on open: the check runs again only when something it reads moved', () => {
+  const checks = () => jest.spyOn(guardianModule, 'verifyGuardian')
+  const K0 = stateRoots.K0_TEST_ROOT
+  const validUntil = (expires: string) => ({
+    ok: true as const,
+    guardian: JORDAN_AID,
+    ward: SAM_WARD,
+    role: 'parent',
+    root: K0.aid,
+    expires,
+  })
+  const askRow = (sam: ReturnType<typeof phone>) =>
+    sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK) as Row
+
+  test('nothing moved: the second open shows the kept verdict without checking (control: after a restart it checks)', async () => {
+    const sam = await arrives(card('G-ok'))
+    const spy = checks()
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(spy).toHaveBeenCalledTimes(1)
+    resetGuardianCheckMemo()
+    await guardianStandings(sam.agent)
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  test.each([
+    [
+      'the ward',
+      async (sam: ReturnType<typeof phone>) => setStateWard(sam.agent, OTHER_WARD),
+      { kind: 'unverified', outcome: 'wardMismatch' },
+    ],
+    [
+      'the roots this build trusts',
+      async () => {
+        jest
+          .spyOn(stateRoots, 'trustedStateRoots')
+          .mockReturnValue([K0, { aid: prov.aids['mal-root'], name: 'Another state' }])
+      },
+      { kind: 'verified', state: 'Test state (K0)' },
+    ],
+    [
+      'the name we show for a trusted root',
+      async () => {
+        jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: 'Renamed state' }])
+      },
+      { kind: 'verified', state: 'Renamed state' },
+    ],
+    [
+      "the card's stored text",
+      async (sam: ReturnType<typeof phone>) => {
+        const record = askRow(sam)
+        const ask = record.content as unknown as approverRole.RoleOfferAsk
+        record.content = { ...ask, guardian: { ...ask.guardian, evidence: card('G-revoked') } } as never
+      },
+      { kind: 'unverified', outcome: 'revoked' },
+    ],
+  ])('%s moved: the next open checks again (control: unmoved, it did not)', async (_, move, shown) => {
+    const sam = await arrives(card('G-ok'))
+    const spy = checks()
+    await guardianStandings(sam.agent)
+    await guardianStandings(sam.agent)
+    expect(spy).toHaveBeenCalledTimes(1)
+    await move(sam)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: shown })
+    expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  describe('a valid verdict that expires', () => {
+    afterEach(() => jest.useRealTimers())
+    const at = (iso: string) => jest.setSystemTime(new Date(iso))
+    const datesOnly = () =>
+      jest.useFakeTimers({
+        doNotFake: [
+          'nextTick',
+          'setImmediate',
+          'clearImmediate',
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+          'queueMicrotask',
+          'requestAnimationFrame',
+          'cancelAnimationFrame',
+          'requestIdleCallback',
+          'cancelIdleCallback',
+          'performance',
+          'hrtime',
+        ],
+      })
+
+    // K0's Guardian expires 2030-11-10; the check is stubbed to return a nearer expiry the faked clock (Date only) can cross.
+    test.each([
+      ['in the past', '2029-07-01T00:00:00Z', 2],
+      ['exactly now (expiry <= now)', '2029-06-01T00:00:00Z', 2],
+      ['still ahead', '2029-05-31T23:59:59Z', 1],
+    ])('a kept valid verdict expiring 2029-06-01 is %s (now %s): checked %i time(s) in all', async (_, now, runs) => {
+      const sam = await arrives(card('G-ok'))
+      datesOnly()
+      at('2029-01-01T00:00:00Z')
+      const spy = checks().mockReturnValue(validUntil('2029-06-01T00:00:00Z'))
+      await guardianStandings(sam.agent)
+      expect(spy).toHaveBeenCalledTimes(1)
+      at(now)
+      await guardianStandings(sam.agent)
+      expect(spy).toHaveBeenCalledTimes(runs)
+    })
+
+    test('an expiry that cannot be read is never reused (control: a readable one ahead is)', async () => {
+      const sam = await arrives(card('G-ok'))
+      const spy = checks().mockReturnValue(validUntil('not a date'))
+      await guardianStandings(sam.agent)
+      await guardianStandings(sam.agent)
+      expect(spy).toHaveBeenCalledTimes(2)
+      resetGuardianCheckMemo()
+      spy.mockClear().mockReturnValue(validUntil('2999-01-01T00:00:00Z'))
+      await guardianStandings(sam.agent)
+      await guardianStandings(sam.agent)
+      expect(spy).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  test('a kept refusal stays a refusal: reuse never shows valid (control: checked again, the same stub would)', async () => {
+    const sam = await arrives(card('G-revoked'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'revoked' } })
+    const spy = checks().mockReturnValue(validUntil('2999-01-01T00:00:00Z'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'revoked' } })
+    expect(spy).not.toHaveBeenCalled()
+    resetGuardianCheckMemo()
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+  })
+
+  test('a verdict stored by an earlier run is not reused: the first open checks (control: it was stored valid)', async () => {
+    const sam = await arrives(card('G-ok'))
+    expect(sam.askRecord().guardian?.verdict.ok).toBe(true)
+    const spy = checks().mockReturnValue({ ok: false, reason: 'revoked', detail: 'newer code refuses it' } as never)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'revoked' } })
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'revoked' })
+  })
+
+  test("a throw when it checks again reads couldn't verify, never the kept valid (control: unmoved, valid without a check)", async () => {
+    const sam = await arrives(card('G-ok'))
+    await guardianStandings(sam.agent)
+    const spy = checks().mockImplementation(() => {
+      throw new Error('boom')
+    })
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    expect(spy).not.toHaveBeenCalled()
+    await setStateWard(sam.agent, OTHER_WARD)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'checkFailed' } })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'checkFailed' })
+  })
+
+  test('report only: how long an open takes for the K0 card, checked and reused (no threshold)', async () => {
+    const sam = await arrives(card('G-ok'))
+    const t0 = performance.now()
+    await guardianStandings(sam.agent)
+    const checked = performance.now() - t0
+    const t1 = performance.now()
+    await guardianStandings(sam.agent)
+    const reused = performance.now() - t1
+    // eslint-disable-next-line no-console
+    console.log(`[guardian open timing] K0 card: checked ${checked.toFixed(1)} ms, reused ${reused.toFixed(2)} ms`)
+    expect(checked).toBeGreaterThan(0)
   })
 })
 
@@ -674,6 +1004,27 @@ describe('Who approves: the state card line', () => {
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
   })
 
+  test('the K0 state shows "State of Example" with the Demo pill beside it (control: the row below, a root not marked demo)', async () => {
+    const sam = await writtenWith(card('G-ok'))
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
+    const tree = await showFor(sam)
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianDemo(JORDAN)))).toBeTruthy()
+  })
+
+  test('a root our list does not mark demo gets no pill, even named "State of Example" (control: the K0 entry above)', async () => {
+    jest
+      .spyOn(stateRoots, 'trustedStateRoots')
+      .mockReturnValue([{ aid: stateRoots.K0_TEST_ROOT.aid, name: 'State of Example' }])
+    const sam = await writtenWith(card('G-ok'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'State of Example' } })
+    const tree = await showFor(sam)
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianDemo(JORDAN)))).toBeNull()
+  })
+
   test("a revoked card: couldn't verify, with the outcome, and never verified (control: the row above)", async () => {
     const tree = await showFor(await writtenWith(card('G-revoked')))
     expect(tree.getByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeTruthy()
@@ -764,7 +1115,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
     await yesTo(jordan)
     expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer')])
     expect(cards()).toHaveLength(0)
-    expect(cardQuestions.first()).toEqual({ connectionId: CONN, asker: 'Sam', state: 'Test state (K0)' })
+    expect(cardQuestions.first()).toEqual({ connectionId: CONN, asker: 'Sam', state: 'State of Example', demo: true })
     expect(answers(jordan)).toHaveLength(0)
     // Control: the same phone with a kept yes for Sam sends it.
     const control = await jordanWithCard()
@@ -951,6 +1302,25 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       setStateVerifiedApproversEnabled(true)
       const on = await show(jordan)
       expect(on.getByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeTruthy()
+    })
+
+    test('the question shows the Demo pill for the K0 state (control: a root not marked demo, same name, shows none)', async () => {
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      const tree = await show(jordan)
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeTruthy()
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.cardAskDemo))).toBeTruthy()
+      tree.unmount()
+      cardQuestions.reset()
+      const plain = await jordanWithCard()
+      jest
+        .spyOn(stateRoots, 'trustedStateRoots')
+        .mockReturnValue([{ aid: stateRoots.K0_TEST_ROOT.aid, name: 'State of Example' }])
+      await yesTo(plain)
+      expect(cardQuestions.first()).toEqual({ connectionId: CONN, asker: 'Sam', state: 'State of Example' })
+      const control = await show(plain)
+      expect(control.getByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeTruthy()
+      expect(control.queryByTestId(testIdWithKey(ApproverOfferIds.cardAskDemo))).toBeNull()
     })
 
     test('an open offer shows first; the question waits until no offer is open', async () => {
