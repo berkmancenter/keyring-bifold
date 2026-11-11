@@ -11,6 +11,7 @@ import { join } from 'path'
 import {
   EMPTY_APPROVALS,
   NotOffered,
+  NotServed,
   OFFERED_TASKS,
   PHONE_SENDS,
   TEST_REQUEST_TASKS,
@@ -21,6 +22,7 @@ import {
   withPhoneRule,
 } from '../module/approvalRules'
 import { synthesizeRego, validateApprovals } from '../module/approvalsPolicy'
+import { deviceRefusalOf } from '../module/vtaOwner'
 
 const ME = 'did:key:z6MkThisPhone'
 const OTHER = 'did:key:z6MkOtherPhone'
@@ -124,16 +126,26 @@ describe('a task agents serve in more than one version', () => {
   const deleteSwitch = (model: Parameters<typeof approvalsView>[0], served?: string[]) =>
     approvalsView(model, ME, served).offered.find((o) => o.key === 'contextsDelete')
 
-  it('one rule per version the agent dispatches, else every version Keyring knows', () => {
+  it('one rule per version the agent dispatches; with no answer, every version Keyring knows', () => {
     const rules = (served?: string[]) => versions(withPhoneRule(EMPTY_APPROVALS, DELETE_11, true, ME, served).rules)
     expect(rules([DELETE_11, CREATE])).toEqual([DELETE_11])
     expect(rules([DELETE_10, DELETE_11])).toEqual([DELETE_11, DELETE_10])
     expect(rules([DELETE_10, CREATE])).toEqual([DELETE_10])
     expect(rules(undefined)).toEqual([DELETE_11, DELETE_10])
-    expect(rules([CREATE])).toEqual([DELETE_11, DELETE_10])
+    // An answer that names none of its versions: refused, never a row naming types the agent may have retired (an
+    // agent refuses the whole row for one retired type; VTI main retires contexts/delete 1.0).
+    expect(() => rules([CREATE])).toThrow(NotServed)
     // The rules it writes are a row the agent takes.
     const both = withPhoneRule(EMPTY_APPROVALS, DELETE_11, true, ME)
     expect(() => validateApprovals(both.rules, both.sets)).not.toThrow()
+  })
+
+  it('a not-served refusal reaches the person in its own words, without the task URI (control: a plain error)', () => {
+    // Left to the generic branch it read "Your agent couldn't do that." and the reason was dropped.
+    const said = deviceRefusalOf(new NotServed(DELETE_11))
+    expect(said.reason).toBe('notServed')
+    expect(said.message).not.toMatch(/https?:|trusttasks/)
+    expect(deviceRefusalOf(new Error('something else')).reason).toBe('failed')
   })
 
   it('a rule only on a version the agent no longer dispatches reads off, to be turned on again', () => {
@@ -248,6 +260,75 @@ describe('the phone never sends an offered task', () => {
         !received.has(uri) && !PHONE_SENDS.includes(uri) && !(TEST_REQUEST_TASKS as readonly string[]).includes(uri)
     )
     expect(unlisted).toEqual([])
+  })
+
+  // A rooms read, write or watch goes to the agent too, from the rooms backend rather than the client's own list.
+  const ROOMS_REAL = join(__dirname, '..', '..', 'rooms', 'real')
+  // What the phone asks its own agent: `rooms/keys` and `vault`. A host's and a community's tasks (`rooms/records`,
+  // `rooms/blobs`, `vtc`) never pass the agent's policy gate. `rooms/keys/changed` is pushed by the agent, never sent:
+  // should it ever join ROOMS_TASK (to parse it), take it out here, or the first test below fails for the wrong reason.
+  const toAgent = (uri: string) => /\/spec\/(rooms\/keys|vault)\//.test(uri) && !uri.includes('/rooms/keys/changed/')
+  const roomsTypes = () => {
+    const { ROOMS_TASK } = jest.requireActual('../../rooms/real/wire') as { ROOMS_TASK: Record<string, string> }
+    const { UPLOAD_TASK } = jest.requireActual('../../rooms/real/files/upload') as {
+      UPLOAD_TASK: Record<string, string>
+    }
+    return { ROOMS_TASK, UPLOAD_TASK }
+  }
+
+  it('every rooms task the phone asks its agent is on the list of what the phone sends', () => {
+    // A rule set elsewhere on one that is missing (a class rule on `Mutating` names read 0.2 and watch 0.1) would hold
+    // each room read and ask its approvers every time, without the screen saying which rule is to blame.
+    const { ROOMS_TASK, UPLOAD_TASK } = roomsTypes()
+    const asked = [...Object.values(ROOMS_TASK), ...Object.values(UPLOAD_TASK)].filter(toAgent)
+    expect(asked.length).toBeGreaterThan(10)
+    expect(asked.filter((uri) => !PHONE_SENDS.includes(uri))).toEqual([])
+  })
+
+  /**
+   * The call sites that name their task through a variable or a helper rather than inline, each with why the rule above
+   * covers it. A new one fails the test below until it is read and named here.
+   */
+  const INDIRECT: Record<string, string> = {
+    'this.browseType()': 'the newest ROOMS_TASK.keysBrowse* the agent serves',
+    get: 'ROOMS_TASK.vaultGet02 or vaultGet01',
+    type: "agentStep's own type, each named at its caller",
+    act: 'the newest ROOMS_TASK.keysAct* the agent serves (actType)',
+    sealType: 'ROOMS_TASK.keysSeal02 or keysSeal03 (sealType)',
+  }
+
+  it("the rooms tasks sent to the agent are the ones that rule names: rooms/keys and vault, never a host's or a community's", () => {
+    // Ties the rule above to the code: what the rooms backend hands to agentTask (its first argument) or agentStep (its
+    // third), in every file under rooms/real.
+    const { ROOMS_TASK, UPLOAD_TASK } = roomsTypes()
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []
+      )
+    const arg = String.raw`(?:'[^']*'|"[^"]*"|\`[^\`]*\`|[\w.]+)`
+    const sites = walk(ROOMS_REAL).flatMap((file) => {
+      const src = readFileSync(file, 'utf8')
+      return [
+        ...[...src.matchAll(/\.agentTask\(\s*([^,]+?)\s*,/g)].map((m) => m[1].trim()),
+        ...[...src.matchAll(new RegExp(String.raw`\.agentStep\(\s*${arg},\s*${arg},\s*([^,]+?)\s*,`, 'g'))].map((m) =>
+          m[1].trim()
+        ),
+      ]
+    })
+    expect(sites.length).toBeGreaterThan(12)
+    const named = (site: string) => {
+      const [, table, key] = /^(ROOMS_TASK|UPLOAD_TASK)\.(\w+)$/.exec(site) ?? []
+      return table ? (table === 'ROOMS_TASK' ? ROOMS_TASK : UPLOAD_TASK)[key] : undefined
+    }
+    expect(sites.filter((site) => !named(site) && !(site in INDIRECT))).toEqual([])
+    // And each one named is still in the code, so the list cannot keep a site that has gone.
+    expect(Object.keys(INDIRECT).filter((site) => !sites.includes(site))).toEqual([])
+    for (const site of sites.filter(named))
+      expect([site, named(site)]).toEqual([site, expect.stringMatching(/\/spec\/(rooms\/keys|vault)\//)])
+  })
+
+  it('a signal the agent pushes is not on the list: the phone receives rooms/keys/changed, it never sends it', () => {
+    expect(PHONE_SENDS.filter((uri) => uri.includes('/rooms/keys/changed/'))).toEqual([])
   })
 
   it('the app has no caller of createContext', () => {

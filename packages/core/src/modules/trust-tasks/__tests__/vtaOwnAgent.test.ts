@@ -632,6 +632,28 @@ describe('adding a backup device', () => {
     expect(mockVta.acl.get(BACKUP)).toMatchObject({ role: 'admin' })
   })
 
+  // VTI main afc06a431: AclEntry 0.3 states `purposes`, and an entry may state only what its writer's own entry grants
+  // (VTI-ACL-107). The new device is given this phone's own, read from the same list as its expiry.
+  it.each([
+    ['states the purposes this phone holds', { scope: 'listed', purposes: ['taskExecution'] }],
+    ["states none when this phone's entry has none (a 0.1 or 0.2 agent; control)", undefined],
+  ])('%s', async (_name, purposes) => {
+    const { vta } = await linkedPhone({ confirmOwner: confirmed() })
+    const own = { subject: PHONE, role: 'admin', ...(purposes ? { purposes } : {}) }
+    const list = jest.spyOn(VtaClient.prototype, 'listAcl').mockResolvedValue([own as never])
+    const grant = jest
+      .spyOn(VtaClient.prototype, 'grantAdmin')
+      .mockResolvedValue({ subject: BACKUP, role: 'admin', label: 'Pixel 8' })
+    try {
+      await vta.addBackupDevice(agent, BACKUP, 'Pixel 8')
+      expect(grant).toHaveBeenCalledTimes(1)
+      expect(grant.mock.calls[0]).toEqual([BACKUP, { label: 'Pixel 8', ...(purposes ? { purposes } : {}) }])
+    } finally {
+      list.mockRestore()
+      grant.mockRestore()
+    }
+  })
+
   // IN-53 (226, a Farm-hosted agent): the session to the agent never came back,
   // and "Add as backup" spun for minutes with nothing listed. Past its deadline
   // the add gives up in words the screen already has ("didn't answer").
@@ -1667,6 +1689,23 @@ describe('trusted approvers: another person approves for this agent', () => {
     await vta.setTrustedApprovers(agent, [], [])
     expect(rulesHeld()).toEqual(own)
     expect(setsHeld()).toEqual({ [`keyring-phone:${PHONE}`]: [PHONE] })
+  })
+
+  it("an action the agent's answer names no version of is refused as notServed, and nothing is written (control: with it)", async () => {
+    // The lab run, 11-10: an answer without acl/grant/0.3 had Keyring write retired versions, and the agent refused
+    // the whole row. Now the write never goes out.
+    mockVta.discovery = [PRESENT, MINT, 'https://trusttasks.org/spec/policy/upsert/0.3']
+    const { vta } = await linkedPhone()
+    await expect(vta.setTrustedApprovers(agent, [JORDAN], ['shareCredential', 'addDevice'])).rejects.toMatchObject({
+      reason: 'notServed',
+    })
+    expect(sentOf(POLICY_UPSERT)).toHaveLength(0)
+    expect(rulesHeld()).toEqual([])
+    mockVta.discovery = [...mockVta.discovery, 'https://trusttasks.org/spec/acl/grant/0.3']
+    await vta.setTrustedApprovers(agent, [JORDAN], ['shareCredential', 'addDevice'])
+    expect(rulesHeld().map((r) => r.taskType)).toEqual(
+      expect.arrayContaining([PRESENT, 'https://trusttasks.org/spec/acl/grant/0.3'])
+    )
   })
 
   it('an action another rule already holds is refused, and nothing is written', async () => {

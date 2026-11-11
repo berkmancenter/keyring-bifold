@@ -176,6 +176,13 @@ export const VTA_TASK = {
   aclUpdate02: 'https://trusttasks.org/spec/acl/update/0.2',
   /** 0.3 (vta-service #2324, in v0.67.0): 0.2's entries; `pageSize` is `limit`, `cursor`/`truncated` are `nextCursor`. */
   aclList03: 'https://trusttasks.org/spec/acl/list/0.3',
+  // grant/revoke/update 0.3 and list 0.4 (VTI main afc06a431, 2026-11-10; what the Farm and testers' agents run from
+  // that day): 0.2's payloads and list 0.3's, over AclEntry 0.3, which adds one REQUIRED member, `purposes`
+  // (trust-tasks-tf specs/acl/_shared/0.3). An agent from afc06a431 serves no older version of these.
+  aclList04: 'https://trusttasks.org/spec/acl/list/0.4',
+  aclGrant03: 'https://trusttasks.org/spec/acl/grant/0.3',
+  aclRevoke03: 'https://trusttasks.org/spec/acl/revoke/0.3',
+  aclUpdate03: 'https://trusttasks.org/spec/acl/update/0.3',
   // Only "Send me a test request" sends these (approvalRules.ts TEST_REQUEST_TASKS).
   contextsDelete: 'https://trusttasks.org/spec/vta/contexts/delete/1.0',
   /** 1.1 (trust-tasks-tf #967, vta-service 1afebe27): 1.0's payload plus `abandonHostCopies`, default false. */
@@ -214,10 +221,12 @@ export const VTA_TASK_VERSIONS = {
   // and v0.67.0 (#2323, #2324) only acl/{grant,revoke,update}/0.2 and acl/list/0.3. So one of them steps down on a
   // refusal whichever is asked first. That needs the refusal to reach the phone: over TSP a refused 0.2 once did
   // not (al-phone, 10-05), so a TSP-only agent before v0.67.0 is the case to watch.
-  aclList: [VTA_TASK.aclList03, VTA_TASK.aclList02, VTA_TASK.aclList],
-  aclGrant: [VTA_TASK.aclGrant02, VTA_TASK.aclGrant],
-  aclRevoke: [VTA_TASK.aclRevoke02, VTA_TASK.aclRevoke],
-  aclUpdate: [VTA_TASK.aclUpdate02, VTA_TASK.aclUpdate],
+  // From VTI main afc06a431 (2026-11-10) an agent serves only acl/list/0.4 and grant/revoke/update 0.3, while every
+  // tagged vta-service to v0.79.0 serves none of them: so the older rungs stay, and agents before it step down once.
+  aclList: [VTA_TASK.aclList04, VTA_TASK.aclList03, VTA_TASK.aclList02, VTA_TASK.aclList],
+  aclGrant: [VTA_TASK.aclGrant03, VTA_TASK.aclGrant02, VTA_TASK.aclGrant],
+  aclRevoke: [VTA_TASK.aclRevoke03, VTA_TASK.aclRevoke02, VTA_TASK.aclRevoke],
+  aclUpdate: [VTA_TASK.aclUpdate03, VTA_TASK.aclUpdate02, VTA_TASK.aclUpdate],
   // 0.2 first. The agents in use share no version: vta-service v0.60.0 to v0.66.0 serve only 0.1, and from
   // 0d3f268e (2026-10-28, #2313, what first.openvtc.net runs) only 0.2. So one of them steps down on a refusal
   // whichever is asked first, and 0.2 is where agents are going. This client sends only 0.1's members, which are a
@@ -301,8 +310,31 @@ export function vaultPayloadFor<P extends Record<string, unknown>>(uri: string, 
   return out as P
 }
 
-/** Is this one of the 0.2 access-list URIs, or acl/list/0.3 (the same entries; a revoke may answer `entry: null`)? */
-const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.2$|\/acl\/list\/0\.3$/.test(uri)
+/**
+ * Is this an access-list URI in 0.2's shape: a 0.2 or 0.3 one, or acl/list/0.3 or 0.4 (the same entries; a revoke may
+ * answer `entry: null`)? 0.3 is 0.2 with `purposes` on the entry, which only a grant has to state.
+ */
+const isAcl02 = (uri: string) => /\/acl\/[a-z-]+\/0\.[23]$|\/acl\/list\/0\.4$/.test(uri)
+
+/** What an AclEntry 0.3 subject may use the content it reads for (trust-tasks-tf specs/acl/_shared/0.3 PurposeScope). */
+export type AclPurposes = { scope: 'any' } | { scope: 'listed'; purposes: string[] }
+
+/** An entry's `purposes`, read strictly: either shape exactly, or nothing (0.1 and 0.2 entries carry none). */
+function purposesFrom(value: unknown): { purposes?: AclPurposes } {
+  if (!value || typeof value !== 'object') return {}
+  const raw = value as Record<string, unknown>
+  if (raw.scope === 'any' && Object.keys(raw).length === 1) return { purposes: { scope: 'any' } }
+  const listed = raw.purposes
+  if (
+    raw.scope === 'listed' &&
+    Object.keys(raw).length === 2 &&
+    Array.isArray(listed) &&
+    listed.length > 0 &&
+    listed.every((p) => typeof p === 'string')
+  )
+    return { purposes: { scope: 'listed', purposes: [...(listed as string[])] } }
+  return {}
+}
 
 /**
  * A full administrator's authority as an `acl/_shared/0.2` entry spells it:
@@ -384,6 +416,8 @@ export interface VtaAclEntry {
   label?: string
   /** RFC 3339; absent means the row never expires. */
   expiresAt?: string
+  /** AclEntry 0.3's purpose scope; absent on a 0.1 or 0.2 entry, which grants every purpose but `modelTraining`. */
+  purposes?: AclPurposes
   createdAt?: string
   createdBy?: string
   /**
@@ -522,6 +556,7 @@ function aclEntryFrom(value: unknown): VtaAclEntry | undefined {
     ...capabilityScopeFrom(raw),
     ...text('label'),
     ...text('expiresAt'),
+    ...purposesFrom(raw.purposes),
     ...text('createdAt'),
     ...text('createdBy'),
   }
@@ -581,14 +616,15 @@ const CONSENT_REQUIRED = 'auth:consent_required'
  */
 export function consentPendingOf(
   error: unknown
-): { payloadDigest?: string; requests: Record<string, unknown>[]; omitted?: number } | undefined {
+): { payloadDigest?: string; challenge?: string; requests: Record<string, unknown>[]; omitted?: number } | undefined {
   if (!(error instanceof VtiRefusal)) return undefined
   const details = error.details as
     | {
         reason?: string
         payloadDigest?: string
+        challenge?: string
         consentRequestsOmitted?: number
-        consentRequests?: (Record<string, unknown> & { payload?: { payloadDigest?: string } })[]
+        consentRequests?: (Record<string, unknown> & { payload?: { payloadDigest?: string; challenge?: string } })[]
       }
     | undefined
   if (details?.reason === CONSENT_REQUIRED) {
@@ -598,8 +634,14 @@ export function consentPendingOf(
     // do not fit, and `consentRequestsOmitted` counts them. Read the digest from
     // `details` first, so the grant can still be waited on precisely.
     const omitted = typeof details.consentRequestsOmitted === 'number' ? details.consentRequestsOmitted : undefined
+    // The nonce that names this question: the same while it is pending, a new one once it was answered no or lapsed
+    // (vta-sdk error.rs ConsentRequired.challenge). A refusal without one cannot be told apart, so it is left out.
+    const challenge = [details.challenge, requests[0]?.payload?.challenge].find(
+      (c): c is string => typeof c === 'string' && c.length > 0
+    )
     return {
       payloadDigest: details.payloadDigest ?? requests[0]?.payload?.payloadDigest,
+      ...(challenge ? { challenge } : {}),
       requests,
       ...(omitted !== undefined ? { omitted } : {}),
     }
@@ -608,6 +650,29 @@ export function consentPendingOf(
     return { requests: [] }
   }
   return undefined
+}
+
+/**
+ * A task held for consent that was not given: the question this phone waited on is gone, so it was answered no or it
+ * lapsed. The agent deletes the request either way and says nothing to the asking phone; the only sign is that a
+ * re-submit raises a new question, with a new challenge (VTI task-consent.md, "Pending vs denied"). The phone cannot
+ * tell a no from a lapse, so this never says which. It stops there: asking again would turn a no into a nag (the
+ * habituation attack), which is why upstream's own client stops at the same point (vta-cli-common consent.rs,
+ * `ConsentOutcome::Resolved`).
+ */
+export const CONSENT_NOT_GIVEN = 'consentNotGiven'
+
+/**
+ * Made when needed, never declared as a subclass: a class extending VtiRefusal is evaluated when this module loads,
+ * and suites that stub vtiAgent with a hand-written factory would fail to load at all. Read it by its code,
+ * never by class.
+ */
+export function consentNotGiven(taskType: string): VtiRefusal {
+  return new VtiRefusal(
+    CONSENT_NOT_GIVEN,
+    `${LOG_PREFIX} ${taskType} was not approved: the approver said no, or the request lapsed`,
+    { taskType }
+  )
 }
 
 /**
@@ -1159,6 +1224,8 @@ export class VtaClient {
       onInbound?: (plaintext: DidCommV2PlaintextMessage) => void
       /** A task was held for an approver's consent; the wait is on. */
       onConsentPending?: (info: { taskType: string; payloadDigest?: string }) => void
+      /** The held task's question was answered no or lapsed ({@link consentNotGiven}); the wait is over. */
+      onConsentNotGiven?: (info: { taskType: string }) => void
       /** How long to wait for approvers before giving up on a held task. Unset: `CONSENT_WAIT_MS`, shorter in a short-clock test build. */
       consentWaitMs?: number
       /**
@@ -1450,7 +1517,18 @@ export class VtaClient {
           return await this.sendTask<T>(type, payload, timeoutMs, documentExtras)
         } catch (retryError) {
           lastError = retryError
-          if (!consentPendingOf(retryError)) throw retryError
+          const still = consentPendingOf(retryError)
+          if (!still) throw retryError
+          // A pending question is answered with the same challenge. A new one means ours is gone, answered no or
+          // lapsed, and this re-submit has just raised another: stop, before asking again turns a no into a nag.
+          // Without a challenge on both, the two cannot be told apart, and the wait goes on as before.
+          if (pending.challenge && still.challenge && still.challenge !== pending.challenge) {
+            this.agent.config.logger.info(
+              `${LOG_PREFIX} ${type}: consent was not given (the question changed); not asking again`
+            )
+            this.options.onConsentNotGiven?.({ taskType: type })
+            throw consentNotGiven(type)
+          }
         }
       }
       throw lastError instanceof Error ? lastError : new Error(String(lastError))
@@ -2128,7 +2206,10 @@ export class VtaClient {
    * entry that expires no later than its own (VTI-ACL-053, vta-service
    * operations/acl.rs:388-403).
    */
-  async grantAdmin(did: string, options: { label?: string; expiresAt?: string } = {}): Promise<VtaAclEntry> {
+  async grantAdmin(
+    did: string,
+    options: { label?: string; expiresAt?: string; purposes?: AclPurposes } = {}
+  ): Promise<VtaAclEntry> {
     const label = options.label?.trim().slice(0, ACL_LABEL_MAX)
     const { uri, answer } = await this.versions.ask('aclGrant', VTA_TASK_VERSIONS.aclGrant, (type) =>
       this.task(type, {
@@ -2138,6 +2219,9 @@ export class VtaClient {
           ...(label ? { label } : {}),
           ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
           ...(isAcl02(type) ? FULL_ADMIN_AUTHORITY_02 : {}),
+          // 0.3 REQUIRES the purposes, and an entry may state only purposes its writer's own entry grants (VTI-ACL-107):
+          // the caller passes this phone's own, else `any`, which every entry rewritten at afc06a431's boot holds.
+          ...(type === VTA_TASK.aclGrant03 ? { purposes: options.purposes ?? { scope: 'any' } } : {}),
         },
       })
     )

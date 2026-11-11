@@ -22,7 +22,7 @@ import { taskWords } from './requestWords'
 
 export interface ApprovalDetailsProps {
   approval: Pick<VtiApproval, 'matchCode' | 'outcome'> &
-    Partial<Pick<VtiApproval, 'taskType' | 'payloadDigest' | 'subject'>>
+    Partial<Pick<VtiApproval, 'taskType' | 'payloadDigest' | 'subject' | 'forAgent'>>
 }
 
 /** A subject worth showing: a name, not an identifier (never a DID, #12). */
@@ -51,11 +51,19 @@ export const ApprovalDetails: React.FC<ApprovalDetailsProps> = ({ approval }) =>
   // Keyring's words and saying they are Keyring's (al-signer, 10-06).
   const action = outcome.from === 'unknown' && approval.taskType ? taskWords(approval.taskType, t) : undefined
   const subject = readableSubject(approval.subject)
+  // Asked by someone else's agent (trusted approvers, T2): the words are about that person and their agent, never
+  // "your agent" or "you started this" (lab run, 11-10). The asking phone's waiting note shows the same code
+  // (ApproverWaitNote, mock frame 5b), so the two people can compare it out of band: the code says which request this
+  // is, not who started it.
+  const asker = approval.forAgent ? approval.forAgent.asker || t('Approver.UnnamedContact') : undefined
+  const forWords = { asker, interpolation: { escapeValue: false } }
   return (
     <View style={styles.block}>
       {action ? (
         <ThemedText testID={testIdWithKey('ApprovalTaskDoes')}>
-          {t('Requests.TaskDoes', { action, interpolation: { escapeValue: false } })}
+          {asker
+            ? t('Requests.ForAgentTaskDoes', { action, ...forWords })
+            : t('Requests.TaskDoes', { action, interpolation: { escapeValue: false } })}
         </ThemedText>
       ) : null}
       {subject ? (
@@ -65,7 +73,9 @@ export const ApprovalDetails: React.FC<ApprovalDetailsProps> = ({ approval }) =>
       ) : null}
       {outcome.from === 'unknown' ? (
         <ThemedText testID={testIdWithKey('ApprovalOutcomeUnknown')}>
-          {t(action ? 'Requests.ApproveIfYouStartedIt' : 'MyAgent.ApprovalOutcomeUnknown')}
+          {asker
+            ? t(action ? 'Requests.ForAgentApproveIf' : 'Requests.ForAgentOutcomeUnknown', forWords)
+            : t(action ? 'Requests.ApproveIfYouStartedIt' : 'MyAgent.ApprovalOutcomeUnknown')}
         </ThemedText>
       ) : (
         <View testID={testIdWithKey('ApprovalOutcome')}>
@@ -77,7 +87,9 @@ export const ApprovalDetails: React.FC<ApprovalDetailsProps> = ({ approval }) =>
       )}
       {approval.matchCode ? (
         <View>
-          <ThemedText style={styles.muted}>{t('MyAgent.ApprovalMatchCode')}</ThemedText>
+          <ThemedText style={styles.muted} testID={testIdWithKey('ApprovalMatchCodeLabel')}>
+            {t(asker ? 'Requests.ForAgentMatchCode' : 'MyAgent.ApprovalMatchCode')}
+          </ThemedText>
           <ThemedText style={styles.code} selectable testID={testIdWithKey('ApprovalMatchCode')}>
             {approval.matchCode}
           </ThemedText>
