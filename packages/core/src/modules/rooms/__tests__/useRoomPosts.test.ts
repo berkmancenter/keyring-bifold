@@ -8,8 +8,9 @@ import { act, renderHook } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 
 import { toInertText } from '../inertText'
+import { PENDING_WRITE_MAX_MS } from '../pendingRecordWrites'
 import { isChatPost, type RoomPost } from '../roomPosts'
-import type { Note, NoteList, NoteSummary, RoomsService } from '../types'
+import { RoomsRefused, type Note, type NoteList, type NoteSummary, type RoomsService } from '../types'
 import { useInViewAndActive } from '../useInViewAndActive'
 import {
   mergeNewer,
@@ -468,6 +469,48 @@ describe('a room watched at its host', () => {
   })
 })
 
+describe("the member's own write in a watched room (with pendingRecordWrites)", () => {
+  // The overlay for the member's own write ends PENDING_WRITE_MAX_MS after it succeeds. Within that, a poll must carry
+  // the write even if the host's signal for it is lost (never re-sent), so the watched room's 120 s wait is not held.
+  const polledWithin = Math.floor((PENDING_WRITE_MAX_MS - 1) / ROOM_POLL_MS)
+
+  test("awaited and its signal lost: the next 10 s poll carries it, inside the overlay's life", async () => {
+    expect(polledWithin).toBeGreaterThanOrEqual(1)
+    const { service, write } = roomWith([note('a', 1)])
+    const w = watchable(service)
+    const { result } = await open(w.service)
+    expect(w.service.roomWatched(ROOM)).toBe(true)
+    write(note('b', 2, { author: ME }))
+    act(() => result.current.awaitWrites([{ key: 'b', version: 2 }]))
+    for (let i = 0; i < polledWithin; i++) await tick()
+    expect(polls(service).length).toBeGreaterThanOrEqual(1)
+    expect(result.current.posts?.map((p) => p.key)).toContain('b')
+  })
+
+  test('a write that failed is not awaited: the watched room waits its 120 s as before (control)', async () => {
+    const { service } = roomWith([note('a', 1)])
+    const w = watchable(service)
+    const { result } = await open(w.service)
+    act(() => result.current.awaitWrites([]))
+    for (let i = 0; i < polledWithin; i++) await tick()
+    expect(polls(service)).toHaveLength(0)
+  })
+
+  test('once it has landed (nothing awaited), the wait comes back', async () => {
+    const { service, write } = roomWith([note('a', 1)])
+    const w = watchable(service)
+    const { result } = await open(w.service)
+    write(note('b', 2, { author: ME }))
+    act(() => result.current.awaitWrites([{ key: 'b', version: 2 }]))
+    await tick()
+    expect(polls(service)).toHaveLength(1)
+    act(() => result.current.awaitWrites([]))
+    await tick()
+    await tick()
+    expect(polls(service)).toHaveLength(1)
+  })
+})
+
 describe('a room pruned while it is open', () => {
   const keys = (posts?: { key: string }[]) => posts?.map((p) => p.key)
 
@@ -782,5 +825,69 @@ describe('a page counted in chat posts', () => {
     expect(chat(result.current.posts)).toHaveLength(3)
     expect(readKeys(service)).toEqual(['n1', 'n3', 'n5'])
     expect(result.current.hasOlder).toBe(false)
+  })
+})
+
+// A read refused with a reason (`RoomsRefused('readNote', reason)`, the service's): the post stays unread and says
+// why; a read that later succeeds clears it. Each round's failures go to the log as counts, never which posts.
+describe('a post the agent cannot open', () => {
+  const cannotOpen = (reason: string) => new RoomsRefused('readNote', reason, reason === 'notDelivered')
+  const failing = (refusals: Record<string, unknown>) => {
+    const { service, write } = roomWith([note('a', 1), note('b', 2), note('c', 3)])
+    const noteUnread = jest.fn()
+    const read = service.readNote.getMockImplementation()!
+    service.readNote.mockImplementation(async (roomId: string, key: string) => {
+      if (refusals[key] !== undefined) throw refusals[key]
+      return read(roomId, key)
+    })
+    return { service: Object.assign(service, { noteUnread }), noteUnread, write }
+  }
+
+  test('keeps the reason on the unread post, and logs the round once with each reason counted', async () => {
+    const { service, noteUnread } = failing({ a: cannotOpen('beyondChain'), b: new Error('no answer') })
+    const { result } = await open(service)
+    expect(result.current.posts?.map((p) => [p.key, p.unread, p.unreadWhy])).toEqual([
+      ['c', false, undefined],
+      ['b', true, undefined],
+      ['a', true, 'beyondChain'],
+    ])
+    expect(noteUnread).toHaveBeenCalledTimes(1)
+    expect(noteUnread).toHaveBeenCalledWith(ROOM, { beyondChain: 1, other: 1 })
+  })
+
+  test.each(['removed', 'beyondChain', 'notDelivered'])('carries %s as given', async (reason) => {
+    const { service } = failing({ a: cannotOpen(reason) })
+    const { result } = await open(service)
+    expect(result.current.posts?.find((p) => p.key === 'a')?.unreadWhy).toBe(reason)
+  })
+
+  test('a refusal of another operation, or with a code that is not a reason, gives no reason (control)', async () => {
+    const { service, noteUnread } = failing({
+      a: new RoomsRefused('listNotes', 'beyondChain', false),
+      b: new RoomsRefused('readNote', 'notFound', false),
+    })
+    const { result } = await open(service)
+    expect(result.current.posts?.filter((p) => p.unread).map((p) => [p.key, p.unreadWhy])).toEqual([
+      ['b', undefined],
+      ['a', undefined],
+    ])
+    expect(noteUnread).toHaveBeenCalledWith(ROOM, { other: 2 })
+  })
+
+  test('a round where every read lands logs nothing (control)', async () => {
+    const { service, noteUnread } = failing({})
+    await open(service)
+    expect(noteUnread).not.toHaveBeenCalled()
+  })
+
+  test('a newer version that reads drops the reason with the unread mark', async () => {
+    const { service, write } = failing({ a: cannotOpen('removed') })
+    const { result } = await open(service)
+    expect(result.current.posts?.find((p) => p.key === 'a')?.unreadWhy).toBe('removed')
+    service.readNote.mockImplementation(async (_roomId: string, key: string) => note(key, key === 'a' ? 4 : 1))
+    write(note('a', 4))
+    await tick()
+    const a = result.current.posts?.find((p) => p.key === 'a')
+    expect([a?.unread, a?.unreadWhy]).toEqual([false, undefined])
   })
 })
