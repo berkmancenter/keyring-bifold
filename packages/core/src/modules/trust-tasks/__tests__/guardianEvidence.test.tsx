@@ -29,7 +29,11 @@ import {
 } from '../approverRoleSpec'
 import {
   GUARDIAN_EVIDENCE_HELD,
+  becomeK0TestWard,
   checkGuardianEvidence,
+  heldGuardianEvidence,
+  holdK0TestGuardianCard,
+  stateWardOf,
   evidenceBytes,
   guardianStandings,
   handleGuardianEvidence,
@@ -385,6 +389,74 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
     const claims = { ...card('G-ok'), state: 'Utah', name: 'Utah' } as unknown as GuardianEvidence
     const verdict = checkGuardianEvidence(claims, SAM_WARD, new Date(), () => undefined)
     expect(verdict).toMatchObject({ ok: true, state: 'Test state (K0)', root: stateRoots.K0_TEST_ROOT.aid })
+  })
+})
+
+describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the test ward (K0)"', () => {
+  const g = globalThis as { __DEV__?: boolean }
+  const wasDev = g.__DEV__
+  beforeEach(() => setTrustTestStateEnabled(true))
+  afterEach(() => {
+    g.__DEV__ = wasDev
+    setTrustTestStateEnabled(false)
+  })
+
+  test("the card held is the K0 Guardian card, and the ward set is K0's (Sam)", async () => {
+    const jordan = phone()
+    expect(await holdK0TestGuardianCard(jordan.agent)).toBe('done')
+    expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
+    const sam = phone()
+    expect(await becomeK0TestWard(sam.agent)).toBe('done')
+    expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
+  })
+
+  test.each([
+    ['the test-state setting off', () => setTrustTestStateEnabled(false)],
+    ['trusted approvers off', () => setTrustedApproversEnabled(false)],
+    ['trusted approvers turned off remotely', () => (TRUSTED_APPROVERS_REMOTE_OFF.off = true)],
+    ['state-verified approvers off', () => setStateVerifiedApproversEnabled(false)],
+    ['state-verified approvers turned off remotely', () => (STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true)],
+    ['the SEDI/KERI umbrella off', () => (SEDI_KERI_REMOTE_OFF.off = true)],
+  ])('%s: neither action does anything (control: all on, both do)', async (_, off) => {
+    off()
+    const jordan = phone()
+    expect(await holdK0TestGuardianCard(jordan.agent)).toBe('off')
+    expect(await heldGuardianEvidence(jordan.agent)).toBeUndefined()
+    const sam = phone()
+    expect(await becomeK0TestWard(sam.agent)).toBe('off')
+    expect(await stateWardOf(sam.agent)).toBeNull()
+    allOn()
+    setTrustTestStateEnabled(true)
+    expect(await holdK0TestGuardianCard(jordan.agent)).toBe('done')
+    expect(await becomeK0TestWard(sam.agent)).toBe('done')
+    expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
+    expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
+  })
+
+  test('as the package exports them, the actions are the same and gated the same (control: on, they act)', async () => {
+    const exported = jest.requireActual('../developerTestState') as typeof import('../developerTestState')
+    setTrustTestStateEnabled(false)
+    const jordan = phone()
+    const sam = phone()
+    expect(await exported.holdK0TestGuardianCard(jordan.agent)).toBe('off')
+    expect(await exported.becomeK0TestWard(sam.agent)).toBe('off')
+    setTrustTestStateEnabled(true)
+    expect(await exported.holdK0TestGuardianCard(jordan.agent)).toBe('done')
+    expect(await exported.becomeK0TestWard(sam.agent)).toBe('done')
+    expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
+    expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
+  })
+
+  test('a tester build, end to end: Jordan holds the test card, Sam is the test ward, and it verifies as "Test state (K0)"', async () => {
+    g.__DEV__ = false
+    const jordan = phone()
+    await holdK0TestGuardianCard(jordan.agent)
+    const held = (await heldGuardianEvidence(jordan.agent)) as GuardianEvidence
+    const sam = phone()
+    await becomeK0TestWard(sam.agent)
+    sam.ask()
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(held), context)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
   })
 })
 

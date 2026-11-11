@@ -21,7 +21,8 @@
 import { utils, type Agent } from '@credo-ts/core'
 
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
-import { trustedStateRoots } from '../sedi/guardian/stateRoots'
+import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
+import { K0_TEST_WARD, trustedStateRoots } from '../sedi/guardian/stateRoots'
 
 import {
   ROLE_OFFER_ASK,
@@ -40,6 +41,7 @@ import {
 import { signDocumentProof } from './documentProof'
 import { isStateVerifiedApproversEnabled } from './module/stateVerifiedApproversFlag'
 import { isTrustedApproversEnabled } from './module/trustedApproversFlag'
+import { isTrustTestStateEnabled } from './module/trustTestStateFlag'
 import type { InboundContext } from './registry'
 import type { TrustTasksService } from './services/TrustTasksService'
 
@@ -229,6 +231,32 @@ export async function sendGuardianEvidence(
 function ceremony(): typeof import('./ceremony') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   return require('./ceremony')
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Developer actions for a tester build: the K0 test card and the K0 test ward
+
+/** What a Developer action did: done, or nothing because "Trust the test state (K0)" (or a switch under it) is off. */
+export type TestStateActionResult = 'done' | 'off'
+
+/**
+ * Developer action "Hold the test Guardian card (K0)", on an approver's phone: keep the K0 kit's Guardian card as the
+ * card this phone sends after a yes. Does nothing unless "Trust the test state (K0)" holds (so trusted approvers and
+ * state-verified approvers are both on, and no remote off is set).
+ */
+export async function holdK0TestGuardianCard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  if (!isTrustTestStateEnabled()) return 'off'
+  return (await holdGuardianEvidence(agent, K0_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'off'
+}
+
+/**
+ * Developer action "I'm the test ward (K0)", on the person's phone: set this phone's ward to the K0 kit's ward (Sam),
+ * so a K0 card checks as naming it. Does nothing unless "Trust the test state (K0)" holds.
+ */
+export async function becomeK0TestWard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  if (!isTrustTestStateEnabled()) return 'off'
+  await setStateWard(agent, K0_TEST_WARD)
+  return 'done'
 }
 
 // ---------------------------------------------------------------------------------------------------------------

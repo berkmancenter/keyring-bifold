@@ -85,6 +85,8 @@ describe('the umbrella', () => {
       'SEDI_KERI_REMOTE_OFF',
       'setTrustTestStateEnabled',
       'isTrustTestStateEnabled',
+      'holdK0TestGuardianCard',
+      'becomeK0TestWard',
     ]
     for (const file of [join(__dirname, '..', 'index.ts'), join(__dirname, '..', '..', '..', 'index.ts')]) {
       const text = readFileSync(file, 'utf8')

@@ -290,6 +290,8 @@ export {
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
   setTrustTestStateEnabled,
   isTrustTestStateEnabled,
+  holdK0TestGuardianCard,
+  becomeK0TestWard,
   SEDI_KERI_REMOTE_OFF,
   setDidCommV2Enabled,
   setPeerLegCarriage,
