@@ -3635,6 +3635,7 @@
     "Waiting": "Waiting for {{name}}",
     "AskAgain": "Ask again",
     "Change": "Change what {{name}} approves",
+    "StillApproves": "{{name}} still approves:",
     "ChangeCaption": "Sends {{name}} a new request. What {{name}} approves now stays until {{name}} says yes again and you add it.",
     "SaidYes": "{{name}} said yes. Add them on My agent, under Who approves.",
     "IsApprover": "{{name}} approves for you.",

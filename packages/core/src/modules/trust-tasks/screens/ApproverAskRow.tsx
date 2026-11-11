@@ -28,6 +28,8 @@ import {
   roleOfferAskOn,
   type RoleAction,
   type RoleOfferAsk,
+  writtenAsOf,
+  writtenActionsOf,
 } from '../approverRole'
 import { ROLE_ACTIONS } from '../approverRoleSpec'
 import { releaseWarn } from '../module/releaseLog'
@@ -47,6 +49,8 @@ export const ApproverAskRowIds = {
   asked: 'ApproverAskedActions',
   steppedDown: 'ApproverSteppedDown',
   change: 'ApproverChange',
+  inForce: 'ApproverInForce',
+  inForceActions: 'ApproverInForceActions',
 } as const
 
 /** Always offered, never switched off here. */
@@ -132,8 +136,8 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
       {t(ask.written ? 'Approver.SteppedDownWritten' : 'Approver.SteppedDown', words)}
     </ThemedText>
   ) : null
-  const actionLines = (actions: readonly RoleAction[]) => (
-    <View testID={testIdWithKey(ApproverAskRowIds.asked)}>
+  const actionLines = (actions: readonly RoleAction[], key: string = ApproverAskRowIds.asked) => (
+    <View testID={testIdWithKey(key)}>
       {PICK_ORDER.filter((action) => actions.includes(action)).map((action) => (
         <ThemedText key={action}>{`• ${t(`Approver.Action.${action}`)}`}</ThemedText>
       ))}
@@ -198,9 +202,16 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
       </View>
     )
   } else if (state === 'open' && ask) {
-    // Mock frame 1c: sent, waiting.
+    // Mock frame 1c: sent, waiting. A re-offer ("Change what … approves") also says what is still in force meanwhile.
+    const inForce = writtenAsOf(ask) ? writtenActionsOf(ask) : []
     body = (
       <View style={styles.card}>
+        {inForce.length ? (
+          <View testID={testIdWithKey(ApproverAskRowIds.inForce)}>
+            <ThemedText variant="bold">{t('Approver.StillApproves', words)}</ThemedText>
+            {actionLines(inForce, ApproverAskRowIds.inForceActions)}
+          </View>
+        ) : null}
         <ThemedText variant="bold" testID={testIdWithKey(ApproverAskRowIds.status)}>
           {t('Approver.Waiting', words)}
         </ThemedText>

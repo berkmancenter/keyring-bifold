@@ -242,6 +242,30 @@ describe("the contact's row", () => {
     ).toBeNull()
   })
 
+  test('during a re-offer the row also says what is still in force (control: a first offer shows no such line)', async () => {
+    linked(SAM_AGENT)
+    jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(
+      ask({
+        state: 'open',
+        actions: ['joinCommunity'],
+        written: true,
+        writtenAs: JORDAN,
+        writtenActions: ['shareCredential', 'changeApprovers'],
+      })
+    )
+    const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
+    expect(tree.getByTestId(id(ApproverAskRowIds.inForce))).toHaveTextContent(/Approver\.StillApproves/)
+    const inForce = tree.getByTestId(id(ApproverAskRowIds.inForceActions))
+    expect(inForce).toHaveTextContent(/Approver\.Action\.shareCredential/)
+    expect(inForce).toHaveTextContent(/Approver\.Action\.changeApprovers/)
+    expect(inForce).not.toHaveTextContent(/joinCommunity/)
+    expect(tree.getByTestId(id(ApproverAskRowIds.status)).props.children).toBe('Approver.Waiting')
+    jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(ask())
+    expect(
+      (await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)).queryByTestId(id(ApproverAskRowIds.inForce))
+    ).toBeNull()
+  })
+
   test('an approver who stepped down has no Change, and with the switch off there is no row at all', async () => {
     linked(SAM_AGENT)
     jest

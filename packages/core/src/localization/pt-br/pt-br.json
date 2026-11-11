@@ -3509,6 +3509,7 @@
     "Waiting": "Aguardando {{name}}",
     "AskAgain": "Pedir de novo",
     "Change": "Mudar o que {{name}} aprova",
+    "StillApproves": "{{name}} ainda aprova:",
     "ChangeCaption": "Envia um novo pedido para {{name}}. O que {{name}} aprova agora continua até {{name}} aceitar de novo e você adicionar.",
     "SaidYes": "{{name}} disse sim. Adicione em Meu agente, em Quem aprova.",
     "IsApprover": "{{name}} aprova por você.",
