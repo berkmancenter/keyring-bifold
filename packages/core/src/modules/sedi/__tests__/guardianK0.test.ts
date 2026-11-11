@@ -275,6 +275,36 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     creds: [...ctx.creds.values()],
   })
   const options = { trustedRoots: [prov.trustedRoot], now: new Date('2026-11-11T12:00:00Z') }
+  // The material with some credential texts and TEL update texts edited (keyed by credential SAID / registry SAID).
+  const edited = (
+    credEdits: Record<string, (text: string) => string>,
+    updateEdits: Record<string, (text: string) => string>
+  ): ChainMaterial => {
+    const m = material()
+    m.creds = m.creds.map((t) => {
+      const d = (JSON.parse(t.slice(0, t.lastIndexOf('}') + 1)) as { d: string }).d
+      return credEdits[d] ? credEdits[d](t) : t
+    })
+    m.tels = m.tels.map((tel) => {
+      const rd = (JSON.parse(tel.ripText) as { d: string }).d
+      return updateEdits[rd] ? { ...tel, updateTexts: tel.updateTexts.map(updateEdits[rd]) } : tel
+    })
+    return m
+  }
+  const recode = (said: string, code: string) => code + said.slice(1)
+  const registryOf = (name: string) => sadOf(said(name)).rd!
+  /** Every SAID of a nested block (any object with a "d" below the top level) in a credential. */
+  const nestedSaids = (name: string) => {
+    const out: string[] = []
+    const walk = (v: unknown, top: boolean) => {
+      if (!v || typeof v !== 'object') return
+      const o = v as Record<string, unknown>
+      if (!top && typeof o.d === 'string') out.push(o.d)
+      for (const x of Object.values(o)) walk(x, false)
+    }
+    walk(sadOf(said(name)), true)
+    return out
+  }
 
   afterEach(() => {
     setStateVerifiedApproversEnabled(false)
@@ -311,6 +341,24 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     expect(verdict(verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options))).toBe(
       'unsupportedCesr'
     )
+  })
+
+  it('the details of unsupportedCesr and malformedCesr are refusals, worded as such, never as "the material was fine"', () => {
+    setStateVerifiedApproversEnabled(true)
+    const detailOf = (alter: (kel: string) => string) => {
+      const m = material()
+      m.kels[0] = new TextEncoder().encode(alter(new TextDecoder().decode(m.kels[0])))
+      const r = verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options)
+      return r.ok ? 'valid' : `${r.reason}: ${r.detail}`
+    }
+    expect(detailOf((k) => k.replace('-KAW', '-LAW'))).toMatch(
+      /^unsupportedCesr: Keyring can't verify this \(unsupported: at \d+: count code -L\)$/
+    )
+    expect(detailOf((k) => k.slice(0, 40))).toMatch(
+      /^malformedCesr: this can't be read \(at 0: body of \d+ bytes runs past the stream\)$/
+    )
+    for (const d of [detailOf((k) => k.replace('-KAW', '-LAW')), detailOf((k) => k.slice(0, 40))])
+      expect(d).not.toMatch(/harmless|benign|only unsupported|\bfine\b|\bsafe\b/i)
   })
 
   it('fail closed: no unreadable or altered KEL stream, anywhere in the material, lets either entry point return valid', () => {
@@ -449,7 +497,106 @@ describe('the entry points, behind the state-verified approvers switch', () => {
         .map((o) => `${o.c.label} -> ${o.got}`)
     ).toEqual([])
     expect(cases.filter((c) => c.cls === 'cesr').length).toBeGreaterThanOrEqual(kelNames.length * 21)
+
+    // The credentials and TEL events too: every nested block SAID of every credential, and every TEL update SAID,
+    // recoded to a digest code this package lacks. None throws; where the edited SAID is on an entry point's chain
+    // that entry point says unsupportedCesr, and elsewhere it stays valid (credentials are checked when a chain
+    // reaches them). (A credential's own top-level SAID is what the material is looked up by: the next row.)
+    const onGuardian = new Set(['unit', 'agent', 'G-ok'])
+    const onSocial = new Set([...onGuardian, 'S2-social'])
+    const materialOutcomes: { label: string; got: string[]; want: string[] }[] = []
+    for (const name of Object.keys(prov.creds)) {
+      const code = ['H', 'F', 'G'][rand(3)]
+      const want = [onGuardian.has(name), onSocial.has(name)].map((on) => (on ? 'unsupportedCesr' : 'valid'))
+      for (const d of nestedSaids(name)) {
+        const m = edited({ [said(name)]: (t) => t.split(`"d":"${d}"`).join(`"d":"${recode(d, code)}"`) }, {})
+        materialOutcomes.push({ label: `${name}: nested block ${d.slice(0, 8)} -> ${code}`, got: run(m), want })
+      }
+      for (const u of ctx.tels.get(registryOf(name))!.updateTexts) {
+        const d = (JSON.parse(u) as { d: string }).d
+        const m = edited(
+          {},
+          { [registryOf(name)]: (t) => (t === u ? t.replace(`"d":"${d}"`, `"d":"${recode(d, code)}"`) : t) }
+        )
+        materialOutcomes.push({ label: `${name}: TEL update ${d.slice(0, 8)} -> ${code}`, got: run(m), want })
+      }
+    }
+    expect(
+      materialOutcomes.filter((o) => o.got.some((v) => v.startsWith('threw'))).map((o) => `${o.label} -> ${o.got}`)
+    ).toEqual([])
+    expect(materialOutcomes.filter((o) => o.got.join() !== o.want.join()).map((o) => `${o.label} -> ${o.got}`)).toEqual(
+      []
+    )
+    expect(materialOutcomes.filter((o) => o.want[0] === 'unsupportedCesr').length).toBeGreaterThan(5)
   })
+
+  it.each([
+    [
+      'an ACDC SAID (G-ok for the Guardian entry, S2-social for the Social entry)',
+      (code: string) => ({
+        m: edited(
+          {
+            [said('G-ok')]: (t: string) => t.split(said('G-ok')).join(recode(said('G-ok'), code)),
+            [said('S2-social')]: (t: string) => t.split(said('S2-social')).join(recode(said('S2-social'), code)),
+          },
+          {}
+        ),
+        g: recode(said('G-ok'), code),
+        s: recode(said('S2-social'), code),
+      }),
+      ['saidMismatch', 'saidMismatch'],
+    ],
+    [
+      'a nested block SAID in G-ok (both entry points reach G-ok)',
+      (code: string) => {
+        const d = nestedSaids('G-ok')[0]
+        return {
+          m: edited({ [said('G-ok')]: (t: string) => t.split(`"d":"${d}"`).join(`"d":"${recode(d, code)}"`) }, {}),
+          g: said('G-ok'),
+          s: said('S2-social'),
+        }
+      },
+      ['saidMismatch', 'saidMismatch'],
+    ],
+    [
+      "a TEL update SAID in G-ok's registry (both entry points reach it)",
+      (code: string) => {
+        const u = ctx.tels.get(registryOf('G-ok'))!.updateTexts[0]
+        const d = (JSON.parse(u) as { d: string }).d
+        return {
+          m: edited({}, { [registryOf('G-ok')]: (t: string) => t.replace(`"d":"${d}"`, `"d":"${recode(d, code)}"`) }),
+          g: said('G-ok'),
+          s: said('S2-social'),
+        }
+      },
+      ['telBroken', 'telBroken'],
+    ],
+  ])(
+    '%s under a digest code this package lacks (H) is unsupportedCesr from both entry points, never a throw (control: under a supported but wrong code, I, the check reaches the recompute and refuses as an edit)',
+    (_, make, withI) => {
+      setStateVerifiedApproversEnabled(true)
+      const both = (x: { m: ChainMaterial; g: string; s: string }) =>
+        [
+          () => verifyGuardian(x.m, x.g, { holder: aids.jordan, ward: aids.sam }, options),
+          () => verifySocialAuthorization(x.m, x.s, { ward: aids.sam }, options),
+        ].map((f) => {
+          try {
+            const r = f()
+            return r.ok ? 'valid' : `${r.reason}: ${r.detail}`
+          } catch (e) {
+            return `threw ${(e as Error).message}`
+          }
+        })
+      expect(both({ m: material(), g: said('G-ok'), s: said('S2-social') })).toEqual(['valid', 'valid'])
+      expect(both(make('I')).map((v) => v.split(':')[0])).toEqual(withI)
+      const h = both(make('H'))
+      expect(h.map((v) => v.split(':')[0])).toEqual(['unsupportedCesr', 'unsupportedCesr'])
+      for (const v of h)
+        expect(v).toBe(
+          "unsupportedCesr: Keyring can't verify this (unsupported: digest code H in a credential or TEL SAID)"
+        )
+    }
+  )
 
   it.each([
     ['kel-mal-root.cesr', 'mal-root'],
@@ -539,16 +686,16 @@ describe('the entry points, behind the state-verified approvers switch', () => {
   }
 
   it.each([
-    ['witnesses (bt 1)', { bt: '1', b: ['BO06-duiao9wxLLhTOOfl03Lavbr30WUqcc9LgzImLtd'] }, /witness receipts 0\/1/],
-    ['a weighted threshold', { kt: ['1/2', '1/2'] }, /unsupported signing threshold/],
     [
-      'a delegated inception (dip)',
-      { t: 'dip', di: 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6' },
-      /unsupported ilk dip/,
+      'witnesses (bt 1)',
+      { bt: '1', b: ['BO06-duiao9wxLLhTOOfl03Lavbr30WUqcc9LgzImLtd'] },
+      /witnesses \(bt 1; receipts are not read\)\)$/,
     ],
-    ['a transferable Ed25519 key (D)', { ed25519D: true }, /unsupported key code D/],
-    ['a SAID under another digest code (H)', { saidCode: 'H' }, /unsupported digest code H/],
-    ['a next-key digest under another digest code (H)', { n: ['H' + 'A'.repeat(43)] }, /unsupported digest code H/],
+    ['a weighted threshold', { kt: ['1/2', '1/2'] }, /signing threshold 1\/2,1\/2\)$/],
+    ['a delegated inception (dip)', { t: 'dip', di: 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6' }, /: ilk dip\)$/],
+    ['a transferable Ed25519 key (D)', { ed25519D: true }, /: key code D\)$/],
+    ['a SAID under another digest code (H)', { saidCode: 'H' }, /: digest code H\)$/],
+    ['a next-key digest under another digest code (H)', { n: ['H' + 'A'.repeat(43)] }, /: digest code H\)$/],
   ])(
     'a KEL using a KERI feature this package does not verify (%s) refuses both entry points as unsupportedCesr, never kelNotReplaying (control: the same KEL without it is valid)',
     (_, feature, detail) => {
@@ -566,7 +713,10 @@ describe('the entry points, behind the state-verified approvers switch', () => {
       expect(run(madeKel({})).map(verdict)).toEqual(['valid', 'valid'])
       const refused = run(madeKel(feature as Parameters<typeof madeKel>[0]))
       expect(refused.map(verdict)).toEqual(['unsupportedCesr', 'unsupportedCesr'])
-      for (const r of refused) expect((r as { detail: string }).detail).toMatch(detail)
+      for (const r of refused) {
+        expect((r as { detail: string }).detail).toMatch(/^Keyring can't verify this \(unsupported: sn 0 /)
+        expect((r as { detail: string }).detail).toMatch(detail)
+      }
     }
   )
 })

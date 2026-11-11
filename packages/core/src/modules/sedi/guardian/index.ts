@@ -12,7 +12,9 @@
 import { isStateVerifiedApproversEnabled } from '../../trust-tasks/module/stateVerifiedApproversFlag'
 
 import { guardianIn, socialIn, type ChainContext, type GuardianResult, type SocialResult, type TelInput } from './chain'
-import { digest, replayKel, type Replay } from './kel'
+import { DIGESTS } from '../cesr/codes'
+
+import { digest, replayKel, type Digest, type Replay } from './kel'
 
 export { SEDI_SCHEMAS, type RefusalReason } from './chain'
 
@@ -29,11 +31,13 @@ export interface CheckOptions {
 }
 
 /**
- * Why the presented material is refused before any chain check. The three are kept apart on purpose and must never
- * collapse into one, because each tells the phone (and whoever reads its logs) something different:
- * - `unsupportedCesr`: a Keyring limit. The stream uses a code, or a KERI feature (a delegated event, a weighted
- *   threshold, witnesses), this package does not verify yet. The material may be perfectly good.
- * - `malformedCesr`: a damaged stream. It does not add up as CESR (cut short, counts wrong, trailing bytes, empty).
+ * Why the presented material is refused before any chain check. Every outcome other than valid REFUSES, and none of
+ * these is a statement that the material is genuine or harmless: a destructive edit can land as any of the three (an
+ * edited character can make a stream unreadable, or name a code Keyring lacks). They are kept apart, and must never
+ * collapse into one, for log fidelity only, not as a safety property: each says what stopped the check.
+ * - `unsupportedCesr`: Keyring can't verify this. It uses a code or a KERI feature (a delegated event, a weighted
+ *   threshold, witnesses, a digest code other than E/I) that this package does not verify yet.
+ * - `malformedCesr`: this can't be read. It does not add up as CESR (cut short, counts wrong, trailing bytes, empty).
  * - `kelNotReplaying`: the stream reads, but the KEL it carries does not verify (a SAID, prior, pre-rotation or
  *   controller signature fails, or it is duplicitous). The material may have been constructed or edited, so the
  *   whole presentation is refused, even when that KEL is not on the chain being checked. It carries the prefix the
@@ -45,6 +49,22 @@ export type MaterialRefusal =
 
 type Built = { ok: true; ctx: ChainContext } | MaterialRefusal
 
+// The wording of these details matters: they are refusals, and must never read as "the material was fine".
+const cannotVerify = (what: string) => `Keyring can't verify this (unsupported: ${what})`
+const cannotRead = (what: string) => `this can't be read (${what})`
+
+/** Raised only by `guarded` below, and caught only by decide(): a SAID in a credential or a TEL event under a digest
+ * code this package lacks (refused, see MaterialRefusal). */
+class UnsupportedDigestCode extends Error {}
+
+/** The chain checks' digest: a code outside ./codes.ts (a credential's or TEL event's SAID, a nested block's) is a
+ * code Keyring can't verify, so it is raised as UnsupportedDigestCode for decide() to refuse as unsupportedCesr, never left to
+ * throw out of an entry point. Wherever the checks compute a SAID, they come through here. */
+const guarded: Digest = (code, bytes) => {
+  if (!DIGESTS[code]) throw new UnsupportedDigestCode(`digest code ${code} in a credential or TEL SAID`)
+  return digest(code, bytes)
+}
+
 function build(material: ChainMaterial, options: CheckOptions): Built {
   const kels = new Map<string, Replay>()
   for (const bytes of material.kels) {
@@ -55,8 +75,11 @@ function build(material: ChainMaterial, options: CheckOptions): Built {
     }
     // Nothing presented is ever treated as if it were absent: a stream this package cannot read, one that uses a
     // feature it does not verify, and one whose KEL does not replay each refuse the whole check (see MaterialRefusal).
-    if (r.cesr) return { ok: false, reason: r.cesr, detail: r.reason }
-    if (r.limit) return { ok: false, reason: 'unsupportedCesr', detail: r.reason }
+    if (r.cesr) {
+      const what = r.reason.slice(r.cesr.length + 2)
+      return { ok: false, reason: r.cesr, detail: r.cesr === 'malformedCesr' ? cannotRead(what) : cannotVerify(what) }
+    }
+    if (r.limit) return { ok: false, reason: 'unsupportedCesr', detail: cannotVerify(r.reason) }
     const prefix = r.pre ?? ''
     return { ok: false, reason: 'kelNotReplaying', prefix, detail: `a presented KEL (${prefix}) does not replay` }
   }
@@ -70,7 +93,14 @@ function build(material: ChainMaterial, options: CheckOptions): Built {
   }
   return {
     ok: true,
-    ctx: { digest, kels, tels, creds, trustedRoots: new Set(options.trustedRoots), now: options.now ?? new Date() },
+    ctx: {
+      digest: guarded,
+      kels,
+      tels,
+      creds,
+      trustedRoots: new Set(options.trustedRoots),
+      now: options.now ?? new Date(),
+    },
   }
 }
 
@@ -94,7 +124,14 @@ function decide<R>(
   if (!isStateVerifiedApproversEnabled()) return switchedOff
   const built = build(material, options)
   if (!built.ok) return built
-  return check(built.ctx)
+  try {
+    return check(built.ctx)
+  } catch (e) {
+    // Only the guarded digest's limit is turned into a refusal; anything else is a bug and still throws.
+    if (e instanceof UnsupportedDigestCode)
+      return { ok: false, reason: 'unsupportedCesr', detail: cannotVerify(e.message) }
+    throw e
+  }
 }
 
 /** A Guardian credential `guardianSaid`, issued to `holder` and naming `ward`, chained to a trusted State root. */
