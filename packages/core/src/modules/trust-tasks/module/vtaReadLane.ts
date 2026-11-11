@@ -73,6 +73,10 @@ export function besideQueue(type: string): boolean {
  * before every queued task that isn't one, keep their own order, and never cut short a task already on the wire: a
  * write still runs alone. A background poll waits a little longer; the person's tap does not.
  *
+ * Unbounded by design: a person sending quickly keeps a queued read waiting for as long as their writes keep coming.
+ * In a human-paced chat a read still runs between taps, and the writer's own posts show at once (pendingRecordWrites).
+ * The "goes ahead of N queued" line (VtaClient) is how a report would show it if N ever stayed high.
+ *
  * ROLLBACK: set {@link VTA_SENDS_FIRST} to false (an OTA can ship that alone); every task then keeps the order asked.
  */
 export const VTA_SENDS_FIRST = true
