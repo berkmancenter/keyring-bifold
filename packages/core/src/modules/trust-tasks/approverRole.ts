@@ -530,11 +530,12 @@ export async function respondToRoleOffer(
   await keepPrompt(agent, kept).catch((error: unknown) =>
     agent.config?.logger?.warn(`${LOG_PREFIX} could not close an offer: ${(error as Error)?.message ?? error}`)
   )
-  // After the yes, this phone's state Guardian card if it holds one (guardianEvidence.ts; nothing with either switch
-  // off). The yes stands whatever happens to the card.
+  // After the yes, and only after it is sent and kept: this phone's state Guardian card, if it holds one and its person
+  // said yes to sending it to this contact; never asked, they are asked and nothing goes (guardianEvidence.ts; nothing
+  // with either switch off). The yes stands whatever happens to the card, a no to sending it included.
   if (accept)
     await guardianEvidence()
-      .sendGuardianEvidence(agent, connectionId, prompt.agentDid, approverDid as string)
+      .guardianCardAfterYes(agent, prompt, approverDid as string)
       .catch((error: unknown) =>
         agent.config?.logger?.warn(
           `${LOG_PREFIX} could not send the guardian card: ${(error as Error)?.message ?? error}`

@@ -7,7 +7,7 @@
  * The K0 Guardian credential expires 2030-11-10; these rows read the real clock.
  */
 import { useFocusEffect } from '@react-navigation/native'
-import { act, render } from '@testing-library/react-native'
+import { act, fireEvent, render } from '@testing-library/react-native'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import React from 'react'
@@ -28,8 +28,14 @@ import {
   type GuardianEvidencePayload,
 } from '../approverRoleSpec'
 import {
+  GUARDIAN_CARD_CONSENT,
   GUARDIAN_EVIDENCE_HELD,
   becomeK0TestWard,
+  cardConsentOn,
+  cardQuestions,
+  guardianCardAfterYes,
+  setCardConsent,
+  shareGuardianCard,
   checkGuardianEvidence,
   heldGuardianEvidence,
   holdK0TestGuardianCard,
@@ -51,6 +57,7 @@ import {
 import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { setTrustTestStateEnabled } from '../module/trustTestStateFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
+import ApproverOfferModal, { ApproverOfferIds } from '../components/ApproverOfferModal'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -110,11 +117,18 @@ const SAM_AGENT = 'did:webvh:sams-agent.example'
 const JORDAN = 'did:peer:2.jordans-phone'
 const AMY = 'did:peer:2.amys-phone'
 const CONN = 'c-jordan'
+/** A second person on the same phone (Amy), on her own connection. */
+const CONN2 = 'c-amy'
 
 type Row = { id: string; content: Record<string, unknown>; tags: Record<string, string> }
 
 function phone() {
   const rows: Row[] = []
+  /** The relationships this phone has, by connection; a test may rotate a DID in place. */
+  const relationships = [
+    { connectionId: CONN, myRelationshipDid: 'did:peer:2.mine', counterpartyRelationshipDid: 'did:peer:2.theirs' },
+    { connectionId: CONN2, myRelationshipDid: 'did:peer:2.mine-amy', counterpartyRelationshipDid: 'did:peer:2.amy' },
+  ]
   let n = 0
   const warn = jest.fn()
   const update = jest.fn(async (record: Row) => {
@@ -141,15 +155,7 @@ function phone() {
       delete: jest.fn(),
     },
     dependencyManager: {
-      resolve: () => ({
-        getAll: async () => [
-          {
-            connectionId: CONN,
-            myRelationshipDid: 'did:peer:2.mine',
-            counterpartyRelationshipDid: 'did:peer:2.theirs',
-          },
-        ],
-      }),
+      resolve: () => ({ getAll: async () => relationships.map((r) => ({ ...r })) }),
     },
     modules: { didcomm: { connections: { getById: async () => ({ did: 'did:peer:me', theirDid: 'did:peer:them' }) } } },
     kms: { randomBytes: ({ length }: { length: number }) => new Uint8Array(length).fill(7) },
@@ -173,7 +179,7 @@ function phone() {
     })
   const askRecord = () =>
     rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK)?.content as unknown as approverRole.RoleOfferAsk
-  return { agent: agent as never, rows, warn, update, consume, service, ask, askRecord, raw: agent }
+  return { agent: agent as never, rows, warn, update, consume, service, ask, askRecord, raw: agent, relationships }
 }
 
 const documentOf = (evidence: GuardianEvidence, over: Partial<GuardianEvidencePayload> = {}) => ({
@@ -209,6 +215,8 @@ const allOn = () => {
 beforeEach(() => {
   jest.restoreAllMocks()
   sent.length = 0
+  cardQuestions.reset()
+  approverRole.roleOfferPromptStore.clear()
   allOn()
 })
 afterAll(() => {
@@ -562,9 +570,10 @@ describe("on the approver's phone: sending the card after a yes", () => {
     await approverRole.respondToRoleOffer(jordan.agent, CONN, true, JORDAN)
   }
 
-  test('with a card held, the yes goes and then the card, for that agent and as that DID', async () => {
+  test('with a card held and its sending said yes to, the yes goes and then the card, for that agent and as that DID', async () => {
     const jordan = phone()
     expect(await holdGuardianEvidence(jordan.agent, card('G-ok'))).toBe('held')
+    await setCardConsent(jordan.agent, CONN, 'yes')
     await sayYes(jordan)
     expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer'), GUARDIAN_EVIDENCE_TYPE_URI])
     const payload = sent[1].payload as GuardianEvidencePayload
@@ -615,6 +624,7 @@ describe("on the approver's phone: sending the card after a yes", () => {
   test('a card that fails to send leaves the yes standing', async () => {
     const jordan = phone()
     await holdGuardianEvidence(jordan.agent, card('G-ok'))
+    await setCardConsent(jordan.agent, CONN, 'yes')
     const ceremony = jest.requireMock('../ceremony') as { sendTrustTaskDocument: jest.Mock }
     ceremony.sendTrustTaskDocument
       .mockImplementationOnce(async (_a: unknown, _c: string, doc: Record<string, unknown>) => {
@@ -654,12 +664,13 @@ describe('Who approves: the state card line', () => {
     return sam
   }
 
-  test('a valid card: "Guardian, verified by" beside the approver, with what is not checked', async () => {
+  test('a valid card: "Has a Guardian card from" beside the approver, with "As shown by … Not yet linked" under it', async () => {
     const tree = await showFor(await writtenWith(card('G-ok')))
     expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN))).props.children).toBe(
-      'Approver.GuardianVerified'
+      'Approver.GuardianHas'
     )
-    expect(tree.getByText('Approver.GuardianNotTied')).toBeTruthy()
+    expect(tree.getByText('Approver.GuardianAsShown')).toBeTruthy()
+    expect(tree.queryByText('Approver.GuardianVerified')).toBeNull()
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
   })
 
@@ -709,5 +720,315 @@ describe('Who approves: the state card line', () => {
     expect(tree.getByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeTruthy()
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
     expect((sam.askRecord().guardian as GuardianOnAsk).verdict.ok).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------
+// Asking Jordan first (Alberto, 2026-11-11): "Also send your Guardian card to <name>?", once per person, kept.
+
+describe('asking Jordan first: the card goes only once Jordan said yes to sending it to this person', () => {
+  const offer = (connectionId = CONN, asker = 'Sam'): approverRole.RoleOfferPrompt => ({
+    open: true,
+    connectionId,
+    asker,
+    agentDid: SAM_AGENT,
+    actions: ['joinCommunity'],
+    request: {
+      id: `req-${connectionId}`,
+      type: TYPE_URI,
+      threadId: `req-${connectionId}`,
+      issuer: 'did:peer:them',
+      recipient: 'did:peer:me',
+      issuedAt: new Date().toISOString(),
+      payload: { agent: SAM_AGENT, actions: ['joinCommunity'], challenge: 'c'.repeat(43) },
+    },
+    receivedAt: new Date().toISOString(),
+  })
+  /** Jordan says yes to approving for the person on `connectionId` (a first offer or a re-offer). */
+  const yesTo = async (jordan: ReturnType<typeof phone>, connectionId = CONN, asker = 'Sam') => {
+    approverRole.roleOfferPromptStore.set(offer(connectionId, asker))
+    await approverRole.respondToRoleOffer(jordan.agent, connectionId, true, JORDAN)
+  }
+  const cards = () => sent.filter((d) => d.type === GUARDIAN_EVIDENCE_TYPE_URI)
+  const answers = (jordan: ReturnType<typeof phone>) =>
+    jordan.rows.filter((r) => r.tags.recordType === GUARDIAN_CARD_CONSENT)
+  const jordanWithCard = async () => {
+    const jordan = phone()
+    await holdGuardianEvidence(jordan.agent, card('G-ok'))
+    jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([stateRoots.K0_TEST_ROOT])
+    return jordan
+  }
+
+  test('never asked: the yes goes, the card does not, and Jordan is asked, naming the state on our list (control: a kept yes sends it)', async () => {
+    const jordan = await jordanWithCard()
+    await yesTo(jordan)
+    expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer')])
+    expect(cards()).toHaveLength(0)
+    expect(cardQuestions.first()).toEqual({ connectionId: CONN, asker: 'Sam', state: 'Test state (K0)' })
+    expect(answers(jordan)).toHaveLength(0)
+    // Control: the same phone with a kept yes for Sam sends it.
+    const control = await jordanWithCard()
+    await setCardConsent(control.agent, CONN, 'yes')
+    sent.length = 0
+    await yesTo(control)
+    expect(cards()).toHaveLength(1)
+  })
+
+  test('"Send my card": kept as yes, sent now as the yes kept here, and sent again on a re-offer without asking', async () => {
+    const jordan = await jordanWithCard()
+    await yesTo(jordan)
+    expect(await shareGuardianCard(jordan.agent, CONN, true)).toBe('sent')
+    expect(cards()).toHaveLength(1)
+    expect(cards()[0].payload).toMatchObject({ agent: SAM_AGENT, approver: JORDAN })
+    expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
+    expect(cardQuestions.first()).toBeUndefined()
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(2)
+    expect(cardQuestions.first()).toBeUndefined()
+  })
+
+  test('"Don\'t send": kept as no, nothing goes, and a re-offer neither sends nor asks again (the never-asked row is its control)', async () => {
+    const jordan = await jordanWithCard()
+    await yesTo(jordan)
+    expect(await shareGuardianCard(jordan.agent, CONN, false)).toBe('declined')
+    expect(cards()).toHaveLength(0)
+    expect(answers(jordan)).toHaveLength(1)
+    expect(answers(jordan)[0].tags).toEqual({ recordType: GUARDIAN_CARD_CONSENT, connectionId: CONN })
+    expect(cardQuestions.first()).toBeUndefined()
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(0)
+    expect(cardQuestions.first()).toBeUndefined()
+    expect(await guardianCardAfterYes(jordan.agent, offer(), JORDAN)).toBe('declined')
+  })
+
+  test('a no outlives a restart: nothing in memory, the kept no still withholds and asks nothing (control: a person never asked is asked)', async () => {
+    const jordan = await jordanWithCard()
+    await setCardConsent(jordan.agent, CONN, 'no')
+    // A restart: nothing this run held in memory is left; only what was kept.
+    cardQuestions.reset()
+    approverRole.roleOfferPromptStore.clear()
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(0)
+    expect(cardQuestions.first()).toBeUndefined()
+    await yesTo(jordan, CONN2, 'Amy')
+    expect(cardQuestions.first()).toMatchObject({ connectionId: CONN2, asker: 'Amy' })
+  })
+
+  test("an answer is per person: a yes for Sam sends nothing to Amy, who is asked (control: Sam's card goes)", async () => {
+    const jordan = await jordanWithCard()
+    await setCardConsent(jordan.agent, CONN, 'yes')
+    await yesTo(jordan, CONN2, 'Amy')
+    expect(cards()).toHaveLength(0)
+    expect(cardQuestions.first()).toMatchObject({ connectionId: CONN2 })
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(1)
+  })
+
+  test('the answer is kept by connection, so a rotated relationship DID keeps it: a no still withholds, a yes still sends', async () => {
+    const jordan = await jordanWithCard()
+    await setCardConsent(jordan.agent, CONN, 'no')
+    jordan.relationships[0].myRelationshipDid = 'did:peer:2.mine-rotated'
+    jordan.relationships[0].counterpartyRelationshipDid = 'did:peer:2.theirs-rotated'
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(0)
+    expect(cardQuestions.first()).toBeUndefined()
+    await setCardConsent(jordan.agent, CONN, 'yes')
+    await yesTo(jordan)
+    expect(cards()).toHaveLength(1)
+  })
+
+  test.each([
+    ['state-verified approvers off', () => setStateVerifiedApproversEnabled(false)],
+    ['state-verified approvers turned off remotely', () => (STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true)],
+    ['the SEDI/KERI umbrella off', () => (SEDI_KERI_REMOTE_OFF.off = true)],
+    ['trusted approvers off', () => setTrustedApproversEnabled(false)],
+  ])('%s: nothing is asked, nothing is kept and nothing goes (control: on, Jordan is asked)', async (_, off) => {
+    const jordan = await jordanWithCard()
+    off()
+    expect(await guardianCardAfterYes(jordan.agent, offer(), JORDAN)).toBe('off')
+    expect(await shareGuardianCard(jordan.agent, CONN, true)).toBe('off')
+    expect(cardQuestions.first()).toBeUndefined()
+    expect(answers(jordan)).toHaveLength(0)
+    expect(cards()).toHaveLength(0)
+    allOn()
+    expect(await guardianCardAfterYes(jordan.agent, offer(), JORDAN)).toBe('asked')
+  })
+
+  test.each([
+    ['said no', 'no' as const],
+    ['never asked', undefined],
+  ])('%s: the approval itself stands, sent and kept as a yes', async (_, answer) => {
+    const jordan = await jordanWithCard()
+    if (answer) await setCardConsent(jordan.agent, CONN, answer)
+    await expect(yesTo(jordan)).resolves.toBeUndefined()
+    expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer')])
+    expect((sent[0].payload as { decision?: string }).decision).toBe('accepted')
+    const kept = jordan.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_PROMPT)?.content
+    expect(kept).toMatchObject({ answered: 'accepted', answeredAs: JORDAN })
+  })
+
+  test('on Sam\'s phone, a card Jordan chose not to send is no line at all, not "couldn\'t verify" (control: sent, it shows)', async () => {
+    const run = async (send: boolean) => {
+      sent.length = 0
+      cardQuestions.reset()
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      await shareGuardianCard(jordan.agent, CONN, send)
+      const sam = phone()
+      await setStateWard(sam.agent, SAM_WARD)
+      sam.ask({ state: 'closed', written: true, writtenAs: JORDAN })
+      for (const doc of cards()) await handleGuardianEvidence(sam.agent, sam.service, doc, context)
+      ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+      ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
+      jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+      jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+        view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
+        version: 2,
+      } as TrustedApproversState)
+      const tree = render(
+        <BasicAppContext>
+          <VtaTrustedApprovers />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+    const declined = await run(false)
+    expect(declined.getByTestId(testIdWithKey(TrustedApproversIds.approver(JORDAN)))).toBeTruthy()
+    expect(declined.queryByTestId(testIdWithKey(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
+    expect(declined.queryByTestId(testIdWithKey(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
+    expect(declined.queryByText('Approver.GuardianCouldNotVerify')).toBeNull()
+    declined.unmount()
+    const shared = await run(true)
+    expect(shared.getByTestId(testIdWithKey(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+  })
+
+  describe('the question, on the offer sheet after a yes', () => {
+    const show = async (jordan: ReturnType<typeof phone>) => {
+      ;(useAgent as jest.Mock).mockReturnValue({ agent: jordan.agent })
+      jest.spyOn(approverRole, 'restoreRoleOfferPrompts').mockResolvedValue(undefined)
+      const tree = render(
+        <BasicAppContext>
+          <ApproverOfferModal />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+
+    test("it asks, naming the state, and Send keeps a yes and sends; Don't send keeps a no and sends nothing", async () => {
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      const tree = await show(jordan)
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.cardAsk)).props.children).toBe('Approver.CardAskTitle')
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey(ApproverOfferIds.cardSend)))
+      })
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
+      expect(cards()).toHaveLength(1)
+      expect(tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+      tree.unmount()
+
+      sent.length = 0
+      const other = await jordanWithCard()
+      await yesTo(other)
+      const second = await show(other)
+      await act(async () => {
+        fireEvent.press(second.getByTestId(testIdWithKey(ApproverOfferIds.cardDont)))
+      })
+      expect(await cardConsentOn(other.agent, CONN)).toBe('no')
+      expect(cards()).toHaveLength(0)
+      expect(second.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+    })
+
+    test('with state-verified approvers off it asks nothing, even with a question left (control: on, it asks)', async () => {
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      setStateVerifiedApproversEnabled(false)
+      const off = await show(jordan)
+      expect(off.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+      off.unmount()
+      setStateVerifiedApproversEnabled(true)
+      const on = await show(jordan)
+      expect(on.getByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeTruthy()
+    })
+
+    test('an open offer shows first; the question waits until no offer is open', async () => {
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      approverRole.roleOfferPromptStore.set(offer(CONN2, 'Amy'))
+      const tree = await show(jordan)
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.body))).toBeTruthy()
+      expect(tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+    })
+  })
+
+  describe('People I approve for: changing the answer later', () => {
+    const show = async (jordan: ReturnType<typeof phone>) => {
+      ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+      ;(useAgent as jest.Mock).mockReturnValue({ agent: jordan.agent })
+      jest.spyOn(approverRole, 'approverNames').mockResolvedValue({})
+      jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+        view: { approvers: [], keys: [], heldElsewhere: [] },
+        version: 1,
+      } as TrustedApproversState)
+      const tree = render(
+        <BasicAppContext>
+          <VtaTrustedApprovers />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+
+    test('never asked reads as not sent, and "Send my Guardian card" keeps a yes and sends it now', async () => {
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      const tree = await show(jordan)
+      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
+        'Approver.CardNotSentTo'
+      )
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardSend(CONN))))
+      })
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
+      expect(cards()).toHaveLength(1)
+      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN)))).toBeTruthy()
+    })
+
+    test('a kept yes reads as sent, and "Stop sending" keeps a no, so a re-offer sends nothing', async () => {
+      const jordan = await jordanWithCard()
+      await setCardConsent(jordan.agent, CONN, 'yes')
+      await yesTo(jordan)
+      sent.length = 0
+      const tree = await show(jordan)
+      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
+        'Approver.CardSentTo'
+      )
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))))
+      })
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('no')
+      tree.unmount()
+      await yesTo(jordan)
+      expect(cards()).toHaveLength(0)
+    })
+
+    test('no card held, or state-verified approvers off: no card line (control: both, it shows)', async () => {
+      const bare = phone()
+      await yesTo(bare)
+      const none = await show(bare)
+      expect(none.queryByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN)))).toBeNull()
+      none.unmount()
+      const jordan = await jordanWithCard()
+      await yesTo(jordan)
+      setStateVerifiedApproversEnabled(false)
+      const off = await show(jordan)
+      expect(off.queryByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN)))).toBeNull()
+      off.unmount()
+      setStateVerifiedApproversEnabled(true)
+      const on = await show(jordan)
+      expect(on.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN)))).toBeTruthy()
+    })
   })
 })

@@ -1,7 +1,7 @@
 /**
  * The State roots this phone trusts for a Guardian card (trusted-approver plan, stage 2, S1), each with the name Who
- * approves shows. A card is shown as verified only when its chain ends at one of these, and the name shown is ours,
- * never the sender's.
+ * approves shows. A card is shown as from a state only when its chain ends at one of these, and the name shown is
+ * ours, never the sender's.
  *
  * A release trusts none: empty, so nothing verifies and every card reads "Couldn't verify the state card", unless the
  * Developer setting "Trust the test state (K0)" is on (trustTestStateFlag.ts, which holds only while trusted approvers
@@ -17,13 +17,13 @@ import { isTrustTestStateEnabled } from '../../trust-tasks/module/trustTestState
 export interface StateRoot {
   /** The root's KERI AID. */
   aid: string
-  /** What Who approves calls it: "Guardian, verified by <name>". */
+  /** What Who approves calls it: "Has a Guardian card from <name>". */
   name: string
 }
 
 /**
  * The K0 kit's State root ("roy"): a test root, trusted in Developer builds or with "Trust the test state (K0)" on.
- * Its name says so, never a real state's: Who approves reads "Guardian, verified by Test state (K0)".
+ * Its name says so, never a real state's: Who approves reads "Has a Guardian card from Test state (K0)".
  */
 export const K0_TEST_ROOT: StateRoot = { aid: 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6', name: 'Test state (K0)' }
 
