@@ -538,9 +538,9 @@ export function resetGuardianCheckMemo(): void {
 }
 
 /**
- * A verdict that expires is reused only while its expiry is still ahead (an unreadable expiry is never reused).
- * That unreadable-expiry case becomes dead once the verifier refuses an unreadable expiry (bifold #1031,
- * expiryUnreadable): a valid verdict then always carries a readable expiry or none. Remove it after both land.
+ * A verdict that expires is reused only while its expiry is still ahead. The verifier refuses an unreadable expiry
+ * (bifold #1031, expiryUnreadable), so a valid verdict always carries a readable expiry or none; if one ever did
+ * not, `new Date(x) > now` is false for an unreadable x and the check runs again, which is the safe direction.
  *
  * The time trigger assumes the check reads only the PRESENTED credential's expiry, which is the `expires` a valid
  * verdict carries (sedi/guardian/chain.ts guardianIn; intermediates go through node(), which never reads expiry). If
