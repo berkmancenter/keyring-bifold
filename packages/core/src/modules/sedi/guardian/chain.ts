@@ -28,6 +28,7 @@ export type RefusalReason =
   | 'switchedOff'
   | 'unsupportedCesr'
   | 'malformedCesr'
+  | 'kelNotReplaying'
   | 'revoked'
   | 'notIssued'
   | 'statusNotCurrent'

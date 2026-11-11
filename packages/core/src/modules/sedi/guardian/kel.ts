@@ -9,7 +9,8 @@ import { blake3 } from '@noble/hashes/blake3.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 
 import { readKelStream } from '../cesr/reader'
-import { b64Encode } from '../cesr/qb64'
+import { DIGESTS } from '../cesr/codes'
+import { b64Encode, keyCode } from '../cesr/qb64'
 import { verifySignature } from '../cesr/signatures'
 
 const te = new TextEncoder()
@@ -57,6 +58,10 @@ export type Replay =
       reason: string
       /** Set when the stream holds CESR this package does not read: never replayed as if it were absent. */
       cesr?: 'unsupportedCesr' | 'malformedCesr'
+      /** Set when the stream read but uses a KERI feature this package does not verify (a Keyring limit, not damage). */
+      limit?: true
+      /** The identifier prefix the stream's first event claims; absent only when the stream did not read. */
+      pre?: string
       duplicity?: true
       state?: KeyState | null
       history: HistoryEntry[]
@@ -71,14 +76,25 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
   const history: HistoryEntry[] = []
   let st: KeyState | null = null
   const seen = new Map<number, string>()
+  const claimed = read.frames[0]?.body.pre
   for (const f of read.frames) {
     const b = f.body
-    const fail = (reason: string): Replay => ({
+    const fail = (reason: string, limit?: true): Replay => ({
       ok: false,
       reason: `sn ${b.sn} ${b.ilk}: ${reason}`,
+      ...(limit ? { limit } : {}),
+      pre: claimed,
       state: st,
       history,
     })
+
+    // A code outside ./codes.ts is a Keyring limit, reported before anything uses it: an unknown key code would
+    // otherwise count as a missing signature (and read as an edited KEL), and an unknown digest code would throw.
+    const badDigest = [b.said, ...b.ndigs].find((x) => !DIGESTS[x[0]])
+    if (badDigest !== undefined) return fail(`unsupported digest code ${badDigest[0]}`, true)
+    const badKey = b.keys.find((k) => !keyCode(k))
+    if (badKey !== undefined) return fail(`unsupported key code ${badKey[0]}`, true)
+    if (!DIGESTS[b.pre[0]] && !keyCode(b.pre)) return fail(`unsupported prefix code ${b.pre[0]}`, true)
 
     // A self-addressing prefix may use another digest code than the SAID (keripy Habery: prefix SHA2-256 'I',
     // event SAID Blake3 'E'), so 'i' is dummied too and checked on its own.
@@ -97,9 +113,12 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
 
     if (seen.has(b.sn)) {
       if (seen.get(b.sn) !== b.said)
-        return { ok: false, duplicity: true, reason: `duplicity at sn ${b.sn}`, state: st, history }
+        return { ok: false, duplicity: true, reason: `duplicity at sn ${b.sn}`, pre: claimed, state: st, history }
       continue
     }
+
+    // Before the order checks, so a delegated event (dip, drt) is reported as the limit it is, not as out of order.
+    if (b.ilk !== 'icp' && b.ilk !== 'rot' && b.ilk !== 'ixn') return fail(`unsupported ilk ${b.ilk}`, true)
 
     let keys: string[], ndigs: string[], wits: string[], toad: number
     if (b.ilk === 'icp') {
@@ -122,18 +141,18 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
         ndigs = b.ndigs
         wits = b.backs.length ? b.backs : st.wits
         toad = b.bn ?? st.toad
-      } else if (b.ilk === 'ixn') {
+      } else {
         keys = st.keys
         ndigs = st.ndigs
         wits = st.wits
         toad = st.toad
-      } else return fail(`unsupported ilk ${b.ilk}`)
+      }
     }
 
     // Controller signatures, against the threshold (a number here; weighted thresholds are not read).
     const sigs = f.groups.filter((g) => g.name === 'ControllerIdxSigs').flatMap((g) => g.items)
     const kt = Number(b.kt || 1)
-    if (!Number.isInteger(kt) || kt < 1) return fail(`unsupported signing threshold ${b.kt}`)
+    if (!Number.isInteger(kt) || kt < 1) return fail(`unsupported signing threshold ${b.kt}`, true)
     let good = 0
     for (const s of sigs) {
       const k = keys[s.index]
@@ -141,7 +160,7 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
     }
     if (good < kt) return fail(`controller signatures ${good}/${kt}`)
     // No witness receipts are read: a KEL that names witnesses cannot meet its threshold here and is refused.
-    if (toad > 0) return fail(`witness receipts 0/${toad}`)
+    if (toad > 0) return fail(`witness receipts 0/${toad}`, true)
 
     const anchors = b.seals ?? []
     if (
@@ -155,5 +174,5 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
     seen.set(b.sn, b.said)
     history[b.sn] = { ...st, seals: b.ilk === 'ixn' ? anchors : [], receipts: 0, sigs: good }
   }
-  return st ? { ok: true, state: st, history } : { ok: false, reason: 'no events', history }
+  return st ? { ok: true, state: st, history } : { ok: false, reason: 'no events', pre: claimed, history }
 }

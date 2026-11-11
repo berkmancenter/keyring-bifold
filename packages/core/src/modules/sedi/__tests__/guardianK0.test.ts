@@ -25,9 +25,13 @@ import {
   type Sad,
 } from '../guardian/chain'
 import { verifyGuardian, verifySocialAuthorization, type ChainMaterial } from '../guardian'
+import { ed25519 } from '@noble/curves/ed25519.js'
+import { p256 } from '@noble/curves/nist.js'
+
 import { INDEXED_SIGS } from '../cesr/codes'
+import { b64Encode } from '../cesr/qb64'
 import { readKelStream } from '../cesr/reader'
-import { digest, replayKel, type Replay } from '../guardian/kel'
+import { DUMMY, digest, replayKel, type Replay } from '../guardian/kel'
 
 const FX = join(__dirname, 'fixtures', 'k0-utah-v2')
 const files = readdirSync(FX)
@@ -313,9 +317,9 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     // Every KEL in the material, each altered one way at a time, through BOTH entry points (G-ok and S2-social, which
     // are valid unaltered: the control below). Code cases must come back as their exact CESR refusal; fuzzed ones as any
     // refusal at all. Not covered on purpose: a cut exactly between two events (a complete, shorter KEL, not malformed;
-    // whether the chain still holds is the chain checks' job, K18); a trailing empty `-KAA` group (well formed;
-    // cesr-ts 2.0.0 reads it too); and a body or signature edited in a stream that still reads (the replay refuses
-    // that KEL, which the chain rows cover where the chain needs it).
+    // whether the chain still holds is the chain checks' job, K18), and a trailing empty `-KAA` group (well formed;
+    // cesr-ts 2.0.0 reads it too). A body or signature character edited is its own class: if the edited stream still
+    // reads, kelNotReplaying; if it no longer reads, the reader's refusal, never kelNotReplaying.
     setStateVerifiedApproversEnabled(true)
     const enc = new TextEncoder()
     const kelNames = files.filter((f) => /^kel-.*\.cesr$/.test(f)).sort()
@@ -325,7 +329,12 @@ describe('the entry points, behind the state-verified approvers switch', () => {
       return seed % n
     }
     const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
-    type Case = { label: string; text: string; expect?: 'unsupportedCesr' | 'malformedCesr' }
+    type Case = {
+      label: string
+      text: string
+      cls: 'cesr' | 'edit'
+      expect?: 'unsupportedCesr' | 'malformedCesr' | 'kelNotReplaying'
+    }
     const cases: Case[] = []
     for (const f of kelNames) {
       const t = text(f)
@@ -346,8 +355,8 @@ describe('the entry points, behind the state-verified approvers switch', () => {
       const g = headers[0]
       expect(t.indexOf('-KAW')).toBe(g)
       const sig = t.slice(g + 4, g + 92)
-      const add = (label: string, altered: string, expect?: Case['expect']) =>
-        cases.push({ label: `${f}: ${label}`, text: altered, expect })
+      const add = (label: string, altered: string, expect?: Case['expect'], cls: Case['cls'] = 'cesr') =>
+        cases.push({ label: `${f}: ${label}`, text: altered, expect, cls })
       // Codes this reader lacks, including the ones a lenient parser would skip and still find the real signatures.
       add('unknown count code', t.replace('-KAW', '-LAW'), 'unsupportedCesr')
       add('unknown signature code', t.slice(0, g + 4) + 'C' + t.slice(g + 5), 'unsupportedCesr')
@@ -386,6 +395,18 @@ describe('the entry points, behind the state-verified approvers switch', () => {
         add(`${label} at ${i} -> ${c}`, t.slice(0, i) + c + t.slice(i + 1))
       }
       for (const h of headers) for (const d of [2, 3]) swap(h + d, 'count char')
+      // A character outside the count codes changed (in a body or a signature). Its expected outcome comes from the
+      // reader on the edited bytes: still reads, kelNotReplaying; no longer reads, that refusal.
+      for (let k = 0; k < 3; ) {
+        const i = rand(t.length)
+        if (headers.some((h) => i >= h && i < h + 4) || !/[A-Za-z0-9_]/.test(t[i])) continue
+        let c = b64[rand(64)]
+        if (c === t[i]) c = c === 'A' ? 'B' : 'A'
+        const edited = t.slice(0, i) + c + t.slice(i + 1)
+        const r = readKelStream(enc.encode(edited))
+        add(`body or signature char at ${i} -> ${c}`, edited, r.ok ? 'kelNotReplaying' : r.reason, 'edit')
+        k++
+      }
     }
     const unaltered = (): ChainMaterial => material()
     const withAltered = (c: Case): ChainMaterial => {
@@ -415,11 +436,137 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     expect(
       outcomes.filter((o) => o.c.expect && o.got.some((v) => v !== o.c.expect)).map((o) => `${o.c.label} -> ${o.got}`)
     ).toEqual([])
+    // Every CESR-class case is a CESR refusal: a parse failure is never reported as kelNotReplaying.
+    expect(
+      outcomes
+        .filter((o) => o.c.cls === 'cesr' && o.got.some((v) => v !== 'unsupportedCesr' && v !== 'malformedCesr'))
+        .map((o) => `${o.c.label} -> ${o.got}`)
+    ).toEqual([])
+    expect(outcomes.filter((o) => o.c.cls === 'edit' && o.c.expect === 'kelNotReplaying').length).toBeGreaterThan(20)
     expect(
       outcomes
         .filter((o) => o.got.some((v) => v === undefined || v.startsWith('threw')))
         .map((o) => `${o.c.label} -> ${o.got}`)
     ).toEqual([])
-    expect(cases.length).toBeGreaterThanOrEqual(kelNames.length * 21)
+    expect(cases.filter((c) => c.cls === 'cesr').length).toBeGreaterThanOrEqual(kelNames.length * 21)
   })
+
+  it.each([
+    ['kel-mal-root.cesr', 'mal-root'],
+    ['kel-sam.cesr', 'sam'],
+  ])(
+    'a KEL that reads but does not replay, and is NOT on the chain checked (%s), refuses both entry points as kelNotReplaying (control: the same material without it is valid)',
+    (file, aid) => {
+      setStateVerifiedApproversEnabled(true)
+      const kelNames = files.filter((f) => /^kel-.*\.cesr$/.test(f)).sort()
+      const at = kelNames.indexOf(file)
+      const t = text(file)
+      // One character of its first controller signature changed: the stream still reads, the KEL no longer replays.
+      const i = t.indexOf('-KAW') + 4 + 40
+      const edited = t.slice(0, i) + (t[i] === 'A' ? 'B' : 'A') + t.slice(i + 1)
+      expect(readKelStream(new TextEncoder().encode(edited)).ok).toBe(true)
+      const run = (m: ChainMaterial) => [
+        verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options),
+        verifySocialAuthorization(m, said('S2-social'), { ward: aids.sam }, options),
+      ]
+      const withEdited = material()
+      withEdited.kels[at] = new TextEncoder().encode(edited)
+      const without = material()
+      without.kels.splice(at, 1)
+      expect(run(material()).map(verdict)).toEqual(['valid', 'valid'])
+      // The control: the KEL is not on either chain, so without it both are still valid; a fix that refuses
+      // everything, or that needs this KEL, fails here.
+      expect(run(without).map(verdict)).toEqual(['valid', 'valid'])
+      // Its own outcome, carrying the prefix the KEL claims and nothing of its contents.
+      const refused = run(withEdited)
+      expect(refused.map(verdict)).toEqual(['kelNotReplaying', 'kelNotReplaying'])
+      const firstSaid = (JSON.parse(t.slice(0, t.indexOf('-KAW'))) as { d: string }).d
+      for (const r of refused) {
+        expect(r).toEqual({ ok: false, reason: 'kelNotReplaying', prefix: aids[aid], detail: expect.any(String) })
+        expect((r as { detail: string }).detail).not.toContain(firstSaid)
+        expect((r as { detail: string }).detail).not.toContain(t.slice(i - 10, i + 10))
+      }
+    }
+  )
+  // A one-event KEL made here with a fresh P-256 key, correctly SAIDed and signed, so the only thing wrong with it is
+  // the KERI feature under test. No K0 fixture uses one, which is why the stream is generated.
+  function madeKel(over: {
+    t?: string
+    kt?: string | string[]
+    bt?: string
+    b?: string[]
+    di?: string
+    ed25519D?: true
+    saidCode?: string
+    n?: string[]
+  }): Uint8Array {
+    const enc = new TextEncoder()
+    const sk = over.ed25519D ? ed25519.utils.randomSecretKey() : p256.utils.randomSecretKey()
+    const key = over.ed25519D
+      ? 'D' + b64Encode(new Uint8Array([0, ...ed25519.getPublicKey(sk)])).slice(1)
+      : '1AAJ' + b64Encode(new Uint8Array([0, 0, 0, ...p256.getPublicKey(sk, true)])).slice(4)
+    const ilk = over.t ?? 'icp'
+    const n = over.n ?? []
+    const ked: Record<string, unknown> = { v: 'KERICAACAAJSON' + 'AAAA' + '.', t: ilk, d: DUMMY, i: DUMMY, s: '0' }
+    Object.assign(ked, {
+      kt: over.kt ?? '1',
+      k: [key],
+      nt: String(n.length),
+      n,
+      bt: over.bt ?? '0',
+      b: over.b ?? [],
+      c: [],
+      a: [],
+    })
+    if (over.di) ked.di = over.di
+    const size = JSON.stringify(ked).length
+    const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    ked.v = 'KERICAACAAJSON' + [18, 12, 6, 0].map((sh) => b64[(size >> sh) & 63]).join('') + '.'
+    const dummied = JSON.stringify(ked)
+    // icp: the prefix is self-addressing (SHA2-256, as keripy's Habery makes it); dip: any prefix, here a fixed one.
+    const pre = ilk === 'icp' ? digest('I', enc.encode(dummied)) : 'I' + 'Q'.repeat(43)
+    const computed = digest(
+      'E',
+      enc.encode(ilk === 'icp' ? dummied : dummied.replace(`"i":"${DUMMY}"`, `"i":"${pre}"`))
+    )
+    // saidCode: the same digest under a code this package lacks (it cannot tell; it must refuse before using it).
+    const said = over.saidCode ? over.saidCode + computed.slice(1) : computed
+    const body = dummied.replace(`"d":"${DUMMY}"`, `"d":"${said}"`).replace(`"i":"${DUMMY}"`, `"i":"${pre}"`)
+    const msg = enc.encode(body)
+    const sig = over.ed25519D ? ed25519.sign(msg, sk) : p256.sign(msg, sk, { prehash: true, lowS: false })
+    const sigQb64 = (over.ed25519D ? 'AA' : 'EA') + b64Encode(new Uint8Array([0, 0, ...sig])).slice(2)
+    return enc.encode(body + '-KAW' + sigQb64)
+  }
+
+  it.each([
+    ['witnesses (bt 1)', { bt: '1', b: ['BO06-duiao9wxLLhTOOfl03Lavbr30WUqcc9LgzImLtd'] }, /witness receipts 0\/1/],
+    ['a weighted threshold', { kt: ['1/2', '1/2'] }, /unsupported signing threshold/],
+    [
+      'a delegated inception (dip)',
+      { t: 'dip', di: 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6' },
+      /unsupported ilk dip/,
+    ],
+    ['a transferable Ed25519 key (D)', { ed25519D: true }, /unsupported key code D/],
+    ['a SAID under another digest code (H)', { saidCode: 'H' }, /unsupported digest code H/],
+    ['a next-key digest under another digest code (H)', { n: ['H' + 'A'.repeat(43)] }, /unsupported digest code H/],
+  ])(
+    'a KEL using a KERI feature this package does not verify (%s) refuses both entry points as unsupportedCesr, never kelNotReplaying (control: the same KEL without it is valid)',
+    (_, feature, detail) => {
+      setStateVerifiedApproversEnabled(true)
+      const run = (extra: Uint8Array) => {
+        const m = material()
+        m.kels.push(extra)
+        return [
+          verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options),
+          verifySocialAuthorization(m, said('S2-social'), { ward: aids.sam }, options),
+        ]
+      }
+      // The control: the same generator without the feature makes a KEL that replays, so the material stays valid.
+      expect(replayKel(digest, madeKel({})).ok).toBe(true)
+      expect(run(madeKel({})).map(verdict)).toEqual(['valid', 'valid'])
+      const refused = run(madeKel(feature as Parameters<typeof madeKel>[0]))
+      expect(refused.map(verdict)).toEqual(['unsupportedCesr', 'unsupportedCesr'])
+      for (const r of refused) expect((r as { detail: string }).detail).toMatch(detail)
+    }
+  )
 })
