@@ -1,0 +1,351 @@
+/**
+ * An approver's state Guardian card, carried to the phone of the person they approve for and checked there
+ * (trusted-approver plan, stage 2, S1). Jordan says yes to approving for Sam; if Jordan's phone holds a Guardian card,
+ * it sends the chain after the yes (approver/guardian-evidence/0.1, signed under its relationship DID). Sam's phone
+ * checks it with sedi/guardian's verifyGuardian against the State roots this build trusts (sedi/guardian/stateRoots)
+ * and the ward set on this phone, keeps the card and the verdict on the offer's record, and checks it again each
+ * time Who approves opens (a card can expire or a root can leave the list).
+ *
+ * Behind both switches: trusted approvers (isTrustedApproversEnabled) and state-verified approvers
+ * (isStateVerifiedApproversEnabled), each of which the SEDI/KERI umbrella turns off. Off, nothing is sent, nothing
+ * arriving is read, and nothing is shown.
+ *
+ * What a verified card says, and no more: a State root on this phone's list names the card's holder as the guardian
+ * of this phone's ward. It does not say the contact's phone controls that holder (that waits for the approver's own
+ * KERI identity, stage 3), and the ward is a Developer setting, not yet bound to the person (KH-P3).
+ *
+ * Every record here is changed in place, never deleted.
+ *
+ * @module trust-tasks/guardianEvidence
+ */
+import { utils, type Agent } from '@credo-ts/core'
+
+import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
+import { trustedStateRoots } from '../sedi/guardian/stateRoots'
+
+import {
+  ROLE_OFFER_ASK,
+  approverRoleEvents,
+  proofUnder,
+  relationshipOn,
+  writtenAsOf,
+  type RoleOfferAsk,
+} from './approverRole'
+import {
+  GUARDIAN_EVIDENCE_MAX_BYTES,
+  GUARDIAN_EVIDENCE_SPEC,
+  GUARDIAN_EVIDENCE_TYPE_URI,
+  type GuardianEvidencePayload,
+} from './approverRoleSpec'
+import { signDocumentProof } from './documentProof'
+import { isStateVerifiedApproversEnabled } from './module/stateVerifiedApproversFlag'
+import { isTrustedApproversEnabled } from './module/trustedApproversFlag'
+import type { InboundContext } from './registry'
+import type { TrustTasksService } from './services/TrustTasksService'
+
+const LOG_PREFIX = '[TrustTasks:GuardianEvidence]'
+
+/** genericRecords recordType of the Guardian card this phone holds to send (one record, changed in place). */
+export const GUARDIAN_EVIDENCE_HELD = 'keyring.sedi-guardian-evidence-held'
+/** genericRecords recordType of this phone's ward for Guardian checks (one record, changed in place). */
+export const STATE_WARD = 'keyring.sedi-state-ward'
+
+/** The card itself: the Guardian credential, the holder it names, and the chain to its root. */
+export type GuardianEvidence = Pick<GuardianEvidencePayload, 'guardianSaid' | 'holder' | 'kels' | 'tels' | 'creds'>
+
+/**
+ * What the last check said. `ok: true` only from verifyGuardian's valid result on a root this build trusts, and its
+ * `state` is the name on this phone's list, never one the sender gave. Every other outcome is a refusal, kept with
+ * its reason for the details line and the log.
+ */
+export type GuardianVerdict =
+  | { ok: true; root: string; state: string; checkedAt: string; expires?: string }
+  | { ok: false; reason: string; detail: string; checkedAt: string }
+
+/** Kept on the offer's record (RoleOfferAsk.guardian): the card a contact sent, as whom, and the last verdict. */
+export interface GuardianOnAsk {
+  approver: string
+  evidence: GuardianEvidence
+  receivedAt: string
+  verdict: GuardianVerdict
+}
+
+/** What Who approves shows beside an approver: verified by a named state, or could not verify, with the outcome. */
+export type GuardianStanding = { kind: 'verified'; state: string } | { kind: 'unverified'; outcome: string }
+
+const OFF = 'state-verified approvers are switched off on this phone (Settings › Developer)'
+const warn = (agent: Pick<Agent, 'config'>, message: string) => agent.config?.logger?.warn(`${LOG_PREFIX} ${message}`)
+const isOn = () => isTrustedApproversEnabled() && isStateVerifiedApproversEnabled()
+
+const te = new TextEncoder()
+
+/** The size the cap reads: kels, tels and creds as UTF-8 JSON. Never throws on a shape it does not expect. */
+export function evidenceBytes(
+  evidence: Partial<Pick<GuardianEvidence, 'kels' | 'tels' | 'creds'>> | undefined
+): number {
+  const json = JSON.stringify({ kels: evidence?.kels, tels: evidence?.tels, creds: evidence?.creds })
+  return te.encode(json ?? '').length
+}
+
+const evidenceOf = (from: GuardianEvidence): GuardianEvidence => ({
+  guardianSaid: from.guardianSaid,
+  holder: from.holder,
+  kels: from.kels,
+  tels: from.tels,
+  creds: from.creds,
+})
+
+/**
+ * Check a card against this phone's ward and trusted roots. Never throws, and never returns `ok: true` from a catch:
+ * verifyGuardian still throws on an error it does not expect (only unreadable material and unknown digest codes are
+ * refusals), and such a throw is a refusal here (`checkFailed`), logged through `onThrow`.
+ */
+export function checkGuardianEvidence(
+  evidence: GuardianEvidence,
+  ward: string | null,
+  now: Date,
+  onThrow: (message: string) => void
+): GuardianVerdict {
+  const checkedAt = now.toISOString()
+  const refuse = (reason: string, detail: string): GuardianVerdict => ({ ok: false, reason, detail, checkedAt })
+  if (!ward) return refuse('noWard', 'no ward is set on this phone (Settings › Developer)')
+  if (evidenceBytes(evidence) > GUARDIAN_EVIDENCE_MAX_BYTES)
+    return refuse('tooLarge', `the card is over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes`)
+  try {
+    const roots = trustedStateRoots()
+    const material: ChainMaterial = {
+      kels: evidence.kels.map((kel) => te.encode(kel)),
+      tels: evidence.tels.map((tel) => ({ ripText: tel.ripText, updateTexts: [...tel.updateTexts] })),
+      creds: [...evidence.creds],
+    }
+    const result = verifyGuardian(
+      material,
+      evidence.guardianSaid,
+      { holder: evidence.holder, ward },
+      { trustedRoots: roots.map((root) => root.aid), now }
+    )
+    if (result.ok !== true) return refuse(result.reason, result.detail)
+    const root = roots.find((known) => known.aid === result.root)
+    if (!root) return refuse('untrustedRoot', `root ${result.root} is not on this phone's list`)
+    return {
+      ok: true,
+      root: root.aid,
+      state: root.name,
+      checkedAt,
+      ...(result.expires ? { expires: result.expires } : {}),
+    }
+  } catch (e) {
+    const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
+    onThrow(message)
+    return refuse('checkFailed', message)
+  }
+}
+
+/** The one record of `recordType`, its content replaced; saved the first time. */
+async function keepOne(agent: Pick<Agent, 'genericRecords'>, recordType: string, content: object): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType })) ?? []
+  if (existing) {
+    existing.content = { ...content }
+    await agent.genericRecords.update(existing)
+  } else {
+    await agent.genericRecords.save({ content: { ...content }, tags: { recordType } })
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The approver's phone (Jordan)
+
+/**
+ * Hold a Guardian card on this phone, to send after a yes (Developer setting: there is no wallet flow that receives a
+ * card yet). Refused over the cap, so a card that cannot go is never kept.
+ */
+export async function holdGuardianEvidence(
+  agent: Pick<Agent, 'genericRecords'>,
+  evidence: GuardianEvidence
+): Promise<'held' | 'tooLarge'> {
+  if (evidenceBytes(evidence) > GUARDIAN_EVIDENCE_MAX_BYTES) return 'tooLarge'
+  await keepOne(agent, GUARDIAN_EVIDENCE_HELD, { ...evidenceOf(evidence), heldAt: new Date().toISOString() })
+  return 'held'
+}
+
+/** The card this phone holds to send, if any. */
+export async function heldGuardianEvidence(
+  agent: Pick<Agent, 'genericRecords'>
+): Promise<GuardianEvidence | undefined> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
+  const held = record?.content as unknown as GuardianEvidence | undefined
+  return held?.guardianSaid ? evidenceOf(held) : undefined
+}
+
+export type EvidenceSendResult = 'sent' | 'off' | 'none' | 'tooLarge' | 'noRelationship'
+
+/**
+ * After a yes as `approverDid` to approve for the agent `agentDid`: send the card this phone holds to the contact on
+ * `connectionId`. Nothing goes with either switch off or no card held, or over the cap.
+ */
+export async function sendGuardianEvidence(
+  agent: Agent,
+  connectionId: string,
+  agentDid: string,
+  approverDid: string
+): Promise<EvidenceSendResult> {
+  if (!isOn()) return 'off'
+  const held = await heldGuardianEvidence(agent)
+  if (!held) return 'none'
+  if (evidenceBytes(held) > GUARDIAN_EVIDENCE_MAX_BYTES) {
+    warn(agent, `the card held here is over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes; not sent on ${connectionId}`)
+    return 'tooLarge'
+  }
+  const relationship = await relationshipOn(agent, connectionId)
+  if (!relationship) return 'noRelationship'
+  const connection = await agent.modules.didcomm.connections.getById(connectionId)
+  if (!connection.did || !connection.theirDid) return 'noRelationship'
+
+  const id = utils.uuid()
+  const payload: GuardianEvidencePayload = {
+    agent: agentDid,
+    approver: approverDid,
+    ...held,
+    sentAt: new Date().toISOString(),
+  }
+  const document: Record<string, unknown> = {
+    id,
+    type: GUARDIAN_EVIDENCE_TYPE_URI,
+    threadId: id,
+    issuer: connection.did,
+    recipient: connection.theirDid,
+    issuedAt: new Date().toISOString(),
+    payload,
+  }
+  const signed = await signDocumentProof(agent, document, relationship.myRelationshipDid as string)
+  const { getTrustTasksService, sendTrustTaskDocument } = ceremony()
+  await getTrustTasksService(agent).retain(agent.context, signed, 'request', connectionId)
+  await sendTrustTaskDocument(agent, connectionId, signed)
+  agent.config?.logger?.info(`${LOG_PREFIX} guardian card sent on connection ${connectionId}`)
+  return 'sent'
+}
+
+/** The ceremony module, reached lazily: it registers this type, so importing it at the top would be a cycle. */
+function ceremony(): typeof import('./ceremony') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  return require('./ceremony')
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The person's phone (Sam)
+
+/**
+ * Set this phone's ward for Guardian checks (Developer setting; the K0 kit's is K0_TEST_WARD). A card is checked as
+ * naming this AID. Not a binding to the person: that waits for stage 3 (KH-P3).
+ */
+export async function setStateWard(agent: Pick<Agent, 'genericRecords'>, ward: string): Promise<void> {
+  await keepOne(agent, STATE_WARD, { ward, setAt: new Date().toISOString() })
+}
+
+/** This phone's ward for Guardian checks, or null when none is set (then no card verifies). */
+export async function stateWardOf(agent: Pick<Agent, 'genericRecords'>): Promise<string | null> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: STATE_WARD })) ?? []
+  const ward = (record?.content as { ward?: unknown } | undefined)?.ward
+  return typeof ward === 'string' && ward.length > 0 ? ward : null
+}
+
+const dropped = (agent: Agent, connectionId: string, why: string) =>
+  warn(agent, `a guardian card on connection ${connectionId} not taken: ${why}`)
+
+/**
+ * A contact's Guardian card arrives: refused over the cap before anything else, verified under their relationship
+ * DID, then checked and kept with its verdict on the offer this phone sent on that connection (for the agent the
+ * offer named). Kept whatever the verdict, so Who approves can say it could not verify; shown only beside the DID the
+ * contact said yes as (see {@link guardianStandings}), so a card that overtakes the yes is not lost.
+ */
+export async function handleGuardianEvidence(
+  agent: Agent,
+  service: TrustTasksService,
+  document: Record<string, unknown>,
+  context: InboundContext
+): Promise<void> {
+  if (!isOn()) return dropped(agent, context.connectionId, OFF)
+  const size = evidenceBytes(document?.payload as GuardianEvidencePayload | undefined)
+  if (size > GUARDIAN_EVIDENCE_MAX_BYTES)
+    return dropped(agent, context.connectionId, `it is ${size} bytes, over the ${GUARDIAN_EVIDENCE_MAX_BYTES} cap`)
+  const relationship = await relationshipOn(agent, context.connectionId)
+  if (!relationship)
+    return dropped(agent, context.connectionId, 'no relationship with this contact to check it against')
+  const outcome = await service.consume(agent.context, {
+    spec: GUARDIAN_EVIDENCE_SPEC as never,
+    document,
+    myDid: context.recipientDid,
+    senderDid: context.senderDid,
+    connectionId: context.connectionId,
+    proofPolicy: proofUnder(agent, relationship.counterpartyRelationshipDid as string),
+    handler: async () => undefined,
+  })
+  if (outcome.kind !== 'accepted' && outcome.kind !== 'handled')
+    return dropped(agent, context.connectionId, `it did not pass its check (${outcome.kind})`)
+
+  const payload = document.payload as GuardianEvidencePayload
+  const [record] =
+    (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK, connectionId: context.connectionId })) ??
+    []
+  const ask = record?.content as unknown as RoleOfferAsk | undefined
+  if (!record || !ask || ask.agentDid !== payload.agent)
+    return dropped(agent, context.connectionId, 'it names no offer this phone sent on this connection')
+
+  const evidence = evidenceOf(payload)
+  const verdict = checkGuardianEvidence(evidence, await stateWardOf(agent), new Date(), (m) => warn(agent, m))
+  const guardian: GuardianOnAsk = {
+    approver: payload.approver,
+    evidence,
+    receivedAt: new Date().toISOString(),
+    verdict,
+  }
+  record.content = { ...ask, guardian }
+  await agent.genericRecords.update(record)
+  agent.config?.logger?.info(
+    `${LOG_PREFIX} guardian card kept on connection ${context.connectionId}: ${verdict.ok ? 'valid' : verdict.reason}`
+  )
+  approverRoleEvents.emit('answered', { connectionId: context.connectionId, decision: 'guardianCard' })
+}
+
+/** The DID a kept card is shown beside: the one written on the agent, or a yes not yet written; else none. */
+function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undefined {
+  if (writtenAsOf(ask) === guardian.approver) return guardian.approver
+  if (ask.state === 'accepted' && ask.acceptedAs === guardian.approver) return guardian.approver
+  return undefined
+}
+
+const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
+  !!a &&
+  a.ok === b.ok &&
+  (a.ok === true && b.ok === true
+    ? a.root === b.root && a.state === b.state && a.expires === b.expires
+    : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
+
+/**
+ * Who approves, on open: each kept card checked again now (expiry, the roots this build trusts, the ward set now),
+ * by the approver DID it is shown beside. A verdict that changed is written back in place; if that write fails, the
+ * fresh verdict is still what shows. Empty with either switch off, and an approver with no card has no entry.
+ */
+export async function guardianStandings(agent: Agent): Promise<Record<string, GuardianStanding>> {
+  if (!isOn()) return {}
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  const ward = await stateWardOf(agent)
+  const standings: Record<string, GuardianStanding> = {}
+  for (const record of records) {
+    const ask = record.content as unknown as RoleOfferAsk
+    const guardian = ask?.guardian
+    if (!guardian) continue
+    const beside = shownBeside(ask, guardian)
+    if (!beside) continue
+    const verdict = checkGuardianEvidence(guardian.evidence, ward, new Date(), (m) => warn(agent, m))
+    if (!sameVerdict(guardian.verdict, verdict)) {
+      record.content = { ...ask, guardian: { ...guardian, verdict } }
+      await agent.genericRecords
+        .update(record)
+        .catch((e: unknown) => warn(agent, `could not keep a new verdict: ${(e as Error)?.message ?? e}`))
+    }
+    standings[beside] =
+      verdict.ok === true ? { kind: 'verified', state: verdict.state } : { kind: 'unverified', outcome: verdict.reason }
+  }
+  return standings
+}

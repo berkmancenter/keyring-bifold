@@ -39,7 +39,9 @@ import {
   type RoleOfferAsk,
   type RoleOfferPrompt,
 } from '../approverRole'
+import { guardianStandings, type GuardianStanding } from '../guardianEvidence'
 import { releaseWarn } from '../module/releaseLog'
+import { isStateVerifiedApproversEnabled } from '../module/stateVerifiedApproversFlag'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 
@@ -67,6 +69,9 @@ export const TrustedApproversIds = {
   check: 'TrustedApproversCheck',
   checkResult: 'TrustedApproversCheckResult',
   checkPrompt: 'TrustedApproversCheckPrompt',
+  guardianVerified: (did: string) => `TrustedApproverGuardianVerified_${did}`,
+  guardianUnverified: (did: string) => `TrustedApproverGuardianUnverified_${did}`,
+  guardianOutcome: (did: string) => `TrustedApproverGuardianOutcome_${did}`,
 } as const
 
 const VtaTrustedApprovers: React.FC = () => {
@@ -81,6 +86,8 @@ const VtaTrustedApprovers: React.FC = () => {
   const [confirming, setConfirming] = useState<string | undefined>()
   const [stepDownError, setStepDownError] = useState<string | undefined>()
   const [names, setNames] = useState<Record<string, string>>({})
+  /** Each approver's state Guardian card, checked again on this open (guardianEvidence.ts); none, no line. */
+  const [standings, setStandings] = useState<Record<string, GuardianStanding>>({})
   const [mine, setMine] = useState<RoleOfferPrompt[]>([])
   const [error, setError] = useState<string | undefined>()
   const [busy, setBusy] = useState<string | undefined>()
@@ -104,8 +111,12 @@ const VtaTrustedApprovers: React.FC = () => {
     ]).catch(() => [[], {}, []] as [RoleOfferAsk[], Record<string, string>, RoleOfferPrompt[]])
     // Read on its own: a note that cannot be read must not blank the lists above.
     const stepped = await steppedDownApprovers(agent).catch(() => [] as string[])
+    // Also on its own. A card whose check fails is "couldn't verify" inside guardianStandings; this catch is for the
+    // records not being readable at all, which shows no line, so it never claims a card is valid.
+    const cards = await guardianStandings(agent).catch(() => ({}) as Record<string, GuardianStanding>)
     setAccepted(yeses)
     setSteppedDown(stepped)
+    setStandings(cards)
     setNames(known)
     setMine(approving)
   }, [agent])
@@ -227,6 +238,30 @@ const VtaTrustedApprovers: React.FC = () => {
   const view = state?.view
   const actionList = (keys: readonly string[]) => keys.map((key) => t(`Approver.Action.${key}`)).join(', ')
   const nameOf = (did: string) => names[did] ?? t('Approver.Unnamed')
+  /** The state card line beside an approver: verified by a named state, or couldn't verify with the outcome. */
+  const guardianLine = (did: string | undefined, name: string) => {
+    const standing = did && isStateVerifiedApproversEnabled() ? standings[did] : undefined
+    if (!did || !standing) return null
+    return standing.kind === 'verified' ? (
+      <View>
+        <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianVerified(did))}>
+          {t('Approver.GuardianVerified', { state: standing.state, interpolation: { escapeValue: false } })}
+        </ThemedText>
+        <ThemedText style={styles.muted}>
+          {t('Approver.GuardianNotTied', { name, interpolation: { escapeValue: false } })}
+        </ThemedText>
+      </View>
+    ) : (
+      <View>
+        <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianUnverified(did))}>
+          {t('Approver.GuardianCouldNotVerify')}
+        </ThemedText>
+        <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianOutcome(did))}>
+          {t('Approver.GuardianOutcome', { outcome: standing.outcome, interpolation: { escapeValue: false } })}
+        </ThemedText>
+      </View>
+    )
+  }
   const waiting = accepted.filter((ask) => !view?.approvers.includes(ask.acceptedAs as string))
 
   if (!on || !isTrustedApproversEnabled())
@@ -260,6 +295,7 @@ const VtaTrustedApprovers: React.FC = () => {
             >
               <ThemedText variant="bold">{name}</ThemedText>
               <ThemedText style={styles.muted}>{t('Approver.Accepted')}</ThemedText>
+              {guardianLine(ask.acceptedAs, name)}
               <ThemedText>{actionList(ask.actions)}</ThemedText>
               <Button
                 title={t('Approver.Add', { name, interpolation: { escapeValue: false } })}
@@ -296,6 +332,7 @@ const VtaTrustedApprovers: React.FC = () => {
         {view?.approvers.map((did) => (
           <View key={did} style={styles.card} testID={testIdWithKey(TrustedApproversIds.approver(did))}>
             <ThemedText variant="bold">{nameOf(did)}</ThemedText>
+            {guardianLine(did, nameOf(did))}
             {steppedDown.includes(did) ? (
               <ThemedText testID={testIdWithKey(TrustedApproversIds.steppedDown(did))}>
                 {t('Approver.SteppedDownRemove', { name: nameOf(did), interpolation: { escapeValue: false } })}
