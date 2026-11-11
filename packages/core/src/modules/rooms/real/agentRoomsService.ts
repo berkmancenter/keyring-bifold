@@ -1715,6 +1715,10 @@ export class AgentRoomsService implements RoomsService {
     }
     if (read.status === 'unreadable')
       throw new RoomsRefused('curate', 'profileUnread', true, "the agent's answer for the profile could not be read")
+    // A stale profile is the room's own: the agent walks down from the current epoch and answers the first valid one it
+    // finds (VTI vta-service-v0.79.0 trust_tasks/room_profile.rs `resolve`, `stale = epoch < current`), so no epoch above
+    // it holds one. Written forward under the current epoch, it is what upstream says a room in that state needs: members
+    // who joined since "read the profile as stale or absent until it is written again". Nothing newer exists to drop.
     const current = read.status === 'found' ? (read.profile ?? {}) : {}
     const named = typeof current.name === 'string' && current.name.trim() ? current.name : undefined
     const name = named ?? (room.nameFrom === 'community' ? String(room.name) : undefined)

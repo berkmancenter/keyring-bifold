@@ -405,6 +405,22 @@ describe('turning replies and reactions on', () => {
     expect(s.tasks(ROOMS_TASK.keysProfileRead)).toHaveLength(before + 1)
   })
 
+  it("carries a stale profile forward: it is the room's own, the newest any epoch holds", async () => {
+    const s = setup({
+      served: WITH_WRITE,
+      actions: CURATOR,
+      profile: () => ({ roomId: ROOM, status: 'found', stale: true, profile: current }),
+    })
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    expect(written(s)).toEqual([
+      {
+        roomId: ROOM,
+        host: HOST,
+        profile: { ...current, recordMembers: ['editedAt', 'kind', 'inReplyTo', 'writtenAt'] },
+      },
+    ])
+  })
+
   it('writes nothing when all three are listed already (control)', async () => {
     const s = setup({ served: WITH_WRITE, actions: CURATOR, listed: ALL })
     await s.service.turnOnRepliesAndReactions(ROOM)
