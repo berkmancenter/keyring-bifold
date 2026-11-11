@@ -680,7 +680,9 @@ const stillCurrent = (verdict: GuardianVerdict, now: Date) =>
 /**
  * The verdict on open: the memoised one if the check would read exactly the same inputs and it has not expired,
  * else the check run now (and memoised). Reuse only ever returns a verdict the check itself gave for those inputs,
- * so it cannot turn a refusal into valid.
+ * so it cannot turn a refusal into valid. The exception: a card whose root publishes at a did:webs is never
+ * memoised. It is resolved again on every open (once per open), so a root's rotation or revocation shows at once
+ * and "couldn't reach the state" is never reused.
  */
 async function verdictNow(
   agent: Agent,
@@ -731,9 +733,10 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
  * Who approves, on open: each kept card checked again now (expiry, the roots this build trusts, the ward set now),
  * by the approver DID it is shown beside. The check runs on the JS thread, so it is memoised for this run of the app
  * (see {@link verdictNow}): it runs again only when the ward, the trusted roots or the card's text moved, or a valid
- * verdict's expiry has come, and always on the first open after a restart. A verdict that changed is written back in
- * place; if that write fails, the fresh verdict is still what shows. Empty with either switch off, and an approver
- * with no card has no entry.
+ * verdict's expiry has come, and always on the first open after a restart. Except for a card whose root publishes
+ * at a did:webs: that one is fetched and checked again on EVERY open, never memoised. A verdict that changed is
+ * written back in place; if that write fails, the fresh verdict is still what shows. Empty with either switch off,
+ * and an approver with no card has no entry.
  */
 export async function guardianStandings(
   agent: Agent,
