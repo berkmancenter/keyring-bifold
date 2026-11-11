@@ -32,6 +32,8 @@ const checked = (evidence: GuardianEvidence = card, now = NOW) => checkHeldCard(
 
 const CHECKS_OUT = /^StateCard\.ChecksOut/
 const realDev = (global as { __DEV__?: boolean }).__DEV__
+// The K0 root's own `demo` as this build has it, put back after a row changes it.
+const realDemo = Object.getOwnPropertyDescriptor(K0_TEST_ROOT, 'demo')
 
 const switches = (sv: boolean, testState = true) => {
   setTrustedApproversEnabled(true)
@@ -46,6 +48,7 @@ afterEach(() => {
   SEDI_KERI_REMOTE_OFF.off = false
   ;(global as { __DEV__?: boolean }).__DEV__ = realDev
   delete (K0_TEST_ROOT as { demo?: boolean }).demo
+  if (realDemo) Object.defineProperty(K0_TEST_ROOT, 'demo', realDemo)
 })
 
 describe('the state card: what it says', () => {

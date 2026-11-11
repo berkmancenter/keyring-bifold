@@ -19,6 +19,7 @@ import { setStateVerifiedApproversEnabled } from '../../../trust-tasks/module/st
 import { setTrustTestStateEnabled } from '../../../trust-tasks/module/trustTestStateFlag'
 import { setTrustedApproversEnabled } from '../../../trust-tasks/module/trustedApproversFlag'
 import { K0_TEST_GUARDIAN_CARD } from '../../guardian/k0TestCard'
+import { K0_TEST_ROOT } from '../../guardian/stateRoots'
 import StateCardDetails from '../StateCardDetails'
 import StateCardPass from '../StateCardPass'
 import { checkHeldCard, stateCardView } from '../stateCard'
@@ -87,7 +88,7 @@ describe('the state card in Credentials', () => {
   test('switched on, a card held: the card shows, and "no credentials" does not', async () => {
     const tree = await wallet()
     expect(shown(tree)).toBe(true)
-    expect(tree.getByTestId(id('CommunityPassTitle')).props.children).toBe('Test state (K0)')
+    expect(tree.getByTestId(id('CommunityPassTitle')).props.children).toBe(K0_TEST_ROOT.name)
     expect(tree.getByTestId(id('CommunityPassLapsing')).props.children).toBe('StateCard.Demo')
     expect(tree.queryByText('Credentials.EmptyList')).toBeNull()
   })
