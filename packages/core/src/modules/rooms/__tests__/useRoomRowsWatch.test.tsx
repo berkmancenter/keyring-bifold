@@ -213,7 +213,7 @@ describe("Messages' rooms watched at their hosts", () => {
     expect(s.listNotes).not.toHaveBeenCalled()
   })
 
-  test('a signal while a read of every room is out reads nothing more: that read reads it and arms it again', async () => {
+  test('a signal while every room is still being listed: the pass reads it, and it is read alone again once the pass ends', async () => {
     let release: () => void = () => undefined
     const s = serviceWith([room('a')], { a: [note('a1', 1)] })
     const w = watching(s)
@@ -227,7 +227,34 @@ describe("Messages' rooms watched at their hosts", () => {
     expect(s.listNotes).not.toHaveBeenCalled()
     await act(async () => release())
     await flush()
-    expect(s.listNotes.mock.calls.map(([roomId]) => roomId)).toEqual(['a'])
+    // The pass reads 'a'; the signal kept meanwhile reads it once more after: a read too many, never one too few.
+    expect(s.listNotes.mock.calls.map(([roomId]) => roomId)).toEqual(['a', 'a'])
+  })
+
+  test('a signal for a room the pass has already read, while it reads the next: the change is read once the pass ends', async () => {
+    const notes: Record<string, NoteSummary[]> = { a: [note('a1', 1)], b: [note('b1', 2)] }
+    const s = serviceWith([room('a'), room('b')], notes, { a2: chat('New in a') })
+    const w = watching(s)
+    const { list } = mount(s)
+    await inView()
+    await flush()
+    // The next pass: 'a' is read, then the read of 'b' is held, so the pass is still out.
+    let releaseB: () => void = () => undefined
+    const real = s.listNotes.getMockImplementation()!
+    s.listNotes.mockImplementation(async (roomId: string, options?: { sinceVersion?: number }) => {
+      if (roomId === 'b') await new Promise<void>((r) => (releaseB = r))
+      return real(roomId, options)
+    })
+    act(() => refreshRoomRows())
+    await flush()
+    // 'a' was read at version 1; now it changes, and its signal lands while the pass waits on 'b'.
+    notes.a = [...notes.a, note('a2', 3)]
+    await w.signal('a')
+    await act(async () => releaseB())
+    await flush()
+    await flush()
+    expect(list.result.current.rows.rows.find((r) => r.roomId === 'a')?.lastPost?.text).toBe('New in a')
+    expect(w.watchRoom).toHaveBeenLastCalledWith('a', 3)
   })
 
   test('a service that cannot watch: rows read as before, and no signal is listened for (control)', async () => {

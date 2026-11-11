@@ -132,6 +132,12 @@ interface Feed {
   listed?: Map<string, RoomSummary & { communityDid: string }>
   /** Rooms being read alone on a signal: one at a time each. */
   readingAlone: Set<string>
+  /**
+   * Rooms signalled while a read of every room was out: read alone once it ends. That read may have read the room
+   * before its change, and the signal is spent (one arming, one signal), so dropping it would leave the change to the
+   * next two-minute read.
+   */
+  signalledWhileReading: Set<string>
 }
 
 const feed: Feed = {
@@ -143,6 +149,7 @@ const feed: Feed = {
   inView: 0,
   listeners: new Set(),
   readingAlone: new Set(),
+  signalledWhileReading: new Set(),
 }
 // The app's log, from the poll: one line per read, so a tester's report says when the rows came and why not.
 let log: ((line: string) => void) | undefined
@@ -394,9 +401,18 @@ async function readAll(service: RoomsService): Promise<void> {
     publish()
     if (feed.again) {
       feed.again = false
+      // The read asked for reads every room; what was signalled meanwhile waits for it to end, then reads alone.
       refreshRoomRows()
-    }
+    } else readSignalledWhileReading(service)
   }
+}
+
+/** The rooms signalled during a read of every room, each read alone now that it has ended (readOneOnSignal). */
+function readSignalledWhileReading(service: RoomsService): void {
+  if (feed.service !== service) return
+  const signalled = [...feed.signalledWhileReading]
+  feed.signalledWhileReading.clear()
+  for (const roomId of signalled) void readOneOnSignal(service, roomId)
 }
 
 /**
@@ -404,6 +420,10 @@ async function readAll(service: RoomsService): Promise<void> {
  * the newest version read, so a post in one reaches its row on the agent's signal rather than at the next two-minute
  * read. Arming one already armed from that version sends nothing (roomWatches). Where the agent, the host or the release
  * switch can't watch, nothing is armed and the rows read as before.
+ *
+ * The cap bounds what each call arms, not what stays armed: a room that leaves the top ones, or Messages closing, leaves
+ * its watch to lapse at its lease (a week) or fire once. Past the agent's 64 a member, it refuses with `limitReached`
+ * and that room is polled (roomWatches), so the cost of a residue is polling, never a missed post.
  */
 function watchActive(service: RoomsService): void {
   if (!service.watchRoom || feed.inView === 0 || AppState.currentState !== 'active') return
@@ -420,13 +440,22 @@ function watchActive(service: RoomsService): void {
 }
 
 /**
- * A room's watch said it changed: read that room alone, show its row, and arm it again from what was read. Not while a
- * read of every room is out (it reads this one and arms it again itself), and one read at a time for each room.
+ * A room's watch said it changed: read that room alone, show its row, and arm it again from what was read. One read at a
+ * time for each room. While a read of every room is out, the room is kept and read alone once that read ends, as any
+ * read asked for meanwhile is (`feed.again`): the pass may already have read it before the change.
+ *
+ * A signal is acted on whenever it comes, Messages in view or not, for as long as the watch armed in view lasts: it
+ * costs one read of a room the member is in. A read that fails leaves the room unarmed, on the two-minute read, which
+ * arms it again in view (watchActive); nothing retries it sooner.
  */
 async function readOneOnSignal(service: RoomsService, roomId: string): Promise<void> {
   const room = feed.listed?.get(roomId)
   const byRoom = tracks.get(service)
-  if (feed.service !== service || feed.asking || !room || !byRoom || feed.readingAlone.has(roomId)) return
+  if (feed.service !== service || !room || !byRoom || feed.readingAlone.has(roomId)) return
+  if (feed.asking) {
+    feed.signalledWhileReading.add(roomId)
+    return
+  }
   if (room.joined === false) return
   feed.readingAlone.add(roomId)
   try {
@@ -659,6 +688,7 @@ export function useRoomRowsPoll(
     feed.keptRooms = new Set()
     feed.listed = undefined
     feed.readingAlone = new Set()
+    feed.signalledWhileReading = new Set()
     feed.failed = false
     feed.lastAsk = 0
     publish()
