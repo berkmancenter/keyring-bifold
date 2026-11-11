@@ -1699,35 +1699,26 @@ export class AgentRoomsService implements RoomsService {
   public async turnOnRepliesAndReactions(roomId: string): Promise<void> {
     const room = await this.requireInRoom(roomId, 'write')
     if (room.tier !== 'attributed')
-      throw new RoomsRefused('turnOnRecords', 'tierNotYet', false, `replies in a ${room.tier} room are not built`)
+      throw new RoomsRefused('curate', 'tierNotYet', false, `replies in a ${room.tier} room are not built`)
     const verbs = room.verbs ?? []
     if (!verbs.includes('curate') && !verbs.includes('admin'))
-      throw new RoomsRefused('turnOnRecords', 'noAuthority', false, 'it takes curate or admin in the room')
+      throw new RoomsRefused('curate', 'noAuthority', false, 'it takes curate or admin in the room')
     const { community, host } = this.hostOf(room, 'write')
     const served = this.served?.types ?? []
     if (!served.includes(ROOMS_TASK.keysProfileRead) || !served.includes(ROOMS_TASK.keysProfileWrite))
-      throw new RoomsUnavailable(
-        'turnOnRecords',
-        'agentDoesNotServe',
-        "the agent can't read and write a room's profile"
-      )
+      throw new RoomsUnavailable('curate', 'agentDoesNotServe', "the agent can't read and write a room's profile")
     let read: ReturnType<typeof parseProfileRead>
     try {
       read = parseProfileRead(await this.backend.agentTask(ROOMS_TASK.keysProfileRead, { roomId: room.roomId, host }))
     } catch (e) {
-      throw new RoomsRefused('turnOnRecords', 'profileUnread', true, message(e), e)
+      throw new RoomsRefused('curate', 'profileUnread', true, message(e), e)
     }
     if (read.status === 'unreadable')
-      throw new RoomsRefused(
-        'turnOnRecords',
-        'profileUnread',
-        true,
-        "the agent's answer for the profile could not be read"
-      )
+      throw new RoomsRefused('curate', 'profileUnread', true, "the agent's answer for the profile could not be read")
     const current = read.status === 'found' ? (read.profile ?? {}) : {}
     const named = typeof current.name === 'string' && current.name.trim() ? current.name : undefined
     const name = named ?? (room.nameFrom === 'community' ? String(room.name) : undefined)
-    if (!name) throw new RoomsRefused('turnOnRecords', 'noName', false, 'the room has no name to keep in its profile')
+    if (!name) throw new RoomsRefused('curate', 'noName', false, 'the room has no name to keep in its profile')
     const listed = read.listed
     const recordMembers = [...listed, ...NEEDS.reaction.filter((member) => !listed.includes(member))]
     if (recordMembers.length === listed.length) return
