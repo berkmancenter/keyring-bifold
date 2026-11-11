@@ -29,6 +29,7 @@ import {
 } from '../approverRoleSpec'
 import {
   GUARDIAN_EVIDENCE_HELD,
+  checkGuardianEvidence,
   evidenceBytes,
   guardianStandings,
   handleGuardianEvidence,
@@ -44,6 +45,7 @@ import {
   setStateVerifiedApproversEnabled,
 } from '../module/stateVerifiedApproversFlag'
 import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../module/trustedApproversFlag'
+import { setTrustTestStateEnabled } from '../module/trustTestStateFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
@@ -227,9 +229,11 @@ describe('the card and its cap', () => {
     expect(schemaTakes({ ...documentOf(card('G-ok')).payload, state: 'Utah' })).toBe(false)
   })
 
-  test('a release trusts no root; a Developer build only the K0 test root', () => {
-    expect(stateRoots.stateRootsFor(false)).toEqual([])
-    expect(stateRoots.stateRootsFor(true)).toEqual([stateRoots.K0_TEST_ROOT])
+  test('a release trusts no root; a Developer build, or the test-state setting, only the K0 test root', () => {
+    expect(stateRoots.stateRootsFor(false, false)).toEqual([])
+    expect(stateRoots.stateRootsFor(true, false)).toEqual([stateRoots.K0_TEST_ROOT])
+    expect(stateRoots.stateRootsFor(false, true)).toEqual([stateRoots.K0_TEST_ROOT])
+    expect(stateRoots.stateRootsFor(true, true)).toEqual([stateRoots.K0_TEST_ROOT])
     expect(stateRoots.K0_TEST_ROOT.aid).toBe(JSON.parse(text('PROVENANCE.json')).trustedRoot)
     expect(stateRoots.K0_TEST_WARD).toBe(SAM_WARD)
   })
@@ -239,10 +243,10 @@ describe("on the person's phone: a card arrives", () => {
   test('a valid K0 card is kept on the ask in place, valid, named by our list', async () => {
     const sam = await arrives(card('G-ok'))
     expect(sam.consume).toHaveBeenCalledTimes(1)
-    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'K0 test state' })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'Test state (K0)' })
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
     expect(sam.raw.genericRecords.deleteById).not.toHaveBeenCalled()
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'K0 test state' } })
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
   })
 
   test("the wrong ward: kept, couldn't verify as wardMismatch (control: the same card, Sam's ward, is valid)", async () => {
@@ -268,7 +272,7 @@ describe("on the person's phone: a card arrives", () => {
   })
 
   test("a release's empty list verifies nothing: the valid K0 card reads couldn't verify", async () => {
-    jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue(stateRoots.stateRootsFor(false))
+    jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue(stateRoots.stateRootsFor(false, false))
     const sam = await arrives(card('G-ok'))
     expect(await guardianStandings(sam.agent)).toEqual({
       [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' },
@@ -322,6 +326,68 @@ describe("on the person's phone: a card arrives", () => {
   })
 })
 
+describe('tester builds: the Developer setting "Trust the test state (K0)"', () => {
+  // jest runs as a Developer build (__DEV__ true); a TestFlight or OTA build is not one. Each row sets it.
+  const g = globalThis as { __DEV__?: boolean }
+  const wasDev = g.__DEV__
+  const asBuild = (developer: boolean) => {
+    g.__DEV__ = developer
+  }
+  afterEach(() => {
+    g.__DEV__ = wasDev
+    setTrustTestStateEnabled(false)
+  })
+
+  test('a release with the setting off verifies nothing (control: a Developer build verifies the same card)', async () => {
+    asBuild(false)
+    const sam = await arrives(card('G-ok'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
+    asBuild(true)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+  })
+
+  test('a release with the setting on verifies the K0 card as "Test state (K0)" (control: switched off again, it does not)', async () => {
+    asBuild(false)
+    setTrustTestStateEnabled(true)
+    const sam = await arrives(card('G-ok'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+    setTrustTestStateEnabled(false)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
+  })
+
+  test.each([
+    ['trusted approvers off', () => setTrustedApproversEnabled(false)],
+    ['trusted approvers turned off remotely', () => (TRUSTED_APPROVERS_REMOTE_OFF.off = true)],
+    ['state-verified approvers off', () => setStateVerifiedApproversEnabled(false)],
+    ['state-verified approvers turned off remotely', () => (STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true)],
+    ['the SEDI/KERI umbrella off', () => (SEDI_KERI_REMOTE_OFF.off = true)],
+  ])('%s: a release trusts no root even with the setting on (control: all on, the K0 root)', (_, off) => {
+    asBuild(false)
+    setTrustTestStateEnabled(true)
+    expect(stateRoots.trustedStateRoots()).toEqual([stateRoots.K0_TEST_ROOT])
+    off()
+    expect(stateRoots.trustedStateRoots()).toEqual([])
+  })
+
+  test('it adds the K0 root only: a card from another root still reads untrustedRoot (control: the K0 card verifies)', async () => {
+    asBuild(false)
+    setTrustTestStateEnabled(true)
+    const other = await arrives(card('G-untrusted'))
+    expect(await guardianStandings(other.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
+    const sam = await arrives(card('G-ok'))
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
+  })
+
+  test('the name shown is the test state, never one the card claims (control: the K0 root is named so)', () => {
+    asBuild(false)
+    setTrustTestStateEnabled(true)
+    expect(stateRoots.K0_TEST_ROOT.name).toBe('Test state (K0)')
+    const claims = { ...card('G-ok'), state: 'Utah', name: 'Utah' } as unknown as GuardianEvidence
+    const verdict = checkGuardianEvidence(claims, SAM_WARD, new Date(), () => undefined)
+    expect(verdict).toMatchObject({ ok: true, state: 'Test state (K0)', root: stateRoots.K0_TEST_ROOT.aid })
+  })
+})
+
 describe('shown only beside the DID it was sent as, and checked again on open', () => {
   test('a card that overtakes the yes is kept and shown once the yes is in (control: before it, nothing)', async () => {
     const sam = phone()
@@ -346,7 +412,7 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     await setStateWard(sam.agent, SAM_WARD)
     sam.ask({ state: 'closed', written: true, writtenAs: JORDAN })
     await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'K0 test state' } })
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
   })
 
   test("on open the card is checked again: a changed ward turns a kept valid into couldn't verify, written in place", async () => {
@@ -382,7 +448,7 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     await approverRole.offerApproverRole(sam.agent, CONN, SAM_AGENT, ['joinCommunity', 'addDevice'])
     expect(sam.askRecord().state).toBe('open')
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'K0 test state' } })
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Test state (K0)' } })
 
     const other = phone()
     other.ask({ state: 'closed', written: true, writtenAs: JORDAN })

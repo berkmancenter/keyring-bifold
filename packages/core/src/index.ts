@@ -288,6 +288,8 @@ export {
   setStateVerifiedApproversEnabled,
   isStateVerifiedApproversEnabled,
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
+  setTrustTestStateEnabled,
+  isTrustTestStateEnabled,
   SEDI_KERI_REMOTE_OFF,
   setDidCommV2Enabled,
   setPeerLegCarriage,
