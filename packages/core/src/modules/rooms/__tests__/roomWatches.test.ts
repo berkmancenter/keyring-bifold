@@ -36,12 +36,14 @@ function setUp({
   served = [ROOMS_TASK.keysWatch01],
   holds,
   now = () => T0,
+  on = () => true,
 }: {
   answer?: Answer
   /** null: what the agent serves is not known yet. */
   served?: string[] | null
   holds?: ReturnType<typeof storedConsentHolds>
   now?: () => number
+  on?: () => boolean
 } = {}) {
   const order: string[] = []
   const agentTask = jest.fn(async (type: string, payload: Record<string, unknown>, options?: unknown) => {
@@ -61,6 +63,7 @@ function setUp({
     now,
     warn,
     logRef: (id) => id.slice(-6),
+    on,
   })
   const sent = () => agentTask.mock.calls.map(([, p]) => p as unknown as Payload)
   return { watches, agentTask, sent, order, warn }
@@ -430,5 +433,26 @@ describe('ending watches', () => {
     await s.watches.idle()
     expect(s.watches.watched('room:1')).toBe(false)
     expect(s.agentTask).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the release switch (liveDeliverySwitch)', () => {
+  test('off: nothing is armed, and every room is polled', async () => {
+    const s = setUp({ on: () => false })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    await s.watches.idle()
+    expect(s.agentTask).not.toHaveBeenCalled()
+    expect(s.watches.watched('room:1')).toBe(false)
+  })
+
+  test('turned off after a room was armed: no longer watched, and its signal reads nothing', async () => {
+    let on = true
+    const s = setUp({ on: () => on })
+    s.watches.want('room:1', MEMBER, HOST, 4)
+    await s.watches.idle()
+    expect(s.watches.watched('room:1')).toBe(true)
+    on = false
+    expect(s.watches.watched('room:1')).toBe(false)
+    expect(s.watches.signal(signal('room:1'))).toBeUndefined()
   })
 })

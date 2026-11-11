@@ -207,6 +207,11 @@ export interface RoomsBackend {
    * no signal arrives, and every room is polled.
    */
   onRoomSignal?(listener: (payload: Record<string, unknown>) => void): () => void
+  /**
+   * Lets rooms be watched and their signals read (live delivery). The real backend reads it from the release's switch
+   * (`liveDeliverySwitch.ts`) each time it is asked. Anything but `true`, absent included, is off: every room polls.
+   */
+  readonly liveDelivery?: boolean
 }
 
 /** The picked file, and the room host's HTTPS Trust Task door, which an upload's single-use key sends to. */
@@ -470,6 +475,7 @@ export class AgentRoomsService implements RoomsService {
       now: () => this.now(),
       warn: (line) => this.backend.warn(line),
       logRef,
+      on: () => this.backend.liveDelivery === true,
     })
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     // Before any room can open: a killed app's copy of a file does not wait for the next file to be opened. Once per

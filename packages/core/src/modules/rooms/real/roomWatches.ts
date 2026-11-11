@@ -49,6 +49,8 @@ export interface RoomWatchDeps {
   warn(line: string): void
   /** A short, loggable form of a room id. */
   logRef(roomId: string): string
+  /** Whether live delivery is on (liveDeliverySwitch.ts): asked at each arming and each signal. Off: nothing is armed and no signal is acted on. */
+  on(): boolean
 }
 
 type Watch =
@@ -77,7 +79,7 @@ export class RoomWatches {
    * already. Returns at once; the request goes after any still out.
    */
   want(roomId: string, member: string, host: string, sinceVersion: number): void {
-    if (this.stopped || !(this.deps.served() ?? []).includes(ROOMS_TASK.keysWatch01)) return
+    if (!this.deps.on() || this.stopped || !(this.deps.served() ?? []).includes(ROOMS_TASK.keysWatch01)) return
     const held = this.watches.get(roomId)
     if (held && held.member === member && held.host === host) {
       if (held.state === 'polled') return
@@ -97,6 +99,8 @@ export class RoomWatches {
 
   /** True while `roomId` has a watch armed that has neither fired nor lapsed: its timed poll can wait. */
   watched(roomId: string): boolean {
+    // Off: no room counts as watched, so every one is polled at today's pace, whatever was armed before.
+    if (!this.deps.on()) return false
     const w = this.watches.get(roomId)
     return w?.state === 'armed' && w.expiresAt > this.deps.now()
   }
@@ -106,6 +110,7 @@ export class RoomWatches {
    * member and at the host it was armed with; anything else changes nothing and returns undefined.
    */
   signal(payload: unknown): string | undefined {
+    if (!this.deps.on()) return undefined
     const changed = parseChanged(payload)
     if (!changed) return undefined
     const w = this.watches.get(changed.roomId)

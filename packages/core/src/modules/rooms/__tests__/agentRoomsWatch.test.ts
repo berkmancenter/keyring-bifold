@@ -13,7 +13,10 @@ const LATER = new Date(Date.now() + 7 * 24 * 3600_000).toISOString()
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url')
 const decode = (s: string) => Buffer.from(s, 'base64url').toString('utf8')
 
-function setUp({ served = [ROOMS_TASK.keysWatch01] }: { served?: string[] } = {}) {
+function setUp({
+  served = [ROOMS_TASK.keysWatch01],
+  liveDelivery = true,
+}: { served?: string[]; /** null: the backend does not say. */ liveDelivery?: boolean | null } = {}) {
   const signals = new Set<(payload: Record<string, unknown>) => void>()
   const agentTask = jest.fn(async (type: string, payload: Record<string, unknown>) => {
     switch (type) {
@@ -62,6 +65,7 @@ function setUp({ served = [ROOMS_TASK.keysWatch01] }: { served?: string[] } = {}
     hiddenOffers: async () => [],
     hideOffer: jest.fn(async () => undefined),
     warn: jest.fn(),
+    ...(liveDelivery === null ? {} : { liveDelivery }),
     onRoomSignal: (listener) => {
       signals.add(listener)
       return () => void signals.delete(listener)
@@ -173,4 +177,11 @@ test('an agent that does not serve the watch: nothing is sent and the room is no
   await s.settle()
   expect(s.watchesSent()).toEqual([])
   expect(s.service.roomWatched(ROOM)).toBe(false)
+})
+
+test('a backend that does not say live delivery is on: nothing is armed (fails closed)', async () => {
+  const s = await listed(setUp({ liveDelivery: null }))
+  s.service.watchRoom(ROOM, 4)
+  await s.settle()
+  expect(s.watchesSent()).toEqual([])
 })

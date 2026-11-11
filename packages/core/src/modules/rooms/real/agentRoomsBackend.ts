@@ -21,6 +21,7 @@ import { GenericRecordsVettingStore } from '../../trust-tasks/module/vtiVetting'
 import { vtiAgent } from '../../trust-tasks/module/vtiAgent'
 import { GenericRecordsTspPeerRevisionStore } from '../../trust-tasks/module/vtiTsp'
 
+import { isRoomLiveDeliveryOn } from '../liveDeliverySwitch'
 import { isRoomRecordSendingOn } from '../recordSendingSwitch'
 import { afterLeavingCommunity } from '../roomsLeave'
 
@@ -177,6 +178,11 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     // Read on every send, never kept: a release that turns sending off has it off at the next start (recordSendingSwitch).
     get recordSending() {
       return isRoomRecordSendingOn()
+    },
+    // Read at each arming and each signal, never kept: a release that turns it off has every room polled at the next
+    // start (liveDeliverySwitch).
+    get liveDelivery() {
+      return isRoomLiveDeliveryOn()
     },
     sessionKept: isSessionKept,
     sessionFree: async (communityDid) => {
