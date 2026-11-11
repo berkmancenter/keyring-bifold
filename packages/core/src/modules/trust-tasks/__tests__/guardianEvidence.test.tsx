@@ -548,6 +548,19 @@ describe('Who approves: the state card line', () => {
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
   })
 
+  test('switched off while open: the line goes on the next render, before anything is read again (control: on, shown)', async () => {
+    const tree = await showFor(await writtenWith(card('G-ok')))
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+    STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true
+    tree.rerender(
+      <BasicAppContext>
+        <VtaTrustedApprovers />
+      </BasicAppContext>
+    )
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
+    expect(tree.getByTestId(id(TrustedApproversIds.approver(JORDAN)))).toBeTruthy()
+  })
+
   test("verifyGuardian throwing on open: couldn't verify, and the kept verdict is no longer valid (control: no throw, verified)", async () => {
     const sam = await writtenWith(card('G-ok'))
     expect(sam.askRecord().guardian?.verdict.ok).toBe(true)
