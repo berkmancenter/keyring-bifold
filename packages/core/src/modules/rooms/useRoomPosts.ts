@@ -25,7 +25,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useAgentSession } from './agentSession'
 import { newestFirst, postOf, type RoomPost, withRepliesToReactions } from './roomPosts'
-import type { HostCheck, Identity, Note, NoteList, NoteSummary, RoomsService } from './types'
+import {
+  RECORD_UNOPENED_REASONS,
+  RoomsRefused,
+  type HostCheck,
+  type Identity,
+  type Note,
+  type NoteList,
+  type NoteSummary,
+  type RecordUnopenedReason,
+  type RoomsService,
+} from './types'
 
 /**
  * The posts read on opening a room, and on each "Load older". Small on purpose: each is one task for the person's
@@ -127,6 +137,12 @@ const prunedPast = (listing: Listing, newer: NoteList): boolean =>
 
 const readKey = (note: NoteSummary) => `${note.key}@${note.version}`
 
+/** The reason a read was refused with, when the agent gave one Keyring knows (`RoomsService.readNote`). */
+const unopenedReason = (e: unknown): RecordUnopenedReason | undefined =>
+  e instanceof RoomsRefused && e.operation === 'readNote'
+    ? RECORD_UNOPENED_REASONS.find((r) => r === e.code)
+    : undefined
+
 /**
  * A listing, counted in `inFlight` until it settles, even when the call throws before it returns a promise: left
  * counted, every later poll would be skipped for the life of the screen.
@@ -188,12 +204,19 @@ export function useRoomPosts(
   const tickNow = useRef<(() => void) | undefined>(undefined)
   /** When the last listing of the room was asked: a watched room's poll waits ROOM_WATCHED_POLL_MS from it. */
   const askedAt = useRef(0)
-  const reads = useRef<{ service?: RoomsService; roomId: string; notes: Map<string, Note> }>({
+  const reads = useRef<{
+    service?: RoomsService
+    roomId: string
+    notes: Map<string, Note>
+    /** Why each record that could not be read was refused, when the agent said. Cleared by a read that succeeds. */
+    unopened: Map<string, RecordUnopenedReason>
+  }>({
     roomId,
     notes: new Map(),
+    unopened: new Map(),
   })
   if (reads.current.service !== service || reads.current.roomId !== roomId)
-    reads.current = { service, roomId, notes: new Map() }
+    reads.current = { service, roomId, notes: new Map(), unopened: new Map() }
   const session = useAgentSession()
   // The agent session each failed ask was sent on: a session opened since asks again.
   const openedAt = useRef(session.openedAt)
@@ -312,9 +335,14 @@ export function useRoomPosts(
     if (!service || !listing) return
     let current = true
     const read = reads.current.notes
+    const unopened = reads.current.unopened
     const page = listing.notes.slice(0, shown)
-    const postsOf = (notes: NoteSummary[]) =>
-      withRepliesToReactions(notes.map((summary) => postOf(read.get(readKey(summary)) ?? summary, actingAs)))
+    const postOfSummary = (summary: NoteSummary) => {
+      const post = postOf(read.get(readKey(summary)) ?? summary, actingAs)
+      const why = post.unread ? unopened.get(readKey(summary)) : undefined
+      return why ? { ...post, unreadWhy: why } : post
+    }
+    const postsOf = (notes: NoteSummary[]) => withRepliesToReactions(notes.map(postOfSummary))
     const draw = (notes: NoteSummary[]) => setPosts(postsOf(notes))
     const show = () => {
       const drawn = postsOf(page)
@@ -351,20 +379,34 @@ export function useRoomPosts(
     // read that fails holds the rest until every read has answered; then the page is drawn whole, the failed post
     // marked as unread.
     let drawn = readSoFar().length
+    // How many of this round's reads failed, by reason: one log line for the round, never which records.
+    const notOpened: Record<string, number> = {}
     const keys = unread.map((summary) => summary.key)
+    // Together where the service can (one batch), else one read each, as before; each answer is handled on its own.
     const answers = service.readNotes?.(roomId, keys) ?? keys.map((key) => service.readNote(roomId, key))
     const asks = unread.map((summary, i) =>
-      answers[i].then((note) => {
-        read.set(readKey(summary), note)
-        if (!current) return
-        const soFar = readSoFar()
-        if (soFar.length > drawn && soFar.length < page.length) {
-          drawn = soFar.length
-          draw(soFar)
+      answers[i].then(
+        (note) => {
+          read.set(readKey(summary), note)
+          unopened.delete(readKey(summary))
+          if (!current) return
+          const soFar = readSoFar()
+          if (soFar.length > drawn && soFar.length < page.length) {
+            drawn = soFar.length
+            draw(soFar)
+          }
+        },
+        (e) => {
+          const why = unopenedReason(e)
+          if (why) unopened.set(readKey(summary), why)
+          else unopened.delete(readKey(summary))
+          notOpened[why ?? 'other'] = (notOpened[why ?? 'other'] ?? 0) + 1
+          throw e
         }
-      })
+      )
     )
     void Promise.allSettled(asks).then(() => {
+      if (Object.keys(notOpened).length) service.noteUnread?.(roomId, notOpened)
       if (current) show()
     })
     return () => {

@@ -1008,7 +1008,11 @@
     "ThingCards": "os cartões que ele guarda",
     "ForAgentAsksTo": "O agente de {{asker}} pede que você aprove: {{action}}",
     "ForAgentAsksSomething": "O agente de {{asker}} pede que você aprove algo que o Keyring ainda não sabe descrever.",
-    "ForAgentNote": "Você aprova por {{asker}}. Sua resposta vai para o agente dessa pessoa, não para o seu."
+    "ForAgentNote": "Você aprova por {{asker}}. Sua resposta vai para o agente dessa pessoa, não para o seu.",
+    "ForAgentTaskDoes": "O agente de {{asker}} não descreveu isso. Esta tarefa iria {{action}}.",
+    "ForAgentApproveIf": "Aprove só se souber que {{asker}} quis fazer isso.",
+    "ForAgentOutcomeUnknown": "O Keyring não consegue dizer o que isso faria. Aprove só se souber que {{asker}} quis fazer isso.",
+    "ForAgentMatchCode": "O telefone de {{asker}} mostra o mesmo código:"
   },
   "TabStack": {
     "Messages": "Mensagens",
@@ -2603,6 +2607,10 @@
     "ShareCodeMessage": "Meu código de proprietário do Keyring — adicione-o como proprietário (admin) do meu agente:"
   },
   "AskMe": {
+    "TrustedTitle": "Seus aprovadores de confiança",
+    "TrustedOtherAction": "Outra ação",
+    "TrustedOpen": "Quem aprova",
+    "TrustedSwitchedOff": "Elas vêm dos aprovadores de confiança, desativados neste telefone. Elas ainda seguram essas ações no seu agente.",
     "Intro": "Seu agente pode esperar sua aprovação antes de fazer algumas coisas. Ele pergunta neste telefone.",
     "Enforcement": "Seu agente só pergunta se as aprovações estiverem ativadas onde ele está hospedado.",
     "Loading": "Lendo as regras do seu agente…",
@@ -3205,6 +3213,7 @@
     "AgentBadge": "Agente de IA",
     "PostRemoved": "Removida",
     "PostUnread": "Não foi possível ler esta mensagem.",
+    "PostCannotOpen": "Esta mensagem não pode ser aberta.",
     "QuoteUnavailable": "A mensagem original não está disponível",
     "QuoteNote": "Nota",
     "QuoteNoAuthor": "Um membro",
@@ -3214,6 +3223,7 @@
     "PostWithdrawn": "Mensagem retirada",
     "PostWithdrawnMine": "Você retirou esta mensagem",
     "RecordsNotOn": "Respostas e reações ainda não estão ativadas nesta sala.",
+    "RecordsTurnedOff": "Respostas e reações estavam ativadas nesta sala e agora estão desativadas. Uma alteração feita por um administrador da sala pode desativá-las.",
     "Editing": "Editando sua mensagem",
     "EditCancel": "Cancelar a edição",
     "ReplyCancel": "Cancelar a resposta",
@@ -3492,6 +3502,7 @@
     "CertifiedOn": "Certificado pela comunidade em {{date}}"
   },
   "Approver": {
+    "SwitchedOff": "Os aprovadores de confiança estão desativados.",
     "AskTitle": "Aprovador",
     "Ask": "Pedir a {{name}} para ser meu aprovador",
     "AskCaption": "{{name}} vê exatamente o que você escolhe e pode recusar ser seu aprovador.",
@@ -3522,6 +3533,14 @@
     "Unnamed": "Alguém fora dos seus contatos",
     "Remove": "Remover {{name}}",
     "RemoveNeedsYes": "Seu agente pode consultar seus aprovadores antes de remover um.",
+    "Check": "Verificar se seu agente espera por eles",
+    "CheckHint": "O Keyring envia ao seu agente um pedido de teste sobre o qual só este telefone é consultado, nunca seus aprovadores. Seu agente deve retê-lo.",
+    "CheckAfterAdd": "{{name}} foi adicionado. Verifique se seu agente vai esperar o sim dessa pessoa:",
+    "CheckHeld": "Seu agente espera o sim do seu aprovador. O pedido de teste está em Pedidos, e você pode recusá-lo.",
+    "CheckNotOn": "As aprovações não estão ativadas onde seu agente está hospedado, então seu aprovador ainda não será consultado.",
+    "CheckNeedsTestRule": "Para verificar, primeiro ative \"{{task}}\" em \"Pergunte antes…\".",
+    "CheckUnknown": "O Keyring não conseguiu saber se seu agente espera. Tente de novo mais tarde.",
+    "CheckWouldReachOthers": "O Keyring não enviou o teste: a regra que ele usa consultaria mais do que este telefone.",
     "Covers": "Precisa do sim de {{name}}:",
     "HeldElsewhere": "Já coberto por outra regra: {{actions}}",
     "Accepted": "Disse sim",
@@ -3553,6 +3572,7 @@
     "WaitingFor": "Aguardando {{names}}",
     "WaitHolding": "Seu agente está segurando isto até {{names}} dizer sim.",
     "WaitMayNeedOpen": "O telefone de {{names}} pode não tocar. Se não tocar, {{names}} precisa abrir o Keyring para responder.",
+    "WaitCode": "Se {{names}} pedir, leia este código. A tela dessa pessoa mostra o mesmo:",
     "NamesOr": " ou ",
     "ApprovedBy": "Aprovado por {{names}}",
     "NotGivenBy": "{{names}} não aprovou",

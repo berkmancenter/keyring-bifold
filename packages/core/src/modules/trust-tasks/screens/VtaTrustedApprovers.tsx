@@ -8,7 +8,9 @@
  * Approvers are named from the relationships this phone asked over; one added some other way is said to be someone
  * not in the contacts.
  *
- * Reached from My agent only while the trusted-approvers switch is on.
+ * Reached from My agent only while the trusted-approvers switch is on, and guarded here too: navigation restore, a
+ * later entry point, or the remote off (TRUSTED_APPROVERS_REMOTE_OFF) must not leave a working screen behind. Read again
+ * on each focus, so a switch-off while it is open takes effect the next time it shows.
  *
  * @module trust-tasks/screens/VtaTrustedApprovers
  */
@@ -38,13 +40,16 @@ import {
   type RoleOfferPrompt,
 } from '../approverRole'
 import { releaseWarn } from '../module/releaseLog'
+import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 
+import { checkEnforcement, lastEnforcementCheck, type EnforcementCheck } from './approverEnforcementCheck'
 import { localDate } from './localTime'
 import { deviceErrorWords } from './VtaDevices'
 
 export const TrustedApproversIds = {
   screen: 'TrustedApprovers',
+  off: 'TrustedApproversOff',
   error: 'TrustedApproversError',
   none: 'TrustedApproversNone',
   approver: (did: string) => `TrustedApprover_${did}`,
@@ -58,6 +63,9 @@ export const TrustedApproversIds = {
   stepDownConfirm: (connectionId: string) => `TrustedApproverStepDownConfirm_${connectionId}`,
   stepDownCancel: (connectionId: string) => `TrustedApproverStepDownCancel_${connectionId}`,
   stepDownError: 'TrustedApproverStepDownError',
+  check: 'TrustedApproversCheck',
+  checkResult: 'TrustedApproversCheckResult',
+  checkPrompt: 'TrustedApproversCheckPrompt',
 } as const
 
 const VtaTrustedApprovers: React.FC = () => {
@@ -75,6 +83,13 @@ const VtaTrustedApprovers: React.FC = () => {
   const [mine, setMine] = useState<RoleOfferPrompt[]>([])
   const [error, setError] = useState<string | undefined>()
   const [busy, setBusy] = useState<string | undefined>()
+  const [on, setOn] = useState(isTrustedApproversEnabled)
+  /** The last enforcement check on this agent this session; the probe runs only when tapped. */
+  const [checked, setChecked] = useState<EnforcementCheck | undefined>(() =>
+    lastEnforcementCheck(vtaAgent.getState().vtaDid)
+  )
+  /** Who was just added: the screen then offers the check (never runs it). */
+  const [justAdded, setJustAdded] = useState<string | undefined>()
 
   const wordsFor = useCallback((e: unknown) => deviceErrorWords(e, t), [t])
 
@@ -110,7 +125,10 @@ const VtaTrustedApprovers: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
-      void load()
+      const now = isTrustedApproversEnabled()
+      setOn(now)
+      // Switched off: nothing is read or written, and the agent is not asked.
+      if (now) void load()
     }, [load])
   )
 
@@ -147,7 +165,19 @@ const VtaTrustedApprovers: React.FC = () => {
     const written = await write(ask.connectionId, nextTrustedRules(state.view, ask))
     if (!written || !ask.acceptedAs || !written.view.approvers.includes(ask.acceptedAs)) return
     await closeRoleOffer(agent, ask.connectionId, true).catch(() => undefined)
+    setJustAdded(names[ask.acceptedAs] ?? t('Approver.UnnamedContact'))
     await loadKept()
+  }
+
+  // A live probe with side effects (approverEnforcementCheck.ts): only ever on a tap.
+  const onCheck = async () => {
+    if (!agent) return
+    setBusy('check')
+    try {
+      setChecked(await checkEnforcement(agent))
+    } finally {
+      setBusy(undefined)
+    }
   }
 
   const onNotNow = async (ask: RoleOfferAsk) => {
@@ -197,6 +227,15 @@ const VtaTrustedApprovers: React.FC = () => {
   const actionList = (keys: readonly string[]) => keys.map((key) => t(`Approver.Action.${key}`)).join(', ')
   const nameOf = (did: string) => names[did] ?? t('Approver.Unnamed')
   const waiting = accepted.filter((ask) => !view?.approvers.includes(ask.acceptedAs as string))
+
+  if (!on || !isTrustedApproversEnabled())
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+        <View style={styles.content}>
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.off)}>{t('Approver.SwitchedOff')}</ThemedText>
+        </View>
+      </SafeAreaView>
+    )
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
@@ -276,6 +315,46 @@ const VtaTrustedApprovers: React.FC = () => {
         ))}
         {view && view.approvers.length > 0 ? (
           <ThemedText style={styles.muted}>{t('Approver.RemoveNeedsYes')}</ThemedText>
+        ) : null}
+        {isTrustedApproversEnabled() && view && view.approvers.length > 0 ? (
+          <View style={styles.card} testID={testIdWithKey(TrustedApproversIds.check)}>
+            {justAdded ? (
+              <ThemedText variant="bold" testID={testIdWithKey(TrustedApproversIds.checkPrompt)}>
+                {t('Approver.CheckAfterAdd', { name: justAdded, interpolation: { escapeValue: false } })}
+              </ThemedText>
+            ) : null}
+            <ThemedText style={styles.muted}>{t('Approver.CheckHint')}</ThemedText>
+            <Button
+              title={t('Approver.Check')}
+              buttonType={ButtonType.Secondary}
+              onPress={() => void onCheck()}
+              disabled={busy !== undefined}
+              testID={testIdWithKey(`${TrustedApproversIds.check}Button`)}
+            >
+              {busy === 'check' ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
+            </Button>
+            {checked ? (
+              <View testID={testIdWithKey(TrustedApproversIds.checkResult)} style={{ gap: 4 }}>
+                <ThemedText>
+                  {checked.kind === 'held'
+                    ? t('Approver.CheckHeld')
+                    : checked.kind === 'letThrough'
+                      ? t('Approver.CheckNotOn')
+                      : checked.kind === 'wouldReachOthers'
+                        ? t('Approver.CheckWouldReachOthers')
+                        : checked.kind === 'needsTestRule'
+                          ? t('Approver.CheckNeedsTestRule', {
+                              task: t('AskMe.Task.contextsCreate'),
+                              interpolation: { escapeValue: false },
+                            })
+                          : t('Approver.CheckUnknown')}
+                </ThemedText>
+                {checked.kind === 'letThrough' && checked.kept ? (
+                  <ThemedText style={styles.muted}>{t('AskMe.TestLetThroughKept')}</ThemedText>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
         ) : null}
         {view?.heldElsewhere.length ? (
           <ThemedText style={styles.muted}>
