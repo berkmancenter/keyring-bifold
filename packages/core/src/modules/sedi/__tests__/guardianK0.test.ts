@@ -210,6 +210,31 @@ describe('tampering (each one would weaken one check)', () => {
     expect(verdict(guardianIn(c, said('G-ok'), asJordan))).toBe('telUnanchored')
   })
 
+  it("K18b: G-ok's issuance update unsealed while its registry's rip stays sealed: refused as unanchored", () => {
+    // K18 cuts the KEL back so far that the rip itself is unsealed; this keeps the rip's seal and drops only the one
+    // that anchors the issuance, so the update's own anchor is what refuses it (control: K05).
+    const proof = ctx.creds.get(said('G-ok'))!
+    const regk = (JSON.parse(proof.slice(0, proof.lastIndexOf('}') + 1)) as { rd: string }).rd
+    const issued = JSON.parse(ctx.tels.get(regk)!.updateTexts[0]) as { d: string }
+    const sue = ctx.kels.get(aids.sue)!
+    if (!sue.ok) throw new Error('fixture: Sue replays')
+    const history = sue.history.map((h) => (h ? { ...h, seals: h.seals.filter((x) => x.d !== issued.d) } : h))
+    expect(history.flatMap((h) => h?.seals ?? []).some((x) => x.d === regk)).toBe(true)
+    const c = { ...ctx, kels: new Map(ctx.kels).set(aids.sue, { ...sue, history }) }
+    expect(verdict(guardianIn(c, said('G-ok'), asJordan))).toBe('telUnanchored')
+  })
+
+  it('K01b: a KEL with one controller signature altered does not replay (control: K01, the same stream unaltered)', () => {
+    const original = new TextDecoder().decode(bytes('kel-roy.cesr'))
+    const at = original.indexOf('-KAW') + 4 + 40
+    const flipped = original.slice(0, at) + (original[at] === 'A' ? 'B' : 'A') + original.slice(at + 1)
+    expect(flipped).not.toBe(original)
+    const r = replayKel(digest, new TextEncoder().encode(flipped))
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.reason).toMatch(/controller signatures 0\/1/)
+    expect(replayKel(digest, bytes('kel-roy.cesr')).ok).toBe(true)
+  })
+
   it('K19: G-ok with its expirationDate.value changed inside its nested block: refused, the block SAID breaks', () => {
     const t = ctx.creds
       .get(said('G-ok'))!

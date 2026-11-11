@@ -9,6 +9,19 @@ import { COUNTERS, DIGESTS, INDEXED_SIGS, KEYS } from '../cesr/codes'
 import { readKelStream, type KelFrame } from '../cesr/reader'
 import { verifySignature } from '../cesr/signatures'
 
+// Pass-through recorders on the two curve verifiers (noble freezes its objects, so jest.spyOn cannot wrap them).
+// Every row sees the real math; the cross-curve row reads the call counts.
+jest.mock('@noble/curves/nist.js', () => {
+  const real = jest.requireActual('@noble/curves/nist.js')
+  return { ...real, p256: { ...real.p256, verify: jest.fn(real.p256.verify) } }
+})
+jest.mock('@noble/curves/ed25519.js', () => {
+  const real = jest.requireActual('@noble/curves/ed25519.js')
+  return { ...real, ed25519: { ...real.ed25519, verify: jest.fn(real.ed25519.verify) } }
+})
+import { ed25519 } from '@noble/curves/ed25519.js'
+import { p256 } from '@noble/curves/nist.js'
+
 const FX = join(__dirname, 'fixtures', 'k0-utah-v2')
 const reference = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'cesr-ts-reads.json'), 'utf8')) as {
   generator: string
@@ -92,6 +105,21 @@ describe('each supported code', () => {
     const ed = first('icp-jordan-nt-ed.cesr')
     expect(verifySignature(ed.body.keys![0], p.groups[0].items[0], p.body.raw)).toBe(false)
     expect(verifySignature(p.body.keys![0], ed.groups[0].items[0], ed.body.raw)).toBe(false)
+  })
+
+  it('a cross-curve pair is refused by the code table, before any curve math runs (control: a same-curve pair reaches it)', () => {
+    // The row above passes even without the curve check, because the math happens to fail; this one pins the check.
+    const p = first('kel-roy.cesr')
+    const ed = first('icp-jordan-nt-ed.cesr')
+    const pv = p256.verify as jest.Mock
+    const ev = ed25519.verify as jest.Mock
+    pv.mockClear()
+    ev.mockClear()
+    expect(verifySignature(ed.body.keys![0], p.groups[0].items[0], p.body.raw)).toBe(false)
+    expect(verifySignature(p.body.keys![0], ed.groups[0].items[0], ed.body.raw)).toBe(false)
+    expect([pv.mock.calls.length, ev.mock.calls.length]).toEqual([0, 0])
+    expect(verifySignature(p.body.keys![0], p.groups[0].items[0], p.body.raw)).toBe(true)
+    expect(pv.mock.calls).toHaveLength(1)
   })
 
   it('the code table is exactly what the fixtures carry', () => {
