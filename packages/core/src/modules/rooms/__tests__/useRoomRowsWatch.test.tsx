@@ -201,6 +201,32 @@ describe("Messages' rooms watched at their hosts", () => {
     expect(w.watchRoom).toHaveBeenLastCalledWith('a', 3)
   })
 
+  test("a signal while that room's own read is out: read again once it ends", async () => {
+    const notes: Record<string, NoteSummary[]> = { a: [note('a1', 1)] }
+    const s = serviceWith([room('a')], notes, { a3: chat('Second change') })
+    const w = watching(s)
+    const { list } = mount(s)
+    await inView()
+    await flush()
+    // The read the first signal starts is held; a second change and its signal land meanwhile.
+    let releaseA: () => void = () => undefined
+    const real = s.listNotes.getMockImplementation()!
+    s.listNotes.mockImplementationOnce(async (roomId: string, options?: { sinceVersion?: number }) => {
+      await new Promise<void>((r) => (releaseA = r))
+      return real(roomId, options)
+    })
+    notes.a = [...notes.a, note('a2', 2)]
+    await w.signal('a')
+    notes.a = [...notes.a, note('a3', 3)]
+    await w.signal('a')
+    s.listNotes.mockClear()
+    await act(async () => releaseA())
+    await flush()
+    await flush()
+    expect(list.result.current.rows.rows.find((r) => r.roomId === 'a')?.lastPost?.text).toBe('Second change')
+    expect(w.watchRoom).toHaveBeenLastCalledWith('a', 3)
+  })
+
   test('a signal for a room Messages does not show reads nothing', async () => {
     const s = serviceWith([room('a')], { a: [note('a1', 1)] })
     const w = watching(s)

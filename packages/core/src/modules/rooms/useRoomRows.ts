@@ -451,8 +451,11 @@ function watchActive(service: RoomsService): void {
 async function readOneOnSignal(service: RoomsService, roomId: string): Promise<void> {
   const room = feed.listed?.get(roomId)
   const byRoom = tracks.get(service)
-  if (feed.service !== service || !room || !byRoom || feed.readingAlone.has(roomId)) return
-  if (feed.asking) {
+  if (feed.service !== service || !room || !byRoom) return
+  // Kept, never dropped: the signal is spent, so a change it names would otherwise wait for the two-minute read. During
+  // a pass, the pass's end reads it; during this room's own read (a read lane that runs reads side by side lets a pass
+  // re-arm it meanwhile), that read's end does.
+  if (feed.asking || feed.readingAlone.has(roomId)) {
     feed.signalledWhileReading.add(roomId)
     return
   }
@@ -477,6 +480,9 @@ async function readOneOnSignal(service: RoomsService, roomId: string): Promise<v
     log?.(`[Rooms:rows] ${logRef(roomId)} not read on its signal: ${failureCategory(e)}`)
   } finally {
     feed.readingAlone.delete(roomId)
+    // Signalled again while this read was out, and no pass is out to read it: read it again now.
+    if (!feed.asking && feed.service === service && feed.signalledWhileReading.delete(roomId))
+      void readOneOnSignal(service, roomId)
   }
 }
 
