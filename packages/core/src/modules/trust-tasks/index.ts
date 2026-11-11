@@ -60,6 +60,8 @@ export {
   isStateVerifiedApproversEnabled,
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
 } from './module/stateVerifiedApproversFlag'
+export { setTrustTestStateEnabled, isTrustTestStateEnabled } from './module/trustTestStateFlag'
+export { holdK0TestGuardianCard, becomeK0TestWard, type TestStateActionResult } from './developerTestState'
 export { SEDI_KERI_REMOTE_OFF } from './module/sediKeriRemoteOff'
 export { setConfirmItsYouEnabled, isConfirmItsYouEnabled, CONFIRM_ITS_YOU_REMOTE_OFF } from './module/confirmItsYouFlag'
 
