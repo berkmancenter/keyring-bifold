@@ -24,8 +24,14 @@ export const ROOMS_TASK = {
   keysList01: `${SPEC}rooms/keys/list/0.1`,
   keysList02: `${SPEC}rooms/keys/list/0.2`,
   // Agents from vta-service 0.67's nightly (upstream e6380bf1) serve browse at 0.3 only; older ones at 0.1.
+  keysBrowse04: `${SPEC}rooms/keys/browse/0.4`,
   keysBrowse03: `${SPEC}rooms/keys/browse/0.3`,
   keysBrowse: `${SPEC}rooms/keys/browse/0.1`,
+  keysRead02: `${SPEC}rooms/keys/read/0.2`,
+  // A watch on rooms at one host, as the member: the agent arms `rooms/watch` there and passes the host's one signal on
+  // as `rooms/keys/changed/0.1` (VTI #2457/#2461/#2463, trust-tasks-tf #1036/#1040; VTA 0.77, VTC 0.24). Declared
+  // `Mutating`, as read 0.2 is: a hold of it is kept for a day (consentHolds.ts).
+  keysWatch01: `${SPEC}rooms/keys/watch/0.1`,
   keysRead: `${SPEC}rooms/keys/read/0.1`,
   membershipsList: `${SPEC}vtc/rooms/memberships/list/0.1`,
   // 0.4 renames a renewal's `renews` to `renewsAt` (VTC 0.16 serves only 0.4; 0.15 serves 0.2 and 0.4); 0.3 adds the
@@ -634,13 +640,59 @@ export interface OpenedRecord extends RecordMeta, RecordMembers {
   sender?: SenderCheck
 }
 
+/** What a read says beside its record, under this member name (`org.openvtc.rooms`): one value, or in a batch one per key. */
+const ourExt = (payload: unknown) => obj(obj(obj(payload)?.ext)?.['org.openvtc.rooms'])
+
 export function parseRead(payload: unknown, decodeBase64Url: (s: string) => string): OpenedRecord | undefined {
+  return parseRecord(payload, int(ourExt(payload)?.sealedAt), decodeBase64Url)
+}
+
+/** Why one key of a batch was not answered with a record: what it would have been refused with alone. */
+export interface KeyRefusal {
+  code: string
+  message?: string
+  details?: unknown
+}
+
+/**
+ * A batch read's `results` (`rooms/keys/read/0.2`), by key, or undefined for an answer with no `results`. Each entry is
+ * the record or the refusal that key would have had alone. An entry that is neither is left out, and so is one with no
+ * key. A batch's `ReadResult` has no `ext`, so what a single read says in its own the batch says once, by key.
+ */
+export function parseReadBatch(
+  payload: unknown,
+  decodeBase64Url: (s: string) => string
+): Map<string, OpenedRecord | KeyRefusal> | undefined {
+  const results = obj(payload)?.results
+  if (!Array.isArray(results)) return undefined
+  const sealedAt = obj(ourExt(payload)?.sealedAt)
+  const answers = new Map<string, OpenedRecord | KeyRefusal>()
+  for (const raw of results) {
+    const entry = obj(raw)
+    const key = str(entry?.key)
+    if (!entry || !key) continue
+    const error = obj(entry.error)
+    const code = str(error?.code)
+    if (error && code) {
+      answers.set(key, { code, message: str(error.message), details: error.details })
+      continue
+    }
+    const opened = parseRecord(entry, int(sealedAt?.[key]), decodeBase64Url)
+    if (opened) answers.set(key, opened)
+  }
+  return answers
+}
+
+function parseRecord(
+  payload: unknown,
+  sealedAt: number | undefined,
+  decodeBase64Url: (s: string) => string
+): OpenedRecord | undefined {
   const p = obj(payload)
   const key = str(p?.key)
   const version = int(p?.version)
   if (!p || !key || version === undefined) return undefined
   const status = statusOf(p.status)
-  const sealedAt = int(obj(obj(p.ext)?.['org.openvtc.rooms'])?.sealedAt)
   const plaintext = str(p.plaintext)
   const cleartext = obj(p.cleartext)
   const raw =
@@ -709,4 +761,58 @@ export function hostCheckOf(verification: unknown): HostCheck {
   if (agreed.some(Boolean) && !unknown.some(Boolean))
     return { verdict: 'consistent', detail: 'every check made agreed' }
   return { verdict: 'unverified', detail: 'some checks could not be made (a first read, or no anchor published)' }
+}
+
+/** What became of one room's watch (`rooms/keys/watch/0.1` `RoomWatchOutcome`). */
+export interface RoomWatchOutcome {
+  roomId: string
+  armed: boolean
+  /** When an armed watch lapses if it has not fired. */
+  expiresAt?: string
+  /** Why it was not armed: `notAMember`, `actionNotHeld`, `limitReached`, `hostUnreachable`, `hostRefused`, … */
+  refused?: string
+  /** The host's own code, when `refused` is `hostRefused`. */
+  hostCode?: string
+}
+
+/** A `rooms/keys/watch/0.1` answer: one outcome per room asked, in order. Throws on anything else. */
+export function parseWatch(answer: unknown): { member: string; host: string; watches: RoomWatchOutcome[] } {
+  const a = obj(answer)
+  const member = str(a?.member)
+  const host = str(a?.host)
+  const watches = a?.watches
+  if (!member || !host || !Array.isArray(watches)) throw new Error('rooms: the agent answered a watch with no outcomes')
+  return {
+    member,
+    host,
+    watches: watches.map((w) => {
+      const o = obj(w)
+      const roomId = str(o?.roomId)
+      if (!roomId || typeof o?.armed !== 'boolean') throw new Error('rooms: a watch outcome names no room or no state')
+      return {
+        roomId,
+        armed: o.armed,
+        ...(str(o.expiresAt) ? { expiresAt: str(o.expiresAt) } : {}),
+        ...(str(o.refused) ? { refused: str(o.refused) } : {}),
+        ...(str(o.hostCode) ? { hostCode: str(o.hostCode) } : {}),
+      }
+    }),
+  }
+}
+
+/**
+ * A room's change signal (`rooms/keys/changed/0.1`, VtaClient VTA_TASK.roomsKeysChanged, where its type is matched), or
+ * undefined when the payload is not one.
+ */
+export function parseChanged(
+  payload: unknown
+): { roomId: string; member: string; host: string; latestVersion: number } | undefined {
+  const p = obj(payload)
+  const roomId = str(p?.roomId)
+  const member = str(p?.member)
+  const host = str(p?.host)
+  const latestVersion = p?.latestVersion
+  if (!roomId || !member || !host || typeof latestVersion !== 'number' || !Number.isInteger(latestVersion))
+    return undefined
+  return { roomId, member, host, latestVersion }
 }
