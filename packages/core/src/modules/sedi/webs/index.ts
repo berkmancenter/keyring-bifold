@@ -17,3 +17,4 @@ export {
 } from './resolve'
 export { verifyGuardianWithWebs, type StateNotResolved, type WebsRoot } from './guardian'
 export { ourRootKelResolver, resolveRootKel, setRootKelResolver, type RootKel, type RootKelResolver } from './rootKel'
+export { demoStateHost, demoStateHostProblem, setDemoStateHost, websDidToFetch } from './demoStateHost'

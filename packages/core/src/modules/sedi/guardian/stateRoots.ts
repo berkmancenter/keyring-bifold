@@ -43,6 +43,9 @@ export const K0_TEST_ROOT: StateRoot = {
   aid: 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6',
   name: 'State of Example',
   demo: true,
+  // Where the demo state is fetched from: the host is a placeholder, replaced by the Developer "Demo state host"
+  // (sedi/webs/demoStateHost); with none set, the card's own copy is checked instead.
+  webs: 'did:webs:example.org:keyring-demo-state:IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6',
 }
 
 /**

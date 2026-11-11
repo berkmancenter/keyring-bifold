@@ -1466,6 +1466,7 @@ describe('a root read from its did:webs', () => {
   })
   afterEach(() => {
     global.fetch = realFetch
+    websModule.setDemoStateHost(null)
   })
 
   /** A fetch serving the K0 root's two artifacts, or throwing for every URL when `down`. Counts what was asked. */
@@ -1487,8 +1488,11 @@ describe('a root read from its did:webs', () => {
     return Object.assign(f as unknown as websModule.WebsFetch, { asked })
   }
   /** This phone's list: the K0 root, publishing at DID. */
-  const rootAtWebs = () =>
-    jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ ...stateRoots.K0_TEST_ROOT, webs: DID }])
+  const rootAtWebs = () => {
+    // The K0 root is a demo root: it is fetched only with a Developer "Demo state host" in effect.
+    websModule.setDemoStateHost('example.org')
+    return jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ ...stateRoots.K0_TEST_ROOT, webs: DID }])
+  }
 
   /** Sam's phone with Jordan's G-ok card kept (written, so it shows), and optionally Amy's too on a second connection. */
   const kept = async (alsoAmy = false) => {
@@ -1678,6 +1682,62 @@ describe('a root read from its did:webs', () => {
       'Approver.GuardianFetchedLive'
     )
     expect(live.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
+  })
+
+  test("H6: with the Demo state host set, the root is fetched from THAT host and the line names it, never the DID's own (control: the placeholder host is never asked)", async () => {
+    const sam = await kept()
+    const TUNNEL = 'abc-def.trycloudflare.com'
+    const TBASE = `https://${TUNNEL}/keyring-demo-state/${ROOT}`
+    const asked: string[] = []
+    const tunnel = jest.fn(async (url: string) => {
+      asked.push(url)
+      // did.json names its own DID, so a host serves the one generated for it (the generator takes the host).
+      const doc = new TextEncoder().encode(
+        new TextDecoder().decode(served('did.json')).split('example.org').join(TUNNEL)
+      )
+      const body = url === `${TBASE}/keri.cesr` ? served('keri.cesr') : url === `${TBASE}/did.json` ? doc : null
+      return {
+        ok: !!body,
+        status: body ? 200 : 404,
+        url,
+        headers: { get: () => null },
+        arrayBuffer: async () => (body ?? new Uint8Array()).slice().buffer as ArrayBuffer,
+      }
+    }) as unknown as websModule.WebsFetch
+    rootAtWebs()
+    websModule.setDemoStateHost(TUNNEL)
+    expect(await guardianStandings(sam.agent, { fetch: tunnel })).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: TUNNEL },
+    })
+    expect(asked.length).toBeGreaterThan(0)
+    expect(asked.every((u) => u.startsWith(`https://${TUNNEL}/`))).toBe(true)
+    expect(asked.some((u) => u.includes('example.org'))).toBe(false)
+  })
+
+  test("H7: no Demo state host: the demo root is checked from the card's copy, nothing is fetched, and the line says so (control: H6, fetched live)", async () => {
+    const sam = await kept()
+    const fetch = host()
+    expect(await guardianStandings(sam.agent, { fetch })).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
+    expect(fetch.asked).toHaveLength(0)
+    ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
+    jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+      view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
+      version: 2,
+    } as TrustedApproversState)
+    const tree = render(
+      <BasicAppContext>
+        <VtaTrustedApprovers />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianDemoCopy(JORDAN))).props.children).toBe(
+      'Approver.GuardianDemoCopy'
+    )
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianFetchedLive(JORDAN)))).toBeNull()
   })
 
   test('L2: the live line, in every language, names the host and says the designated-alias check is not done (control: the key exists in all three)', () => {

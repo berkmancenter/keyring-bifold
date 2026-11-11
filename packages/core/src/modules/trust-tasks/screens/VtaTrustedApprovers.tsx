@@ -84,6 +84,7 @@ export const TrustedApproversIds = {
   guardianOutcome: (did: string) => `TrustedApproverGuardianOutcome_${did}`,
   guardianUnreachable: (did: string) => `TrustedApproverGuardianUnreachable_${did}`,
   guardianFetchedLive: (did: string) => `TrustedApproverGuardianFetchedLive_${did}`,
+  guardianDemoCopy: (did: string) => `TrustedApproverGuardianDemoCopy_${did}`,
   cardStatus: (connectionId: string) => `TrustedApproverCardStatus_${connectionId}`,
   cardSend: (connectionId: string) => `TrustedApproverCardSend_${connectionId}`,
   cardStop: (connectionId: string) => `TrustedApproverCardStop_${connectionId}`,
@@ -318,6 +319,10 @@ const VtaTrustedApprovers: React.FC = () => {
         {standing.fetchedFrom ? (
           <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianFetchedLive(did))}>
             {t('Approver.GuardianFetchedLive', { host: standing.fetchedFrom, interpolation: { escapeValue: false } })}
+          </ThemedText>
+        ) : standing.demo ? (
+          <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianDemoCopy(did))}>
+            {t('Approver.GuardianDemoCopy')}
           </ThemedText>
         ) : null}
       </View>

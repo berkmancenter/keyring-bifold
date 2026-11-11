@@ -40,6 +40,7 @@ import {
   type RootKelResolver,
   type WebsFetch,
 } from '../sedi/webs'
+import { websDidToFetch } from '../sedi/webs/demoStateHost'
 
 import {
   ROLE_OFFER_ASK,
@@ -214,10 +215,17 @@ export type WebsResolves = Map<string, Promise<RootKel>>
 const resolverFor = (deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver }): RootKelResolver =>
   deps.resolveRootKel ?? (deps.fetch ? ourRootKelResolver(deps.fetch) : resolveRootKel)
 
-/** The roots on this phone's list that publish at a did:webs and that this card names (no other can be its root). */
+/**
+ * The roots on this phone's list that this card names (no other can be its root) and that are fetched at a did:webs
+ * now, each with the did:webs to fetch: a real root's own; a demo root's with the Developer "Demo state host" in place
+ * of its host, or none when no host is in effect (sedi/webs/demoStateHost, read at each call).
+ */
 function websRootsFor(evidence: GuardianEvidence, roots: StateRoot[]): (StateRoot & { webs: string })[] {
   const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
-  return roots.filter((r): r is StateRoot & { webs: string } => !!r.webs && said.includes(r.aid))
+  return roots.flatMap((r) => {
+    const webs = said.includes(r.aid) ? websDidToFetch(r) : undefined
+    return webs ? [{ ...r, webs }] : []
+  })
 }
 
 /**

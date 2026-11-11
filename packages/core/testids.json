@@ -3040,6 +3040,9 @@
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.error"
     },
     {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.guardianDemoCopy(did)"
+    },
+    {
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.guardianFetchedLive(did)"
     },
     {
