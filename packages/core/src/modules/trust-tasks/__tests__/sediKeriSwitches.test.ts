@@ -79,6 +79,7 @@ describe('the switches found', () => {
         'TRUSTED_APPROVERS_REMOTE_OFF',
         'STATE_VERIFIED_APPROVERS_REMOTE_OFF',
         'STATE_CARD_REMOTE_OFF',
+        'CONFIRM_ITS_YOU_REMOTE_OFF',
       ])
     )
   })
