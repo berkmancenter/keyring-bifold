@@ -39,9 +39,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      CARGO_BUILD_JOBS: '3'
-      # No debug info: the checker needs no symbols, and debuginfo is the
-      # largest part of a release build's memory and of target/ on disk.
+      # Memory, measured (11-11, run 42954124714): a cold build with three jobs fell
+      # from 14.8 GB to 0.5 GB free over its last ~6 minutes, on the large Affinidi
+      # and trust-tasks-rs crates, and the runner was killed (exit 143); disk stayed
+      # at 94 GB free throughout. So one rustc at a time, no optimiser and no debug
+      # info: the checker judges a handful of documents, so its speed is irrelevant.
+      CARGO_BUILD_JOBS: '1'
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
       CARGO_PROFILE_RELEASE_DEBUG: '0'
     name: VTI SDK accepts Keyring's card and statement
     steps:
