@@ -80,6 +80,14 @@ export interface RoomPosts {
   pollFailed: boolean
   /** Asks for new posts at once, without waiting out the ticks a failure skips. Nothing while the room isn't polled. */
   pollNow: () => void
+  /**
+   * The member's own writes that succeeded and that the posts do not carry yet (pendingRecordWrites `written`). While
+   * any is, a watched room is polled every {@link ROOM_POLL_MS} again, not at {@link ROOM_WATCHED_POLL_MS}: the host
+   * signals the writer's own write too, but never sends a signal twice, so a lost one would leave the member's reaction
+   * gone from the screen, once its overlay ends at PENDING_WRITE_MAX_MS (30 s), until the two-minute poll. Read at each
+   * tick; setting it draws nothing.
+   */
+  awaitWrites: (written: readonly { key: string; version: number }[]) => void
 }
 
 /** The newest version a listing holds: a poll asks for the records above it. 0 for an empty room. */
@@ -204,6 +212,11 @@ export function useRoomPosts(
   const tickNow = useRef<(() => void) | undefined>(undefined)
   /** When the last listing of the room was asked: a watched room's poll waits ROOM_WATCHED_POLL_MS from it. */
   const askedAt = useRef(0)
+  /** The member's own successful writes the posts do not carry yet (awaitWrites): a watched room polls at its old pace. */
+  const awaiting = useRef<readonly { key: string; version: number }[]>([])
+  const awaitWrites = useCallback((written: readonly { key: string; version: number }[]) => {
+    awaiting.current = written
+  }, [])
   const reads = useRef<{
     service?: RoomsService
     roomId: string
@@ -266,8 +279,14 @@ export function useRoomPosts(
       }
       if (listingsInFlight.current > 0) return
       // Watched: a change is told and read at once (below), and this tick is only the fallback for a signal lost.
-      // A signal spends the watch before it ticks, so the tick it starts is never held here.
-      if (service.roomWatched?.(roomId) && Date.now() - askedAt.current < ROOM_WATCHED_POLL_MS) return
+      // A signal spends the watch before it ticks, so the tick it starts is never held here. Nor is one while the
+      // member's own write is still to land (awaitWrites): its overlay ends at 30 s, and a lost signal is never re-sent.
+      if (
+        awaiting.current.length === 0 &&
+        service.roomWatched?.(roomId) &&
+        Date.now() - askedAt.current < ROOM_WATCHED_POLL_MS
+      )
+        return
       askedAt.current = Date.now()
       const sentOn = openedAt.current
       counted(listingsInFlight, () =>
@@ -452,5 +471,6 @@ export function useRoomPosts(
     refresh,
     pollFailed: pollFailed && !session.reconnecting,
     pollNow,
+    awaitWrites,
   }
 }
