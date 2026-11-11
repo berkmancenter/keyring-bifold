@@ -118,6 +118,22 @@ describe('newest first', () => {
     ])
     expect(order.map((n) => n.key)).toEqual(['b', 'a', 'd', 'c'])
   })
+
+  test('by when the host first stored it, where it says: an old message edited today stays where it was', () => {
+    const order = newestFirst([
+      { key: 'old-edited', createdAt: '2026-10-20T00:00:00Z', updatedAt: '2026-11-10T00:00:00Z', version: 9 },
+      { key: 'new', createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z', version: 4 },
+    ])
+    expect(order.map((n) => n.key)).toEqual(['new', 'old-edited'])
+  })
+
+  test('the same records with no createdAt (an agent before browse 0.4): by updatedAt, as before (control)', () => {
+    const order = newestFirst([
+      { key: 'old-edited', updatedAt: '2026-11-10T00:00:00Z', version: 9 },
+      { key: 'new', updatedAt: '2026-11-01T00:00:00Z', version: 4 },
+    ])
+    expect(order.map((n) => n.key)).toEqual(['old-edited', 'new'])
+  })
 })
 
 describe('a post as written', () => {
