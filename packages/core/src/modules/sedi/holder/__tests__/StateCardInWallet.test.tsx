@@ -295,6 +295,22 @@ describe('the state card in Credentials', () => {
 })
 
 describe('the state card’s hook', () => {
+  test('an answer that arrives while Credentials is out of focus (still mounted) is kept, and shows on return', async () => {
+    const state = stateAnswersLater()
+    const hook = renderHook(({ focused }: { focused: boolean }) => useHeldStateCard(focused), {
+      initialProps: { focused: true },
+    })
+    await settle()
+    expect(hook.result.current?.tone).toBe('checking')
+    hook.rerender({ focused: false })
+    state.answer(0, SERVED())
+    await settle()
+    hook.rerender({ focused: true })
+    await settle()
+    expect(hook.result.current?.tone).toBe('ok')
+    expect(state.resolver).toHaveBeenCalledTimes(1)
+  })
+
   test('a return to Credentials re-reads the card (a new object) but does not check it again', async () => {
     const check = jest.spyOn(guardianEvidence, 'checkGuardianEvidenceResolving')
     const hook = renderHook(({ focused }: { focused: boolean }) => useHeldStateCard(focused), {

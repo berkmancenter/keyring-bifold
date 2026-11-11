@@ -3,12 +3,15 @@
  * action "Hold the test Guardian card (K0)" puts it there), checked on this phone.
  *
  * The held record is read each time Credentials comes into focus (one record query), so a card held from Developer
- * settings is there on return. The chain check is not: it runs once per mount for a given card and inputs
- * (checkKeyOf), never on a render or a focus that changed neither, so drawing the Wallet stays cheap.
+ * settings is there on return. The chain check is not: it runs once per card and inputs (checkKeyOf), never on a
+ * render or a focus that changed neither, so drawing the Wallet stays cheap. (A remount, a new Credentials screen,
+ * starts with no answer and checks again.)
  *
  * The check can fetch the state's published record over the network (checkGuardianEvidenceResolving), so it runs in an
- * effect, and until it answers the card says it is checking (never "Checks out"). An answer that comes back after the
- * card left the screen, after "State card (demo)" was turned off, or for inputs that have since changed is dropped.
+ * effect, and until it answers the card says it is checking (never "Checks out"). An answer is dropped when it comes
+ * back after the card unmounted, after its inputs moved, or after "State card (demo)" went off. One that comes back
+ * while Credentials is merely out of focus (another tab on top, the card still mounted) is kept, and shows on return:
+ * focus is not among the check's inputs.
  * When the card can't be checked at all (state-verified approvers off, no root trusted), that is known at once and
  * nothing runs.
  *
@@ -75,9 +78,9 @@ export function useHeldStateCard(focused: boolean): StateCardView | undefined {
     const warn = (message: string) => agent?.config?.logger?.warn(`${LOG_PREFIX} ${message}`)
     checkHeldCard(card, new Date(), warn)
       .then((check) => {
-        // Dropped when the card left the screen or what the check read moved (this effect was cleaned up), or the
-        // switch went off before the answer, even with no render since. An answer kept for an older key is never shown:
-        // the view takes an answer only for the key it renders.
+        // Dropped when the card unmounted or what the check read moved (this effect was cleaned up), or when the
+        // switch went off before the answer, even with no render since. Kept when Credentials is only out of focus.
+        // An answer kept for an older key is never shown: the view takes an answer only for the key it renders.
         if (!live || !isStateCardEnabled()) return
         setAnswer({ key, check })
       })
