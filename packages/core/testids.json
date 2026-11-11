@@ -173,6 +173,7 @@
     "ApprovalFullCode": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
     "ApprovalFullCodeHint": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
     "ApprovalMatchCode": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
+    "ApprovalMatchCodeLabel": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
     "ApprovalOutcome": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
     "ApprovalOutcomeUnknown": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
     "ApprovalSubject": ["src/modules/trust-tasks/screens/ApprovalDetails.tsx"],
@@ -188,6 +189,11 @@
     "ApproverAskError": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverAskStatus": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverAskedActions": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverChange": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverInForce": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverInForceActions": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverNotGiven": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
+    "ApproverNotGivenAction": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverOffer": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferBody": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferFaceId": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
@@ -200,6 +206,7 @@
     "ApproverPickSend": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverSteppedDown": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverWait": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
+    "ApproverWaitCode": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitOpen": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "AskMe": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeDetails": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
@@ -215,6 +222,10 @@
     "AskMeTestHintClosed": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeTestHintOpen": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AskMeTested": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
+    "AskMeTrusted": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
+    "AskMeTrustedOff": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
+    "AskMeTrustedOpen": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
+    "AskMeTrustedRule": ["src/modules/trust-tasks/screens/VtaAskMe.tsx"],
     "AttachTourStep": ["src/components/tour/AttachTourStep.tsx"],
     "AttestationVerified": ["src/screens/CredentialOffer.tsx"],
     "AttestationWarning": ["src/screens/CredentialOffer.tsx"],
@@ -1266,6 +1277,7 @@
     "RoomPostAuthor": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostBubble": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostCancel": ["src/modules/rooms/components/RoomPostBubble.tsx"],
+    "RoomPostCannotOpen": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostLate": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostNotSent": ["src/modules/rooms/components/RoomPostBubble.tsx"],
     "RoomPostReactions": ["src/modules/rooms/components/RoomPostBubble.tsx"],
@@ -1510,8 +1522,12 @@
     "TrustedApproverStepDownError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApprovers": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversApprovingFor": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversCheck": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversCheckPrompt": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversCheckResult": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversNone": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
+    "TrustedApproversOff": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "UndoToast": ["src/components/toast/UndoToast.tsx"],
     "UndoToastUndo": ["src/components/toast/UndoToast.tsx"],
     "UnverifiedProofView": ["src/screens/ProofDetails.tsx"],
@@ -2228,13 +2244,16 @@
       "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.ask"
     },
     {
-      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.asked"
-    },
-    {
       "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.cancel"
     },
     {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.change"
+    },
+    {
       "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.error"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.inForce"
     },
     {
       "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.pick(action)"
@@ -2252,7 +2271,19 @@
       "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "ApproverAskRowIds.steppedDown"
     },
     {
+      "src/modules/trust-tasks/screens/ApproverAskRow.tsx": "key"
+    },
+    {
       "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.approved"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.code"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.notGiven"
+    },
+    {
+      "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.notGivenAction"
     },
     {
       "src/modules/trust-tasks/screens/ApproverWaitNote.tsx": "ApproverWaitNoteIds.open"
@@ -2879,6 +2910,15 @@
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.approvingFor"
     },
     {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.check"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.checkPrompt"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.checkResult"
+    },
+    {
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.error"
     },
     {
@@ -2886,6 +2926,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.notNow(ask.connectionId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.off"
     },
     {
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.remove(did)"
@@ -2907,6 +2950,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "TrustedApproversIds.steppedDown(did)"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx": "`${TrustedApproversIds.check}Button`"
     },
     {
       "src/modules/trust-tasks/screens/VtiCommunity.tsx": "VtiCommunityIds.applyToCommunityButton"

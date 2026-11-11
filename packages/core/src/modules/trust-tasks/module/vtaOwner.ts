@@ -86,6 +86,11 @@ export class DeviceCannotOwn extends Error {
  * - `notConfirmed` — the extra check could not confirm it was the person.
  * - `awaitingApproval` — the agent holds the act for someone else's approval,
  *   which did not come in time.
+ * - `notApproved` — the agent held the act for someone else's approval, and the
+ *   question ended without a yes: they said no, or it lapsed (VtaClient's consentNotGiven refusal).
+ *   Not the agent's refusal: it did what its rule says.
+ * - `notServed` — Keyring did not write an approval rule: the agent's answer
+ *   names no version of that task it dispatches (approvalRules NotServed).
  * - `noAnswer` — the agent said nothing in time; the act may or may not have
  *   happened, so the list is worth reading again.
  * - `unreachable` — Keyring could not sign in to the agent.
@@ -104,6 +109,8 @@ export type DeviceRefusalReason =
   | 'stepUpDeclined'
   | 'notConfirmed'
   | 'awaitingApproval'
+  | 'notApproved'
+  | 'notServed'
   | 'noAnswer'
   | 'unreachable'
   | 'failed'
@@ -123,6 +130,9 @@ const PLAIN_WORDS: Record<DeviceRefusalReason, string> = {
   stepUpDeclined: 'You declined the extra check, so your agent did not do this.',
   notConfirmed: "Keyring couldn't confirm it's you.",
   awaitingApproval: 'Your agent is waiting for someone else to approve this.',
+  notApproved:
+    "Your approver didn't approve this, so your agent didn't do it. They may have said no, or not answered in time.",
+  notServed: "Your agent doesn't support asking before this, so nothing changed.",
   noAnswer: "Your agent didn't answer. Check the list before trying again.",
   unreachable: "Keyring couldn't reach your agent. Check your connection and try again.",
   failed: "Your agent couldn't do that.",
@@ -197,7 +207,18 @@ export function deviceRefusalOf(error: unknown): DeviceActionRefused {
   const refusal = (reason: DeviceRefusalReason) => new DeviceActionRefused(reason, message)
   if (error instanceof StepUpDeclined) return refusal('stepUpDeclined')
   if (error instanceof OwnerNotConfirmed) return refusal('notConfirmed')
+  // The two endings of one wait: still waiting, or the wait ended with no yes. Before the generic VtiRefusal cases,
+  // which would read the second as the agent's own refusal and show its code.
   if (consentPendingOf(error)) return refusal('awaitingApproval')
+  // By its code, not its class: suites that stub VtaClient with a hand-written export list (and a second module
+  // instance of it) would defeat instanceof; VtiRefusal comes from vtiAgent, which they don't stub. Keep the code a
+  // literal here, never imported from VtaClient: from a stubbed VtaClient an imported guard is undefined (a crash), and
+  // an imported CONSENT_NOT_GIVEN is undefined too, so the check would silently never match and the refusal would read
+  // as the agent's own again. So this copy of the code is deliberate, and it is guarded: consentNotGiven.test.ts builds
+  // the error with VtaClient's factory and reads it here, so drift on either side fails that row.
+  if (error instanceof VtiRefusal && error.code === 'consentNotGiven') return refusal('notApproved')
+  // By name, as above by code: approvalRules is not imported here, so no stub of it can break this line.
+  if (error instanceof Error && error.name === 'NotServed') return refusal('notServed')
   if (!(error instanceof VtiRefusal)) return refusal(NO_ANSWER.test(message) ? 'noAnswer' : 'failed')
   const details = (error.details ?? {}) as { reason?: unknown }
   if (message === STEP_UP_REQUIRED || details.reason === STEP_UP_REQUIRED) return refusal('stepUpRequired')

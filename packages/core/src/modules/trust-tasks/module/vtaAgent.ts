@@ -157,10 +157,21 @@ export interface VtaAgentState {
   /** A task of ours the VTA is holding for someone else's consent. */
   awaitingConsentFor?: string
   /**
+   * The comparison code of the request {@link awaitingConsentFor} waits on, derived as an approver's card derives it
+   * (consentCheck `consentMatchCode`), so the person can read it to their approver. It says which request, not who
+   * started it. Cleared with awaitingConsentFor.
+   */
+  awaitingConsentCode?: string
+  /**
    * The last task of ours the agent said someone approved (its `task-consent/granted` notice), and when: the hold
    * {@link awaitingConsentFor} named, released. Only a yes is told this way; a no or a lapse is not told at all.
    */
   consentGranted?: { taskType: string; at: number }
+  /**
+   * The last task of ours whose hold ended without consent, and when: the question {@link awaitingConsentFor} named
+   * was answered no or lapsed (VtaClient's consentNotGiven refusal). The phone cannot tell which, and the task was not run.
+   */
+  consentNotGiven?: { taskType: string; at: number }
   /**
    * The agent holds this phone's own `device/set-wake` for consent: an
    * approval rule covers the notification setting, so switching notifications
@@ -863,7 +874,19 @@ export class VtaAgentController {
         }
       },
       onInbound: (plaintext) => this.inbound(plaintext),
-      onConsentPending: ({ taskType }) => this.set({ awaitingConsentFor: taskType, consentGranted: undefined }),
+      onConsentPending: ({ taskType, payloadDigest }) =>
+        this.set({
+          awaitingConsentFor: taskType,
+          awaitingConsentCode: consentMatchCode(payloadDigest),
+          consentGranted: undefined,
+          consentNotGiven: undefined,
+        }),
+      onConsentNotGiven: ({ taskType }) =>
+        this.set({
+          awaitingConsentFor: undefined,
+          awaitingConsentCode: undefined,
+          consentNotGiven: { taskType, at: Date.now() },
+        }),
       onStepUp: (request, context) => this.askStepUp(request, context),
       onRepliesStalled: (stalled) => {
         if (this.current?.client === client) this.set({ repliesStalled: stalled })
@@ -1058,7 +1081,9 @@ export class VtaAgentController {
       managerDid: undefined,
       approvals: [],
       awaitingConsentFor: undefined,
+      awaitingConsentCode: undefined,
       consentGranted: undefined,
+      consentNotGiven: undefined,
       error: undefined,
       reconnectGaveUp: false,
       ownsAgent: false,
@@ -1494,7 +1519,9 @@ export class VtaAgentController {
       managerDid: undefined,
       approvals: [],
       awaitingConsentFor: undefined,
+      awaitingConsentCode: undefined,
       consentGranted: undefined,
+      consentNotGiven: undefined,
       wakeBlockedByRule: undefined,
       error: undefined,
       ownsAgent: false,
@@ -1968,10 +1995,10 @@ export class VtaAgentController {
       try {
         await client.rotateManagerKey()
         // An approval rule held the swap and then let it through: no longer waiting (UX-240-a).
-        this.set({ awaitingConsentFor: undefined })
+        this.set({ awaitingConsentFor: undefined, awaitingConsentCode: undefined })
       } catch (error) {
         // Held, refused or lost: the screen stops saying it waits for an approval.
-        this.set({ awaitingConsentFor: undefined })
+        this.set({ awaitingConsentFor: undefined, awaitingConsentCode: undefined })
         // Swapped, but the new key's sign-in failed: linked, and it reconnects (below).
         const swapDone = error instanceof SwapDoneSignInFailed
         if (!swapDone && !(await this.swapStillOpen(error, identities, vtaDid))) {
@@ -2822,7 +2849,8 @@ export class VtaAgentController {
           releaseWarn(`[VTI] trusted approvers: rules written, version ${model.version} → ${version}`)
           return { view: trustedApproversView(next), version }
         } catch (error) {
-          if (error instanceof TrustedRuleRefused) throw new DeviceActionRefused('failed', error.message)
+          if (error instanceof TrustedRuleRefused)
+            throw new DeviceActionRefused(error.reason === 'not-served' ? 'notServed' : 'failed', error.message)
           const details = (error instanceof VtiRefusal ? error.details : undefined) as { reason?: unknown } | undefined
           if (details?.reason === 'conflict' && attempt === 0) continue
           throw this.refused(error)
@@ -3546,7 +3574,12 @@ export class VtaAgentController {
     }
     if (kept && 'granted' in kept) {
       const taskType = this.state.awaitingConsentFor
-      this.set({ awaitingConsentFor: undefined, ...(taskType ? { consentGranted: { taskType, at: Date.now() } } : {}) })
+      this.set({
+        awaitingConsentFor: undefined,
+        awaitingConsentCode: undefined,
+        consentNotGiven: undefined,
+        ...(taskType ? { consentGranted: { taskType, at: Date.now() } } : {}),
+      })
     }
   }
 
