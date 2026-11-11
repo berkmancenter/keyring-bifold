@@ -7,7 +7,7 @@
  * where heldGuardianEvidence reads it.
  */
 import { useCredentials, useAgent } from '@bifold/react-hooks'
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native'
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react-native'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import React from 'react'
@@ -27,6 +27,7 @@ import { setRootKelResolver, type RootKel } from '../../webs/rootKel'
 import StateCardDetails from '../StateCardDetails'
 import StateCardPass from '../StateCardPass'
 import { stateCardView } from '../stateCard'
+import { useHeldStateCard } from '../useHeldStateCard'
 import { STATE_CARD_REMOTE_OFF, setStateCardEnabled } from '../stateCardFlag'
 
 jest.mock('react-native-localize', () => {})
@@ -290,6 +291,26 @@ describe('the state card in Credentials', () => {
     for (let i = 0; i < 3; i++) tree.rerender(screen())
     expect(shown(tree)).toBe(true)
     expect(check).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the state card’s hook', () => {
+  test('a return to Credentials re-reads the card (a new object) but does not check it again', async () => {
+    const check = jest.spyOn(guardianEvidence, 'checkGuardianEvidenceResolving')
+    const hook = renderHook(({ focused }: { focused: boolean }) => useHeldStateCard(focused), {
+      initialProps: { focused: true },
+    })
+    await settle()
+    expect(hook.result.current?.tone).toBe('ok')
+    const reads = heldQueries()
+    for (const focused of [false, true, false, true]) {
+      hook.rerender({ focused })
+      await settle()
+    }
+    // Read again on each return (the control: the card was re-read), checked once.
+    expect(heldQueries()).toBe(reads + 2)
+    expect(check).toHaveBeenCalledTimes(1)
+    expect(hook.result.current?.tone).toBe('ok')
   })
 })
 
