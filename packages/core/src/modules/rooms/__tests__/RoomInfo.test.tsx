@@ -11,7 +11,7 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { Screens, Stacks, TabStacks } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import { createSampleRoomsService } from '../sample/sampleRooms'
-import type { RoomsService } from '../types'
+import type { RecordFeatures, RoomsService } from '../types'
 
 let mockService: RoomsService | undefined
 let mockParams: Record<string, string> | undefined
@@ -158,9 +158,9 @@ describe("a room's details", () => {
 
 // R2 (Alberto, 11-11): a member who may curate an attributed room turns replies and reactions on from its details.
 describe('turning replies and reactions on, from the details', () => {
-  const NOT_ON = { listed: [], canSeal: true, unresolved: false }
-  const ON = { listed: ['kind', 'inReplyTo', 'writtenAt'], canSeal: true, unresolved: false }
-  const curating = (o: { verbs?: string[]; features?: typeof NOT_ON; fail?: boolean } = {}) => {
+  const NOT_ON: RecordFeatures = { listed: [], canSeal: true, unresolved: false }
+  const ON: RecordFeatures = { listed: ['kind', 'inReplyTo', 'writtenAt'], canSeal: true, unresolved: false }
+  const curating = (o: { verbs?: string[]; features?: RecordFeatures; fail?: boolean } = {}) => {
     const base = createSampleRoomsService()
     const s = Object.assign(Object.create(base) as RoomsService, {
       recordSendingOn: () => true,
