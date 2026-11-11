@@ -11,7 +11,16 @@
  */
 import { isStateVerifiedApproversEnabled } from '../../trust-tasks/module/stateVerifiedApproversFlag'
 
-import { guardianIn, socialIn, type ChainContext, type GuardianResult, type SocialResult, type TelInput } from './chain'
+import {
+  MalformedMaterial,
+  guardianIn,
+  parseObject,
+  socialIn,
+  type ChainContext,
+  type GuardianResult,
+  type SocialResult,
+  type TelInput,
+} from './chain'
 import { DIGESTS } from '../cesr/codes'
 
 import { digest, replayKel, type Digest, type Replay } from './kel'
@@ -37,7 +46,8 @@ export interface CheckOptions {
  * collapse into one, for log fidelity only, not as a safety property: each says what stopped the check.
  * - `unsupportedCesr`: Keyring can't verify this. It uses a code or a KERI feature (a delegated event, a weighted
  *   threshold, witnesses, a digest code other than E/I) that this package does not verify yet.
- * - `malformedCesr`: this can't be read. It does not add up as CESR (cut short, counts wrong, trailing bytes, empty).
+ * - `malformedCesr`: this can't be read. A KEL stream does not add up as CESR (cut short, counts wrong, trailing
+ *   bytes, empty), or a credential's or TEL event's text is not a JSON object.
  * - `kelNotReplaying`: the stream reads, but the KEL it carries does not verify (a SAID, prior, pre-rotation or
  *   controller signature fails, or it is duplicitous). The material may have been constructed or edited, so the
  *   whole presentation is refused, even when that KEL is not on the chain being checked. It carries the prefix the
@@ -84,11 +94,11 @@ function build(material: ChainMaterial, options: CheckOptions): Built {
     return { ok: false, reason: 'kelNotReplaying', prefix, detail: `a presented KEL (${prefix}) does not replay` }
   }
   const tels = new Map<string, TelInput>()
-  for (const t of material.tels) tels.set((JSON.parse(t.ripText) as { d: string }).d, t)
+  for (const t of material.tels) tels.set(parseObject<{ d: string }>(t.ripText, 'a TEL rip').d, t)
   const creds = new Map<string, string>()
   for (const text of material.creds) {
     const end = text.lastIndexOf('}')
-    const said = (JSON.parse(text.slice(0, end + 1)) as { d: string }).d
+    const said = parseObject<{ d: string }>(text.slice(0, end + 1), 'a credential').d
     creds.set(said, text)
   }
   return {
@@ -122,12 +132,14 @@ function decide<R>(
   check: (ctx: ChainContext) => R
 ): R | typeof switchedOff | MaterialRefusal {
   if (!isStateVerifiedApproversEnabled()) return switchedOff
-  const built = build(material, options)
-  if (!built.ok) return built
   try {
+    const built = build(material, options)
+    if (!built.ok) return built
     return check(built.ctx)
   } catch (e) {
-    // Only the guarded digest's limit is turned into a refusal; anything else is a bug and still throws.
+    // Only these two are turned into refusals: material that can't be read, and a SAID under a digest code Keyring
+    // can't verify. Anything else is a bug and still throws.
+    if (e instanceof MalformedMaterial) return { ok: false, reason: 'malformedCesr', detail: cannotRead(e.message) }
     if (e instanceof UnsupportedDigestCode)
       return { ok: false, reason: 'unsupportedCesr', detail: cannotVerify(e.message) }
     throw e

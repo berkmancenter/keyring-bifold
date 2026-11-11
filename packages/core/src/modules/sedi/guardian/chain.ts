@@ -48,6 +48,23 @@ export type RefusalReason =
   | 'chainMissing'
 
 export type Refusal = { ok: false; reason: RefusalReason; detail: string }
+
+/** Raised only by parseObject, and caught only by decide() (./index.ts), which refuses it as malformedCesr. */
+export class MalformedMaterial extends Error {}
+
+/** A credential's or TEL event's text as a JSON object. Anything else (not JSON, or JSON that is an array, a number,
+ * a string or null) raises MalformedMaterial: the material can't be read, and must never throw out of an entry point. */
+export function parseObject<T>(text: string, what: string): T {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    throw new MalformedMaterial(`${what} is not JSON`)
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new MalformedMaterial(`${what} is JSON but not an object`)
+  return value as T
+}
 const refuse = (reason: RefusalReason, detail: string): Refusal => ({ ok: false, reason, detail })
 
 export type Sad = Record<string, unknown> & {
@@ -132,6 +149,7 @@ export function verifyAcdcV2(dig: Digest, rawText: string): { ok: true; sad: Sad
   } catch {
     return refuse('notAcdcV2', 'not JSON')
   }
+  if (!sad || typeof sad !== 'object' || Array.isArray(sad)) return refuse('notAcdcV2', 'JSON but not an object')
   if (typeof sad.v !== 'string' || sad.v.length !== 19 || !sad.v.startsWith('ACDC'))
     return refuse('notAcdcV2', String(sad.v))
   const c: Record<string, unknown> = { ...sad }
@@ -192,7 +210,7 @@ export function verifyTel(
   dig: Digest,
   { ripText, updateTexts, issuerKel }: TelInput & { issuerKel?: Replay }
 ): Tel | Refusal {
-  const rip = JSON.parse(ripText) as TelEvent & { i: string; t: string }
+  const rip = parseObject<TelEvent & { i: string; t: string }>(ripText, 'a TEL rip')
   if (rip.t !== 'rip') return refuse('telBroken', 'first event is not a rip')
   if (saidOfRaw(dig, ripText, rip.d, ['d']) !== rip.d) return refuse('telBroken', 'rip SAID does not recompute')
   if (!issuerKel?.ok)
@@ -205,7 +223,7 @@ export function verifyTel(
     issuerKel.history.some((h) => h && h.seals.some((s) => s.i === rip.d && s.s === ev.n && s.d === ev.d))
   if (!anchored(rip)) return refuse('telUnanchored', `rip ${rip.d} has no seal in the issuer KEL`)
   const ups = updateTexts
-    .map((t) => ({ t, ev: JSON.parse(t) as TelEvent }))
+    .map((t) => ({ t, ev: parseObject<TelEvent>(t, 'a TEL event') }))
     .sort((a, b) => parseInt(a.ev.n, 16) - parseInt(b.ev.n, 16))
   let prior: TelEvent = rip
   for (const [i, { t, ev }] of ups.entries()) {

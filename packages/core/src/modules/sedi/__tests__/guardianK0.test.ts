@@ -278,7 +278,8 @@ describe('the entry points, behind the state-verified approvers switch', () => {
   // The material with some credential texts and TEL update texts edited (keyed by credential SAID / registry SAID).
   const edited = (
     credEdits: Record<string, (text: string) => string>,
-    updateEdits: Record<string, (text: string) => string>
+    updateEdits: Record<string, (text: string) => string>,
+    ripEdits: Record<string, (text: string) => string> = {}
   ): ChainMaterial => {
     const m = material()
     m.creds = m.creds.map((t) => {
@@ -287,7 +288,8 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     })
     m.tels = m.tels.map((tel) => {
       const rd = (JSON.parse(tel.ripText) as { d: string }).d
-      return updateEdits[rd] ? { ...tel, updateTexts: tel.updateTexts.map(updateEdits[rd]) } : tel
+      const u = updateEdits[rd] ? { ...tel, updateTexts: tel.updateTexts.map(updateEdits[rd]) } : tel
+      return ripEdits[rd] ? { ...u, ripText: ripEdits[rd](u.ripText) } : u
     })
     return m
   }
@@ -536,7 +538,76 @@ describe('the entry points, behind the state-verified approvers switch', () => {
       []
     )
     expect(materialOutcomes.filter((o) => o.want[0] === 'unsupportedCesr').length).toBeGreaterThan(5)
+
+    // And texts that can't be read: every credential, every TEL rip and every TEL update replaced, one at a time, by
+    // something that is not a JSON object. Credentials and rips are all read before any check (malformedCesr from
+    // both entry points wherever they sit); an update is read when a chain reaches its registry.
+    const unreadable = ['not json', '[1,2]', '42', 'null', '"x"', '{"d":', '']
+    const malformedOutcomes: { label: string; got: string[]; want: string[] }[] = []
+    const bothMalformed = ['malformedCesr', 'malformedCesr']
+    for (const name of Object.keys(prov.creds)) {
+      const bad = unreadable[rand(unreadable.length)]
+      const rd = registryOf(name)
+      const onChain = [onGuardian.has(name), onSocial.has(name)].map((on) => (on ? 'malformedCesr' : 'valid'))
+      const runAs = (label: string, m: ChainMaterial, want: string[]) =>
+        malformedOutcomes.push({ label: `${name}: ${label} -> ${JSON.stringify(bad)}`, got: run(m).map(String), want })
+      runAs('credential', edited({ [said(name)]: () => bad }, {}), bothMalformed)
+      runAs('TEL rip', edited({}, {}, { [rd]: () => bad }), bothMalformed)
+      runAs('TEL update', edited({}, { [rd]: () => bad }), onChain)
+    }
+    expect(
+      malformedOutcomes.filter((o) => o.got.some((v) => v.startsWith('threw'))).map((o) => `${o.label} -> ${o.got}`)
+    ).toEqual([])
+    expect(
+      malformedOutcomes.filter((o) => o.got.join() !== o.want.join()).map((o) => `${o.label} -> ${o.got}`)
+    ).toEqual([])
   })
+
+  it.each([
+    ['not JSON', 'not json'],
+    ['cut short', '{"d":"E'],
+    ['empty', ''],
+    ['a JSON array', '[{"d":"x"}]'],
+    ['a JSON number', '42'],
+    ['JSON null', 'null'],
+    ['a JSON string', '"x"'],
+  ])(
+    'a credential, TEL rip or TEL update whose text is %s is malformedCesr from both entry points, never a throw and never unsupportedCesr (control: a JSON object that is not a valid event reaches the checks, telBroken)',
+    (_, bad) => {
+      setStateVerifiedApproversEnabled(true)
+      const rd = registryOf('G-ok')
+      const both = (m: ChainMaterial) =>
+        [
+          () => verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options),
+          () => verifySocialAuthorization(m, said('S2-social'), { ward: aids.sam }, options),
+        ].map((f) => {
+          try {
+            const r = f()
+            return r.ok ? 'valid' : `${r.reason}: ${r.detail}`
+          } catch (e) {
+            return `threw ${(e as Error).message}`
+          }
+        })
+      const reasons = (m: ChainMaterial) => both(m).map((v) => v.split(':')[0])
+      expect(reasons(material())).toEqual(['valid', 'valid'])
+      // The control: well-formed JSON objects, so the guard lets them through and the checks refuse them.
+      expect(reasons(edited({}, {}, { [rd]: () => '{}' }))).toEqual(['telBroken', 'telBroken'])
+      expect(reasons(edited({}, { [rd]: () => '{}' }))).toEqual(['telBroken', 'telBroken'])
+      const cases: [string, ChainMaterial][] = [
+        ['credential', edited({ [said('G-ok')]: () => bad }, {})],
+        ['TEL rip', edited({}, {}, { [rd]: () => bad })],
+        ['TEL update', edited({}, { [rd]: () => bad })],
+      ]
+      for (const [what, m] of cases) {
+        const got = both(m)
+        expect([what, got.map((v) => v.split(':')[0])]).toEqual([what, ['malformedCesr', 'malformedCesr']])
+        for (const v of got)
+          expect(v).toMatch(
+            /^malformedCesr: this can't be read \(a (credential|TEL rip|TEL event) is (not JSON|JSON but not an object)\)$/
+          )
+      }
+    }
+  )
 
   it.each([
     [
