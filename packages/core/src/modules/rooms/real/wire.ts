@@ -55,6 +55,8 @@ export const ROOMS_TASK = {
   // 0.2, also accepting a record's `kind`, `inReplyTo`, `writtenAt` and `editedAt` (trust-tasks-tf #1027).
   keysSeal03: `${SPEC}rooms/keys/seal/0.3`,
   keysProfileRead: `${SPEC}rooms/keys/profile/read/0.1`,
+  // A member with `curate` or `admin` sets the room's whole profile; their own agent signs, seals and stores it.
+  keysProfileWrite: `${SPEC}rooms/keys/profile/write/0.1`,
   recordsPut: `${SPEC}rooms/records/put/0.1`,
   // 0.1 with optional members: `blobs`, on a file's record, and an open room's provenance, which Keyring does not send. Completed only by
   // `rooms/keys/act` from 0.8 (0.7's table added it); hosts from VTA 0.68 serve only 0.3, the lab's pin 0.1 and 0.3.
@@ -601,16 +603,20 @@ export interface ProfileRead {
   status: 'found' | 'cleared' | 'absent' | 'unreadable'
   stale: boolean
   listed: string[]
+  /** The profile as found, every member of it, for a write that must carry them all over (it replaces the whole). */
+  profile?: Record<string, unknown>
 }
 
 export function parseProfileRead(payload: unknown): ProfileRead {
   const p = obj(payload)
   const status = p?.status === 'found' || p?.status === 'cleared' || p?.status === 'absent' ? p.status : 'unreadable'
   if (status !== 'found') return { status, stale: false, listed: [] }
-  const listed = obj(p?.profile)?.recordMembers
+  const profile = obj(p?.profile)
+  const listed = profile?.recordMembers
   return {
     status,
     stale: p?.stale === true,
+    ...(profile ? { profile } : {}),
     listed: Array.isArray(listed) ? listed.filter((m): m is string => typeof m === 'string') : [],
   }
 }
