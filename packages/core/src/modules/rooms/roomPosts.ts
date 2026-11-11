@@ -226,14 +226,19 @@ export function withRepliesToReactions(posts: RoomPost[]): RoomPost[] {
  * that record is edited, and never guesses it (vti-rooms `Record::created_at` at VTI 0.79). Each record still has exactly
  * one time it is placed by, so this is one consistent order: a record from before is placed by its last change, as it
  * was before `createdAt` existed, since nothing better is known of it. Times are compared as instants, not as text, so
- * two spellings of one time (a fractional second, an offset) place alike. One with no time at all goes last, by version.
+ * two spellings of one time (a fractional second, an offset) place alike. A time that can't be read counts as absent,
+ * so the next one stands in (a malformed `createdAt` falls back to `updatedAt`), and no comparison ever meets NaN, which
+ * would make the order depend on the sort's internals. One with no readable time at all goes last, by version.
  */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'> & { createdAt?: string }>(
   notes: T[]
 ): T[] => {
+  const instant = (s: string | undefined) => (s === undefined ? NaN : Date.parse(s))
   const at = (n: T) => {
-    const t = Date.parse(n.createdAt ?? n.updatedAt ?? '')
-    return Number.isNaN(t) ? -Infinity : t
+    const created = instant(n.createdAt)
+    if (!Number.isNaN(created)) return created
+    const updated = instant(n.updatedAt)
+    return Number.isNaN(updated) ? -Infinity : updated
   }
   return [...notes].sort((a, b) => (at(b) === at(a) ? b.version - a.version : at(b) > at(a) ? 1 : -1))
 }

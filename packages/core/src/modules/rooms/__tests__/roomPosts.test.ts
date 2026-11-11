@@ -150,6 +150,20 @@ describe('newest first', () => {
     expect(order.map((n) => n.key)).toEqual(['later', 'offset', 'none'])
   })
 
+  test('a time that cannot be read counts as absent: the next stands in, and none read at all goes last', () => {
+    const notes = [
+      { key: 'bad-created', createdAt: 'yesterday', updatedAt: '2026-11-05T00:00:00Z', version: 2 },
+      { key: 'good', createdAt: '2026-11-08T00:00:00Z', version: 3 },
+      { key: 'both-bad', createdAt: '2026-11-0', updatedAt: 'soon', version: 7 },
+      { key: 'none', version: 5 },
+      { key: 'older', createdAt: '2026-11-01T00:00:00Z', version: 1 },
+    ]
+    const order = newestFirst(notes).map((n) => n.key)
+    expect(order).toEqual(['good', 'bad-created', 'older', 'both-bad', 'none'])
+    // One order whatever it starts from: no comparison met NaN.
+    expect(newestFirst([...notes].reverse()).map((n) => n.key)).toEqual(order)
+  })
+
   test('the same records with no createdAt (an agent before browse 0.4): by updatedAt, as before (control)', () => {
     const order = newestFirst([
       { key: 'old-edited', updatedAt: '2026-11-10T00:00:00Z', version: 9 },
