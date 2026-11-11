@@ -344,6 +344,7 @@ export {
   membershipFromVerdict,
   vtaAgent,
 } from './modules/trust-tasks'
+export { setStateCardEnabled, isStateCardEnabled, STATE_CARD_REMOTE_OFF } from './modules/sedi/holder/stateCardFlag'
 export type {
   TrustTaskRegistration,
   TrustTaskOrchestration,
