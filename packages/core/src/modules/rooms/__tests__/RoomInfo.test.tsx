@@ -155,3 +155,80 @@ describe("a room's details", () => {
     expect(tree.queryByTestId(id('RoomInfoHide'))).toBeNull()
   })
 })
+
+// R2 (Alberto, 11-11): a member who may curate an attributed room turns replies and reactions on from its details.
+describe('turning replies and reactions on, from the details', () => {
+  const NOT_ON = { listed: [], canSeal: true, unresolved: false }
+  const ON = { listed: ['kind', 'inReplyTo', 'writtenAt'], canSeal: true, unresolved: false }
+  const curating = (o: { verbs?: string[]; features?: typeof NOT_ON; fail?: boolean } = {}) => {
+    const base = createSampleRoomsService()
+    const s = Object.assign(Object.create(base) as RoomsService, {
+      recordSendingOn: () => true,
+      recordFeaturesIn: jest.fn(async () => o.features ?? NOT_ON),
+      sendRecord: jest.fn(),
+      turnOnRepliesAndReactions: jest.fn(async () => {
+        if (o.fail) throw new Error('agent not reached')
+      }),
+      getRoom: async (roomId: string) => ({
+        ...(await base.getRoom(roomId)),
+        tier: 'attributed' as const,
+        verbs: o.verbs ?? ['read', 'write', 'curate'],
+      }),
+    })
+    mockService = s
+    return s as RoomsService & { recordFeaturesIn: jest.Mock; turnOnRepliesAndReactions: jest.Mock }
+  }
+
+  it('offers it where they are not on, asks once, then turns them on and reads the room again', async () => {
+    const toast = jest.spyOn(Toast, 'show')
+    const s = curating()
+    const tree = await show(RoomInfo, 'RoomInfoTurnOnReplies')
+    expect(tree.queryByTestId(id('RoomInfoTurnOnBody'))).toBeNull()
+    fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnReplies')))
+    expect(tree.getByTestId(id('RoomInfoTurnOnBody'))).toHaveTextContent('Rooms.TurnOnRepliesBody')
+    expect(s.turnOnRepliesAndReactions).not.toHaveBeenCalled()
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnConfirm')))
+    })
+    expect(s.turnOnRepliesAndReactions).toHaveBeenCalledWith(PLANNING)
+    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Rooms.RepliesTurnedOn' })))
+    expect(s.recordFeaturesIn.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('Cancel turns nothing on', async () => {
+    const s = curating()
+    const tree = await show(RoomInfo, 'RoomInfoTurnOnReplies')
+    fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnReplies')))
+    fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnCancel')))
+    expect(tree.queryByTestId(id('RoomInfoTurnOnBody'))).toBeNull()
+    expect(s.turnOnRepliesAndReactions).not.toHaveBeenCalled()
+  })
+
+  it('one that fails says so, and stays offered', async () => {
+    const toast = jest.spyOn(Toast, 'show')
+    curating({ fail: true })
+    const tree = await show(RoomInfo, 'RoomInfoTurnOnReplies')
+    fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnReplies')))
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id('RoomInfoTurnOnConfirm')))
+    })
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Rooms.RepliesNotTurnedOn' }))
+    )
+    expect(tree.getByTestId(id('RoomInfoTurnOnBody'))).toBeTruthy()
+  })
+
+  it('a member who may not curate is not offered it, and the profile is not read (control)', async () => {
+    const s = curating({ verbs: ['read', 'write'] })
+    const tree = await show(RoomInfo, 'RoomInfoYou')
+    expect(tree.queryByTestId(id('RoomInfoTurnOnReplies'))).toBeNull()
+    expect(s.recordFeaturesIn).not.toHaveBeenCalled()
+  })
+
+  it('a room that takes them already is not offered it (control)', async () => {
+    const s = curating({ features: ON })
+    const tree = await show(RoomInfo, 'RoomInfoYou')
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+    expect(tree.queryByTestId(id('RoomInfoTurnOnReplies'))).toBeNull()
+  })
+})
