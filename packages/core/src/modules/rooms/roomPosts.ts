@@ -221,11 +221,19 @@ export function withRepliesToReactions(posts: RoomPost[]): RoomPost[] {
 /**
  * Newest first, by when the host first stored each record (`createdAt`) where it says, else by its last change
  * (`updatedAt`), as before: an edit or a curation does not move an old message to the top (chat plan §7 decision 3).
- * A record with no `createdAt` is placed by its `updatedAt`, so a listing from an agent that predates it reads as today.
+ *
+ * One room's page can hold both kinds. A host serves no `createdAt` on a record it stored before it kept one, even after
+ * that record is edited, and never guesses it (vti-rooms `Record::created_at` at VTI 0.79). Each record still has exactly
+ * one time it is placed by, so this is one consistent order: a record from before is placed by its last change, as it
+ * was before `createdAt` existed, since nothing better is known of it. Times are compared as instants, not as text, so
+ * two spellings of one time (a fractional second, an offset) place alike. One with no time at all goes last, by version.
  */
 export const newestFirst = <T extends Pick<NoteSummary, 'updatedAt' | 'version'> & { createdAt?: string }>(
   notes: T[]
 ): T[] => {
-  const at = (n: T) => n.createdAt ?? n.updatedAt ?? ''
-  return [...notes].sort((a, b) => at(b).localeCompare(at(a)) || b.version - a.version)
+  const at = (n: T) => {
+    const t = Date.parse(n.createdAt ?? n.updatedAt ?? '')
+    return Number.isNaN(t) ? -Infinity : t
+  }
+  return [...notes].sort((a, b) => (at(b) === at(a) ? b.version - a.version : at(b) > at(a) ? 1 : -1))
 }
