@@ -18,7 +18,7 @@ import type { TFunction } from 'i18next'
 import { checkGuardianEvidence, type GuardianEvidence, type GuardianVerdict } from '../../trust-tasks/guardianEvidence'
 import { isStateVerifiedApproversEnabled } from '../../trust-tasks/module/stateVerifiedApproversFlag'
 import { K0_TEST_GUARDIAN_CARD } from '../guardian/k0TestCard'
-import { K0_TEST_ROOT, trustedStateRoots, type StateRoot } from '../guardian/stateRoots'
+import { isDemoStateRoot, trustedStateRoots } from '../guardian/stateRoots'
 
 /**
  * How far a "Checks out" reaches, in one place: the copy this phone holds. Once the root keys come from a live
@@ -49,8 +49,11 @@ const attributesOf = (evidence: GuardianEvidence) =>
     expirationDate?: { value?: unknown }
   }
 
-const dateText = (value: unknown): string | undefined =>
-  typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : undefined
+/**
+ * A date as the card states it, for display only: never parsed here (only readExpiry parses a date in sedi/,
+ * expiryParseGuard.test.ts). The screen's localDate words it, and gives back text it cannot read as it is.
+ */
+const dateText = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined)
 
 /**
  * Check the held card. Not run at all while state-verified approvers is off or no root is trusted (the verifier would
@@ -76,12 +79,6 @@ export const checkKeyOf = (evidence: GuardianEvidence): string =>
       .map((root) => root.aid)
       .join(','),
   ].join('|')
-
-/** A demo root's card says "Demo". `demo` on a root entry decides; until roots carry it, the K0 test root is one. */
-function isDemoRoot(aid: string): boolean {
-  const root = trustedStateRoots().find((known) => known.aid === aid) as (StateRoot & { demo?: boolean }) | undefined
-  return root?.demo ?? aid === K0_TEST_ROOT.aid
-}
 
 export type StateCardTone = 'ok' | 'notChecked' | 'problem'
 
@@ -137,7 +134,8 @@ export function stateCardView(
   const a = attributesOf(evidence)
   const verdict = check.checked ? check.verdict : undefined
   const ok = verdict?.ok === true ? verdict : undefined
-  const demo = ok ? isDemoRoot(ok.root) : false
+  // One answer to "is this a demo root", the one Who approves and the card question use (stateRoots).
+  const demo = ok ? isDemoStateRoot(ok.root) : false
   const asOf = words(STATE_CARD_AS_OF)
 
   let tone: StateCardTone

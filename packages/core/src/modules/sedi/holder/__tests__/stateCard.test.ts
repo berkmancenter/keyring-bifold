@@ -62,7 +62,8 @@ describe('the state card: what it says', () => {
       holder: K0_TEST_GUARDIAN_CARD.holder,
       root: K0_TEST_ROOT.aid,
       said: K0_TEST_GUARDIAN_CARD.guardianSaid,
-      expires: '2030-11-10T00:00:00.000Z',
+      // As the card states it: dates are never parsed here (expiryParseGuard), only worded by the screen.
+      expires: '2030-11-10T00:00:00.000000+00:00',
       result: 'valid',
     })
     expect(v.issued).toEqual({ label: 'StateCard.Issued', value: 'day(2026-11-10)' })
@@ -143,6 +144,7 @@ describe('the state card: what it says', () => {
     ['kelNotReplaying', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
     ['checkFailed', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
     ['noWard', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
+    ['expiryUnreadable', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
   ])('refused (%s): its words, a red pill, no state name, no root, no "Demo"', (reason, status, pill) => {
     const v = view(refused(reason))
     expect([v.tone, v.status, v.pill, v.title, v.technical.root]).toEqual([
