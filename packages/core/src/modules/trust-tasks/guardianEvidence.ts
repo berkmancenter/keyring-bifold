@@ -365,13 +365,19 @@ function checkInputs(evidence: GuardianEvidence, ward: string | null): string {
  */
 const lastChecks = new Map<string, { inputs: string; verdict: GuardianVerdict }>()
 
-/** Empty the in-memory memo (nothing stored is touched): the next open checks each card again, as after a restart. */
+/**
+ * Empty the in-memory memo (nothing stored is touched): the next open checks each card again, as after a restart.
+ * Tests only: rows use it to simulate a restart. Nothing in production calls it, and it is not exported from the package
+ * (a real restart empties the memo by itself). Don't wire it anywhere, or delete it as unused while rows use it.
+ */
 export function resetGuardianCheckMemo(): void {
   lastChecks.clear()
 }
 
 /**
  * A verdict that expires is reused only while its expiry is still ahead (an unreadable expiry is never reused).
+ * That unreadable-expiry case becomes dead once the verifier refuses an unreadable expiry (bifold #1031,
+ * expiryUnreadable): a valid verdict then always carries a readable expiry or none. Remove it after both land.
  *
  * The time trigger assumes the check reads only the PRESENTED credential's expiry, which is the `expires` a valid
  * verdict carries (sedi/guardian/chain.ts guardianIn; intermediates go through node(), which never reads expiry). If
