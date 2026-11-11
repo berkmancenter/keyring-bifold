@@ -46,6 +46,7 @@ export const ApproverAskRowIds = {
   cancel: 'ApproverPickCancel',
   asked: 'ApproverAskedActions',
   steppedDown: 'ApproverSteppedDown',
+  change: 'ApproverChange',
 } as const
 
 /** Always offered, never switched off here. */
@@ -215,15 +216,38 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         />
       </View>
     )
-  } else if (state === 'accepted') {
-    body = <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.SaidYes', words)}</ThemedText>
-  } else if (ask?.written) {
-    body = (
+  } else if (state === 'accepted' || ask?.written) {
+    // After a yes, what they approve can be changed: a fresh offer with the picker set to today's actions. Nothing is
+    // deleted, and the rules already written on the agent stay until the new yes is added on Who approves.
+    const change = (
       <>
-        <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.IsApprover', words)}</ThemedText>
-        {steppedDown}
+        <Button
+          title={t('Approver.Change', words)}
+          buttonType={ButtonType.Tertiary}
+          onPress={() => {
+            setSaid(undefined)
+            setChosen(ask?.actions?.length ? [...ask.actions] : [...ROLE_ACTIONS])
+            setPicking(true)
+          }}
+          disabled={busy}
+          testID={testIdWithKey(ApproverAskRowIds.change)}
+        />
+        <ThemedText style={styles.muted}>{t('Approver.ChangeCaption', words)}</ThemedText>
       </>
     )
+    body =
+      state === 'accepted' ? (
+        <>
+          <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.SaidYes', words)}</ThemedText>
+          {change}
+        </>
+      ) : (
+        <>
+          <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.IsApprover', words)}</ThemedText>
+          {steppedDown}
+          {ask?.steppedDown ? null : change}
+        </>
+      )
   } else {
     // Mock frame 1a.
     body = (
