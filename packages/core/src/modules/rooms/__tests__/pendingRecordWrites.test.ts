@@ -83,6 +83,19 @@ describe('what is on its way, laid over the posts', () => {
     expect(placeOf(laid)).toBe('nowhere')
   })
 
+  test('a withdrawn message that carried a file shows nowhere either: a withdrawal carries none', () => {
+    const file = {
+      id: 'f1',
+      name: 'agenda.pdf',
+      size: 10,
+      mime: 'application/pdf',
+    } as unknown as RoomPost['files'][number]
+    const mine = post('m3', 'The agenda', { author: ME, mine: true, files: [file] })
+    expect(placeOf(mine)).toBe('chat')
+    const [laid] = withPendingWrites([mine], [write({ type: 'withdraw', key: 'm3' })])
+    expect([placeOf(laid), laid.files]).toEqual(['nowhere', []])
+  })
+
   test('an edit shows its new words, as edited', () => {
     const at = '2026-11-11T00:00:00.000Z'
     const [laid] = withPendingWrites(
