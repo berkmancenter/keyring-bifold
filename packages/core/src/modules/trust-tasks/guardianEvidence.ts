@@ -27,7 +27,8 @@ import { EventEmitter } from 'events'
 
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
-import { K0_TEST_WARD, trustedStateRoots } from '../sedi/guardian/stateRoots'
+import { K0_TEST_WARD, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
+import { ourRootKelResolver, resolveRootKel, type RootKel, type RootKelResolver, type WebsFetch } from '../sedi/webs'
 
 import {
   ROLE_OFFER_ASK,
@@ -89,7 +90,15 @@ export interface GuardianOnAsk {
  * not verify, with the outcome. An approver who sent no card (never asked, or chose not to) has no standing at all, so
  * no line: not sharing is a choice, never shown as a failed check.
  */
-export type GuardianStanding = { kind: 'verified'; state: string } | { kind: 'unverified'; outcome: string }
+/**
+ * What Who approves shows for a kept card. `unreachable`: a root on this phone's list publishes its KEL at a did:webs
+ * that could not be fetched or checked on this open (`stateNotResolved`), so the card was not checked against it.
+ * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
+ */
+export type GuardianStanding =
+  | { kind: 'verified'; state: string }
+  | { kind: 'unverified'; outcome: string }
+  | { kind: 'unreachable'; state: string }
 
 const OFF = 'state-verified approvers are switched off on this phone (Settings › Developer)'
 const warn = (agent: Pick<Agent, 'config'>, message: string) => agent.config?.logger?.warn(`${LOG_PREFIX} ${message}`)
@@ -124,6 +133,17 @@ export function checkGuardianEvidence(
   now: Date,
   onThrow: (message: string) => void
 ): GuardianVerdict {
+  return checkWith(evidence, ward, now, onThrow, [])
+}
+
+/** The check itself; `resolvedKels` are root KELs already fetched and verified at their did:webs (sedi/webs). */
+function checkWith(
+  evidence: GuardianEvidence,
+  ward: string | null,
+  now: Date,
+  onThrow: (message: string) => void,
+  resolvedKels: Uint8Array[]
+): GuardianVerdict {
   const checkedAt = now.toISOString()
   const refuse = (reason: string, detail: string): GuardianVerdict => ({ ok: false, reason, detail, checkedAt })
   if (!ward) return refuse('noWard', 'no ward is set on this phone (Settings › Developer)')
@@ -140,7 +160,7 @@ export function checkGuardianEvidence(
       material,
       evidence.guardianSaid,
       { holder: evidence.holder, ward },
-      { trustedRoots: roots.map((root) => root.aid), now }
+      { trustedRoots: roots.map((root) => root.aid), now, resolvedKels }
     )
     if (result.ok !== true) return refuse(result.reason, result.detail)
     const root = roots.find((known) => known.aid === result.root)
@@ -160,6 +180,69 @@ export function checkGuardianEvidence(
 }
 
 /** The one record of `recordType`, its content replaced; saved the first time. */
+/**
+ * One open's did:webs resolutions, by DID: each root is fetched at most once per open, however many cards name it, and
+ * nothing is kept past the open (a failure is never remembered, and so never stands in for a later check).
+ */
+export type WebsResolves = Map<string, Promise<RootKel>>
+
+/**
+ * Which resolver a check uses: one passed in, else ours over a passed-in fetch, else the app-wide seam
+ * (sedi/webs resolveRootKel, which the VTI maintainer's resolver replaces). Nothing here calls resolveWebs directly.
+ */
+const resolverFor = (deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver }): RootKelResolver =>
+  deps.resolveRootKel ?? (deps.fetch ? ourRootKelResolver(deps.fetch) : resolveRootKel)
+
+/** The roots on this phone's list that publish at a did:webs and that this card names (no other can be its root). */
+function websRootsFor(evidence: GuardianEvidence, roots: StateRoot[]): (StateRoot & { webs: string })[] {
+  const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
+  return roots.filter((r): r is StateRoot & { webs: string } => !!r.webs && said.includes(r.aid))
+}
+
+/**
+ * The check, with every listed root the card names that publishes at a did:webs read from there first. If one does
+ * not resolve, the verdict is `stateNotResolved` (its own reason; never the card's own copy instead). With no such
+ * root it is exactly {@link checkGuardianEvidence}. Never throws, and never returns `ok: true` from a catch.
+ */
+export async function checkGuardianEvidenceResolving(
+  evidence: GuardianEvidence,
+  ward: string | null,
+  now: Date,
+  onThrow: (message: string) => void,
+  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves?: WebsResolves } = {}
+): Promise<GuardianVerdict> {
+  const checkedAt = now.toISOString()
+  try {
+    const roots = websRootsFor(evidence, trustedStateRoots())
+    if (!ward || roots.length === 0) return checkWith(evidence, ward, now, onThrow, [])
+    const resolves = deps.resolves ?? new Map()
+    const resolvedKels: Uint8Array[] = []
+    for (const root of roots) {
+      let pending = resolves.get(root.webs)
+      if (!pending) {
+        pending = resolverFor(deps)(root.webs)
+        resolves.set(root.webs, pending)
+      }
+      const r = await pending
+      if (!r.ok)
+        return { ok: false, reason: 'stateNotResolved', detail: `${root.name}: ${r.reason}: ${r.detail}`, checkedAt }
+      if (r.aid !== root.aid)
+        return {
+          ok: false,
+          reason: 'stateNotResolved',
+          detail: `${root.name}: its did:webs names another AID`,
+          checkedAt,
+        }
+      resolvedKels.push(r.kel)
+    }
+    return checkWith(evidence, ward, now, onThrow, resolvedKels)
+  } catch (e) {
+    const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
+    onThrow(message)
+    return { ok: false, reason: 'checkFailed', detail: message, checkedAt }
+  }
+}
+
 async function keepOne(agent: Pick<Agent, 'genericRecords'>, recordType: string, content: object): Promise<void> {
   const [existing] = (await agent.genericRecords.findAllByQuery({ recordType })) ?? []
   if (existing) {
@@ -483,7 +566,9 @@ export async function handleGuardianEvidence(
     return dropped(agent, context.connectionId, 'it names no offer this phone sent on this connection')
 
   const evidence = evidenceOf(payload)
-  const verdict = checkGuardianEvidence(evidence, await stateWardOf(agent), new Date(), (m) => warn(agent, m))
+  const verdict = await checkGuardianEvidenceResolving(evidence, await stateWardOf(agent), new Date(), (m) =>
+    warn(agent, m)
+  )
   const guardian: GuardianOnAsk = {
     approver: payload.approver,
     evidence,
@@ -505,6 +590,14 @@ function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undef
   return undefined
 }
 
+/** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
+function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
+  if (verdict.ok === true) return { kind: 'verified', state: verdict.state }
+  if (verdict.reason === 'stateNotResolved')
+    return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
+  return { kind: 'unverified', outcome: verdict.reason }
+}
+
 const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
   !!a &&
   a.ok === b.ok &&
@@ -517,8 +610,12 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
  * by the approver DID it is shown beside. A verdict that changed is written back in place; if that write fails, the
  * fresh verdict is still what shows. Empty with either switch off, and an approver with no card has no entry.
  */
-export async function guardianStandings(agent: Agent): Promise<Record<string, GuardianStanding>> {
+export async function guardianStandings(
+  agent: Agent,
+  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver } = {}
+): Promise<Record<string, GuardianStanding>> {
   if (!isOn()) return {}
+  const resolves: WebsResolves = new Map()
   const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
   const ward = await stateWardOf(agent)
   const standings: Record<string, GuardianStanding> = {}
@@ -528,15 +625,17 @@ export async function guardianStandings(agent: Agent): Promise<Record<string, Gu
     if (!guardian) continue
     const beside = shownBeside(ask, guardian)
     if (!beside) continue
-    const verdict = checkGuardianEvidence(guardian.evidence, ward, new Date(), (m) => warn(agent, m))
+    const verdict = await checkGuardianEvidenceResolving(guardian.evidence, ward, new Date(), (m) => warn(agent, m), {
+      ...deps,
+      resolves,
+    })
     if (!sameVerdict(guardian.verdict, verdict)) {
       record.content = { ...ask, guardian: { ...guardian, verdict } }
       await agent.genericRecords
         .update(record)
         .catch((e: unknown) => warn(agent, `could not keep a new verdict: ${(e as Error)?.message ?? e}`))
     }
-    standings[beside] =
-      verdict.ok === true ? { kind: 'verified', state: verdict.state } : { kind: 'unverified', outcome: verdict.reason }
+    standings[beside] = standingOf(verdict, guardian.evidence)
   }
   return standings
 }

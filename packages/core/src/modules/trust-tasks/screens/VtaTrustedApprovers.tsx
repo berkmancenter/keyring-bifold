@@ -80,6 +80,7 @@ export const TrustedApproversIds = {
   guardianVerified: (did: string) => `TrustedApproverGuardianVerified_${did}`,
   guardianUnverified: (did: string) => `TrustedApproverGuardianUnverified_${did}`,
   guardianOutcome: (did: string) => `TrustedApproverGuardianOutcome_${did}`,
+  guardianUnreachable: (did: string) => `TrustedApproverGuardianUnreachable_${did}`,
   cardStatus: (connectionId: string) => `TrustedApproverCardStatus_${connectionId}`,
   cardSend: (connectionId: string) => `TrustedApproverCardSend_${connectionId}`,
   cardStop: (connectionId: string) => `TrustedApproverCardStop_${connectionId}`,
@@ -279,11 +280,27 @@ const VtaTrustedApprovers: React.FC = () => {
   /**
    * The state card line beside an approver: a card from a named state, as the contact showed it (what is checked is
    * the chain they sent, as of what they sent, and not yet that it is their phone's), or couldn't verify with the
-   * outcome. No card (never asked, or they chose not to send it): no line.
+   * outcome. No card (never asked, or they chose not to send it): no line. A root whose did:webs could not be reached
+   * on this open: "Couldn't reach the state", its own line, never "Couldn't verify" (the card was not checked) and
+   * never verified (nothing falls back to the card's own copy).
    */
   const guardianLine = (did: string | undefined, name: string) => {
     const standing = did && isStateVerifiedApproversEnabled() ? standings[did] : undefined
     if (!did || !standing) return null
+    if (standing.kind === 'unreachable')
+      return (
+        <View>
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianUnreachable(did))}>
+            {t('Approver.GuardianStateUnreachable')}
+          </ThemedText>
+          <ThemedText style={styles.muted}>
+            {t('Approver.GuardianStateUnreachableHint', {
+              state: standing.state,
+              interpolation: { escapeValue: false },
+            })}
+          </ThemedText>
+        </View>
+      )
     return standing.kind === 'verified' ? (
       <View>
         <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianVerified(did))}>

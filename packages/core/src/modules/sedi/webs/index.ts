@@ -16,3 +16,4 @@ export {
   type WebsResponse,
 } from './resolve'
 export { verifyGuardianWithWebs, type StateNotResolved, type WebsRoot } from './guardian'
+export { ourRootKelResolver, resolveRootKel, setRootKelResolver, type RootKel, type RootKelResolver } from './rootKel'

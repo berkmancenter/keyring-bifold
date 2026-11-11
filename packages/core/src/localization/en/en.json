@@ -3696,6 +3696,8 @@
     "GuardianAsShown": "As shown by {{name}}. Not yet linked to their phone.",
     "GuardianCouldNotVerify": "Couldn't verify the state card",
     "GuardianOutcome": "Details: {{outcome}}",
+    "GuardianStateUnreachable": "Couldn't reach the state",
+    "GuardianStateUnreachableHint": "{{state}} couldn't be reached to check this card. It's checked again the next time you open this screen.",
     "CardAskTitle": "Also send your Guardian card from {{state}} to {{asker}}?",
     "CardAskTitleNoState": "Also send your Guardian card to {{asker}}?",
     "CardAskBody": "It shows {{asker}} that a state named you a guardian. {{asker}} would see your KERI identifier and the state's record of it. You approve for {{asker}} either way. You can change this under People I approve for.",

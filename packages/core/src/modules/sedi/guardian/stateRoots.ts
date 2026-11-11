@@ -19,6 +19,12 @@ export interface StateRoot {
   aid: string
   /** What Who approves calls it: "Has a Guardian card from <name>". */
   name: string
+  /**
+   * Where the root publishes its KEL (did:webs; sedi/webs). With it, a card's check reads the root's history from
+   * there, fetched on each open, and refuses as `stateNotResolved` when it cannot (never falls back to the card's own
+   * copy). Its last label must be `aid`. Without it, the card's copy is read, as before.
+   */
+  webs?: string
 }
 
 /**
