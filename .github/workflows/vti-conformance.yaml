@@ -32,7 +32,14 @@ permissions:
 
 jobs:
   upstream-judges-keyring:
-    runs-on: ubuntu-22.04
+    # ubuntu-24.04: two cold builds of the checker on ubuntu-22.04 were cut off by
+    # a runner shutdown signal (exit 143) at "Build card-verify" on 11-11. Fewer
+    # cargo jobs keep a cold build's memory down; a cold build is ~25-50 min, a
+    # warm one ~6 min, so 90 min is a ceiling, not a target.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
     name: VTI SDK accepts Keyring's card and statement
     steps:
       - name: Checkout bifold
