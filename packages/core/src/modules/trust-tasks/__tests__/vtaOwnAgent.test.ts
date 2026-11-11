@@ -811,8 +811,9 @@ describe('adding a device from a phone whose own access lapses', () => {
     expect(added.expiresAt).toBe(HOUR)
   })
 
-  // VTI-ACL-107 (vta-service-v0.79.0 acl.rs): an entry may state only purposes its writer's own grants. A phone whose own
-  // list it couldn't read gives `any`, and an agent holding it to listed purposes refuses: said as beyond its own access.
+  // VTI-ACL-107 (vta-service-v0.80.0 acl.rs; newer than our v0.79.0 pin): an entry may state only purposes its
+  // writer's own grants. A phone whose own list it couldn't read gives `any`, and an agent holding it to listed
+  // purposes refuses: said as beyond its own access.
   it.each([
     ['as the 0.3 tasks code it', { code: 'purposeOutsideDelegator', message: 'purposes outside your own' }],
     [
