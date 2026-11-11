@@ -20,6 +20,10 @@
  *
  * Every record here is changed in place, never deleted.
  *
+ * The check on open is memoised for this run of the app only (see {@link guardianStandings}): it runs again whenever
+ * anything it reads has moved, and never across a restart or an OTA, so a verdict from older verifier code is never
+ * reused.
+ *
  * @module trust-tasks/guardianEvidence
  */
 import { utils, type Agent } from '@credo-ts/core'
@@ -70,11 +74,11 @@ export type GuardianEvidence = Pick<GuardianEvidencePayload, 'guardianSaid' | 'h
 
 /**
  * What the last check said. `ok: true` only from verifyGuardian's valid result on a root this build trusts, and its
- * `state` is the name on this phone's list, never one the sender gave. Every other outcome is a refusal, kept with
- * its reason for the details line and the log.
+ * `state` is the name on this phone's list, never one the sender gave, and `demo` is that list entry's demo mark.
+ * Every other outcome is a refusal, kept with its reason for the details line and the log.
  */
 export type GuardianVerdict =
-  | { ok: true; root: string; state: string; checkedAt: string; expires?: string }
+  | { ok: true; root: string; state: string; demo?: true; checkedAt: string; expires?: string }
   | { ok: false; reason: string; detail: string; checkedAt: string }
 
 /** Kept on the offer's record (RoleOfferAsk.guardian): the card a contact sent, as whom, and the last verdict. */
@@ -96,7 +100,7 @@ export interface GuardianOnAsk {
  * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
  */
 export type GuardianStanding =
-  | { kind: 'verified'; state: string }
+  | { kind: 'verified'; state: string; demo?: true }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
 
@@ -169,6 +173,7 @@ function checkWith(
       ok: true,
       root: root.aid,
       state: root.name,
+      ...(root.demo ? { demo: true as const } : {}),
       checkedAt,
       ...(result.expires ? { expires: result.expires } : {}),
     }
@@ -396,6 +401,8 @@ export interface CardQuestion {
   asker: string
   /** The state named on this phone's own list for the card's root, if it is on the list. */
   state?: string
+  /** That list entry's demo mark ("Demo" pill beside the name). */
+  demo?: true
 }
 
 class CardQuestionStore {
@@ -420,18 +427,24 @@ export const cardQuestions = new CardQuestionStore()
 /** 'question': a question was added or answered. */
 export const guardianCardEvents = new EventEmitter()
 
-/** The state this phone's own list names for the card's root, if the root is on the list; never the card's word. */
-function stateNameOf(evidence: GuardianEvidence): string | undefined {
-  return trustedStateRoots().find((root) => evidence.kels.some((kel) => kel.includes(`"i":"${root.aid}"`)))?.name
+/**
+ * The state this phone's own list names for the card's root, and that entry's demo mark, if the root is on the list;
+ * never the card's word.
+ */
+function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true } {
+  const root = trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))
+  if (!root) return {}
+  return root.demo ? { state: root.name, demo: true } : { state: root.name }
 }
 
 /** The card this phone could share, and the state it is from: none with either switch off or no card held. */
-export async function cardToShare(agent: Pick<Agent, 'genericRecords'>): Promise<{ state?: string } | undefined> {
+export async function cardToShare(
+  agent: Pick<Agent, 'genericRecords'>
+): Promise<{ state?: string; demo?: true } | undefined> {
   if (!isOn()) return undefined
   const held = await heldGuardianEvidence(agent)
   if (!held) return undefined
-  const state = stateNameOf(held)
-  return state ? { state } : {}
+  return stateOf(held)
 }
 
 export type CardAfterYesResult = EvidenceSendResult | 'declined' | 'asked' | 'notApproving'
@@ -453,8 +466,7 @@ export async function guardianCardAfterYes(
   const consent = await cardConsentOn(agent, prompt.connectionId)
   if (consent === 'yes') return sendGuardianEvidence(agent, prompt.connectionId, prompt.agentDid, approverDid)
   if (consent === 'no') return 'declined'
-  const state = stateNameOf(held)
-  cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...(state ? { state } : {}) })
+  cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...stateOf(held) })
   guardianCardEvents.emit('question', { connectionId: prompt.connectionId })
   return 'asked'
 }
@@ -491,8 +503,20 @@ export type TestStateActionResult = 'done' | 'off'
  * state-verified approvers are both on, and no remote off is set).
  */
 export async function holdK0TestGuardianCard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  return (await keepK0TestGuardianCard(agent)) === 'done' ? 'done' : 'off'
+}
+
+/**
+ * Why holdK0TestGuardianCard did or did not keep the card: 'off' (the test state is not trusted) and 'tooLarge' (the
+ * card is over GUARDIAN_EVIDENCE_MAX_BYTES) are different facts, which the one-tap "Set up the SEDI demo" reports
+ * apart. holdK0TestGuardianCard keeps its two results for its Developer row; this is not exported from the package.
+ */
+export type K0CardKeepResult = TestStateActionResult | 'tooLarge'
+
+/** holdK0TestGuardianCard, saying which of 'off' and 'tooLarge' stopped it. */
+export async function keepK0TestGuardianCard(agent: Pick<Agent, 'genericRecords'>): Promise<K0CardKeepResult> {
   if (!isTrustTestStateEnabled()) return 'off'
-  return (await holdGuardianEvidence(agent, K0_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'off'
+  return (await holdGuardianEvidence(agent, K0_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'tooLarge'
 }
 
 /**
@@ -590,9 +614,75 @@ function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undef
   return undefined
 }
 
+/**
+ * What a check on open read, as one string: the ward, the roots this build trusts (AID and the name we show), and
+ * the card's exact stored text. Equal strings mean the check would read the same inputs; anything that differs,
+ * including a key order that changed, only makes the check run again. The card's text is compared whole, not
+ * hashed: a hash would cost more than comparing ~14 KB and could only be less exact.
+ */
+function checkInputs(evidence: GuardianEvidence, ward: string | null): string {
+  const roots = trustedStateRoots()
+    .map((root) => `${root.aid}=${root.name}${root.demo ? '#demo' : ''}`)
+    .sort()
+  return JSON.stringify([ward, roots, evidenceOf(evidence)])
+}
+
+/**
+ * The last check on open per ask record, for this run of the app only: never stored, so a restart or an OTA that
+ * changes the verifier checks every card again, and a verdict computed by older code is never reused.
+ */
+const lastChecks = new Map<string, { inputs: string; verdict: GuardianVerdict }>()
+
+/**
+ * Empty the in-memory memo (nothing stored is touched): the next open checks each card again, as after a restart.
+ * Tests only: rows use it to simulate a restart. Nothing in production calls it, and it is not exported from the package
+ * (a real restart empties the memo by itself). Don't wire it anywhere, or delete it as unused while rows use it.
+ */
+export function resetGuardianCheckMemo(): void {
+  lastChecks.clear()
+}
+
+/**
+ * A verdict that expires is reused only while its expiry is still ahead. The verifier refuses an unreadable expiry
+ * (bifold #1031, expiryUnreadable), so a valid verdict always carries a readable expiry or none; if one ever did
+ * not, `new Date(x) > now` is false for an unreadable x and the check runs again, which is the safe direction.
+ *
+ * The time trigger assumes the check reads only the PRESENTED credential's expiry, which is the `expires` a valid
+ * verdict carries (sedi/guardian/chain.ts guardianIn; intermediates go through node(), which never reads expiry). If
+ * intermediate expiry is ever checked, this must become the earliest expiry across the whole chain.
+ */
+const stillCurrent = (verdict: GuardianVerdict, now: Date) =>
+  verdict.ok !== true || verdict.expires === undefined || new Date(verdict.expires) > now
+
+/**
+ * The verdict on open: the memoised one if the check would read exactly the same inputs and it has not expired,
+ * else the check run now (and memoised). Reuse only ever returns a verdict the check itself gave for those inputs,
+ * so it cannot turn a refusal into valid.
+ */
+async function verdictNow(
+  agent: Agent,
+  recordId: string,
+  guardian: GuardianOnAsk,
+  ward: string | null,
+  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves: WebsResolves }
+): Promise<GuardianVerdict> {
+  const now = new Date()
+  // A card naming a root that publishes at a did:webs is checked against what that root serves now, so it is never
+  // memoised: the inputs below do not include the fetched history.
+  if (websRootsFor(guardian.evidence, trustedStateRoots()).length > 0)
+    return checkGuardianEvidenceResolving(guardian.evidence, ward, now, (m) => warn(agent, m), deps)
+  const inputs = checkInputs(guardian.evidence, ward)
+  const last = lastChecks.get(recordId)
+  if (last && last.inputs === inputs && stillCurrent(last.verdict, now)) return last.verdict
+  const verdict = checkGuardianEvidence(guardian.evidence, ward, now, (m) => warn(agent, m))
+  lastChecks.set(recordId, { inputs, verdict })
+  return verdict
+}
+
 /** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
 function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
-  if (verdict.ok === true) return { kind: 'verified', state: verdict.state }
+  if (verdict.ok === true)
+    return { kind: 'verified', state: verdict.state, ...(verdict.demo ? { demo: true as const } : {}) }
   if (verdict.reason === 'stateNotResolved')
     return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
   return { kind: 'unverified', outcome: verdict.reason }
@@ -602,13 +692,16 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
   !!a &&
   a.ok === b.ok &&
   (a.ok === true && b.ok === true
-    ? a.root === b.root && a.state === b.state && a.expires === b.expires
+    ? a.root === b.root && a.state === b.state && a.demo === b.demo && a.expires === b.expires
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**
  * Who approves, on open: each kept card checked again now (expiry, the roots this build trusts, the ward set now),
- * by the approver DID it is shown beside. A verdict that changed is written back in place; if that write fails, the
- * fresh verdict is still what shows. Empty with either switch off, and an approver with no card has no entry.
+ * by the approver DID it is shown beside. The check runs on the JS thread, so it is memoised for this run of the app
+ * (see {@link verdictNow}): it runs again only when the ward, the trusted roots or the card's text moved, or a valid
+ * verdict's expiry has come, and always on the first open after a restart. A verdict that changed is written back in
+ * place; if that write fails, the fresh verdict is still what shows. Empty with either switch off, and an approver
+ * with no card has no entry.
  */
 export async function guardianStandings(
   agent: Agent,
@@ -625,10 +718,7 @@ export async function guardianStandings(
     if (!guardian) continue
     const beside = shownBeside(ask, guardian)
     if (!beside) continue
-    const verdict = await checkGuardianEvidenceResolving(guardian.evidence, ward, new Date(), (m) => warn(agent, m), {
-      ...deps,
-      resolves,
-    })
+    const verdict = await verdictNow(agent, record.id, guardian, ward, { ...deps, resolves })
     if (!sameVerdict(guardian.verdict, verdict)) {
       record.content = { ...ask, guardian: { ...guardian, verdict } }
       await agent.genericRecords
