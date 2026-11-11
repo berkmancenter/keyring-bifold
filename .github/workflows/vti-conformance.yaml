@@ -40,8 +40,21 @@ jobs:
     timeout-minutes: 180
     env:
       CARGO_BUILD_JOBS: '3'
+      # No debug info: the checker needs no symbols, and debuginfo is the
+      # largest part of a release build's memory and of target/ on disk.
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
     name: VTI SDK accepts Keyring's card and statement
     steps:
+      # Three cold builds died with a runner shutdown signal (exit 143) at
+      # "Build card-verify", in the same crates each time, on two images. A full
+      # disk takes the runner service down that way, so free the preinstalled
+      # SDKs this job never uses and log the space before and after the builds.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" || true
+          df -h /
+
       - name: Checkout bifold
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -88,6 +101,9 @@ jobs:
       - name: Build card-verify
         working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify
         run: cargo build --release --locked
+
+      - name: Disk after the first build
+        run: df -h /
 
       - name: Build card-verify-v047
         working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify-v047
