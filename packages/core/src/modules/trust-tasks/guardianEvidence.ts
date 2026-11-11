@@ -418,8 +418,20 @@ export type TestStateActionResult = 'done' | 'off'
  * state-verified approvers are both on, and no remote off is set).
  */
 export async function holdK0TestGuardianCard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  return (await keepK0TestGuardianCard(agent)) === 'done' ? 'done' : 'off'
+}
+
+/**
+ * Why holdK0TestGuardianCard did or did not keep the card: 'off' (the test state is not trusted) and 'tooLarge' (the
+ * card is over GUARDIAN_EVIDENCE_MAX_BYTES) are different facts, which the one-tap "Set up the SEDI demo" reports
+ * apart. holdK0TestGuardianCard keeps its two results for its Developer row; this is not exported from the package.
+ */
+export type K0CardKeepResult = TestStateActionResult | 'tooLarge'
+
+/** holdK0TestGuardianCard, saying which of 'off' and 'tooLarge' stopped it. */
+export async function keepK0TestGuardianCard(agent: Pick<Agent, 'genericRecords'>): Promise<K0CardKeepResult> {
   if (!isTrustTestStateEnabled()) return 'off'
-  return (await holdGuardianEvidence(agent, K0_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'off'
+  return (await holdGuardianEvidence(agent, K0_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'tooLarge'
 }
 
 /**

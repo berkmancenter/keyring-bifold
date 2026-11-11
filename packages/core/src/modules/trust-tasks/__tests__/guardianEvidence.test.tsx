@@ -62,6 +62,7 @@ import {
 } from '../module/trustedApproversFlag'
 import { isTrustTestStateEnabled, setTrustTestStateEnabled } from '../module/trustTestStateFlag'
 import { setUpSediDemo, turnOffSediDemo } from '../developerTestState'
+import * as evidenceModule from '../guardianEvidence'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import ApproverOfferModal, { ApproverOfferIds } from '../components/ApproverOfferModal'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
@@ -550,6 +551,68 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
   test.todo(
     'the one-tap and its undo also set the holder state-card switch (setStateCardEnabled, feat/sedi-holder-card)'
   )
+
+  // Each way the one-tap can stop is its own result (ac, #1033): a card over the size cap is not "a release turned
+  // this off". The steps are reached through the module object (developerTestState requires it lazily), so a spy on
+  // it stands in for the card or ward failing.
+  describe('a step that fails says which step, and the switches it turned on stay on', () => {
+    afterEach(() => {
+      jest.restoreAllMocks()
+      SEDI_KERI_REMOTE_OFF.off = false
+    })
+
+    test('the card over the size cap: cardNotHeld, never remoteOff; switches on, ward still set (control: no failure, done)', async () => {
+      const control = phone()
+      expect(await setUpSediDemo(control.agent)).toBe('done')
+      allSwitchesOff()
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockResolvedValue('tooLarge')
+      const phoneA = phone()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('cardNotHeld')
+      expect(states()).toEqual([true, true, true])
+      expect(await heldGuardianEvidence(phoneA.agent)).toBeUndefined()
+      expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
+    })
+
+    test('the card step throws: cardNotHeld (control: it resolves done, setup is done)', async () => {
+      const spy = jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockRejectedValueOnce(new Error('storage'))
+      expect(await setUpSediDemo(phone().agent)).toBe('cardNotHeld')
+      spy.mockRestore()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+
+    test('the ward step fails: wardNotSet, the card still held and the switches on (control: no failure, done)', async () => {
+      jest.spyOn(evidenceModule, 'becomeK0TestWard').mockRejectedValue(new Error('storage'))
+      const phoneA = phone()
+      expect(await setUpSediDemo(phoneA.agent)).toBe('wardNotSet')
+      expect(states()).toEqual([true, true, true])
+      expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
+      expect(await stateWardOf(phoneA.agent)).toBeNull()
+      jest.restoreAllMocks()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+
+    test('both steps fail: the card is named first, and both were attempted (control: the ward-only row above)', async () => {
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockResolvedValue('tooLarge')
+      const ward = jest.spyOn(evidenceModule, 'becomeK0TestWard').mockRejectedValue(new Error('storage'))
+      expect(await setUpSediDemo(phone().agent)).toBe('cardNotHeld')
+      expect(ward).toHaveBeenCalledTimes(1)
+    })
+
+    test('a kill landing during the card step: remoteOff, not cardNotHeld; the raw switches stay on (control: no kill, done)', async () => {
+      jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockImplementation(async () => {
+        SEDI_KERI_REMOTE_OFF.off = true
+        return 'off'
+      })
+      expect(await setUpSediDemo(phone().agent)).toBe('remoteOff')
+      SEDI_KERI_REMOTE_OFF.off = false
+      expect(states()).toEqual([true, true, true])
+      jest.restoreAllMocks()
+      allSwitchesOff()
+      expect(await setUpSediDemo(phone().agent)).toBe('done')
+    })
+  })
 })
 
 describe('the demo state is marked on our list, never inferred', () => {
