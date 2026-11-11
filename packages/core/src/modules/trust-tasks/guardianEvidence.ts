@@ -6,9 +6,13 @@
  * and the ward set on this phone, keeps the card and the verdict on the offer's record, and checks it again each
  * time Who approves opens (a card can expire or a root can leave the list).
  *
+ * Jordan is asked first (Alberto, 2026-11-11): the card shows Sam Jordan's KERI identifier and the state's record of it,
+ * so it goes only once Jordan has said yes to sending it to Sam, an answer asked once per person and kept. Never asked
+ * means nothing is sent ({@link guardianCardAfterYes}).
+ *
  * Behind both switches: trusted approvers (isTrustedApproversEnabled) and state-verified approvers
- * (isStateVerifiedApproversEnabled), each of which the SEDI/KERI umbrella turns off. Off, nothing is sent, nothing
- * arriving is read, and nothing is shown.
+ * (isStateVerifiedApproversEnabled), each of which the SEDI/KERI umbrella turns off. Off, nothing is asked, nothing is
+ * sent, nothing arriving is read, and nothing is shown.
  *
  * What a verified card says, and no more: a State root on this phone's list names the card's holder as the guardian
  * of this phone's ward. It does not say the contact's phone controls that holder (that waits for the approver's own
@@ -23,6 +27,7 @@
  * @module trust-tasks/guardianEvidence
  */
 import { utils, type Agent } from '@credo-ts/core'
+import { EventEmitter } from 'events'
 
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
@@ -31,10 +36,12 @@ import { K0_TEST_WARD, trustedStateRoots } from '../sedi/guardian/stateRoots'
 import {
   ROLE_OFFER_ASK,
   approverRoleEvents,
+  approvingFor,
   proofUnder,
   relationshipOn,
   writtenAsOf,
   type RoleOfferAsk,
+  type RoleOfferPrompt,
 } from './approverRole'
 import {
   GUARDIAN_EVIDENCE_MAX_BYTES,
@@ -55,6 +62,11 @@ const LOG_PREFIX = '[TrustTasks:GuardianEvidence]'
 export const GUARDIAN_EVIDENCE_HELD = 'keyring.sedi-guardian-evidence-held'
 /** genericRecords recordType of this phone's ward for Guardian checks (one record, changed in place). */
 export const STATE_WARD = 'keyring.sedi-state-ward'
+/**
+ * genericRecords recordType of this phone's answer to "Also send your Guardian card to <name>?": one record per
+ * connection, changed in place, never deleted.
+ */
+export const GUARDIAN_CARD_CONSENT = 'keyring.sedi-guardian-card-consent'
 
 /** The card itself: the Guardian credential, the holder it names, and the chain to its root. */
 export type GuardianEvidence = Pick<GuardianEvidencePayload, 'guardianSaid' | 'holder' | 'kels' | 'tels' | 'creds'>
@@ -76,7 +88,11 @@ export interface GuardianOnAsk {
   verdict: GuardianVerdict
 }
 
-/** What Who approves shows beside an approver: verified by a named state, or could not verify, with the outcome. */
+/**
+ * What Who approves shows beside an approver: a card from a named state ("Has a Guardian card from <state>"), or could
+ * not verify, with the outcome. An approver who sent no card (never asked, or chose not to) has no standing at all, so
+ * no line: not sharing is a choice, never shown as a failed check.
+ */
 export type GuardianStanding = { kind: 'verified'; state: string } | { kind: 'unverified'; outcome: string }
 
 const OFF = 'state-verified approvers are switched off on this phone (Settings › Developer)'
@@ -235,6 +251,153 @@ export async function sendGuardianEvidence(
 function ceremony(): typeof import('./ceremony') {
   // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
   return require('./ceremony')
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Asking Jordan first: "Also send your Guardian card to <name>?"
+
+/** This phone's answer for one person: send the card to them, or not. No answer: never asked, and nothing is sent. */
+export type CardConsent = 'yes' | 'no'
+
+/**
+ * This phone's answer for the contact on `connectionId`, if it gave one.
+ *
+ * Persisted, on purpose: an answer is the person's decision, not a computation, so it must outlive a restart and an
+ * OTA, and a no must never be forgotten into a re-ask until they say yes. (A Guardian verdict is the opposite: it is
+ * computed by one version of the checker, so it is never kept as an answer to reuse across an update.)
+ *
+ * Keyed by the connection, not by a DID. A relationship DID that rotates on the same connection keeps the answer, so
+ * a no stays a no. A new connection (a reconnect, which may be another phone or another person) has no answer and is
+ * asked again; with no answer nothing is sent, so a re-ask can only withhold.
+ */
+export async function cardConsentOn(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string
+): Promise<CardConsent | undefined> {
+  const [record] =
+    (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
+  const answer = (record?.content as { answer?: unknown } | undefined)?.answer
+  return answer === 'yes' || answer === 'no' ? answer : undefined
+}
+
+/** Keep this phone's answer for the contact on `connectionId` (changed in place; saved the first time). */
+export async function setCardConsent(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string,
+  answer: CardConsent
+): Promise<void> {
+  const content = { connectionId, answer, answeredAt: new Date().toISOString() }
+  const [existing] =
+    (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
+  if (existing) {
+    existing.content = { ...content }
+    await agent.genericRecords.update(existing)
+  } else {
+    await agent.genericRecords.save({
+      content: { ...content },
+      tags: { recordType: GUARDIAN_CARD_CONSENT, connectionId },
+    })
+  }
+}
+
+/** Every answer this phone gave, by connection (for People I approve for). */
+export async function cardConsents(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, CardConsent>> {
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT })) ?? []
+  const answers: Record<string, CardConsent> = {}
+  for (const record of records) {
+    const { connectionId, answer } = (record.content ?? {}) as { connectionId?: unknown; answer?: unknown }
+    if (typeof connectionId === 'string' && (answer === 'yes' || answer === 'no')) answers[connectionId] = answer
+  }
+  return answers
+}
+
+/** "Also send your Guardian card to <asker>?", waiting for this phone's person. */
+export interface CardQuestion {
+  connectionId: string
+  asker: string
+  /** The state named on this phone's own list for the card's root, if it is on the list. */
+  state?: string
+}
+
+class CardQuestionStore {
+  private questions = new Map<string, CardQuestion>()
+  set(question: CardQuestion) {
+    this.questions.set(question.connectionId, question)
+  }
+  take(connectionId: string) {
+    this.questions.delete(connectionId)
+  }
+  first(): CardQuestion | undefined {
+    return [...this.questions.values()][0]
+  }
+  /** Tests only. */
+  reset() {
+    this.questions.clear()
+  }
+}
+
+/** The questions asked this run. Not kept: one not answered before a restart is answered on People I approve for. */
+export const cardQuestions = new CardQuestionStore()
+/** 'question': a question was added or answered. */
+export const guardianCardEvents = new EventEmitter()
+
+/** The state this phone's own list names for the card's root, if the root is on the list; never the card's word. */
+function stateNameOf(evidence: GuardianEvidence): string | undefined {
+  return trustedStateRoots().find((root) => evidence.kels.some((kel) => kel.includes(`"i":"${root.aid}"`)))?.name
+}
+
+/** The card this phone could share, and the state it is from: none with either switch off or no card held. */
+export async function cardToShare(agent: Pick<Agent, 'genericRecords'>): Promise<{ state?: string } | undefined> {
+  if (!isOn()) return undefined
+  const held = await heldGuardianEvidence(agent)
+  if (!held) return undefined
+  const state = stateNameOf(held)
+  return state ? { state } : {}
+}
+
+export type CardAfterYesResult = EvidenceSendResult | 'declined' | 'asked' | 'notApproving'
+
+/**
+ * After a yes to approve for the contact on `prompt.connectionId`: send the card this phone holds only if its person
+ * already said yes to sending it to this contact. Said no: nothing goes, and nothing is asked again. Never asked:
+ * nothing goes, and the question is put to the person ({@link cardQuestions}). Either switch off: nothing is asked
+ * and nothing goes. The approval itself is never touched here.
+ */
+export async function guardianCardAfterYes(
+  agent: Agent,
+  prompt: Pick<RoleOfferPrompt, 'connectionId' | 'agentDid' | 'asker'>,
+  approverDid: string
+): Promise<CardAfterYesResult> {
+  if (!isOn()) return 'off'
+  const held = await heldGuardianEvidence(agent)
+  if (!held) return 'none'
+  const consent = await cardConsentOn(agent, prompt.connectionId)
+  if (consent === 'yes') return sendGuardianEvidence(agent, prompt.connectionId, prompt.agentDid, approverDid)
+  if (consent === 'no') return 'declined'
+  const state = stateNameOf(held)
+  cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...(state ? { state } : {}) })
+  guardianCardEvents.emit('question', { connectionId: prompt.connectionId })
+  return 'asked'
+}
+
+/**
+ * This phone's person answers "Also send your Guardian card to <name>?" (the question after a yes, or the button on
+ * People I approve for): the answer is kept, and a yes sends the card now, for the agent and as the DID of the yes
+ * kept here. Either switch off: nothing is kept and nothing goes.
+ */
+export async function shareGuardianCard(
+  agent: Agent,
+  connectionId: string,
+  send: boolean
+): Promise<CardAfterYesResult> {
+  if (!isOn()) return 'off'
+  await setCardConsent(agent, connectionId, send ? 'yes' : 'no')
+  cardQuestions.take(connectionId)
+  guardianCardEvents.emit('question', { connectionId })
+  if (!send) return 'declined'
+  const yes = (await approvingFor(agent)).find((prompt) => prompt.connectionId === connectionId)
+  if (!yes?.answeredAs) return 'notApproving'
+  return sendGuardianEvidence(agent, connectionId, yes.agentDid, yes.answeredAs)
 }
 
 // ---------------------------------------------------------------------------------------------------------------
