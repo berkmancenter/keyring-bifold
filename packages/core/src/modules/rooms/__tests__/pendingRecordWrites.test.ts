@@ -14,7 +14,7 @@ import {
   usePendingWrites,
   withPendingWrites,
 } from '../pendingRecordWrites'
-import { placeOf, type RoomPost } from '../roomPosts'
+import { placeOf, reactionValueOfBody, type RoomPost } from '../roomPosts'
 import { foldRoomRecords } from '../roomThread'
 
 const ME = { did: 'did:peer:me' }
@@ -67,7 +67,8 @@ describe('what is on its way, laid over the posts', () => {
       [myReaction('r1', 'm1', '👍'), M1],
       [write({ type: 'changeReaction', key: 'r1', value: '❤️' })]
     )
-    expect(mineOn(laid, 'm1')).toEqual(['❤️'])
+    // In the normal form values are compared in (reactionValueOfBody), as a stored one is.
+    expect(mineOn(laid, 'm1')).toEqual([reactionValueOfBody('❤️')])
   })
 
   test('a reaction taken back counts for nothing', () => {
