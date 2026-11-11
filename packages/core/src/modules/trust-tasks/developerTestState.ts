@@ -8,10 +8,10 @@
  */
 import type { Agent } from '@credo-ts/core'
 
-import { setStateCardEnabled } from '../sedi/holder/stateCardFlag'
+import { STATE_CARD_REMOTE_OFF, setStateCardEnabled } from '../sedi/holder/stateCardFlag'
 
 import type { TestStateActionResult } from './guardianEvidence'
-import { setConfirmItsYouEnabled } from './module/confirmItsYouFlag'
+import { CONFIRM_ITS_YOU_REMOTE_OFF, setConfirmItsYouEnabled } from './module/confirmItsYouFlag'
 import { SEDI_KERI_REMOTE_OFF } from './module/sediKeriRemoteOff'
 import {
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
@@ -43,9 +43,25 @@ export function becomeK0TestWard(agent: Pick<Agent, 'genericRecords'>): Promise<
  * - 'remoteOff': a remote off or the SEDI/KERI umbrella is set (found before anything is touched, or landed while the
  *   card and ward were being set);
  * - 'cardNotHeld': the K0 card was not kept (over the size cap, or storage failed);
- * - 'wardNotSet': the card was kept, but the K0 ward was not set (storage failed).
+ * - 'wardNotSet': the card was kept, but the K0 ward was not set (storage failed);
+ * - 'doneSomeHidden': set up as 'done', but the state card's or Confirm it's you's own remote off is set, so that
+ *   feature will not show; {@link sediDemoHiddenByKill} names which.
  */
-export type SediDemoSetupResult = 'done' | 'remoteOff' | 'cardNotHeld' | 'wardNotSet'
+export type SediDemoSetupResult = 'done' | 'remoteOff' | 'cardNotHeld' | 'wardNotSet' | 'doneSomeHidden'
+
+/** A feature the one-tap turned on but a release has turned off with its own remote off. */
+export type SediDemoHiddenFeature = 'stateCard' | 'confirmItsYou'
+
+/**
+ * Which of the one-tap's features a release has turned off with its own remote off, read live at each call (never
+ * remembered from a setup): the switch underneath is on, but the feature will not show while that kill is set.
+ */
+export function sediDemoHiddenByKill(): SediDemoHiddenFeature[] {
+  const hidden: SediDemoHiddenFeature[] = []
+  if (STATE_CARD_REMOTE_OFF.off) hidden.push('stateCard')
+  if (CONFIRM_ITS_YOU_REMOTE_OFF.off) hidden.push('confirmItsYou')
+  return hidden
+}
 
 const anyKill = () =>
   SEDI_KERI_REMOTE_OFF.off || TRUSTED_APPROVERS_REMOTE_OFF.off || STATE_VERIFIED_APPROVERS_REMOTE_OFF.off
@@ -72,8 +88,12 @@ async function attempt<T>(step: () => Promise<T>): Promise<T | 'failed'> {
  *
  * The state card's and Confirm it's you's own remote offs (STATE_CARD_REMOTE_OFF, CONFIRM_ITS_YOU_REMOTE_OFF) do NOT
  * stop the setup: neither is needed by the approvers demo, so a release that turns one of them off still lets the demo
- * set up, and that feature stays hidden by its own kill (each is…Enabled is the switch AND not killed). The umbrella
- * stops everything, as above.
+ * set up, and that feature stays hidden by its own kill (each is…Enabled is the switch AND not killed). The result is
+ * then 'doneSomeHidden', not 'done', so the screen can say which feature will not show and why. The umbrella stops
+ * everything, as above.
+ *
+ * Because the switch underneath IS turned on, clearing one of those two kills later (a later release) reveals the
+ * feature on any phone that ran the setup while the kill was set. While the kill is set it still beats the saved "on".
  *
  * Any result other than 'done' after the start (a kill mid-setup, 'cardNotHeld', 'wardNotSet') means the five
  * switches HAVE ALREADY BEEN TURNED ON and stay on: a non-'done' result never means nothing changed. Under a kill the
@@ -93,7 +113,7 @@ export async function setUpSediDemo(agent: Pick<Agent, 'genericRecords'>): Promi
   if (anyKill() || !isTrustTestStateEnabled()) return 'remoteOff'
   if (card !== 'done') return 'cardNotHeld'
   if (ward !== 'done') return 'wardNotSet'
-  return 'done'
+  return sediDemoHiddenByKill().length > 0 ? 'doneSomeHidden' : 'done'
 }
 
 /**

@@ -70,7 +70,7 @@ import {
   isConfirmItsYouEnabled,
   setConfirmItsYouEnabled,
 } from '../module/confirmItsYouFlag'
-import { setUpSediDemo, turnOffSediDemo } from '../developerTestState'
+import { sediDemoHiddenByKill, setUpSediDemo, turnOffSediDemo } from '../developerTestState'
 import * as evidenceModule from '../guardianEvidence'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 import ApproverOfferModal, { ApproverOfferIds } from '../components/ApproverOfferModal'
@@ -536,6 +536,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     const phoneA = phone()
     expect(await setUpSediDemo(phoneA.agent)).toBe('done')
     expect(states()).toEqual([true, true, true, true, true])
+    expect(sediDemoHiddenByKill()).toEqual([])
     expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
     expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
   })
@@ -587,10 +588,11 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     expect(isStateCardEnabled()).toBe(false)
   })
 
-  test("the state card's own remote off does not stop the setup: done, the card hidden by its kill; cleared, it shows (control: the umbrella stops it)", async () => {
+  test("the state card's own remote off does not stop the setup: doneSomeHidden naming the card, the others visible; cleared, it shows (control: the umbrella stops it)", async () => {
     STATE_CARD_REMOTE_OFF.off = true
     const phoneA = phone()
-    expect(await setUpSediDemo(phoneA.agent)).toBe('done')
+    expect(await setUpSediDemo(phoneA.agent)).toBe('doneSomeHidden')
+    expect(sediDemoHiddenByKill()).toEqual(['stateCard'])
     expect(states()).toEqual([true, true, true, false, true])
     expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
     STATE_CARD_REMOTE_OFF.off = false
@@ -610,12 +612,26 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     expect(isConfirmItsYouEnabled()).toBe(false)
   })
 
-  test("Confirm it's you's own remote off does not stop the setup: done, it stays off by its kill; cleared, it is on", async () => {
+  test("Confirm it's you's own remote off does not stop the setup: doneSomeHidden naming it, the others visible; cleared, it is on", async () => {
     CONFIRM_ITS_YOU_REMOTE_OFF.off = true
-    expect(await setUpSediDemo(phone().agent)).toBe('done')
+    expect(await setUpSediDemo(phone().agent)).toBe('doneSomeHidden')
+    expect(sediDemoHiddenByKill()).toEqual(['confirmItsYou'])
     expect(states()).toEqual([true, true, true, true, false])
     CONFIRM_ITS_YOU_REMOTE_OFF.off = false
     expect(isConfirmItsYouEnabled()).toBe(true)
+    expect(sediDemoHiddenByKill()).toEqual([])
+  })
+
+  test('both peripheral remote offs: doneSomeHidden naming both, the approvers demo still set up (control: none set, done)', async () => {
+    STATE_CARD_REMOTE_OFF.off = true
+    CONFIRM_ITS_YOU_REMOTE_OFF.off = true
+    expect(await setUpSediDemo(phone().agent)).toBe('doneSomeHidden')
+    expect(sediDemoHiddenByKill()).toEqual(['stateCard', 'confirmItsYou'])
+    expect(states()).toEqual([true, true, true, false, false])
+    STATE_CARD_REMOTE_OFF.off = false
+    CONFIRM_ITS_YOU_REMOTE_OFF.off = false
+    allSwitchesOff()
+    expect(await setUpSediDemo(phone().agent)).toBe('done')
   })
 
   // Each way the one-tap can stop is its own result (ac, #1033): a card over the size cap is not "a release turned
