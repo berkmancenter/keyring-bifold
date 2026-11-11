@@ -24,7 +24,7 @@ jest.mock('../module/vtiTsp', () => ({
   packTrustTaskForPeer: jest.fn(),
 }))
 
-import { VtaClient } from '../module/VtaClient'
+import { type TspReplyBreaker, VtaClient } from '../module/VtaClient'
 import { goesFirst, VTA_SEND_ACT_TYPES, VTA_SEND_SEAL_TYPES, VTA_SENDS_FIRST } from '../module/vtaReadLane'
 
 const READ = 'https://trusttasks.org/spec/rooms/keys/read/0.1'
