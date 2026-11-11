@@ -29,6 +29,7 @@ import {
   confirmAsksOn,
   confirmEvents,
   confirmStatusOf,
+  namedLock,
   noteToSend,
   sendConfirmRequest,
   type ConfirmAsk,
@@ -186,12 +187,17 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
     error: { color: ColorPalette.semantic.error },
   })
   const n = { name, interpolation: { escapeValue: false } }
-  const at = (ask: ConfirmAsk) => ({
-    ...n,
-    time: timeOf(ask.respondedAt ?? ask.answeredAt),
-    sent: timeOf(ask.askedAt),
-    lock: t(`ConfirmItsYou.Lock.${ask.confirmedWith ?? 'unknown'}`),
-  })
+  // A lock is named only when the answer named one (namedLock): an absent or unknown lock is never shown as a claim,
+  // so the words then say "on their phone", not "with the phone's lock".
+  const at = (ask: ConfirmAsk) => {
+    const lock = namedLock(ask.confirmedWith)
+    return {
+      ...n,
+      time: timeOf(ask.respondedAt ?? ask.answeredAt),
+      sent: timeOf(ask.askedAt),
+      ...(lock ? { lock: t(`ConfirmItsYou.Lock.${lock}`) } : {}),
+    }
+  }
   // The note exactly as it was written: plain text, never links or markup.
   const quote = (ask: ConfirmAsk) => (
     <View style={styles.quote}>
@@ -230,7 +236,10 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
         return (
           <View style={[styles.card, styles.good]}>
             <ThemedText variant="bold" testID={testIdWithKey(ConfirmItsYouRowIds.status)}>
-              {t('ConfirmItsYou.ConfirmedTitle', at(ask))}
+              {t(
+                namedLock(ask.confirmedWith) ? 'ConfirmItsYou.ConfirmedTitle' : 'ConfirmItsYou.ConfirmedTitleOnPhone',
+                at(ask)
+              )}
             </ThemedText>
             <ThemedText>{t('ConfirmItsYou.ConfirmedBody', n)}</ThemedText>
             <ThemedText style={styles.muted}>{t('ConfirmItsYou.YouAsked')}</ThemedText>
@@ -250,7 +259,12 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
               <ThemedText style={styles.alarmText} variant="bold">
                 {t('ConfirmItsYou.NotThemBody')}
               </ThemedText>
-              <ThemedText style={styles.alarmText}>{t('ConfirmItsYou.NotThemSigned', at(ask))}</ThemedText>
+              <ThemedText style={styles.alarmText}>
+                {t(
+                  namedLock(ask.confirmedWith) ? 'ConfirmItsYou.NotThemSigned' : 'ConfirmItsYou.NotThemSignedOnPhone',
+                  at(ask)
+                )}
+              </ThemedText>
             </View>
             <View style={styles.steps} testID={testIdWithKey(ConfirmItsYouRowIds.steps)}>
               <ThemedText variant="bold">{t('ConfirmItsYou.WhatToDo')}</ThemedText>

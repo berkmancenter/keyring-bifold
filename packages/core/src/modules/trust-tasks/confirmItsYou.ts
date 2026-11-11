@@ -264,7 +264,7 @@ export async function handleConfirmResponse(
 
   const next = [...asks]
   const signedAt = Number.isFinite(Date.parse(String(answer.respondedAt))) ? String(answer.respondedAt) : undefined
-  const lock = CONFIRM_LOCKS.includes(answer.confirmedWith as ConfirmLock) ? answer.confirmedWith : undefined
+  const lock = namedLock(answer.confirmedWith)
   next[index] = {
     ...ask,
     state: answer.decision,
@@ -414,6 +414,18 @@ export type ConfirmTheOwner = (reason: string) => Promise<OwnerConfirmation>
 export type ConfirmAnswerResult = 'sent' | 'off' | 'gone' | 'cancelled' | 'failed' | 'unavailable'
 
 /**
+ * The lock an answer names, if it names one. An absent field, 'unknown' or anything off the list names no lock: it is
+ * never sent and never shown as a claim. The field exists to name how the person unlocked their phone, and "couldn't
+ * tell" is not a lock, so the asking phone must not be told one was used (it then says "confirmed on their phone").
+ * 'unknown' stays accepted inbound, from other implementations of the spec, and reads exactly like absent.
+ */
+export function namedLock(kind: string | null | undefined): Exclude<ConfirmLock, 'unknown'> | undefined {
+  return kind && kind !== 'unknown' && (CONFIRM_LOCKS as readonly string[]).includes(kind)
+    ? (kind as Exclude<ConfirmLock, 'unknown'>)
+    : undefined
+}
+
+/**
  * The person's answer, "it's me" or "not me". Either one needs the phone owner's lock first (`confirm`): a "not me"
  * matters as much as an "it's me" here, so both come from the owner. Not confirmed, nothing is sent and the request
  * stays. Then it is signed under this phone's relationship DID and sent; sent first, so a failed send leaves the
@@ -425,7 +437,7 @@ export async function answerConfirmRequest(
   decision: ConfirmDecision,
   confirm: ConfirmTheOwner,
   reason: string,
-  confirmedWith: ConfirmLock | null = null
+  confirmedWith: string | null = null
 ): Promise<ConfirmAnswerResult> {
   if (!isConfirmItsYouEnabled()) return 'off'
   const prompt = confirmPromptStore.get(connectionId)
@@ -438,11 +450,13 @@ export async function answerConfirmRequest(
   const relationship = await relationshipOn(agent, connectionId)
   if (!relationship) throw new Error(`${LOG_PREFIX} no relationship to sign the answer under`)
 
+  // Named only when it names a lock: an unknown kind is left out, never sent as 'unknown' (see namedLock).
+  const lock = namedLock(confirmedWith)
   const answer: ConfirmResponsePayload = {
     decision,
     challenge: (prompt.request.payload as ConfirmRequestPayload).challenge,
     respondedAt: new Date().toISOString(),
-    ...(confirmedWith ? { confirmedWith } : {}),
+    ...(lock ? { confirmedWith: lock } : {}),
   }
   const response = respondWith(prompt.request as never, utils.uuid(), answer as never, () =>
     new Date().toISOString()

@@ -21,6 +21,7 @@ import {
   confirmStatusOf,
   handleConfirmRequest,
   handleConfirmResponse,
+  namedLock,
   restoreConfirmPrompts,
   sendConfirmRequest,
 } from '../../../src/modules/trust-tasks/confirmItsYou'
@@ -212,6 +213,34 @@ describe('the round trip', () => {
   test('nothing in the flow reaches for an agent or a VTA', () => {
     const source = fs.readFileSync(path.join(__dirname, '../../../src/modules/trust-tasks/confirmItsYou.ts'), 'utf8')
     expect(source).not.toMatch(/vtaAgent|VtaClient|vtiAgent|trustedApprovers/)
+  })
+})
+
+describe('the lock an answer names', () => {
+  test('an unknown lock is never sent: the answer leaves the field out (control: Face ID is sent and read back)', async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+    await deliver(jordan)
+    expect(await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'itsMe', ok, 'r', 'unknown')).toBe('sent')
+    expect(last().payload).not.toHaveProperty('confirmedWith')
+    await deliver(sam)
+    expect((await confirmAsksOn(sam.agent, SAM.connectionId))[0].confirmedWith).toBeUndefined()
+
+    const sam2 = phone(SAM)
+    const jordan2 = phone(JORDAN)
+    await sendConfirmRequest(sam2.agent, SAM.connectionId, NOTE)
+    await deliver(jordan2)
+    await answerConfirmRequest(jordan2.agent, JORDAN.connectionId, 'itsMe', ok, 'r', 'faceId')
+    expect(last().payload).toMatchObject({ confirmedWith: 'faceId' })
+    await deliver(sam2)
+    expect((await confirmAsksOn(sam2.agent, SAM.connectionId))[0].confirmedWith).toBe('faceId')
+  })
+
+  test("namedLock names a lock only for a listed lock: absent, null, 'unknown' or anything else name none", () => {
+    for (const none of [undefined, null, '', 'unknown', 'retina', 'FaceID']) expect(namedLock(none)).toBeUndefined()
+    for (const lock of ['faceId', 'touchId', 'opticId', 'fingerprint', 'face', 'iris', 'screenLock'])
+      expect(namedLock(lock)).toBe(lock)
   })
 })
 

@@ -3611,6 +3611,7 @@
     "CancelNote": "Si vous annulez, une réponse tardive de {{name}} sera ignorée",
     "AnswerShowsHere": "La réponse de {{name}} s'affichera ici.",
     "ConfirmedTitle": "{{name}} a confirmé avec {{lock}} à {{time}}",
+    "ConfirmedTitleOnPhone": "{{name}} a confirmé sur son téléphone à {{time}}",
     "ConfirmedBody": "La réponse est signée par le téléphone de {{name}}, par la connexion que vous partagez déjà.",
     "YouAsked": "Vous avez demandé",
     "TheyAnswered": "{{name}} a répondu",
@@ -3619,6 +3620,7 @@
     "NotThemTitle": "{{name}} dit que ce n'était pas lui ou elle",
     "NotThemBody": "C'est peut-être une arnaque. N'envoyez pas d'argent.",
     "NotThemSigned": "Signé avec {{lock}} sur le téléphone de {{name}} à {{time}}.",
+    "NotThemSignedOnPhone": "Signé sur le téléphone de {{name}} à {{time}}.",
     "WhatToDo": "Que faire maintenant",
     "StepHangUp": "Raccrochez",
     "StepCallBack": "Appelez {{name}} à un numéro que vous avez déjà",
@@ -3662,6 +3664,7 @@
     "YouToldItsMe": "Vous avez dit à {{asker}} que c'est bien vous",
     "YouToldNotMe": "Vous avez dit à {{asker}} que ce n'était pas vous",
     "SentSigned": "Signé avec {{method}} à {{time}}. Le téléphone de {{asker}} l'affiche maintenant.",
+    "SentSignedNoLock": "Signé à {{time}}. Le téléphone de {{asker}} l'affiche maintenant.",
     "SentItsMeAfter": "Si vous ne vouliez pas dire oui, appelez {{asker}} tout de suite.",
     "SentNotMeAfter": "Si vous vouliez dire oui, appelez {{asker}} et demandez-lui de réessayer.",
     "Done": "Terminé"

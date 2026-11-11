@@ -3527,6 +3527,7 @@
     "CancelNote": "Se você cancelar, uma resposta atrasada de {{name}} é ignorada",
     "AnswerShowsHere": "A resposta de {{name}} aparece aqui.",
     "ConfirmedTitle": "{{name}} confirmou com {{lock}} às {{time}}",
+    "ConfirmedTitleOnPhone": "{{name}} confirmou no telefone às {{time}}",
     "ConfirmedBody": "A resposta é assinada pelo telefone de {{name}}, pela conexão que vocês já têm.",
     "YouAsked": "Você perguntou",
     "TheyAnswered": "{{name}} respondeu",
@@ -3535,6 +3536,7 @@
     "NotThemTitle": "{{name}} diz que não era essa pessoa",
     "NotThemBody": "Pode ser um golpe. Não mande dinheiro.",
     "NotThemSigned": "Assinado com {{lock}} no telefone de {{name}} às {{time}}.",
+    "NotThemSignedOnPhone": "Assinado no telefone de {{name}} às {{time}}.",
     "WhatToDo": "O que fazer agora",
     "StepHangUp": "Desligue a ligação",
     "StepCallBack": "Ligue para {{name}} em um número que você já tem",
@@ -3578,6 +3580,7 @@
     "YouToldItsMe": "Você disse a {{asker}} que é mesmo você",
     "YouToldNotMe": "Você disse a {{asker}} que não foi você",
     "SentSigned": "Assinado com {{method}} às {{time}}. O telefone de {{asker}} já mostra.",
+    "SentSignedNoLock": "Assinado às {{time}}. O telefone de {{asker}} já mostra.",
     "SentItsMeAfter": "Se você não queria dizer sim, ligue para {{asker}} agora mesmo.",
     "SentNotMeAfter": "Se você queria dizer sim, ligue para {{asker}} e peça para perguntar de novo.",
     "Done": "Pronto"

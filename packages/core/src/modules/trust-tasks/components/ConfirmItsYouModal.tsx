@@ -28,6 +28,7 @@ import {
   answerConfirmRequest,
   confirmEvents,
   confirmPromptStore,
+  namedLock,
   restoreConfirmPrompts,
   type ConfirmPrompt,
   type ConfirmTheOwner,
@@ -74,6 +75,8 @@ interface Sent {
   asker: string
   decision: ConfirmDecision
   at: Date
+  /** The lock the answer named, if it named one (namedLock); absent, the words name none. */
+  lock?: string
 }
 
 const ConfirmItsYouModal: React.FC = () => {
@@ -87,13 +90,16 @@ const ConfirmItsYouModal: React.FC = () => {
   const [said, setSaid] = useState<string | null>(null)
   const [lockKind, setLockKind] = useState<OwnerLockKind>('unknown')
 
+  // Only for the hint's words ("Either answer asks for Face ID"); the answer reads the lock again when it is sent. Off,
+  // nothing runs, not even the keychain probe.
   useEffect(() => {
+    if (!on) return
     let live = true
     void ownerLockKind().then((kind) => live && setLockKind(kind))
     return () => {
       live = false
     }
-  }, [])
+  }, [on])
 
   useEffect(() => {
     if (!agent || !on) return
@@ -128,16 +134,21 @@ const ConfirmItsYouModal: React.FC = () => {
       setSaid(null)
       const words = { asker: prompt.asker || t('Approver.UnnamedContact'), interpolation: { escapeValue: false } }
       try {
+        // Read at answer time, not from state: the state starts 'unknown' until the probe resolves, and a quick tap must
+        // not send that. An unknown kind is left out of the answer (namedLock), never sent as a claim.
+        const lockNow = await ownerLockKind()
         const result = await answerConfirmRequest(
           agent,
           prompt.connectionId,
           decision,
           ownerCheck,
           t(decision === 'itsMe' ? 'ConfirmItsYou.ItsMeReason' : 'ConfirmItsYou.NotMeReason', words),
-          lockKind
+          lockNow
         )
         releaseWarn(`[VTI] confirm request answer: ${result}`)
-        if (result === 'sent') setSent({ asker: words.asker, decision, at: new Date() })
+        const named = namedLock(lockNow)
+        if (result === 'sent')
+          setSent({ asker: words.asker, decision, at: new Date(), ...(named ? { lock: named } : {}) })
         else if (result === 'unavailable') setSaid(t('ConfirmItsYou.NoLock'))
         else if (result === 'failed') setSaid(t('ConfirmItsYou.Failed'))
         else if (result === 'gone' || result === 'off') setPrompt(firstShown())
@@ -151,7 +162,7 @@ const ConfirmItsYouModal: React.FC = () => {
         setBusy(false)
       }
     },
-    [agent, prompt, busy, lockKind, t]
+    [agent, prompt, busy, t]
   )
 
   const notNow = useCallback(() => {
@@ -205,8 +216,8 @@ const ConfirmItsYouModal: React.FC = () => {
         })}
       </ThemedText>
       <ThemedText>
-        {t('ConfirmItsYou.SentSigned', {
-          ...lockWords,
+        {t(sent.lock ? 'ConfirmItsYou.SentSigned' : 'ConfirmItsYou.SentSignedNoLock', {
+          ...(sent.lock ? { method: t(`ConfirmItsYou.Lock.${sent.lock}`) } : {}),
           time: timeOf(sent.at),
           asker: sent.asker,
           interpolation: { escapeValue: false },

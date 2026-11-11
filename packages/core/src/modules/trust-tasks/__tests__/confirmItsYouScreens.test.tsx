@@ -138,6 +138,47 @@ describe("the contact's row", () => {
     expect(other.getByText('ConfirmItsYou.ConfirmedCaveat')).toBeTruthy()
   })
 
+  test.each([
+    ['no lock named', undefined],
+    ["'unknown'", 'unknown'],
+  ] as const)(
+    'an answer with %s says "confirmed on their phone", naming no lock (control: Face ID names it)',
+    async (_label, confirmedWith) => {
+      const read = jest
+        .spyOn(confirmItsYou, 'confirmAsksOn')
+        .mockResolvedValue([ask({ state: 'itsMe', respondedAt: new Date().toISOString(), confirmedWith })])
+      const tree = await show(<ConfirmItsYouRow connectionId={CONN} name="Jordan" />)
+      expect(tree.getByTestId(id(ConfirmItsYouRowIds.status)).props.children).toBe(
+        'ConfirmItsYou.ConfirmedTitleOnPhone'
+      )
+      expect(tree.queryByText('ConfirmItsYou.ConfirmedTitle')).toBeNull()
+
+      read.mockResolvedValue([ask({ state: 'notMe', respondedAt: new Date().toISOString(), confirmedWith })])
+      const notThem = await show(<ConfirmItsYouRow connectionId={CONN} name="Jordan" />)
+      expect(notThem.getByText('ConfirmItsYou.NotThemSignedOnPhone')).toBeTruthy()
+      expect(notThem.queryByText('ConfirmItsYou.NotThemSigned')).toBeNull()
+
+      read.mockResolvedValue([ask({ state: 'itsMe', respondedAt: new Date().toISOString(), confirmedWith: 'faceId' })])
+      const named = await show(<ConfirmItsYouRow connectionId={CONN} name="Jordan" />)
+      expect(named.getByTestId(id(ConfirmItsYouRowIds.status)).props.children).toBe('ConfirmItsYou.ConfirmedTitle')
+    }
+  )
+
+  test('the words that name no lock carry no lock in any language (control: the lock words do)', () => {
+    for (const lang of ['en', 'fr', 'pt-br']) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const words = require(`../../../localization/${lang}/${lang}.json`).ConfirmItsYou
+      const locks = Object.values(words.Lock as Record<string, string>)
+      for (const key of ['ConfirmedTitleOnPhone', 'NotThemSignedOnPhone', 'SentSignedNoLock']) {
+        expect(words[key]).toEqual(expect.any(String))
+        expect(words[key]).not.toMatch(/\{\{(lock|method)\}\}/)
+        for (const lock of locks) expect(words[key]).not.toContain(lock)
+      }
+      expect(words.ConfirmedTitle).toMatch(/\{\{lock\}\}/)
+      expect(words.SentSigned).toMatch(/\{\{method\}\}/)
+    }
+  })
+
   test('a waiting request turns into no answer on a clock, with no event (control: before its time it still waits)', async () => {
     jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] })
     try {
@@ -230,6 +271,45 @@ describe('the request sheet on the asked phone', () => {
       ).toBeTruthy()
     }
   )
+
+  test('a quick answer before the lock probe resolves sends the lock read at answer time, never the starting value', async () => {
+    jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)
+    confirmItsYou.confirmPromptStore.set(prompt())
+    setConfirmOwnerCheckForTests(jest.fn(async () => ({ ok: true })))
+    jest
+      .spyOn(ownerConfirm, 'ownerLockKind')
+      .mockReturnValueOnce(new Promise(() => undefined)) // the mount probe never answers
+      .mockResolvedValue('faceId')
+    const answer = jest.spyOn(confirmItsYou, 'answerConfirmRequest').mockResolvedValue('sent')
+    const tree = await show(<ConfirmItsYouModal />)
+    await press(tree, ConfirmItsYouModalIds.itsMe)
+    expect(answer.mock.calls[0][5]).toBe('faceId')
+    expect(tree.getByText('ConfirmItsYou.SentSigned')).toBeTruthy()
+  })
+
+  test('when the phone cannot tell its lock, the sheet says "signed", naming none (control: Face ID is named, above)', async () => {
+    jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)
+    confirmItsYou.confirmPromptStore.set(prompt())
+    setConfirmOwnerCheckForTests(jest.fn(async () => ({ ok: true })))
+    jest.spyOn(ownerConfirm, 'ownerLockKind').mockResolvedValue('unknown')
+    jest.spyOn(confirmItsYou, 'answerConfirmRequest').mockResolvedValue('sent')
+    const tree = await show(<ConfirmItsYouModal />)
+    await press(tree, ConfirmItsYouModalIds.itsMe)
+    expect(tree.getByText('ConfirmItsYou.SentSignedNoLock')).toBeTruthy()
+    expect(tree.queryByText('ConfirmItsYou.SentSigned')).toBeNull()
+  })
+
+  test('switched off, the sheet runs nothing: no lock probe on mount (control: on, it probes)', async () => {
+    jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)
+    const probe = jest.spyOn(ownerConfirm, 'ownerLockKind').mockResolvedValue('faceId')
+    setConfirmItsYouEnabled(false)
+    await show(<ConfirmItsYouModal />)
+    expect(probe).not.toHaveBeenCalled()
+
+    setConfirmItsYouEnabled(true)
+    await show(<ConfirmItsYouModal />)
+    expect(probe).toHaveBeenCalled()
+  })
 
   test('cancelled at the lock: nothing failed, the request stays (control: a failure says so)', async () => {
     jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)

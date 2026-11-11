@@ -3653,6 +3653,7 @@
     "CancelNote": "If you cancel, a late answer from {{name}} is ignored",
     "AnswerShowsHere": "You'll see {{name}}'s answer here.",
     "ConfirmedTitle": "{{name}} confirmed with {{lock}} at {{time}}",
+    "ConfirmedTitleOnPhone": "{{name}} confirmed on their phone at {{time}}",
     "ConfirmedBody": "The answer is signed by {{name}}'s phone, over the connection you already share.",
     "YouAsked": "You asked",
     "TheyAnswered": "{{name}} answered",
@@ -3661,6 +3662,7 @@
     "NotThemTitle": "{{name}} says it wasn't them",
     "NotThemBody": "This may be a scam. Don't send money.",
     "NotThemSigned": "Signed with {{lock}} on {{name}}'s phone at {{time}}.",
+    "NotThemSignedOnPhone": "Signed on {{name}}'s phone at {{time}}.",
     "WhatToDo": "What to do now",
     "StepHangUp": "Hang up on the caller",
     "StepCallBack": "Call {{name}} on a number you already have",
@@ -3704,6 +3706,7 @@
     "YouToldItsMe": "You told {{asker}} it's really you",
     "YouToldNotMe": "You told {{asker}} it wasn't you",
     "SentSigned": "Signed with {{method}} at {{time}}. {{asker}}'s phone shows it now.",
+    "SentSignedNoLock": "Signed at {{time}}. {{asker}}'s phone shows it now.",
     "SentItsMeAfter": "If you didn't mean to say yes, call {{asker}} straight away.",
     "SentNotMeAfter": "If you meant to say yes, call {{asker}} and ask them to try again.",
     "Done": "Done"
