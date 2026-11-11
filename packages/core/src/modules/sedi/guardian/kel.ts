@@ -46,7 +46,11 @@ export interface KeyState {
 }
 
 export interface HistoryEntry extends KeyState {
+  /** The seals that may anchor a presented TEL event: an ixn's, as ref-21 reads them (empty for icp and rot). */
   seals: Record<string, unknown>[]
+  /** Every seal in the event's "a", whatever its ilk. Read only by the TEL completeness check (chain.ts verifyTel),
+   * which must see every event the issuer anchored for a registry, so that a seal in an icp or rot is not missed. */
+  anchors: Record<string, unknown>[]
   receipts: number
   sigs: number
 }
@@ -173,7 +177,7 @@ export function replayKel(dig: Digest, bytes: Uint8Array): Replay {
 
     st = { pre: b.pre, sn: b.sn, said: b.said, keys, ndigs, wits, toad, ilk: b.ilk }
     seen.set(b.sn, b.said)
-    history[b.sn] = { ...st, seals: b.ilk === 'ixn' ? anchors : [], receipts: 0, sigs: good }
+    history[b.sn] = { ...st, seals: b.ilk === 'ixn' ? anchors : [], anchors, receipts: 0, sigs: good }
   }
   return st ? { ok: true, state: st, history } : { ok: false, reason: 'no events', pre: claimed, history }
 }

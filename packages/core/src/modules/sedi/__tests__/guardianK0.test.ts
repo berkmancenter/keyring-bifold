@@ -268,6 +268,97 @@ describe('tampering (each one would weaken one check)', () => {
   })
 })
 
+describe('TEL completeness: every event the issuer anchored is presented (review F1)', () => {
+  const regk = () => sadOf(said('G-revoked')).rd!
+  const issuedOnly = (c: ChainContext): ChainContext => ({
+    ...c,
+    tels: new Map(c.tels).set(regk(), { ...c.tels.get(regk())!, updateTexts: [text('tel-G-revoked-issued.json')] }),
+    creds: new Map(c.creds).set(said('G-revoked'), text('acdc-G-revoked-issued-proofed.cesr')),
+  })
+  const revocation = () => JSON.parse(text('tel-G-revoked-revoked.json')) as { d: string }
+  /** Sue's KEL with the revocation's seal taken out of `pick` ('seals', 'anchors' or both). */
+  const withoutRevocationSeal = (c: ChainContext, pick: ('seals' | 'anchors')[]): ChainContext => {
+    const sue = c.kels.get(aids.sue)!
+    if (!sue.ok) throw new Error('fixture: Sue replays')
+    const drop = (xs: Record<string, unknown>[]) => xs.filter((x) => x.d !== revocation().d)
+    const history = sue.history.map((h) => (h ? { ...h, ...Object.fromEntries(pick.map((k) => [k, drop(h[k])])) } : h))
+    expect(sue.history.flatMap((h) => h?.anchors ?? []).some((x) => x.d === revocation().d)).toBe(true)
+    return { ...c, kels: new Map(c.kels).set(aids.sue, { ...sue, history }) }
+  }
+
+  it("K22: G-revoked with its revocation update WITHHELD and its stale 'issued' proof: refused (valid on f25cdf488)", () => {
+    expect(verdict(guardianIn(issuedOnly(ctx), said('G-revoked'), asJordan))).toBe('statusNotCurrent')
+  })
+
+  it('K22c: controls: the complete chain refuses it as revoked (K06), and an issued-only registry its KEL agrees with is valid (K05)', () => {
+    expect([
+      verdict(guardianIn(ctx, said('G-revoked'), asJordan)),
+      verdict(guardianIn(ctx, said('G-ok'), asJordan)),
+    ]).toEqual(['revoked', 'valid'])
+  })
+
+  it('K22d: a revocation seal outside an ixn (in a rot or icp "a") still counts: withheld, it is refused', () => {
+    expect(verdict(guardianIn(withoutRevocationSeal(issuedOnly(ctx), ['seals']), said('G-revoked'), asJordan))).toBe(
+      'statusNotCurrent'
+    )
+  })
+
+  it('K22e: the bound: a KEL with NO seal for the revocation (cut short) is read as current, so valid is as of the KEL shown', () => {
+    // Pinned on purpose: nothing in the material says the issuer's KEL is its current one (witness receipts would,
+    // and are refused as unsupportedCesr). The PR body's deployment preconditions state this.
+    expect(
+      verdict(guardianIn(withoutRevocationSeal(issuedOnly(ctx), ['seals', 'anchors']), said('G-revoked'), asJordan))
+    ).toBe('valid')
+  })
+
+  it("K22f: a registry's rip alone, while its KEL anchors n=1: refused; with no later seal, the rip is the head (rip's own s=0 is the floor)", () => {
+    const ok = sadOf(said('G-ok')).rd!
+    const tel = { ...ctx.tels.get(ok)!, updateTexts: [] }
+    const issued = JSON.parse(ctx.tels.get(ok)!.updateTexts[0]) as { d: string }
+    const sue = ctx.kels.get(aids.sue)!
+    if (!sue.ok) throw new Error('fixture: Sue replays')
+    const noIssue = {
+      ...sue,
+      history: sue.history.map((h) => (h ? { ...h, anchors: h.anchors.filter((x) => x.d !== issued.d) } : h)),
+    }
+    const withSeal = verifyTel(digest, { ...tel, issuerKel: sue })
+    const without = verifyTel(digest, { ...tel, issuerKel: noIssue })
+    expect([verdict(withSeal), without.ok && without.head.n]).toEqual(['statusNotCurrent', '0'])
+  })
+
+  it('K22h: the highest sealed n counts, not the last seal read: a later seal re-naming n=1 does not hide the revocation', () => {
+    const c = issuedOnly(ctx)
+    const sue = c.kels.get(aids.sue)!
+    if (!sue.ok) throw new Error('fixture: Sue replays')
+    const issued = JSON.parse(text('tel-G-revoked-issued.json')) as { d: string }
+    const last = sue.history.length - 1
+    const history = sue.history.map((h, i) =>
+      h && i === last ? { ...h, anchors: [...h.anchors, { i: regk(), s: '1', d: issued.d }] } : h
+    )
+    const at = (h: typeof history) =>
+      h
+        .flatMap((x) => x?.anchors ?? [])
+        .filter((x) => x.i === regk())
+        .map((x) => x.s)
+    expect(at(history).slice(-2)).toEqual(['2', '1'])
+    const v = verdict(
+      guardianIn({ ...c, kels: new Map(c.kels).set(aids.sue, { ...sue, history }) }, said('G-revoked'), asJordan)
+    )
+    expect(v).toBe('statusNotCurrent')
+  })
+
+  it('K22g: a seal for the registry whose sn is not lowercase hex is refused as telBroken (control K05)', () => {
+    const sue = ctx.kels.get(aids.sue)!
+    if (!sue.ok) throw new Error('fixture: Sue replays')
+    const rd = sadOf(said('G-ok')).rd!
+    const history = sue.history.map((h, i) =>
+      h && i === sue.history.length - 1 ? { ...h, anchors: [...h.anchors, { i: rd, s: 'X', d: DUMMY }] } : h
+    )
+    const c = { ...ctx, kels: new Map(ctx.kels).set(aids.sue, { ...sue, history }) }
+    expect(verdict(guardianIn(c, said('G-ok'), asJordan))).toBe('telBroken')
+  })
+})
+
 describe('the entry points, behind the state-verified approvers switch', () => {
   const material = (): ChainMaterial => ({
     kels: files.filter((f) => /^kel-.*\.cesr$/.test(f)).map(bytes),
@@ -333,6 +424,72 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     expect(
       verdict(verifyGuardian(material(), said('G-revoked'), { holder: aids.jordan, ward: aids.sam }, options))
     ).toBe('revoked')
+  })
+
+  // Review F2: two KELs for one prefix are a contradiction, refused whichever comes first; never "the last one wins".
+  const sueFile = 'kel-sue.cesr'
+  const sueCut = () => {
+    // Sue's stream cut before the event that anchors G-revoked's revocation: a shorter history, which replays.
+    const t = text(sueFile)
+    const rev = (JSON.parse(text('tel-G-revoked-revoked.json')) as { d: string }).d
+    const at = t.lastIndexOf('{"v":"', t.indexOf(rev))
+    expect(at).toBeGreaterThan(0)
+    const cut = new TextEncoder().encode(t.slice(0, at))
+    expect(replayKel(digest, cut).ok).toBe(true)
+    return cut
+  }
+  /** G-revoked with its revocation withheld (stale issued proof), and the KEL list given. */
+  const withheld = (kels: Uint8Array[]): ChainMaterial => {
+    const m = material()
+    const rd = registryOf('G-revoked')
+    m.kels = kels
+    m.tels = m.tels.map((t) =>
+      (JSON.parse(t.ripText) as { d: string }).d === rd ? { ...t, updateTexts: [text('tel-G-revoked-issued.json')] } : t
+    )
+    m.creds = m.creds.map((t) =>
+      t.slice(0, t.lastIndexOf('}') + 1).includes(`"d":"${said('G-revoked')}"`)
+        ? text('acdc-G-revoked-issued-proofed.cesr')
+        : t
+    )
+    return m
+  }
+  const others = () => files.filter((f) => /^kel-.*\.cesr$/.test(f) && f !== sueFile).map(bytes)
+  const asSam = { holder: aids.jordan, ward: aids.sam }
+
+  it('K23: two presented KELs claiming one prefix (the real one and a cut copy) are refused, in either order', () => {
+    setStateVerifiedApproversEnabled(true)
+    const run = (kels: Uint8Array[]) => verifyGuardian(withheld(kels), said('G-revoked'), asSam, options)
+    const got = [run([...others(), bytes(sueFile), sueCut()]), run([...others(), sueCut(), bytes(sueFile)])]
+    expect(got.map((r) => [verdict(r), 'prefix' in r && r.prefix])).toEqual([
+      ['kelNotReplaying', aids.sue],
+      ['kelNotReplaying', aids.sue],
+    ])
+  })
+
+  it('K23c: controls: the real KEL alone refuses the withheld revocation (F1); the cut KEL alone is the K22e bound', () => {
+    setStateVerifiedApproversEnabled(true)
+    const run = (kels: Uint8Array[]) => verdict(verifyGuardian(withheld(kels), said('G-revoked'), asSam, options))
+    expect([run([...others(), bytes(sueFile)]), run([...others(), sueCut()])]).toEqual(['statusNotCurrent', 'valid'])
+  })
+
+  it('K23b: the same KEL stream presented twice is refused too (no duplicate prefix is ever resolved)', () => {
+    setStateVerifiedApproversEnabled(true)
+    expect(
+      verdict(
+        verifyGuardian({ ...material(), kels: [...material().kels, bytes(sueFile)] }, said('G-ok'), asSam, options)
+      )
+    ).toBe('kelNotReplaying')
+  })
+
+  it('K23d: a registry or a credential presented twice is refused as malformedCesr (control: material() is valid, the switch row)', () => {
+    setStateVerifiedApproversEnabled(true)
+    const m = material()
+    const twiceTel = { ...m, tels: [...m.tels, m.tels[0]] }
+    const twiceCred = { ...m, creds: [...m.creds, m.creds[0]] }
+    expect([twiceTel, twiceCred].map((x) => verdict(verifyGuardian(x, said('G-ok'), asSam, options)))).toEqual([
+      'malformedCesr',
+      'malformedCesr',
+    ])
   })
 
   it('a KEL stream with CESR this package does not read is refused as unsupportedCesr, never treated as absent', () => {
