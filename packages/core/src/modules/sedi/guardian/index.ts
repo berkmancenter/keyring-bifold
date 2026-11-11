@@ -61,17 +61,35 @@ const switchedOff = {
   detail: 'state-verified approvers are switched off',
 }
 
+type Unreadable = Exclude<Built, { ok: true }>
+
+/**
+ * The one place a verdict leaves this module: both entry points go through it, in this order. The switch; then every
+ * KEL stream through the CESR reader, where any stream it cannot read refuses the whole check (`unsupportedCesr` or
+ * `malformedCesr`) before a chain check runs; then the check itself, whose `{ ok: true }` is the only way "valid" comes
+ * back. The fail-closed row in guardianK0.test.ts runs every unreadable-stream case through both entry points.
+ */
+function decide<R>(
+  material: ChainMaterial,
+  options: CheckOptions,
+  check: (ctx: ChainContext) => R
+): R | typeof switchedOff | Unreadable {
+  if (!isStateVerifiedApproversEnabled()) return switchedOff
+  const built = build(material, options)
+  if (!built.ok) return built
+  return check(built.ctx)
+}
+
 /** A Guardian credential `guardianSaid`, issued to `holder` and naming `ward`, chained to a trusted State root. */
 export function verifyGuardian(
   material: ChainMaterial,
   guardianSaid: string,
   expect: { holder: string; ward: string },
   options: CheckOptions
-): GuardianResult | typeof switchedOff | Exclude<Built, { ok: true }> {
-  if (!isStateVerifiedApproversEnabled()) return switchedOff
-  const built = build(material, options)
-  if (!built.ok) return built
-  return guardianIn(built.ctx, guardianSaid, { guardian: expect.holder, ward: expect.ward })
+): GuardianResult | typeof switchedOff | Unreadable {
+  return decide(material, options, (ctx) =>
+    guardianIn(ctx, guardianSaid, { guardian: expect.holder, ward: expect.ward })
+  )
 }
 
 /** A Social Authorization `socialSaid` issued to `ward`, chained to its issuer's Guardian credential (S2). */
@@ -80,9 +98,6 @@ export function verifySocialAuthorization(
   socialSaid: string,
   expect: { ward: string },
   options: CheckOptions
-): SocialResult | typeof switchedOff | Exclude<Built, { ok: true }> {
-  if (!isStateVerifiedApproversEnabled()) return switchedOff
-  const built = build(material, options)
-  if (!built.ok) return built
-  return socialIn(built.ctx, socialSaid, expect)
+): SocialResult | typeof switchedOff | Unreadable {
+  return decide(material, options, (ctx) => socialIn(ctx, socialSaid, expect))
 }

@@ -1,4 +1,5 @@
 // Run once, outside the repo: what cesr-ts 2.0.0 reads from each K0 KEL stream, in the fields replayKel uses.
+/* eslint-disable no-console -- a run-once generator, run with node outside the app */
 import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'

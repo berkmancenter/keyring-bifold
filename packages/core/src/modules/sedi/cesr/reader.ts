@@ -112,6 +112,8 @@ function groupAt(text: string, at: number): { ok: true; group: KelFrame['groups'
 /** Frame a KEL stream: each event with the attachment groups that follow it. */
 export function readKelStream(bytes: Uint8Array): { ok: true; frames: KelFrame[] } | CesrRefusal {
   const text = td.decode(bytes)
+  // A stream with no event in it is not a KEL; refused here so it can never stand for one that is absent.
+  if (text.length === 0) return malformed('an empty stream')
   const frames: KelFrame[] = []
   let at = 0
   while (at < text.length) {

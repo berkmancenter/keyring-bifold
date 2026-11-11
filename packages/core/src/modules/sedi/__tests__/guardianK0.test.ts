@@ -25,6 +25,8 @@ import {
   type Sad,
 } from '../guardian/chain'
 import { verifyGuardian, verifySocialAuthorization, type ChainMaterial } from '../guardian'
+import { INDEXED_SIGS } from '../cesr/codes'
+import { readKelStream } from '../cesr/reader'
 import { digest, replayKel, type Replay } from '../guardian/kel'
 
 const FX = join(__dirname, 'fixtures', 'k0-utah-v2')
@@ -305,5 +307,119 @@ describe('the entry points, behind the state-verified approvers switch', () => {
     expect(verdict(verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options))).toBe(
       'unsupportedCesr'
     )
+  })
+
+  it('fail closed: no unreadable or altered KEL stream, anywhere in the material, lets either entry point return valid', () => {
+    // Every KEL in the material, each altered one way at a time, through BOTH entry points (G-ok and S2-social, which
+    // are valid unaltered: the control below). Code cases must come back as their exact CESR refusal; fuzzed ones as any
+    // refusal at all. Not covered on purpose: a cut exactly between two events (a complete, shorter KEL, not malformed;
+    // whether the chain still holds is the chain checks' job, K18); a trailing empty `-KAA` group (well formed;
+    // cesr-ts 2.0.0 reads it too); and a body or signature edited in a stream that still reads (the replay refuses
+    // that KEL, which the chain rows cover where the chain needs it).
+    setStateVerifiedApproversEnabled(true)
+    const enc = new TextEncoder()
+    const kelNames = files.filter((f) => /^kel-.*\.cesr$/.test(f)).sort()
+    let seed = 0x5ed1
+    const rand = (n: number) => {
+      seed = (Math.imul(seed ^ (seed >>> 15), 0x2c1b3c6d) + 0x6d2b79f5) >>> 0
+      return seed % n
+    }
+    const b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    type Case = { label: string; text: string; expect?: 'unsupportedCesr' | 'malformedCesr' }
+    const cases: Case[] = []
+    for (const f of kelNames) {
+      const t = text(f)
+      // Where each attachment group opens, from the reader's own framing of the unaltered stream (checked against
+      // cesr-ts above), so a "count" case alters a count and never a "-K" that happens to sit inside a body.
+      const read = readKelStream(enc.encode(t))
+      if (!read.ok) throw new Error(`fixture: ${f} reads`)
+      const headers: number[] = []
+      let pos = 0
+      for (const fr of read.frames) {
+        pos += fr.body.raw.length
+        for (const gr of fr.groups) {
+          headers.push(pos)
+          pos += 4 + gr.items.reduce((n, it) => n + INDEXED_SIGS[it.code].fs, 0)
+        }
+      }
+      expect([pos, headers.every((h) => t.slice(h, h + 2) === '-K')]).toEqual([t.length, true])
+      const g = headers[0]
+      expect(t.indexOf('-KAW')).toBe(g)
+      const sig = t.slice(g + 4, g + 92)
+      const add = (label: string, altered: string, expect?: Case['expect']) =>
+        cases.push({ label: `${f}: ${label}`, text: altered, expect })
+      // Codes this reader lacks, including the ones a lenient parser would skip and still find the real signatures.
+      add('unknown count code', t.replace('-KAW', '-LAW'), 'unsupportedCesr')
+      add('unknown signature code', t.slice(0, g + 4) + 'C' + t.slice(g + 5), 'unsupportedCesr')
+      add('unknown version (CBOR)', t.replace('KERICAACAAJSON', 'KERICAACAACBOR'), 'unsupportedCesr')
+      add(
+        'an unknown group after the real signatures',
+        t.slice(0, g + 92) + '-LAW' + sig + t.slice(g + 92),
+        'unsupportedCesr'
+      )
+      add(
+        'an unknown-code signature beside the real one',
+        t.slice(0, g) + '-KAs' + sig + 'C' + sig.slice(1) + t.slice(g + 92),
+        'unsupportedCesr'
+      )
+      // Streams that do not add up.
+      add('empty stream', '', 'malformedCesr')
+      add('cut inside the first body', t.slice(0, 40), 'malformedCesr')
+      add('count one quadlet short', t.replace('-KAW', '-KAV'), 'malformedCesr')
+      add('count one quadlet long', t.replace('-KAW', '-KAX'))
+      add('trailing junk', t + 'xyz')
+      add('trailing newline', t + '\n')
+      add('trailing lone dash', t + '-')
+      add('trailing count code cut short', t + '-KA')
+      // Fuzz (seeded, so a failure reproduces): cuts strictly inside an event or its attachments, and the count
+      // characters of every -K group changed to another value.
+      const boundaries = new Set([t.length, ...[...t.matchAll(/\{"v":"KERI/g)].map((m) => m.index)])
+      for (let k = 0; k < 6; ) {
+        const at = 1 + rand(t.length - 1)
+        if (boundaries.has(at)) continue
+        add(`cut at ${at}`, t.slice(0, at))
+        k++
+      }
+      const swap = (i: number, label: string) => {
+        let c = b64[rand(64)]
+        if (c === t[i]) c = c === 'A' ? 'B' : 'A'
+        add(`${label} at ${i} -> ${c}`, t.slice(0, i) + c + t.slice(i + 1))
+      }
+      for (const h of headers) for (const d of [2, 3]) swap(h + d, 'count char')
+    }
+    const unaltered = (): ChainMaterial => material()
+    const withAltered = (c: Case): ChainMaterial => {
+      const m = material()
+      const i = kelNames.indexOf(c.label.slice(0, c.label.indexOf(':')))
+      m.kels[i] = enc.encode(c.text)
+      return m
+    }
+    // A throw is recorded as its own outcome (asserted to be none, after the valid check), so a case that throws can
+    // never hide whether another one came back valid.
+    const attempt = (f: () => { ok: boolean; reason?: string }) => {
+      try {
+        return verdict(f())
+      } catch (e) {
+        return `threw ${(e as Error).message}`
+      }
+    }
+    const run = (m: ChainMaterial) => [
+      attempt(() => verifyGuardian(m, said('G-ok'), { holder: aids.jordan, ward: aids.sam }, options)),
+      attempt(() => verifySocialAuthorization(m, said('S2-social'), { ward: aids.sam }, options)),
+    ]
+    // Control: the same two checks on the unaltered material are valid, so a refusal below is the alteration's.
+    expect(run(unaltered())).toEqual(['valid', 'valid'])
+    expect(material().kels).toHaveLength(kelNames.length)
+    const outcomes = cases.map((c) => ({ c, got: run(withAltered(c)) }))
+    expect(outcomes.filter((o) => o.got.includes('valid')).map((o) => `${o.c.label} -> ${o.got}`)).toEqual([])
+    expect(
+      outcomes.filter((o) => o.c.expect && o.got.some((v) => v !== o.c.expect)).map((o) => `${o.c.label} -> ${o.got}`)
+    ).toEqual([])
+    expect(
+      outcomes
+        .filter((o) => o.got.some((v) => v === undefined || v.startsWith('threw')))
+        .map((o) => `${o.c.label} -> ${o.got}`)
+    ).toEqual([])
+    expect(cases.length).toBeGreaterThanOrEqual(kelNames.length * 21)
   })
 })
