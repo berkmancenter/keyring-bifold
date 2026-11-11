@@ -211,9 +211,12 @@ describe("Messages' rooms watched at their hosts", () => {
     // The read the first signal starts is held; a second change and its signal land meanwhile.
     let releaseA: () => void = () => undefined
     const real = s.listNotes.getMockImplementation()!
+    // It answers with what the room held when it was asked (version 2), as a real read would: the second change is
+    // not in it, so only reading the room again can show it.
     s.listNotes.mockImplementationOnce(async (roomId: string, options?: { sinceVersion?: number }) => {
+      const asked = real(roomId, options)
       await new Promise<void>((r) => (releaseA = r))
-      return real(roomId, options)
+      return asked
     })
     notes.a = [...notes.a, note('a2', 2)]
     await w.signal('a')
