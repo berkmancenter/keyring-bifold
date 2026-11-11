@@ -100,14 +100,24 @@ jobs:
 
       - name: Build card-verify
         working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify
-        run: cargo build --release --locked
+        # The sampler writes free disk and memory into this step's own log every
+        # 15 s, so the last line before a runner kill is the state at death
+        # (a later step cannot report it: a killed job runs nothing after).
+        run: |
+          ( while :; do echo "SAMPLE $(date -u +%H:%M:%S) disk_avail=$(df -h --output=avail / | tail -1 | tr -d ' ') mem_avail_mb=$(free -m | awk '/^Mem:/{print $7}')"; sleep 15; done ) &
+          cargo build --release --locked
 
       - name: Disk after the first build
         run: df -h /
 
       - name: Build card-verify-v047
         working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify-v047
-        run: cargo build --release --locked
+        # The sampler writes free disk and memory into this step's own log every
+        # 15 s, so the last line before a runner kill is the state at death
+        # (a later step cannot report it: a killed job runs nothing after).
+        run: |
+          ( while :; do echo "SAMPLE $(date -u +%H:%M:%S) disk_avail=$(df -h --output=avail / | tail -1 | tr -d ' ') mem_avail_mb=$(free -m | awk '/^Mem:/{print $7}')"; sleep 15; done ) &
+          cargo build --release --locked
 
       - name: Keyring makes a card and a statement
         working-directory: packages/core
