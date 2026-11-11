@@ -762,6 +762,13 @@ describe('Who approves on open: the check runs again only when something it read
       { kind: 'verified', state: 'Renamed state' },
     ],
     [
+      'the demo mark on a trusted root',
+      async () => {
+        jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: K0.name }])
+      },
+      { kind: 'verified', state: 'State of Example' },
+    ],
+    [
       "the card's stored text",
       async (sam: ReturnType<typeof phone>) => {
         const record = askRow(sam)
@@ -779,6 +786,17 @@ describe('Who approves on open: the check runs again only when something it read
     await move(sam)
     expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: shown })
     expect(spy).toHaveBeenCalledTimes(2)
+  })
+
+  test('the demo mark moved: the kept verdict is written back without it (control: unmoved, it keeps demo)', async () => {
+    const sam = await arrives(card('G-ok'))
+    await guardianStandings(sam.agent)
+    const kept = () => (askRow(sam).content as unknown as approverRole.RoleOfferAsk).guardian?.verdict
+    expect(kept()).toMatchObject({ ok: true, state: 'State of Example', demo: true })
+    jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: K0.name }])
+    await guardianStandings(sam.agent)
+    expect(kept()).toMatchObject({ ok: true, state: 'State of Example' })
+    expect(kept()).not.toHaveProperty('demo')
   })
 
   describe('a valid verdict that expires', () => {
