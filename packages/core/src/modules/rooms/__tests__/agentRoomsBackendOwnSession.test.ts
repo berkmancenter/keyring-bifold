@@ -33,7 +33,7 @@ jest.mock('../../trust-tasks/module/vtiJoin', () => ({ leaveCommunity: jest.fn()
 jest.mock('../../trust-tasks/module/vtiVetting', () => ({ GenericRecordsVettingStore: class {} }))
 jest.mock('../../trust-tasks/module/vtiAgent', () => {
   class VtiNoOwnSession extends Error {
-    constructor(readonly did: string) {
+    constructor() {
       super('not open')
       this.name = 'VtiNoOwnSession'
     }
@@ -97,7 +97,7 @@ describe('the rooms backend, with its identity’s own session open', () => {
 
   it('asks the shared way when the session turns out closed before anything was sent', async () => {
     mockTaskAs.mockImplementation(async () => {
-      throw new VtiNoOwnSession('did:webvh:p:airport')
+      throw new (VtiNoOwnSession as unknown as new () => Error)()
     })
     await expect(listing()).resolves.toBe('shared')
     expect(mockHolding).toHaveBeenCalledTimes(1)
