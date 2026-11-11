@@ -6,7 +6,14 @@
  * The parsers accept only what the specs define and drop anything else, so a malformed or hostile
  * answer can at worst lose a row, never inject one.
  */
-import type { HostCheck, RecordPrune, RoomTier, RoomVerb } from '../types'
+import {
+  RECORD_UNOPENED_REASONS,
+  type HostCheck,
+  type RecordPrune,
+  type RecordUnopenedReason,
+  type RoomTier,
+  type RoomVerb,
+} from '../types'
 
 import type { SenderCheck } from './files/sender'
 import type { BlobManifest } from './files/stream'
@@ -324,6 +331,13 @@ export function refusalCode(error: unknown): string | undefined {
   return named?.slice(named.lastIndexOf(':') + 1)
 }
 
+/** The reason an agent's `unknownEpoch` refusal gives for a record it could not open, when it is one Keyring knows. */
+export function recordUnopenedReason(error: unknown): RecordUnopenedReason | undefined {
+  if (refusalCode(error) !== 'unknownEpoch') return undefined
+  const reason = str(obj((error as { details?: unknown }).details)?.reason)
+  return RECORD_UNOPENED_REASONS.find((r) => r === reason)
+}
+
 /** One record's metadata in a listing (`rooms/_shared` `RecordMetadata`). */
 export interface RecordMeta {
   key: string
@@ -577,10 +591,30 @@ export function recordMembersOf(body: Record<string, unknown> | undefined): Reco
  * cleared one, one that lists none, or an answer that doesn't read: each means nothing may be written.
  */
 export function parseProfileRecordMembers(payload: unknown): string[] {
+  return parseProfileRead(payload).listed
+}
+
+/**
+ * A `rooms/keys/profile/read/0.1` answer: what the room's profile lists, and whether it is the profile of the room's
+ * current epoch. `stale` is the agent's own word: the profile it returned was found below the epoch the reader is at
+ * (VTI `room_profile.rs` `Resolution`). An answer that names no status the spec does reads as `unreadable`.
+ */
+export interface ProfileRead {
+  status: 'found' | 'cleared' | 'absent' | 'unreadable'
+  stale: boolean
+  listed: string[]
+}
+
+export function parseProfileRead(payload: unknown): ProfileRead {
   const p = obj(payload)
-  if (p?.status !== 'found') return []
-  const listed = obj(p.profile)?.recordMembers
-  return Array.isArray(listed) ? listed.filter((m): m is string => typeof m === 'string') : []
+  const status = p?.status === 'found' || p?.status === 'cleared' || p?.status === 'absent' ? p.status : 'unreadable'
+  if (status !== 'found') return { status, stale: false, listed: [] }
+  const listed = obj(p?.profile)?.recordMembers
+  return {
+    status,
+    stale: p?.stale === true,
+    listed: Array.isArray(listed) ? listed.filter((m): m is string => typeof m === 'string') : [],
+  }
 }
 
 /** One opened record (`rooms/keys/read`). The body is decoded text, or the open room's cleartext as JSON text. */

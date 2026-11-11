@@ -184,6 +184,28 @@ describe('with sending on', () => {
     expect(tree.queryByTestId(id('ChatReactionBar'))).toBeNull()
   })
 
+  test('a room this phone saw take them, now listing neither, says they were on and are off now', async () => {
+    const s = service([post('m1', 'Hi all')], {
+      features: { listed: [], canSeal: true, unresolved: false, wereOn: { epoch: 3 } },
+    })
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalledWith(ROOM))
+    await longPress(tree, 'm1')
+    expect(tree.getByTestId(id('ChatMessageActionsNotice'))).toHaveTextContent('Rooms.RecordsTurnedOff')
+    expect(tree.getByTestId(id('ChatActionCopy'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ChatReactionBar'))).toBeNull()
+    expect(tree.queryByTestId(id('ChatActionReply'))).toBeNull()
+  })
+
+  test('a room that still takes them says nothing of having been on (control)', async () => {
+    const s = service([post('m1', 'Hi all')], { features: { ...EVERYTHING, wereOn: { epoch: 3 } } })
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+    await longPress(tree, 'm1')
+    expect(tree.getByTestId(id('ChatReactionBar'))).toBeTruthy()
+    expect(tree.queryByTestId(id('ChatMessageActionsNotice'))).toBeNull()
+  })
+
   test('an agent that does not seal them offers neither, whatever the profile lists', async () => {
     const s = service([post('m1', 'Hi all')], { features: { ...EVERYTHING, canSeal: false } })
     const tree = open(s)
@@ -265,12 +287,125 @@ describe('with sending on', () => {
       { type: 'withdraw', key: 'r2' },
       { type: 'withdraw', key: 'r1' },
     ])
+    // Taken back on screen at once: the chips go before the room is read again.
+    expect(tree.queryByTestId(id('RoomPostReactions'))).toBeNull()
 
-    s.sendRecord.mockClear()
-    await longPress(tree, 'm1')
-    await press(tree, 'ChatReaction-1')
-    await waitFor(() => expect(s.sendRecord).toHaveBeenCalledTimes(1))
-    expect(s.sendRecord).toHaveBeenCalledWith(ROOM, { type: 'changeReaction', key: 'r2', value: '❤️' })
+    // Another value, on a room where yours is still held, rewrites the newest of yours.
+    const again = service([
+      reaction('r2', 'm1', '👍', { author: ME }),
+      reaction('r1', 'm1', '👍', { author: ME }),
+      post('m1', 'Hi all'),
+    ])
+    tree.unmount()
+    const next = open(again)
+    await waitFor(() => expect(next.getByTestId(id('RoomPostReactions'))).toBeTruthy())
+    await longPress(next, 'm1')
+    await press(next, 'ChatReaction-1')
+    await waitFor(() => expect(again.sendRecord).toHaveBeenCalledTimes(1))
+    expect(again.sendRecord).toHaveBeenCalledWith(ROOM, { type: 'changeReaction', key: 'r2', value: '❤️' })
+  })
+
+  // 278.12, 11-10: a reaction took 4.7 s to show on an iPhone 11, all of it the agent's round trips and a read of the
+  // room. It shows at once now (pendingRecordWrites), until the room's list carries it.
+  describe('shown at once, before the room has stored it', () => {
+    /** A send that answers only when told. */
+    const held = () => {
+      let answer!: (w: { key: string; version: number }) => void
+      let refuse!: (e: unknown) => void
+      const sendRecord = jest.fn(
+        () =>
+          new Promise<{ key: string; version: number }>((resolve, reject) => {
+            answer = resolve
+            refuse = reject
+          })
+      )
+      return {
+        sendRecord,
+        answer: (w: { key: string; version: number }) => answer(w),
+        refuse: (e: unknown) => refuse(e),
+      }
+    }
+
+    test('a first reaction shows as yours while it is still on its way', async () => {
+      const send = held()
+      const s = service([post('m1', 'Hi all')], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      expect(tree.queryByTestId(id('RoomPostReactions'))).toBeNull()
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatReaction-0')
+      expect(send.sendRecord).toHaveBeenCalledTimes(1)
+      expect(tree.getByTestId(id('RoomPostReactions'))).toBeTruthy()
+      await act(async () => send.answer({ key: 'r-new', version: 1 }))
+      expect(tree.getByTestId(id('RoomPostReactions'))).toBeTruthy()
+    })
+
+    test('a reaction that fails is taken back, and says so', async () => {
+      const show = jest.spyOn(Toast, 'show')
+      const send = held()
+      const s = service([post('m1', 'Hi all')], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatReaction-0')
+      expect(tree.getByTestId(id('RoomPostReactions'))).toBeTruthy()
+      await act(async () => send.refuse(new Error('agent not reached')))
+      await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Chat.ReactionNotSent' })))
+      expect(tree.queryByTestId(id('RoomPostReactions'))).toBeNull()
+    })
+
+    test('a second reaction while the first is on its way sends nothing more', async () => {
+      const send = held()
+      const s = service([post('m1', 'Hi all')], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatReaction-0')
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatReaction-1')
+      expect(send.sendRecord).toHaveBeenCalledTimes(1)
+    })
+
+    test('an edit shows its new words while it is on its way', async () => {
+      const send = held()
+      const s = service([post('m1', 'We meet at 5', { kind: 'message', author: ME })], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatActionEdit')
+      fireEvent.changeText(tree.getByTestId(id('RoomComposerInput')), 'We meet at 6')
+      await press(tree, 'RoomComposerSend')
+      const bubble = within(tree.getByTestId(id(`RoomPost_${roomHandle('m1')}`)))
+      expect(bubble.getByText('We meet at 6')).toBeTruthy()
+      expect(bubble.queryByText('We meet at 5')).toBeNull()
+      await act(async () => send.answer({ key: 'm1', version: 2 }))
+    })
+
+    test('an edit that fails shows the words the room has again (control)', async () => {
+      const send = held()
+      const s = service([post('m1', 'We meet at 5', { kind: 'message', author: ME })], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatActionEdit')
+      fireEvent.changeText(tree.getByTestId(id('RoomComposerInput')), 'We meet at 6')
+      await press(tree, 'RoomComposerSend')
+      await act(async () => send.refuse(new Error('agent not reached')))
+      const bubble = within(tree.getByTestId(id(`RoomPost_${roomHandle('m1')}`)))
+      await waitFor(() => expect(bubble.getByText('We meet at 5')).toBeTruthy())
+    })
+
+    test('a withdrawn message goes at once', async () => {
+      const send = held()
+      const s = service([post('m1', 'We meet at 5', { kind: 'message', author: ME })], { sendRecord: send.sendRecord })
+      const tree = open(s)
+      await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalled())
+      await longPress(tree, 'm1')
+      await press(tree, 'ChatActionWithdraw')
+      await press(tree, 'RoomWithdrawConfirm')
+      expect(tree.queryByTestId(id(`RoomPost_${roomHandle('m1')}`))).toBeNull()
+      await act(async () => send.answer({ key: 'm1', version: 2 }))
+    })
   })
 
   test('a reaction the room refuses says so in the reaction words, and why', async () => {
@@ -314,6 +449,28 @@ describe('with sending on', () => {
     expect(tree.queryByTestId(id('ChatReactionBar'))).toBeNull()
     // Told, so not asked again.
     expect(s.recordFeaturesIn).toHaveBeenCalledTimes(1)
+  })
+
+  test('a write refused in a room this phone saw take them says they were on, in the toast and then the sheet', async () => {
+    const show = jest.spyOn(Toast, 'show')
+    const s = service([post('m1', 'Hi all')], {
+      sendRecord: async () => {
+        throw Object.assign(new Error('this room cannot take kind'), {
+          name: 'RecordMembersNotPermitted',
+          refused: ['kind'],
+          features: { listed: [], canSeal: true, unresolved: false, wereOn: { epoch: 3 } },
+        })
+      },
+    })
+    const tree = open(s)
+    await waitFor(() => expect(s.recordFeaturesIn).toHaveBeenCalledTimes(1))
+    await longPress(tree, 'm1')
+    await press(tree, 'ChatReaction-0')
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({ text1: 'Rooms.RecordsTurnedOff' })))
+    await longPress(tree, 'm1')
+    await waitFor(() =>
+      expect(tree.getByTestId(id('ChatMessageActionsNotice'))).toHaveTextContent('Rooms.RecordsTurnedOff')
+    )
   })
 
   test('a refusal that says nothing of the room reads its profile again', async () => {

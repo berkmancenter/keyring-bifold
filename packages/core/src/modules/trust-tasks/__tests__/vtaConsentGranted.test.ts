@@ -33,8 +33,23 @@ test('a grant while a task is held releases the hold and remembers which task, a
   expect(state.consentGranted?.at).toBeGreaterThanOrEqual(before)
 })
 
+test("a grant drops the held request's code with the hold", () => {
+  const { vta, internals } = controller()
+  internals.set({ awaitingConsentFor: PERSONA_MINT, awaitingConsentCode: 'abcdef' })
+  internals.inbound(granted())
+  expect(vta.getState().awaitingConsentCode).toBeUndefined()
+})
+
 test('a grant with nothing held remembers nothing (control: the one above)', () => {
   const { vta, internals } = controller()
   internals.inbound(granted())
   expect(vta.getState().consentGranted).toBeUndefined()
+})
+
+test('a grant clears an earlier not-given, so the screen says the newer thing', () => {
+  const { vta, internals } = controller()
+  internals.set({ awaitingConsentFor: PERSONA_MINT, consentNotGiven: { taskType: PERSONA_MINT, at: 1 } })
+  internals.inbound(granted())
+  expect(vta.getState().consentNotGiven).toBeUndefined()
+  expect(vta.getState().consentGranted?.taskType).toBe(PERSONA_MINT)
 })
