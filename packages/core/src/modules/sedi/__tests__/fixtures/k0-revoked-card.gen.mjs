@@ -57,4 +57,4 @@ export const K0_REVOKED_TEST_GUARDIAN_CARD: {
 } = `
 
 writeFileSync(OUT, header + JSON.stringify(card, null, 2) + '\n')
-console.log(`wrote ${OUT}`)
+process.stdout.write(`wrote ${OUT}\n`)
