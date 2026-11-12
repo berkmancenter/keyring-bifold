@@ -175,6 +175,10 @@ export const PHONE_SENDS: readonly string[] = [
   'rooms/keys/seal/0.2',
   'rooms/keys/seal/0.3',
   'rooms/keys/profile/read/0.1',
+  // A curator turning replies on (turnOnRepliesAndReactions): the person's own act, as a seal or an act is, so it waits
+  // for a rule's approvers the same way rather than being refused at once (only device/set-wake, whose approver may be
+  // this phone, skips the wait).
+  'rooms/keys/profile/write/0.1',
   'rooms/keys/file-key/0.2',
 ].map((slug) => SPEC + slug)
 

@@ -174,6 +174,9 @@ const LOGGED_REFUSAL_CODES = new Set([
   // code (`RECORD_UNOPENED_REASONS`; `notDelivered` is listed above as a spec code).
   'beyondChain',
   'removed',
+  // Turning replies and reactions on (`turnOnRepliesAndReactions`): the profile couldn't be read, or names no room.
+  'profileUnread',
+  'noName',
   // A record a member may not rewrite or withdraw, and a tier its record writes aren't built for (`sendRecord`).
   'notThatKind',
   'notYours',

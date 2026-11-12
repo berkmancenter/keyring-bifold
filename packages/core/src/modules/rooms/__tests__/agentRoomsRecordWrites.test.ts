@@ -53,6 +53,10 @@ interface Setup {
   records?: Record<string, Prior>
   head?: number
   recordSending?: boolean
+  /** What the member may do in the attributed room; read and write by default. */
+  actions?: string[]
+  /** The community's name for the attributed room. */
+  label?: string
 }
 
 function setup(o: Setup = {}) {
@@ -68,6 +72,8 @@ function setup(o: Setup = {}) {
         return o.listed
           ? { roomId: ROOM, status: 'found', profile: { name: 'Room', recordMembers: o.listed } }
           : { roomId: ROOM, status: 'absent' }
+      case ROOMS_TASK.keysProfileWrite:
+        return { roomId: ROOM, status: 'written', epoch: state.epoch, version: 7 }
       case ROOMS_TASK.keysSeal02:
       case ROOMS_TASK.keysSeal03:
         return { sealed: { ciphertext: `sealed:${String(payload.plaintext)}`, nonce: 'nonce', epoch: state.epoch } }
@@ -101,7 +107,14 @@ function setup(o: Setup = {}) {
   const communityTask = jest.fn(
     async (): Promise<unknown> => ({
       items: [
-        { roomId: ROOM, host: HOST, visibility: 'attributed', actions: ['read', 'write'], state: 'admitted' },
+        {
+          roomId: ROOM,
+          host: HOST,
+          visibility: 'attributed',
+          actions: o.actions ?? ['read', 'write'],
+          state: 'admitted',
+          ...(o.label ? { label: o.label } : {}),
+        },
         { roomId: OPEN_ROOM, host: HOST, visibility: 'open', actions: ['read', 'write'], state: 'admitted' },
         { roomId: PRIVATE_ROOM, host: HOST, visibility: 'private', actions: ['read', 'write'], state: 'admitted' },
       ],
@@ -342,6 +355,115 @@ describe('a room whose replies and reactions were on', () => {
     expect(error).toBeInstanceOf(RecordMembersNotPermitted)
     expect((error as RecordMembersNotPermitted).features.wereOn).toEqual({ epoch: 3 })
     expectNothingWritten(s)
+  })
+})
+
+// A curator or admin turns replies and reactions on (`turnOnRepliesAndReactions`): the room's whole profile, carried
+// over, with what they need listed, written by the member's own agent.
+describe('turning replies and reactions on', () => {
+  const CURATOR = ['read', 'write', 'curate']
+  const WITH_WRITE = [...SERVED, ROOMS_TASK.keysProfileWrite]
+  const written = (s: ReturnType<typeof setup>) => s.tasks(ROOMS_TASK.keysProfileWrite).map(([, payload]) => payload)
+  const current = {
+    name: 'Seed swap',
+    description: 'Bring what you grow',
+    tags: ['garden'],
+    emoji: '🌱',
+    recordMembers: ['editedAt'],
+    ext: { 'org.example': { pinned: true } },
+  }
+
+  it('writes the whole profile with the three listed, every member of the current one carried over', async () => {
+    const s = setup({
+      served: WITH_WRITE,
+      actions: CURATOR,
+      profile: () => ({ roomId: ROOM, status: 'found', profile: current }),
+    })
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    expect(written(s)).toEqual([
+      {
+        roomId: ROOM,
+        host: HOST,
+        profile: { ...current, recordMembers: ['editedAt', 'kind', 'inReplyTo', 'writtenAt'] },
+      },
+    ])
+    expect(s.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/replies and reactions turned on: lists editedAt,kind,inReplyTo,writtenAt$/)
+    )
+  })
+
+  it('reads the profile again on the next ask, not the one held for this epoch', async () => {
+    const s = setup({
+      served: WITH_WRITE,
+      actions: CURATOR,
+      profile: () => ({ roomId: ROOM, status: 'found', profile: current }),
+    })
+    await s.service.recordFeaturesIn(ROOM)
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    const before = s.tasks(ROOMS_TASK.keysProfileRead).length
+    await s.service.recordFeaturesIn(ROOM)
+    expect(s.tasks(ROOMS_TASK.keysProfileRead)).toHaveLength(before + 1)
+  })
+
+  it("carries a stale profile forward: it is the room's own, the newest any epoch holds", async () => {
+    const s = setup({
+      served: WITH_WRITE,
+      actions: CURATOR,
+      profile: () => ({ roomId: ROOM, status: 'found', stale: true, profile: current }),
+    })
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    expect(written(s)).toEqual([
+      {
+        roomId: ROOM,
+        host: HOST,
+        profile: { ...current, recordMembers: ['editedAt', 'kind', 'inReplyTo', 'writtenAt'] },
+      },
+    ])
+  })
+
+  it('writes nothing when all three are listed already (control)', async () => {
+    const s = setup({ served: WITH_WRITE, actions: CURATOR, listed: ALL })
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    expect(written(s)).toEqual([])
+  })
+
+  it("names a room with no profile by the community's name for it", async () => {
+    const s = setup({ served: WITH_WRITE, actions: CURATOR, label: 'Garden chat' })
+    await s.service.turnOnRepliesAndReactions(ROOM)
+    expect(written(s)).toEqual([
+      { roomId: ROOM, host: HOST, profile: { name: 'Garden chat', recordMembers: ['kind', 'inReplyTo', 'writtenAt'] } },
+    ])
+  })
+
+  it.each([
+    ['a member without curate or admin', { served: WITH_WRITE }, 'noAuthority'],
+    [
+      'a profile that cannot be read',
+      {
+        served: WITH_WRITE,
+        actions: CURATOR,
+        profile: () => {
+          throw new Error('hostUnreachable')
+        },
+      },
+      'profileUnread',
+    ],
+    [
+      'an answer that does not read',
+      { served: WITH_WRITE, actions: CURATOR, profile: () => ({ profile: {} }) },
+      'profileUnread',
+    ],
+    ['a room with no profile and no name known', { served: WITH_WRITE, actions: CURATOR }, 'noName'],
+  ] as const)('refuses, writing nothing: %s', async (_what, o, code) => {
+    const s = setup(o as Setup)
+    await expect(s.service.turnOnRepliesAndReactions(ROOM)).rejects.toMatchObject({ code })
+    expect(written(s)).toEqual([])
+  })
+
+  it('an agent that cannot write a profile is told so, and asked nothing', async () => {
+    const s = setup({ actions: CURATOR, listed: [] })
+    await expect(s.service.turnOnRepliesAndReactions(ROOM)).rejects.toMatchObject({ reason: 'agentDoesNotServe' })
+    expect(written(s)).toEqual([])
   })
 })
 

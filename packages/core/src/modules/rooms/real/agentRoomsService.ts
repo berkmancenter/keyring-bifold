@@ -39,7 +39,7 @@ import { VtiRefusal } from '../../trust-tasks/module/vtiAgent'
 import { roomRef } from '../roomRef'
 import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
-import { takesRepliesOrReactions } from '../recordPermits'
+import { NEEDS, takesRepliesOrReactions } from '../recordPermits'
 import { keepRecordsOn, recordsWereOnAt } from '../recordsWereOn'
 import type {
   AgentGrant,
@@ -1957,6 +1957,58 @@ export class AgentRoomsService implements RoomsService {
       )
     }
     return { ...features, wereOn: at === null ? {} : { epoch: at } }
+  }
+
+  /**
+   * Turns replies and reactions on in a room, for a member who holds `curate` or `admin` there: the room's profile lists
+   * what they need (`kind`, `inReplyTo`, `writtenAt`, the rule the sheet reads), written by the member's own agent
+   * (`rooms/keys/profile/write/0.1`), which signs, seals and stores it and settles the version itself.
+   *
+   * The write replaces the whole profile, so the one there now is read afresh first and every member of it carried over:
+   * a profile that can't be read is never written over. Members the profile already lists are kept, and nothing is
+   * written when all three are there. With no profile at all, the community's own name for the room becomes its name;
+   * with none known either, nothing is written.
+   */
+  public async turnOnRepliesAndReactions(roomId: string): Promise<void> {
+    const room = await this.requireInRoom(roomId, 'write')
+    if (room.tier !== 'attributed')
+      throw new RoomsRefused('curate', 'tierNotYet', false, `replies in a ${room.tier} room are not built`)
+    const verbs = room.verbs ?? []
+    if (!verbs.includes('curate') && !verbs.includes('admin'))
+      throw new RoomsRefused('curate', 'noAuthority', false, 'it takes curate or admin in the room')
+    const { community, host } = this.hostOf(room, 'write')
+    const served = this.served?.types ?? []
+    if (!served.includes(ROOMS_TASK.keysProfileRead) || !served.includes(ROOMS_TASK.keysProfileWrite))
+      throw new RoomsUnavailable('curate', 'agentDoesNotServe', "the agent can't read and write a room's profile")
+    let read: ReturnType<typeof parseProfileRead>
+    try {
+      read = parseProfileRead(await this.backend.agentTask(ROOMS_TASK.keysProfileRead, { roomId: room.roomId, host }))
+    } catch (e) {
+      throw new RoomsRefused('curate', 'profileUnread', true, message(e), e)
+    }
+    if (read.status === 'unreadable')
+      throw new RoomsRefused('curate', 'profileUnread', true, "the agent's answer for the profile could not be read")
+    // A stale profile is the room's own: the agent walks down from the current epoch and answers the first valid one it
+    // finds (VTI vta-service-v0.79.0 trust_tasks/room_profile.rs `resolve`, `stale = epoch < current`), so no epoch above
+    // it holds one. Written forward under the current epoch, it is what upstream says a room in that state needs: members
+    // who joined since "read the profile as stale or absent until it is written again". Nothing newer exists to drop.
+    const current = read.status === 'found' ? (read.profile ?? {}) : {}
+    const named = typeof current.name === 'string' && current.name.trim() ? current.name : undefined
+    const name = named ?? (room.nameFrom === 'community' ? String(room.name) : undefined)
+    if (!name) throw new RoomsRefused('curate', 'noName', false, 'the room has no name to keep in its profile')
+    const listed = read.listed
+    const recordMembers = [...listed, ...NEEDS.reaction.filter((member) => !listed.includes(member))]
+    if (recordMembers.length === listed.length) return
+    await this.backend.agentTask(ROOMS_TASK.keysProfileWrite, {
+      roomId: room.roomId,
+      host,
+      profile: { ...current, name, recordMembers },
+    })
+    // Read again on the next ask, not taken from this epoch's: the profile just changed under it.
+    this.recordMembers.delete(`${room.roomId}\n${host}\n${community.personaDid}`) // tier-exempt(deletes stored records): an in-memory Map of room profiles read this run, not stored records
+    this.backend.warn(
+      `rooms: ${logRef(room.roomId)} replies and reactions turned on: lists ${recordMembers.filter((m) => (GOVERNED_BODY_MEMBERS as readonly string[]).includes(m)).join(',')}`
+    )
   }
 
   /**

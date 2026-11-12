@@ -569,6 +569,8 @@ export interface RoomsService {
   recordSendingOn?(): boolean
   /** What this room lets its member write: `real/recordWrites.ts`. Absent: the sheet offers less. */
   recordFeaturesIn?(roomId: string): Promise<RecordFeatures>
+  /** Lists what replies and reactions need in the room's profile; a member with `curate` or `admin` only. */
+  turnOnRepliesAndReactions?(roomId: string): Promise<void>
   /** Writes a message, reply or reaction, by the writer's rule. Off in every build until a maintainer says otherwise. */
   sendRecord?(roomId: string, write: RecordWrite): Promise<{ key: string; version: number }>
   openFile(roomId: string, fileId: string, options?: RoomsTransferOptions): Promise<OpenedFile>

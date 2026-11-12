@@ -5,7 +5,8 @@
  * sheet; then Hide from Messages, and the community's screen, where leaving is done.
  *
  * Nothing here is listed: the room itself is already known to this phone, and each part reads its own list when it is
- * opened, so this screen asks the agent nothing new.
+ * opened, so this screen asks the agent nothing new, but for one thing: a member who may curate an attributed room has
+ * its profile read (useRecordSending), and where replies and reactions aren't on there, may turn them on.
  *
  * @module rooms/screens/RoomInfo
  */
@@ -32,6 +33,7 @@ import { roomTitle } from '../components/RoomRow'
 import { openInMyAgent } from '../roomLinks'
 import type { Identity } from '../types'
 import { useMyName } from '../useMyName'
+import { useRecordSending } from '../useRecordSending'
 import { type RoomListing, useRoom } from '../useRoom'
 import { canHideRoom, hideRoom, showRoom, useRoomHidden } from '../useRoomRows'
 import { useRoomsService } from '../useRoomsService'
@@ -61,6 +63,31 @@ const RoomInfo: React.FC = () => {
   const me = useMyName(room?.communityDid)
   const [sheetFor, setSheetFor] = useState<Identity>()
   const hidden = useRoomHidden(roomId)
+  // A member who may curate an attributed room they've joined: only then is its profile read, to say whether replies
+  // and reactions are on, and to turn them on (turnOnRepliesAndReactions).
+  const mayCurate =
+    !!service?.turnOnRepliesAndReactions &&
+    room?.tier === 'attributed' &&
+    room.joined !== false &&
+    !!room.verbs?.includes('write') &&
+    (!!room.verbs?.includes('curate') || !!room.verbs?.includes('admin'))
+  const records = useRecordSending(service, mayCurate ? room : undefined)
+  const [confirming, setConfirming] = useState(false)
+  const [turning, setTurning] = useState(false)
+  const turnOn = async () => {
+    if (!service?.turnOnRepliesAndReactions) return
+    setTurning(true)
+    try {
+      await service.turnOnRepliesAndReactions(roomId)
+      setConfirming(false)
+      records.learn()
+      Toast.show({ type: ToastType.Success, text1: t('Rooms.RepliesTurnedOn') as string })
+    } catch {
+      Toast.show({ type: ToastType.Error, text1: t('Rooms.RepliesNotTurnedOn') as string })
+    } finally {
+      setTurning(false)
+    }
+  }
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
@@ -208,6 +235,41 @@ const RoomInfo: React.FC = () => {
           </View>
           {chevron}
         </Pressable>
+        {/* Where replies and reactions aren't on, a member who may curate can turn them on: asked once, then written. */}
+        {mayCurate && records.notOn ? (
+          <>
+            <View style={styles.divider} />
+            <Pressable
+              style={styles.item}
+              onPress={() => setConfirming(true)}
+              disabled={confirming}
+              accessibilityRole="button"
+              testID={testIdWithKey('RoomInfoTurnOnReplies')}
+            >
+              {icon('message-reply-text-outline')}
+              <ThemedText style={styles.label}>{t('Rooms.TurnOnReplies')}</ThemedText>
+            </Pressable>
+            {confirming ? (
+              <View style={styles.centered}>
+                <ThemedText testID={testIdWithKey('RoomInfoTurnOnBody')}>{t('Rooms.TurnOnRepliesBody')}</ThemedText>
+                <Button
+                  title={t('Rooms.TurnOnConfirm')}
+                  buttonType={ButtonType.Primary}
+                  onPress={() => void turnOn()}
+                  disabled={turning}
+                  testID={testIdWithKey('RoomInfoTurnOnConfirm')}
+                />
+                <Button
+                  title={t('Global.Cancel')}
+                  buttonType={ButtonType.Secondary}
+                  onPress={() => setConfirming(false)}
+                  disabled={turning}
+                  testID={testIdWithKey('RoomInfoTurnOnCancel')}
+                />
+              </View>
+            ) : null}
+          </>
+        ) : null}
         {/* A hidden room shows the way back where it was hidden from (tester feedback, 11-02: there was none). */}
         {hidden ? (
           <>
