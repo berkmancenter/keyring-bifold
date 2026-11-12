@@ -939,8 +939,8 @@ export async function guardianStandings(
 }
 
 /**
- * Who approves (B, 11-12): for each approver whose kept card names a root this phone's list marks demo
- * (isDemoStateRoot), that root's name, by the approver DID it is shown beside, whatever the card's standing (verified,
+ * Who approves (B, 11-12): for each approver whose kept card carries the key history (KEL) of a root this phone's
+ * list marks demo (isDemoStateRoot), that root's name, by the approver DID it is shown beside, whatever the card's standing (verified,
  * unreachable, revoked, couldn't verify). The screen draws the state's own box, titled with that name and the Demo
  * pill, from it. Read from the list's own entry, never from the card's word or inferred from the name; a card whose
  * root is not on the list, or not demo, has no entry. Empty with either switch off. Runs no check.
@@ -956,8 +956,13 @@ export async function guardianDemoStates(agent: Pick<Agent, 'genericRecords'>): 
     if (!guardian) continue
     const beside = shownBeside(ask, guardian)
     if (!beside) continue
-    const said = JSON.stringify([guardian.evidence.kels, guardian.evidence.tels, guardian.evidence.creds])
-    const root = roots.find((r) => said.includes(r.aid))
+    // Matched on the key histories the card carries (kels) only, never on its credentials or registries: a demo
+    // root's AID named only as a reference inside `creds` or `tels` gives no name. This is PRESENCE in a carried KEL,
+    // not proof the card is anchored at that root; it only labels a box on a Developer-gated demo screen, and the
+    // screen shows it only beside a card that checked up to a revocation or whose live fetch failed, never beside
+    // any other refusal. Making it structural (one helper with websRootsFor) is backlog (ac, 11-12).
+    const kels = JSON.stringify(guardian.evidence.kels)
+    const root = roots.find((r) => kels.includes(r.aid))
     if (root) named[beside] = root.name
   }
   return named
