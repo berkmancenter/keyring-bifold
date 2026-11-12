@@ -14,7 +14,10 @@ import * as network from '../../src/contexts/network'
 import { useChatMessagesByConnection } from '../../src/hooks/chat-messages'
 import ConfirmWithSheet, { ConfirmWithSheetIds } from '../../src/modules/trust-tasks/components/ConfirmWithSheet'
 import * as confirmItsYou from '../../src/modules/trust-tasks/confirmItsYou'
-import { CONFIRM_ITS_YOU_REMOTE_OFF, setConfirmItsYouEnabled } from '../../src/modules/trust-tasks/module/confirmItsYouFlag'
+import {
+  CONFIRM_ITS_YOU_REMOTE_OFF,
+  setConfirmItsYouEnabled,
+} from '../../src/modules/trust-tasks/module/confirmItsYouFlag'
 import { SEDI_KERI_REMOTE_OFF } from '../../src/modules/trust-tasks/module/sediKeriRemoteOff'
 import { ConfirmItsYouRowIds } from '../../src/modules/trust-tasks/screens/ConfirmItsYouRow'
 import { useWitnessConnection } from '../../src/modules/vrc/context/WitnessConnectionProvider'
@@ -139,7 +142,7 @@ describe('"Confirm with <name>" in the chat\'s "+"', () => {
     expect(entryIds(tree)).toEqual(['ChatAttachCamera', 'ChatAttachLibrary'])
   })
 
-  test("the witness's chat: no \"+\" at all, and nothing read", async () => {
+  test('the witness\'s chat: no "+" at all, and nothing read', async () => {
     ;(useWitnessConnection as jest.Mock).mockReturnValue({ connectedWitness: { connectionId: '1' } })
     try {
       const tree = await renderChat()
