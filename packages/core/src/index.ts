@@ -285,6 +285,25 @@ export {
   setTrustedApproversEnabled,
   isTrustedApproversEnabled,
   TRUSTED_APPROVERS_REMOTE_OFF,
+  setStateVerifiedApproversEnabled,
+  isStateVerifiedApproversEnabled,
+  STATE_VERIFIED_APPROVERS_REMOTE_OFF,
+  setTrustTestStateEnabled,
+  isTrustTestStateEnabled,
+  holdK0TestGuardianCard,
+  holdK0RevokedOmittedCard,
+  holdK0RevokedTestCard,
+  becomeK0TestWard,
+  setUpSediDemo,
+  turnOffSediDemo,
+  sediDemoHiddenByKill,
+  SEDI_KERI_REMOTE_OFF,
+  setConfirmItsYouEnabled,
+  isConfirmItsYouEnabled,
+  CONFIRM_ITS_YOU_REMOTE_OFF,
+  setDemoStateHost,
+  demoStateHost,
+  demoStateHostProblem,
   setDidCommV2Enabled,
   setPeerLegCarriage,
   getPeerLegCarriage,
@@ -336,6 +355,9 @@ export {
   membershipFromVerdict,
   vtaAgent,
 } from './modules/trust-tasks'
+export { setStateCardEnabled, isStateCardEnabled, STATE_CARD_REMOTE_OFF } from './modules/sedi/holder/stateCardFlag'
+// The SEDI State roots' demo mark, for screens that show the "Demo" pill (Who approves, the holder's state card).
+export { isDemoStateRoot, K0_TEST_ROOT, type StateRoot } from './modules/sedi/guardian/stateRoots'
 export type {
   TrustTaskRegistration,
   TrustTaskOrchestration,

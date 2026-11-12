@@ -103,7 +103,7 @@ import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
 import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
-import { besideQueue, inReadLane, VTA_HEARTBEAT_BESIDE, VTA_READ_LANE_SIZE } from './vtaReadLane'
+import { besideQueue, goesFirst, inReadLane, VTA_HEARTBEAT_BESIDE, VTA_READ_LANE_SIZE } from './vtaReadLane'
 import {
   DECLARATIVE_POLICY_ID,
   DECLARATIVE_POLICY_NAME,
@@ -160,6 +160,12 @@ export const VTA_TASK = {
   /** decision/0.2 adds only OPTIONAL members; a 0.1 decision re-typed as 0.2 means the same (trust-tasks-tf ce07a039 task-consent/decision/0.2 spec.md:122-124). */
   consentDecision02: 'https://trusttasks.org/spec/task-consent/decision/0.2',
   consentGranted: 'https://trusttasks.org/spec/task-consent/granted/0.1',
+  /**
+   * Pushed by the agent, never sent: a room watched with `rooms/keys/watch/0.1` changed at its host (vta-service
+   * `room_key_watch.rs`, trust-tasks-tf #1040). It names the room, the member, the host and the host's `latestVersion`
+   * and nothing about what changed. Its type is matched here and only here; rooms reads the payload (wire.ts parseChanged).
+   */
+  roomsKeysChanged: 'https://trusttasks.org/spec/rooms/keys/changed/0.1',
   aclSwapKey: 'https://trusttasks.org/spec/acl/swap-key/0.1',
   // The canonical ACL family (vta-sdk trust_tasks.rs:222-260), each gated by
   // `require_manage()` (vta-service trust_tasks/acl.rs:27-55, 57-84, 207-234).
@@ -825,7 +831,13 @@ export function activeSwapTestHook(): VtaSwapTestHook {
 type Probe = { kind: 'live' } | { kind: 'refused'; detail: string } | { kind: 'unknown'; detail: string }
 
 /** Documents the agent sends of its own accord: never the answer to a task this client asked. */
-const UNSOLICITED = new Set<string>([VTA_TASK.consentRequest, VTA_TASK.consentGranted, ...STEP_UP_REQUEST_TYPES])
+export const UNSOLICITED: ReadonlySet<string> = new Set<string>([
+  VTA_TASK.consentRequest,
+  VTA_TASK.consentGranted,
+  // A room's change signal can arrive while a task is out: it is that room's, never the task's answer.
+  VTA_TASK.roomsKeysChanged,
+  ...STEP_UP_REQUEST_TYPES,
+])
 
 /** Persona mints running now, by VTA and community (see `ensurePersona`). */
 const personasInFlight = new Map<string, Promise<VtiPersona>>()
@@ -896,6 +908,8 @@ interface QueuedTask {
   ticket: number
   type: string
   start: () => Promise<void>
+  /** Part of a member's own write: queued ahead of every task that isn't (`goesFirst`). */
+  first?: true
 }
 
 export class TspReplyBreaker {
@@ -1566,7 +1580,17 @@ export class VtaClient {
         void Promise.resolve().then(() => run().then(resolve, reject))
         return
       }
-      this.waiting.push({ ticket, type, start: () => run().then(resolve, reject) })
+      const queued: QueuedTask = { ticket, type, start: () => run().then(resolve, reject) }
+      // A member's own write goes ahead of what is queued, behind any other part of a write, in the order asked; what
+      // is on the wire runs on (vtaReadLane, goesFirst).
+      if (goesFirst(type, payload)) {
+        queued.first = true
+        const at = this.waiting.findIndex((t) => !t.first)
+        if (at >= 0) {
+          this.agent.config.logger.info(`${LOG_PREFIX} ${type} goes ahead of ${this.waiting.length - at} queued`)
+          this.waiting.splice(at, 0, queued)
+        } else this.waiting.push(queued)
+      } else this.waiting.push(queued)
       // One task at a time: one queued behind another says what it waits on, so a
       // queue that stalls shows what it stalled on (two-phone gate trial, 09-29).
       // A heartbeat beside the queue holds nothing: what is named is the other task on the wire, if there is one.
