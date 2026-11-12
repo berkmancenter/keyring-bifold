@@ -356,6 +356,11 @@ export function agentListsApprover(
  * Whether asking the contact on `ask` for `actions` would ask for nothing new: the agent's rules, as just read, list
  * them, and already hold every one of `actions` (the one set approves every action it holds). Then no offer is sent.
  * No read (`view` null) is never "nothing new", so the offer goes as it always did.
+ *
+ * This depends on the agent's model being ONE approver set that approves every action it holds (see
+ * {@link approversWithAccepted}): a listed approver then covers every held action. If the agent ever gains
+ * per-approver scopes, this becomes wrong in the dangerous direction (it would call an action covered that this
+ * approver does not hold, and suppress the ask); it must then read that approver's own actions.
  */
 export function agentAlreadyCovers(
   view: { approvers: readonly string[]; keys: readonly RoleAction[] } | null,

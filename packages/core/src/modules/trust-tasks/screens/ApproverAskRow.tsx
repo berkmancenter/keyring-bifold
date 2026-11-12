@@ -141,14 +141,23 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
       if (!agent || !connectionId || !vtaDid || busy) return
       setSaid(undefined)
       setAlready(false)
-      // Nothing new to ask: the agent already has them approving every chosen action. Not sent.
-      if (agentAlreadyCovers(held, ask, actions)) {
-        setPicking(false)
-        setAlready(true)
-        return
-      }
       setBusy(true)
       try {
+        // Nothing new to ask? The last read may be stale (the approver removed on another phone or on the agent
+        // directly fires no event here), so it only prompts a FRESH read, and only a fresh read that still covers
+        // every chosen action stops the send. A fresh read that fails withholds: the offer goes as it always did.
+        if (agentAlreadyCovers(held, ask, actions)) {
+          const fresh = await vtaAgent
+            .trustedApprovers(agent)
+            .then((state) => state.view)
+            .catch(() => null)
+          setHeld(fresh)
+          if (agentAlreadyCovers(fresh, ask, actions)) {
+            setPicking(false)
+            setAlready(true)
+            return
+          }
+        }
         const result = await offerApproverRole(agent, connectionId, vtaDid, actions)
         if (result === 'noRelationship') setSaid(t('Approver.NoRelationship', { name }))
         else setPicking(false)

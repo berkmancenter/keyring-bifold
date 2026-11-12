@@ -419,6 +419,8 @@ describe("the contact's row: already approves, from the agent's own rules (278.1
     await user.press(tree.getByTestId(id(ApproverAskRowIds.change)))
     await user.press(tree.getByTestId(id(ApproverAskRowIds.send)))
     expect(offer).not.toHaveBeenCalled()
+    // Suppressed only on a fresh read at Send, not the one from opening the row.
+    expect(vtaAgent.trustedApprovers).toHaveBeenCalledTimes(2)
     expect(tree.getByTestId(id(ApproverAskRowIds.already)).props.children).toBe('Approver.AlreadyApproves')
     expect(tree.queryByTestId(id(ApproverAskRowIds.send))).toBeNull()
     expect(tree.queryByTestId(id(ApproverAskRowIds.error))).toBeNull()
@@ -429,6 +431,60 @@ describe("the contact's row: already approves, from the agent's own rules (278.1
     await user.press(tree.getByTestId(id(ApproverAskRowIds.send)))
     expect(offer).toHaveBeenCalledTimes(1)
     expect([...offer.mock.calls[0][3]].sort()).toEqual(['addDevice', 'changeApprovers', 'joinCommunity'])
+  })
+
+  test('a read gone stale before Send (removed out of band, or fewer actions now) is read again, and the offer IS sent (control: still covered, not sent)', async () => {
+    linked(SAM_AGENT)
+    jest
+      .spyOn(approverRole, 'roleOfferAskOn')
+      .mockResolvedValue(
+        ask({ state: 'closed', acceptedAs: JORDAN, written: true, actions: ['joinCommunity', 'changeApprovers'] })
+      )
+    const covering = rules([JORDAN], ['joinCommunity', 'changeApprovers'])
+    for (const atSend of [rules([], []), rules([JORDAN], ['changeApprovers'])]) {
+      const read = jest
+        .spyOn(vtaAgent, 'trustedApprovers')
+        .mockResolvedValueOnce(covering)
+        .mockResolvedValueOnce(atSend)
+      const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
+      const user = userEvent.setup()
+      const tree = await row()
+      expect(status(tree)).toBe('Approver.IsApprover')
+      await user.press(tree.getByTestId(id(ApproverAskRowIds.change)))
+      await user.press(tree.getByTestId(id(ApproverAskRowIds.send)))
+      expect(read).toHaveBeenCalledTimes(3) // load, the re-read at Send, and the load after sending
+      expect(offer).toHaveBeenCalledTimes(1)
+      expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'joinCommunity'])
+      expect(tree.queryByTestId(id(ApproverAskRowIds.already))).toBeNull()
+      jest.restoreAllMocks()
+      linked(SAM_AGENT)
+      jest
+        .spyOn(approverRole, 'roleOfferAskOn')
+        .mockResolvedValue(
+          ask({ state: 'closed', acceptedAs: JORDAN, written: true, actions: ['joinCommunity', 'changeApprovers'] })
+        )
+    }
+  })
+
+  test('UNREADABLE WITHHOLDS at Send: a re-read that fails sends the offer, with no "already" line, though the earlier read covered it', async () => {
+    linked(SAM_AGENT)
+    jest
+      .spyOn(approverRole, 'roleOfferAskOn')
+      .mockResolvedValue(
+        ask({ state: 'closed', acceptedAs: JORDAN, written: true, actions: ['joinCommunity', 'changeApprovers'] })
+      )
+    const read = jest
+      .spyOn(vtaAgent, 'trustedApprovers')
+      .mockResolvedValueOnce(rules([JORDAN], ['joinCommunity', 'changeApprovers']))
+      .mockRejectedValue(new DeviceActionRefused('unreachable'))
+    const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
+    const user = userEvent.setup()
+    const tree = await row()
+    await user.press(tree.getByTestId(id(ApproverAskRowIds.change)))
+    await user.press(tree.getByTestId(id(ApproverAskRowIds.send)))
+    expect(read.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(offer).toHaveBeenCalledTimes(1)
+    expect(tree.queryByTestId(id(ApproverAskRowIds.already))).toBeNull()
   })
 
   test('UNREADABLE WITHHOLDS on Send too: the same Change with the agent unreadable is sent, as it always was, with no "already" line', async () => {
