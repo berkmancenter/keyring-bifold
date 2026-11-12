@@ -2204,9 +2204,9 @@ describe('a root read from its did:webs', () => {
     const row = sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK)!
     const ask = row.content as unknown as approverRole.RoleOfferAsk & { guardian: GuardianOnAsk }
     const { fetchedIssuers: _drop, ...without } = ask.guardian.verdict as GuardianVerdict & { fetchedIssuers?: true }
-    row.content = { ...ask, guardian: { ...ask.guardian, verdict: without } } as never
-    // The double's update is already a jest.fn that counted the arrival and the first open: count from here.
-    const updates = jest.spyOn(sam.agent.genericRecords, 'update')
+    row.content = { ...ask, guardian: { ...ask.guardian, verdict: without } } as Row['content']
+    // The double's update (phone().update, a jest.fn) has counted the arrival and the first open: count from here.
+    const updates = sam.update
     updates.mockClear()
     await guardianStandings(sam.agent, { fetch: host() })
     expect(stored()).toMatchObject({ ok: true, fetchedIssuers: true })
