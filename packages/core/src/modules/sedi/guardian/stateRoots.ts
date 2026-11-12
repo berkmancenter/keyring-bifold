@@ -29,8 +29,8 @@ export interface StateRoot {
    */
   webs?: string
   /**
-   * A made-up state for demos and testing: Who approves shows a "Demo" pill beside the name. Set on the entry here,
-   * never read from the card or inferred from the name.
+   * A test root for demos and testing, not a state's own root (even when named after one): Who approves shows a
+   * "Demo" pill beside the name. Set on the entry here, never read from the card or inferred from the name.
    */
   demo?: true
 }
