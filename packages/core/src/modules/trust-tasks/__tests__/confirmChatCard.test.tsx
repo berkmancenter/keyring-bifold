@@ -73,7 +73,8 @@ const press = async (tree: Awaited<ReturnType<typeof show>>, key: string) =>
   act(async () => {
     fireEvent.press(tree.getByTestId(id(key)))
   })
-const statusOf = (tree: Awaited<ReturnType<typeof show>>) => tree.getByTestId(id(ConfirmChatCardIds.status)).props.children
+const statusOf = (tree: Awaited<ReturnType<typeof show>>) =>
+  tree.getByTestId(id(ConfirmChatCardIds.status)).props.children
 
 beforeEach(() => {
   jest.restoreAllMocks()
@@ -239,7 +240,14 @@ describe('theirs (the contact asked this phone)', () => {
     expect(statusOf(tree)).toBe('ConfirmItsYou.PromptTitle')
     expect(tree.getByTestId(id(ConfirmChatCardIds.note)).props.children).toBe(NOTE)
     await press(tree, ConfirmChatCardIds.itsMe)
-    expect(answer).toHaveBeenCalledWith(AGENT, CONN, 'itsMe', expect.any(Function), 'ConfirmItsYou.ItsMeReason', 'faceId')
+    expect(answer).toHaveBeenCalledWith(
+      AGENT,
+      CONN,
+      'itsMe',
+      expect.any(Function),
+      'ConfirmItsYou.ItsMeReason',
+      'faceId'
+    )
     expect(statusOf(tree)).toBe('ConfirmItsYou.YouToldItsMe')
     expect(tree.queryByTestId(id(ConfirmChatCardIds.itsMe))).toBeNull()
   })

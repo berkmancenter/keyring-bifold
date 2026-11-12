@@ -275,7 +275,9 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
             </View>
             <ThemedText variant="bold">{t('ConfirmItsYou.WaitingBody', n)}</ThemedText>
             {quote(t('ConfirmItsYou.YouAsked'), ask.note)}
-            <ThemedText style={styles.muted}>{t('ConfirmItsYou.ExpiresIn', { count: minutesLeft(ask.expiresAt) })}</ThemedText>
+            <ThemedText style={styles.muted}>
+              {t('ConfirmItsYou.ExpiresIn', { count: minutesLeft(ask.expiresAt) })}
+            </ThemedText>
             <Button
               title={t('ConfirmItsYou.CancelRequest')}
               buttonType={ButtonType.Secondary}
