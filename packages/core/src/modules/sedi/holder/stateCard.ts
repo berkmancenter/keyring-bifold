@@ -22,6 +22,7 @@ import type { TFunction } from 'i18next'
 
 import {
   checkGuardianEvidenceResolving,
+  guardianSourceKey,
   type GuardianEvidence,
   type GuardianVerdict,
 } from '../../trust-tasks/guardianEvidence'
@@ -199,12 +200,21 @@ export function stateCardView(
   // One answer to "is this a demo root", the one Who approves and the card question use (stateRoots).
   const demo = ok ? isDemoStateRoot(ok.root) : false
   const asOf = words(ok?.fetchedFrom ? STATE_CARD_AS_OF_LIVE : STATE_CARD_AS_OF)
-  // A fetch reused because the host just failed (our own last live result, under five minutes old) says when it was
-  // fetched: the result is no fresher than that. The status is still the full check's, run again on it.
-  const source = ok?.fetchedFrom
-    ? ok.fetchedAt
-      ? words('Approver.GuardianFetchedLiveAt', { host: ok.fetchedFrom, time: localClock(ok.fetchedAt) })
-      : words('Approver.GuardianFetchedLive', { host: ok.fetchedFrom })
+  // Which "fetched live" line, decided where Who approves decides it (guardianSourceKey): the full line only when the
+  // root and every issuer in its chain were fetched live, else "the issuers' records came from the card"; each with
+  // its "at <time>" variant for a fetch reused because the host just failed (the result is no fresher than that). The
+  // status is still the full check's, run again on it.
+  const sourceKey = ok
+    ? guardianSourceKey({
+        kind: 'verified',
+        state: ok.state,
+        ...(ok.fetchedFrom ? { fetchedFrom: ok.fetchedFrom } : {}),
+        ...(ok.fetchedAt ? { fetchedAt: ok.fetchedAt } : {}),
+        ...(ok.fetchedIssuers ? { fetchedIssuers: true as const } : {}),
+      })
+    : null
+  const source = sourceKey
+    ? words(sourceKey, { host: ok?.fetchedFrom, ...(ok?.fetchedAt ? { time: localClock(ok.fetchedAt) } : {}) })
     : demo
       ? words('Approver.GuardianDemoCopy')
       : undefined

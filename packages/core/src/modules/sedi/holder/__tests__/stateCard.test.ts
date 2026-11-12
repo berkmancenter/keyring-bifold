@@ -124,7 +124,8 @@ describe('the state card: what it says', () => {
     expect(resolveRootKel).toHaveBeenCalledTimes(1)
     expect(v.tone).toBe('ok')
     expect(v.pill).toBeUndefined()
-    expect(v.source).toBe('Approver.GuardianFetchedLive{"host":"example.org"}')
+    // A real root: only its own record is fetched, so the line says the issuers' records came from the card.
+    expect(v.source).toBe('Approver.GuardianFetchedRootLive{"host":"example.org"}')
     // Still the K0 test card, so it still says it is a demo card.
     expect(v.demoNote).toBe('StateCard.DemoNote')
   })
@@ -347,28 +348,37 @@ describe('the state card: checking, and checked live', () => {
     expect(checkKeyOf(card)).toBe(copy)
   })
 
-  test('a fetch reused because the host just failed says when it was fetched; a fresh one does not (control)', () => {
-    const verdict = (extra: object): HeldCheck => ({
-      checked: true,
-      verdict: {
-        ok: true,
-        root: K0_TEST_ROOT.aid,
-        state: K0_TEST_ROOT.name,
-        demo: true,
-        checkedAt: NOW.toISOString(),
-        fetchedFrom: 'example.org',
-        ...extra,
-      },
-    })
-    const clock = (iso: string) => `clock(${iso})`
-    const reused = stateCardView(card, verdict({ fetchedAt: '2026-11-12T11:58:00Z', reused: true }), t, day, clock)
-    expect(reused.source).toBe(
-      'Approver.GuardianFetchedLiveAt{"host":"example.org","time":"clock(2026-11-12T11:58:00Z)"}'
-    )
-    // The status is the full check's, run again on the reused history: "Checks out", as of the published record.
-    expect(reused.status).toBe(`StateCard.ChecksOut{"asOf":"${STATE_CARD_AS_OF_LIVE}"}`)
-    const fresh = stateCardView(card, verdict({}), t, day, clock)
-    expect(fresh.source).toBe('Approver.GuardianFetchedLive{"host":"example.org"}')
+  const fetched = (extra: object): HeldCheck => ({
+    checked: true,
+    verdict: {
+      ok: true,
+      root: K0_TEST_ROOT.aid,
+      state: K0_TEST_ROOT.name,
+      demo: true,
+      checkedAt: NOW.toISOString(),
+      fetchedFrom: 'example.org',
+      ...extra,
+    },
+  })
+  const clock = (iso: string) => `clock(${iso})`
+  const AT = '2026-11-12T11:58:00Z'
+  test.each([
+    ['root and issuers fetched, fresh', { fetchedIssuers: true }, 'Approver.GuardianFetchedLive{"host":"example.org"}'],
+    [
+      'root and issuers fetched, reused',
+      { fetchedIssuers: true, fetchedAt: AT, reused: true },
+      `Approver.GuardianFetchedLiveAt{"host":"example.org","time":"clock(${AT})"}`,
+    ],
+    ['only the root fetched, fresh', {}, 'Approver.GuardianFetchedRootLive{"host":"example.org"}'],
+    [
+      'only the root fetched, reused',
+      { fetchedAt: AT, reused: true },
+      `Approver.GuardianFetchedRootLiveAt{"host":"example.org","time":"clock(${AT})"}`,
+    ],
+  ])("%s: the line Who approves shows (guardianSourceKey), and the status is the full check's", (_, extra, line) => {
+    const v = stateCardView(card, fetched(extra), t, day, clock)
+    expect(v.source).toBe(line)
+    expect(v.status).toBe(`StateCard.ChecksOut{"asOf":"${STATE_CARD_AS_OF_LIVE}"}`)
   })
 
   test('the root answers but an issuer in its chain can\'t be reached: "Couldn\'t reach", never "Checks out"', async () => {
