@@ -87,6 +87,14 @@ from `did:webs:<host>:keyring-demo-state:<AID>`: the demo publishes the whole ch
 - A REAL root's issuers are NOT fetched: only the root is on our list with a did:webs, and a real state's units and
   agents would need their own did:webs for this. For a real state the issuers' histories still come from the card.
 
+What is proven, by what the card does:
+
+| the card does                                     | result                                                                                                                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| carries its revocation                            | `revoked` ("The card shows it was revoked")                                                                                                                     |
+| omits the revocation, keeps the issuer KEL's seal | `statusNotCurrent` (bifold #1047 proves it end to end)                                                                                                          |
+| omits both, consistently                          | passes offline; caught only by a LIVE fetch of the issuer's published KEL: done here for demo roots, NOT for real roots, whose issuers still come from the card |
+
 ## What it does not check (not a full did:webs resolver)
 
 - **Designated-alias attestations.** The did:webs specification's resolver requires a valid, unrevoked
