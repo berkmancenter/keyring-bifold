@@ -301,7 +301,11 @@ describe('Who approves: hidden with the switches off (ac)', () => {
 })
 
 describe('guardianDemoStates: the demo root a kept card names, from the list only', () => {
-  const recordWith = (said: string, over: Partial<approverRole.RoleOfferAsk> = {}) => ({
+  const recordWith = (
+    said: string,
+    over: Partial<approverRole.RoleOfferAsk> = {},
+    where: { tels?: string[]; creds?: string[] } = {}
+  ) => ({
     id: 'r1',
     content: {
       state: 'accepted',
@@ -309,7 +313,7 @@ describe('guardianDemoStates: the demo root a kept card names, from the list onl
       connectionId: 'c1',
       guardian: {
         approver: JORDAN,
-        evidence: { guardianSaid: 'G', holder: 'H', kels: [said], tels: [], creds: [] },
+        evidence: { guardianSaid: 'G', holder: 'H', kels: [said], tels: where.tels ?? [], creds: where.creds ?? [] },
         receivedAt: '2026-11-12T00:00:00Z',
         verdict: { ok: false, reason: 'revoked', detail: '', checkedAt: '' },
       },
@@ -329,6 +333,22 @@ describe('guardianDemoStates: the demo root a kept card names, from the list onl
   test('the name is never read from the card: a card that only says "State of Utah" has no entry', async () => {
     expect(await guardianEvidence.guardianDemoStates(agentWith([recordWith('issued by State of Utah')]))).toEqual({})
   })
+
+  // ac, 11-12: a demo root's AID named only in a non-anchoring place (a reference inside a credential or a registry,
+  // while the card's KELs are another root's) gives no name. The limit, documented: this is presence in a carried KEL,
+  // not anchoring (control: the same AID in a KEL names it).
+  test.each([
+    ['a credential', { creds: [`{"ri":"${K0_TEST_ROOT.aid}"}`] }],
+    ['a registry', { tels: [`ref ${K0_TEST_ROOT.aid}`] }],
+  ])(
+    "the demo root's AID only in %s, KELs of another root: no entry (control: in a KEL, its name)",
+    async (_, where) => {
+      const elsewhere = recordWith('kel of some other root', {}, where)
+      expect(await guardianEvidence.guardianDemoStates(agentWith([elsewhere]))).toEqual({})
+      const inKel = recordWith(`kel of ${K0_TEST_ROOT.aid}`, {}, where)
+      expect(await guardianEvidence.guardianDemoStates(agentWith([inKel]))).toEqual({ [JORDAN]: UTAH })
+    }
+  )
 
   test('empty with state-verified approvers off (control: on, above)', async () => {
     setStateVerifiedApproversEnabled(false)
