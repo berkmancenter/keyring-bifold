@@ -77,7 +77,11 @@ const ownerCheck: ConfirmTheOwner = (reason) => (ownerCheckForTests ?? confirmOw
 
 const firstShown = () => confirmPromptStore.list().find((prompt) => !putOff.has(prompt.connectionId))
 
-const pastDue = (expiresAt: string) => !(Date.parse(expiresAt) > Date.now())
+/**
+ * The same rule as confirmItsYou.ts's pastDue. The negation is deliberate: an unreadable or missing expiresAt parses
+ * to NaN, and NaN must read as past due (never as still open). `Date.parse(x) <= Date.now()` would read NaN as open.
+ */
+const pastDue = (expiresAt: string | null | undefined) => !(Date.parse(String(expiresAt)) > Date.now())
 
 const timeOf = (date: Date) => date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
