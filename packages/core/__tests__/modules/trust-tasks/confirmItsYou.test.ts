@@ -468,23 +468,28 @@ describe('time', () => {
   test.each([
     ["unreadable ('not-a-date')", 'not-a-date'],
     ['missing (null)', null],
-  ])('an expiresAt that is %s reads as past due: no answer on the asking phone, never shown on the asked one', (_name, expiresAt) => {
-    // Asker: a waiting request with no readable time is "no answer", never "waiting" forever.
-    expect(confirmStatusOf({ state: 'waiting', expiresAt: expiresAt as never })).toBe('expired')
-    // Control: one in time still waits.
-    expect(confirmStatusOf({ state: 'waiting', expiresAt: new Date(Date.now() + 60_000).toISOString() })).toBe('waiting')
-    // Asked phone: such a prompt is not listed to answer.
-    confirmPromptStore.set({
-      open: true,
-      connectionId: 'c-nan',
-      asker: 'Sam',
-      note: 'n',
-      expiresAt: expiresAt as never,
-      request: {},
-      receivedAt: new Date().toISOString(),
-    })
-    expect(confirmPromptStore.list().map((p) => p.connectionId)).not.toContain('c-nan')
-  })
+  ])(
+    'an expiresAt that is %s reads as past due: no answer on the asking phone, never shown on the asked one',
+    (_name, expiresAt) => {
+      // Asker: a waiting request with no readable time is "no answer", never "waiting" forever.
+      expect(confirmStatusOf({ state: 'waiting', expiresAt: expiresAt as never })).toBe('expired')
+      // Control: one in time still waits.
+      expect(confirmStatusOf({ state: 'waiting', expiresAt: new Date(Date.now() + 60_000).toISOString() })).toBe(
+        'waiting'
+      )
+      // Asked phone: such a prompt is not listed to answer.
+      confirmPromptStore.set({
+        open: true,
+        connectionId: 'c-nan',
+        asker: 'Sam',
+        note: 'n',
+        expiresAt: expiresAt as never,
+        request: {},
+        receivedAt: new Date().toISOString(),
+      })
+      expect(confirmPromptStore.list().map((p) => p.connectionId)).not.toContain('c-nan')
+    }
+  )
 
   test('by default a request is open for 15 minutes', async () => {
     const sam = phone(SAM)
