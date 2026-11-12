@@ -475,8 +475,18 @@ const VtaTrustedApprovers: React.FC = () => {
   const stateBox = (did: string | undefined) => {
     const standing = standingFor(did)
     if (!did || !standing) return null
-    // Verified: the check's own `demo` (from the root list). Otherwise: the root list's entry the card names.
-    const state = standing.kind === 'verified' ? (standing.demo ? standing.state : undefined) : demoStates[did]
+    // Verified: the check's own `demo` (from the root list). Unreachable (the card is ours, only the live fetch failed)
+    // or revoked (it checked up to the revocation): the root list's entry the card names. Any other refusal (a bad
+    // signature, the wrong ward, an untrusted root): no box, since the root it names is only the card's own unchecked
+    // claim, and a state's name must never sit beside a forged card as if it vouched for it (SEDI lane, 11-12).
+    const state =
+      standing.kind === 'verified'
+        ? standing.demo
+          ? standing.state
+          : undefined
+        : standing.kind === 'unreachable' || isRevoked(standing)
+          ? demoStates[did]
+          : undefined
     if (!state) return null
     const host = demoStateHost()
     return (

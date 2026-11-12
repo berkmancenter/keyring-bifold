@@ -188,6 +188,21 @@ describe("Who approves: the state's own box shows only for a demo root (Demo onl
     }
   )
 
+  // A refusal other than revoked: the root the card names is its own unchecked claim, so no state box beside it, even
+  // when the card writes the K0 root's AID (control: the same demo root named on a revoked card shows the box).
+  test.each(['signatureInvalid', 'wardMismatch', 'untrustedRoot', 'checkFailed'])(
+    "couldn't verify (%s), card claiming the demo root: no state box and no Demo pill (control: revoked shows it)",
+    async (outcome) => {
+      const forged = await show(REVOKED(outcome), UTAH)
+      expect(has(forged, Ids.stateBox(JORDAN))).toBe(false)
+      expect(has(forged, Ids.guardianDemo(JORDAN))).toBe(false)
+      expect(forged.queryByText(UTAH)).toBeNull()
+      forged.unmount()
+      const revoked = await show(REVOKED('revoked'), UTAH)
+      expect(has(revoked, Ids.stateBox(JORDAN))).toBe(true)
+    }
+  )
+
   test('unreachable demo state: the box names the Demo state host (B4) (control: no host, the plain test-state line)', async () => {
     jest.spyOn(demoHost, 'demoStateHost').mockReturnValue('abc-def.trycloudflare.com')
     const withHost = await show(UNREACHABLE, UTAH)
