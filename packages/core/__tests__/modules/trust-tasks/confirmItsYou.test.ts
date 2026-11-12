@@ -210,6 +210,60 @@ describe('the round trip', () => {
     expect(answered.confirmedWith).toBeUndefined()
   })
 
+  test("a 'not me' that lands vibrates the phone ONCE; the same answer again, or a confirm, never does (IN-677)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const { Vibration } = require('react-native')
+    // The RN jest setup already mocks vibrate, so spyOn hands back that mock with earlier tests' calls: clear them.
+    const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => undefined)
+    buzz.mockClear()
+    try {
+      const sam = phone(SAM)
+      const jordan = phone(JORDAN)
+      await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+      await deliver(jordan)
+      await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'notMe', ok, 'r')
+      const answer = last()
+      expect(buzz).not.toHaveBeenCalled()
+      await deliver(sam, answer)
+      expect(buzz).toHaveBeenCalledTimes(1)
+      // The same answer delivered again is dropped (no longer waiting), so it does not vibrate again.
+      await deliver(sam, answer)
+      expect(buzz).toHaveBeenCalledTimes(1)
+
+      // Control: a confirm lands and does not vibrate.
+      buzz.mockClear()
+      const sam2 = phone(SAM)
+      const jordan2 = phone(JORDAN)
+      await sendConfirmRequest(sam2.agent, SAM.connectionId, NOTE)
+      await deliver(jordan2)
+      await answerConfirmRequest(jordan2.agent, JORDAN.connectionId, 'itsMe', ok, 'r')
+      await deliver(sam2)
+      expect(confirmStatusOf((await confirmAsksOn(sam2.agent, SAM.connectionId))[0])).toBe('itsMe')
+      expect(buzz).not.toHaveBeenCalled()
+    } finally {
+      buzz.mockRestore()
+    }
+  })
+
+  test("a phone that cannot vibrate still keeps the 'not me' answer", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const { Vibration } = require('react-native')
+    const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => {
+      throw new Error('no vibrator')
+    })
+    try {
+      const sam = phone(SAM)
+      const jordan = phone(JORDAN)
+      await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+      await deliver(jordan)
+      await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'notMe', ok, 'r')
+      await deliver(sam)
+      expect(confirmStatusOf((await confirmAsksOn(sam.agent, SAM.connectionId))[0])).toBe('notMe')
+    } finally {
+      buzz.mockRestore()
+    }
+  })
+
   test('nothing in the flow reaches for an agent or a VTA', () => {
     const source = fs.readFileSync(path.join(__dirname, '../../../src/modules/trust-tasks/confirmItsYou.ts'), 'utf8')
     expect(source).not.toMatch(/vtaAgent|VtaClient|vtiAgent|trustedApprovers/)

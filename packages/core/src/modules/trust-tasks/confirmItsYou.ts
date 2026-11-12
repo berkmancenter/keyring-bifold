@@ -20,6 +20,7 @@
 
 import { TypedArrayEncoder, utils, type Agent } from '@credo-ts/core'
 import { EventEmitter } from 'events'
+import { Vibration } from 'react-native'
 
 import { RelationshipDidRepository } from '../vrc/repositories/RelationshipDidRepository'
 import { resolveContactDisplayInfo } from '../vrc/utils/rcardDisplayUtils'
@@ -276,6 +277,22 @@ export async function handleConfirmResponse(
   await agent.genericRecords.update(record)
   agent.config?.logger?.info(`${LOG_PREFIX} answered on connection ${context.connectionId}: ${answer.decision}`)
   confirmEvents.emit('answered', { connectionId: context.connectionId, decision: answer.decision })
+  if (answer.decision === 'notMe') buzzNotThem(agent)
+}
+
+/**
+ * A "No, that wasn't me" just landed: the phone vibrates once, so the person looks before acting, wherever the app is.
+ * Once per answer, never on a render or a re-open: this runs only here, when a waiting request takes its answer, and a
+ * second copy of the same answer is dropped above (no longer waiting). React Native's own Vibration, already in the
+ * shipped app (the PIN screen and the scanner use it; Android declares VIBRATE). A phone that cannot vibrate changes
+ * nothing: the answer is already kept.
+ */
+function buzzNotThem(agent: Agent): void {
+  try {
+    Vibration.vibrate()
+  } catch (error) {
+    agent.config?.logger?.warn(`${LOG_PREFIX} could not vibrate for a not-me answer: ${(error as Error)?.message}`)
+  }
 }
 
 /**
