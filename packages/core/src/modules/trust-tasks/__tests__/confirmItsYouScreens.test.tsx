@@ -426,7 +426,8 @@ describe('the words (IN-677/678)', () => {
 })
 
 describe('the red card (IN-677)', () => {
-  const flat = (node: { props: { style: unknown } }) => StyleSheet.flatten(node.props.style as never) ?? {}
+  type Node = { props: Record<string, unknown> }
+  const flat = (node: Node): { backgroundColor?: unknown } => StyleSheet.flatten(node.props.style as never) ?? {}
 
   test('not them: ONE solid red card, white words, and what to do now inside it', async () => {
     jest.spyOn(confirmItsYou, 'confirmAsksOn').mockResolvedValue([ask({ state: 'notMe' })])
@@ -438,7 +439,7 @@ describe('the red card (IN-677)', () => {
     expect(within(steps).getByText('ConfirmItsYou.WhatToDo')).toBeTruthy()
     // Every line on the red carries the alarm's own white words, not the theme's text colour (which can be anything:
     // in the test theme it is white already, so the colour alone would prove nothing).
-    const own = (line: { props: { style: unknown } }) =>
+    const own = (line: Node) =>
       [line.props.style].flat(Infinity).some((part) => {
         const style = part as Record<string, unknown> | null
         return !!style && style.color === ColorPalette.grayscale.white && Object.keys(style).length === 1
