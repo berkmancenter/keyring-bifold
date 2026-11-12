@@ -30,6 +30,7 @@ import { utils, type Agent } from '@credo-ts/core'
 import { EventEmitter } from 'events'
 
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
+import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
 import { K0_REVOKED_OMITTED_CARD } from '../sedi/guardian/k0RevokedOmittedCard'
 import { K0_TEST_WARD, isDemoStateRoot, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
@@ -670,6 +671,17 @@ export async function holdK0RevokedOmittedCard(agent: Pick<Agent, 'genericRecord
   if (!isTrustTestStateEnabled()) return 'off'
   // 'tooLarge' kept apart from 'off' (the same split as keepK0TestGuardianCard): two facts, never one result.
   return (await holdGuardianEvidence(agent, K0_REVOKED_OMITTED_CARD)) === 'held' ? 'done' : 'tooLarge'
+}
+
+/**
+ * Developer action "Hold the revoked test card (K0)", on an approver's phone: keep the K0 kit's REVOKED Guardian card,
+ * carried with its revocation, as the card this phone sends after a yes. The person's phone then refuses it as revoked
+ * ("The card shows it was revoked"). It replaces any card held. Does nothing unless "Trust the test state (K0)" holds,
+ * exactly as "Hold the test Guardian card (K0)".
+ */
+export async function holdK0RevokedTestCard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  if (!isTrustTestStateEnabled()) return 'off'
+  return (await holdGuardianEvidence(agent, K0_REVOKED_TEST_GUARDIAN_CARD)) === 'held' ? 'done' : 'off'
 }
 
 /**

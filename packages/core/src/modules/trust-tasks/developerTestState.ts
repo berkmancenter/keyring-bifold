@@ -37,6 +37,11 @@ export function holdK0RevokedOmittedCard(agent: Pick<Agent, 'genericRecords'>): 
   return guardianEvidence().holdK0RevokedOmittedCard(agent)
 }
 
+/** See guardianEvidence's holdK0RevokedTestCard: nothing unless "Trust the test state (K0)" holds. */
+export function holdK0RevokedTestCard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
+  return guardianEvidence().holdK0RevokedTestCard(agent)
+}
+
 /** See guardianEvidence's becomeK0TestWard: nothing unless "Trust the test state (K0)" holds. */
 export function becomeK0TestWard(agent: Pick<Agent, 'genericRecords'>): Promise<TestStateActionResult> {
   return guardianEvidence().becomeK0TestWard(agent)

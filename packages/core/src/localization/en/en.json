@@ -3782,6 +3782,7 @@
     "GuardianCouldNotVerify": "Couldn't verify the state card",
     "GuardianRevokedIssuer": "The issuer's published record shows it was revoked",
     "GuardianRevokedState": "The state's published record shows it was revoked",
+    "GuardianRevoked": "The card shows it was revoked",
     "GuardianOutcome": "Details: {{outcome}}",
     "GuardianStateUnreachable": "Couldn't reach the state",
     "GuardianStateUnreachableHint": "{{state}} couldn't be reached to check this card. It's checked again the next time you open this screen.",

@@ -64,6 +64,7 @@ export { setTrustTestStateEnabled, isTrustTestStateEnabled } from './module/trus
 export {
   holdK0TestGuardianCard,
   holdK0RevokedOmittedCard,
+  holdK0RevokedTestCard,
   becomeK0TestWard,
   setUpSediDemo,
   turnOffSediDemo,
