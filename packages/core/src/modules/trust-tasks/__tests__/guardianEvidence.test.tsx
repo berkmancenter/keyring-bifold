@@ -8,7 +8,7 @@
  */
 import { useFocusEffect } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import React from 'react'
 
@@ -19,6 +19,7 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import * as guardianModule from '../../sedi/guardian'
 import * as stateRoots from '../../sedi/guardian/stateRoots'
+import { K0_REVOKED_OMITTED_CARD } from '../../sedi/guardian/k0RevokedOmittedCard'
 import { STATE_CARD_REMOTE_OFF, isStateCardEnabled, setStateCardEnabled } from '../../sedi/holder/stateCardFlag'
 import * as websModule from '../../sedi/webs'
 import * as lastLive from '../../sedi/webs/lastLive'
@@ -472,6 +473,26 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
     expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
   })
+
+  test.each([
+    ['the test-state setting off', () => setTrustTestStateEnabled(false)],
+    ['state-verified approvers turned off remotely', () => (STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true)],
+    ['the SEDI/KERI umbrella off', () => (SEDI_KERI_REMOTE_OFF.off = true)],
+  ])(
+    '"Hold the revoked card without its revocation (K0)": %s: nothing is held (control: on, it holds that card in place of the G-ok one)',
+    async (_, off) => {
+      const exported = jest.requireActual('../developerTestState') as typeof import('../developerTestState')
+      const jordan = phone()
+      expect(await holdK0TestGuardianCard(jordan.agent)).toBe('done')
+      off()
+      expect(await exported.holdK0RevokedOmittedCard(jordan.agent)).toBe('off')
+      allOn()
+      setTrustTestStateEnabled(true)
+      expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
+      expect(await exported.holdK0RevokedOmittedCard(jordan.agent)).toBe('done')
+      expect(await heldGuardianEvidence(jordan.agent)).toEqual(K0_REVOKED_OMITTED_CARD)
+    }
+  )
 
   test('as the package exports them, the actions are the same and gated the same (control: on, they act)', async () => {
     const exported = jest.requireActual('../developerTestState') as typeof import('../developerTestState')
@@ -1535,6 +1556,19 @@ describe('a root read from its did:webs', () => {
   const served = (f: string) =>
     new Uint8Array(readFileSync(join(WEBS_FX, 'example.org', 'keyring-demo-state', ROOT, f)))
   const id = (key: string) => testIdWithKey(key)
+  /** The KEL example.org publishes for an AID of the K0 chain (the root, the org unit or the issuing agent). */
+  const kelOf = (aid: string) =>
+    new Uint8Array(readFileSync(join(WEBS_FX, 'example.org', 'keyring-demo-state', aid, 'keri.cesr')))
+  const aidOfDid = (did: string) => did.slice(did.lastIndexOf(':') + 1)
+  /** A replacement resolver answering each did:webs with the fixture KEL for its AID. */
+  const honest = async (did: string) => ({ ok: true as const, aid: aidOfDid(did), kel: kelOf(aidOfDid(did)) })
+  /** The six URLs one open asks for a demo root: the root's two artifacts, then the org unit's and the agent's. */
+  const CHAIN = [ROOT, 'IBv2DqvYol_GdZH3R6M6X-UiSjqcBm6pooXoikn2alOZ', 'IDTFZ-B3B25INJli8AtIDcYRyZpwcfE7sNYaS4ISbZjx']
+  const chainUrls = (at = 'example.org') =>
+    CHAIN.flatMap((aid) => [
+      `https://${at}/keyring-demo-state/${aid}/keri.cesr`,
+      `https://${at}/keyring-demo-state/${aid}/did.json`,
+    ])
   // No row here may reach the network: the platform fetch refuses unless a row puts its own in place.
   const realFetch = global.fetch
   beforeEach(() => {
@@ -1547,14 +1581,19 @@ describe('a root read from its did:webs', () => {
     websModule.setDemoStateHost(null)
   })
 
-  /** A fetch serving the K0 root's two artifacts, or throwing for every URL when `down`. Counts what was asked. */
+  /**
+   * A fetch serving the K0 chain's artifacts as example.org publishes them (the root's, and the org unit's and issuing
+   * agent's: a demo root's check fetches its chain's issuers too), or throwing for every URL when `down`. Counts what
+   * was asked.
+   */
   const host = (down = false) => {
     const asked: string[] = []
     const f = jest.fn(async (url: string) => {
       asked.push(url)
       if (down) throw new Error('offline')
-      const body =
-        url === `${BASE}/keri.cesr` ? served('keri.cesr') : url === `${BASE}/did.json` ? served('did.json') : null
+      const m = /^https:\/\/example\.org\/keyring-demo-state\/([A-Za-z0-9_-]+)\/(keri\.cesr|did\.json)$/.exec(url)
+      const file = m ? join(WEBS_FX, 'example.org', 'keyring-demo-state', m[1], m[2]) : null
+      const body = file && existsSync(file) ? new Uint8Array(readFileSync(file)) : null
       return {
         ok: !!body,
         status: body ? 200 : 404,
@@ -1573,11 +1612,11 @@ describe('a root read from its did:webs', () => {
   }
 
   /** Sam's phone with Jordan's G-ok card kept (written, so it shows), and optionally Amy's too on a second connection. */
-  const kept = async (alsoAmy = false) => {
+  const kept = async (alsoAmy = false, evidence: GuardianEvidence = card('G-ok')) => {
     const sam = phone()
     await setStateWard(sam.agent, SAM_WARD)
     sam.ask({ state: 'closed', written: true, writtenAs: JORDAN })
-    await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(evidence), context)
     if (alsoAmy) {
       const jordanRow = sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK)!
       const content = JSON.parse(JSON.stringify(jordanRow.content)) as Record<string, unknown> & {
@@ -1599,7 +1638,8 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
       [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
-    expect(fetch.asked).toEqual([`${BASE}/keri.cesr`, `${BASE}/did.json`])
+    // A demo root's chain issuers (the org unit and the issuing agent) are fetched from the same host and path too.
+    expect(fetch.asked).toEqual(chainUrls())
   })
 
   test('D2: one open fetches each root once, however many cards name it (control: D4, a new open fetches again)', async () => {
@@ -1610,7 +1650,7 @@ describe('a root read from its did:webs', () => {
       [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
       [AMY]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
-    expect(fetch.asked).toHaveLength(2)
+    expect(fetch.asked).toHaveLength(6)
   })
 
   test("D3: the root can't be reached: unreachable, its own kind, never verified from the card's copy (control: the same card with no did:webs is verified)", async () => {
@@ -1633,7 +1673,7 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
       [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
-    expect(fetch.asked).toHaveLength(2)
+    expect(fetch.asked).toHaveLength(6)
   })
 
   test('D5: switched off: nothing is fetched and nothing shows (control: D1)', async () => {
@@ -1687,7 +1727,7 @@ describe('a root read from its did:webs', () => {
     const sam = await kept()
     rootAtWebs()
     const fetch = host()
-    const replacement = jest.fn(async () => ({ ok: true as const, aid: ROOT, kel: served('keri.cesr') }))
+    const replacement = jest.fn(honest)
     expect(await guardianStandings(sam.agent, { fetch, resolveRootKel: replacement })).toEqual({
       [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
     })
@@ -1706,7 +1746,7 @@ describe('a root read from its did:webs', () => {
     const tampered = new TextEncoder().encode(
       new TextDecoder('latin1').decode(served('keri.cesr')).replace('"s":"1"', '"s":"3"')
     )
-    const lying = async () => ({ ok: true as const, aid: ROOT, kel: tampered })
+    const lying = async (did: string) => (did === DID ? { ok: true as const, aid: ROOT, kel: tampered } : honest(did))
     expect((await guardianStandings(sam.agent, { resolveRootKel: lying }))[JORDAN]).toEqual({
       kind: 'unverified',
       outcome: 'kelNotReplaying',
@@ -1716,13 +1756,13 @@ describe('a root read from its did:webs', () => {
   test('D12: setRootKelResolver replaces it app-wide, so the screen path needs no change (control: null restores ours)', async () => {
     const sam = await kept()
     rootAtWebs()
-    const replacement = jest.fn(async () => ({ ok: true as const, aid: ROOT, kel: served('keri.cesr') }))
+    const replacement = jest.fn(honest)
     websModule.setRootKelResolver(replacement)
     try {
       expect(await guardianStandings(sam.agent)).toEqual({
         [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
       })
-      expect(replacement).toHaveBeenCalledTimes(1)
+      expect(replacement).toHaveBeenCalledTimes(3) // the root, then its two chain issuers
     } finally {
       websModule.setRootKelResolver(null)
     }
@@ -1770,15 +1810,21 @@ describe('a root read from its did:webs', () => {
   test("H6: with the Demo state host set, the root is fetched from THAT host and the line names it, never the DID's own (control: the placeholder host is never asked)", async () => {
     const sam = await kept()
     const TUNNEL = 'abc-def.trycloudflare.com'
-    const TBASE = `https://${TUNNEL}/keyring-demo-state/${ROOT}`
     const asked: string[] = []
     const tunnel = jest.fn(async (url: string) => {
       asked.push(url)
       // did.json names its own DID, so a host serves the one generated for it (the generator takes the host).
-      const doc = new TextEncoder().encode(
-        new TextDecoder().decode(served('did.json')).split('example.org').join(TUNNEL)
-      )
-      const body = url === `${TBASE}/keri.cesr` ? served('keri.cesr') : url === `${TBASE}/did.json` ? doc : null
+      const m = new RegExp(
+        `^https://${TUNNEL.replace(/\./g, '\\.')}/keyring-demo-state/([A-Za-z0-9_-]+)/(keri\\.cesr|did\\.json)$`
+      ).exec(url)
+      const aid = m?.[1]
+      const tdoc = (a: string) =>
+        new TextEncoder().encode(
+          readFileSync(join(WEBS_FX, 'example.org', 'keyring-demo-state', a, 'did.json'), 'utf8')
+            .split('example.org')
+            .join(TUNNEL)
+        )
+      const body = aid && CHAIN.includes(aid) ? (m?.[2] === 'keri.cesr' ? kelOf(aid) : tdoc(aid)) : null
       return {
         ok: !!body,
         status: body ? 200 : 404,
@@ -1821,6 +1867,207 @@ describe('a root read from its did:webs', () => {
       'Approver.GuardianDemoCopy'
     )
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianFetchedLive(JORDAN)))).toBeNull()
+  })
+
+  // -------------------------------------------------------------------------------------------------------------
+  // A demo root's chain issuers, fetched live (revocation option (b)): a revocation is anchored in its ISSUER's key
+  // history, so the org unit's and the issuing agent's published histories are read too, never only the card's.
+
+  const SUE = CHAIN[2]
+  const omitted = () => K0_REVOKED_OMITTED_CARD as GuardianEvidence
+  /** A fetch serving the chain at example.org, except the AIDs in `missing` (404). */
+  const hostWithout = (...missing: string[]) => {
+    const all = host()
+    const asked: string[] = []
+    const f = jest.fn(async (url: string, init?: unknown) => {
+      asked.push(url)
+      if (missing.some((aid) => url.includes(`/${aid}/`)))
+        return {
+          ok: false,
+          status: 404,
+          url,
+          headers: { get: () => null },
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }
+      return (all as unknown as (u: string, i?: unknown) => Promise<unknown>)(url, init)
+    })
+    return Object.assign(f as unknown as websModule.WebsFetch, { asked })
+  }
+
+  test("I1: OMISSION: the card leaves out its revocation, the agent's PUBLISHED history anchors it: refused as revokedInIssuerRecord (the issuer's record) (controls: the same card from its own copy reads verified; G-ok against the same live history is verified)", async () => {
+    const own = await kept(false, omitted())
+    // Control 1: no host in effect, so the card is checked from its own copy (the known bound): verified.
+    expect((await guardianStandings(own.agent, { fetch: host() }))[JORDAN]).toEqual({
+      kind: 'verified',
+      state: 'State of Example',
+      demo: true,
+    })
+    rootAtWebs()
+    expect((await guardianStandings(own.agent, { fetch: host() }))[JORDAN]).toEqual({
+      kind: 'unverified',
+      outcome: 'revokedInIssuerRecord',
+    })
+    // Control 2: an unrevoked card against the very same live histories.
+    resetGuardianCheckMemo()
+    const ok = await kept()
+    expect((await guardianStandings(ok.agent, { fetch: host() }))[JORDAN]).toEqual({
+      kind: 'verified',
+      state: 'State of Example',
+      demo: true,
+      fetchedFrom: 'example.org',
+    })
+  })
+
+  test("I1b: a card that CARRIES its own revocation stays 'revoked', not the published-record reason (control: I1, the omitted one)", async () => {
+    const sam = await kept(false, card('G-revoked'))
+    rootAtWebs()
+    expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toEqual({
+      kind: 'unverified',
+      outcome: 'revoked',
+    })
+  })
+
+  test("I3: the issuing agent's host can't be reached: unreachable, never the card's own copy of its history (control: all served, verified)", async () => {
+    const sam = await kept()
+    rootAtWebs()
+    expect((await guardianStandings(sam.agent, { fetch: hostWithout(SUE) }))[JORDAN]).toEqual({
+      kind: 'unreachable',
+      state: 'State of Example',
+    })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'stateNotResolved' })
+    expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toMatchObject({ kind: 'verified' })
+  })
+
+  test("I4: the card's history for the agent is LONGER than the one published: refused, never read from the card (control: the honest resolver, verified)", async () => {
+    const sam = await kept()
+    rootAtWebs()
+    const t = new TextDecoder('latin1').decode(kelOf(SUE))
+    const rev = (JSON.parse(text('tel-G-revoked-revoked.json')) as { d: string }).d
+    const shorter = new TextEncoder().encode(t.slice(0, t.lastIndexOf('{"v":"', t.indexOf(rev))))
+    const publishesLess = async (did: string) =>
+      aidOfDid(did) === SUE ? { ok: true as const, aid: SUE, kel: shorter } : honest(did)
+    expect((await guardianStandings(sam.agent, { resolveRootKel: publishesLess }))[JORDAN]).toEqual({
+      kind: 'unverified',
+      outcome: 'kelNotReplaying',
+    })
+    resetGuardianCheckMemo()
+    expect((await guardianStandings(sam.agent, { resolveRootKel: honest }))[JORDAN]).toMatchObject({ kind: 'verified' })
+  })
+
+  test('I5: a REAL (non-demo) root: only the root is fetched, never its chain issuers (control: I1/D1, a demo root fetches all three)', async () => {
+    const sam = await kept()
+    const was = stateRoots.K0_TEST_ROOT.demo
+    ;(stateRoots.K0_TEST_ROOT as { demo?: true }).demo = undefined
+    try {
+      jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ ...stateRoots.K0_TEST_ROOT, webs: DID }])
+      const fetch = host()
+      expect((await guardianStandings(sam.agent, { fetch }))[JORDAN]).toMatchObject({ kind: 'verified' })
+      expect(fetch.asked).toEqual([`${BASE}/keri.cesr`, `${BASE}/did.json`])
+    } finally {
+      ;(stateRoots.K0_TEST_ROOT as { demo?: true }).demo = was
+    }
+  })
+
+  test('I6: no Demo state host: nothing at all is fetched, the root or its issuers (control: I1, with a host)', async () => {
+    const sam = await kept(false, omitted())
+    rootAtWebs()
+    websModule.setDemoStateHost(null)
+    const fetch = host()
+    expect((await guardianStandings(sam.agent, { fetch }))[JORDAN]).toEqual({
+      kind: 'verified',
+      state: 'State of Example',
+      demo: true,
+    })
+    expect(fetch.asked).toEqual([])
+  })
+
+  test("I7: the five-minute reuse applies per issuer: the agent's host blips after a success, its last live history is reused and the line says when (control: forgotten, unreachable)", async () => {
+    const sam = await kept()
+    rootAtWebs()
+    expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toMatchObject({ kind: 'verified' })
+    const blip = await guardianStandings(sam.agent, { fetch: hostWithout(SUE) })
+    expect(blip[JORDAN]).toMatchObject({ kind: 'verified', fetchedFrom: 'example.org' })
+    expect((blip[JORDAN] as { fetchedAt?: string }).fetchedAt).toEqual(expect.any(String))
+    resetGuardianCheckMemo()
+    expect((await guardianStandings(sam.agent, { fetch: hostWithout(SUE) }))[JORDAN]).toEqual({
+      kind: 'unreachable',
+      state: 'State of Example',
+    })
+  })
+
+  test("I9: a revocation found in the STATE ROOT's own published history is named as the state's record, not the issuer's (control: I1, an issuer's history, the issuer's record)", async () => {
+    const sam = await kept()
+    rootAtWebs()
+    const real = jest.requireActual('../../sedi/guardian') as typeof import('../../sedi/guardian')
+    const rootKel = kelOf(ROOT)
+    const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i])
+    // Only the root's published history reports a later status (as a revoked org-unit credential would); the card's
+    // own copy and the issuers' histories alone do not.
+    jest
+      .spyOn(guardianModule, 'verifyGuardian')
+      .mockImplementation((m, said, exp, opts) =>
+        (opts.resolvedKels ?? []).some((k) => same(k, rootKel))
+          ? { ok: false, reason: 'statusNotCurrent', detail: 'the issuer KEL anchors registry events to n=2' }
+          : real.verifyGuardian(m, said, exp, opts)
+      )
+    expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toEqual({
+      kind: 'unverified',
+      outcome: 'revokedInStateRecord',
+    })
+    // And Who approves says so on the state's line, not the issuer's.
+    ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
+    jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+      view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
+      version: 2,
+    } as TrustedApproversState)
+    resetGuardianCheckMemo()
+    global.fetch = host() as never
+    const tree = render(
+      <BasicAppContext>
+        <VtaTrustedApprovers />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN))).props.children).toBe(
+      'Approver.GuardianRevokedState'
+    )
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
+  })
+
+  test('I8: Who approves says "The issuer\'s published record shows it was revoked", its own line, not "Couldn\'t verify" (control: a card carrying its own revocation keeps the generic line)', async () => {
+    const sam = await kept(false, omitted())
+    ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
+    jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue({
+      view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
+      version: 2,
+    } as TrustedApproversState)
+    rootAtWebs()
+    global.fetch = host() as never
+    const screen = async () => {
+      const tree = render(
+        <BasicAppContext>
+          <VtaTrustedApprovers />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+    const live = await screen()
+    expect(live.getByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN))).props.children).toBe(
+      'Approver.GuardianRevokedIssuer'
+    )
+    expect(live.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
+    live.unmount()
+    // Control: a card that carries its own revocation is refused as revoked, on the generic line.
+    const own = await kept(false, card('G-revoked'))
+    ;(useAgent as jest.Mock).mockReturnValue({ agent: own.agent })
+    const generic = await screen()
+    expect(generic.getByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeTruthy()
+    expect(generic.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
   })
 
   test('L2: the live line, in every language, names the host and says the designated-alias check is not done (control: the key exists in all three)', () => {

@@ -291,6 +291,7 @@ export {
   setTrustTestStateEnabled,
   isTrustTestStateEnabled,
   holdK0TestGuardianCard,
+  holdK0RevokedOmittedCard,
   becomeK0TestWard,
   setUpSediDemo,
   turnOffSediDemo,

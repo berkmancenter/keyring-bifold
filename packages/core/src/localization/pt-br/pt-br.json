@@ -3654,6 +3654,8 @@
     "GuardianAsShown": "Conforme mostrado por {{name}}. Ainda não vinculado ao celular dessa pessoa.",
     "DemoPill": "Demo",
     "GuardianCouldNotVerify": "Não foi possível verificar o cartão do estado",
+    "GuardianRevokedIssuer": "O registro publicado pelo emissor mostra que ele foi revogado",
+    "GuardianRevokedState": "O registro publicado pelo estado mostra que ele foi revogado",
     "GuardianOutcome": "Detalhes: {{outcome}}",
     "GuardianStateUnreachable": "Não foi possível contatar o estado",
     "GuardianStateUnreachableHint": "Não foi possível contatar {{state}} para verificar este cartão. Ele será verificado de novo na próxima vez que você abrir esta tela.",

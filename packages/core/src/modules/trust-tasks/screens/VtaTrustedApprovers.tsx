@@ -81,6 +81,8 @@ export const TrustedApproversIds = {
   guardianVerified: (did: string) => `TrustedApproverGuardianVerified_${did}`,
   guardianDemo: (did: string) => `TrustedApproverGuardianDemo_${did}`,
   guardianUnverified: (did: string) => `TrustedApproverGuardianUnverified_${did}`,
+  guardianRevokedIssuer: (did: string) => `TrustedApproverGuardianRevokedIssuer_${did}`,
+  guardianRevokedState: (did: string) => `TrustedApproverGuardianRevokedState_${did}`,
   guardianOutcome: (did: string) => `TrustedApproverGuardianOutcome_${did}`,
   guardianUnreachable: (did: string) => `TrustedApproverGuardianUnreachable_${did}`,
   guardianFetchedLive: (did: string) => `TrustedApproverGuardianFetchedLive_${did}`,
@@ -335,6 +337,20 @@ const VtaTrustedApprovers: React.FC = () => {
             {t('Approver.GuardianDemoCopy')}
           </ThemedText>
         ) : null}
+      </View>
+    ) : standing.outcome === 'revokedInIssuerRecord' || standing.outcome === 'revokedInStateRecord' ? (
+      // A revocation the card itself left out, found in a published record (a live fetch): its own line, never the
+      // generic "couldn't verify", and naming whose record carried it, the issuer's or the state's own.
+      <View>
+        {standing.outcome === 'revokedInStateRecord' ? (
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedState(did))}>
+            {t('Approver.GuardianRevokedState')}
+          </ThemedText>
+        ) : (
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedIssuer(did))}>
+            {t('Approver.GuardianRevokedIssuer')}
+          </ThemedText>
+        )}
       </View>
     ) : (
       <View>
