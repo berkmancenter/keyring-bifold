@@ -611,6 +611,34 @@ describe('"This request has expired" on the asked phone (local only)', () => {
     expect(tree.queryByTestId(id(ConfirmItsYouModalIds.itsMe))).toBeNull()
   })
 
+  test.each([
+    ["unreadable ('not-a-date')", (open: confirmItsYou.ConfirmPrompt) => (open.expiresAt = 'not-a-date')],
+    ['missing (null)', (open: confirmItsYou.ConfirmPrompt) => ((open as { expiresAt: unknown }).expiresAt = null)],
+    ['missing (absent)', (open: confirmItsYou.ConfirmPrompt) => delete (open as { expiresAt?: unknown }).expiresAt],
+  ])(
+    'an expiresAt that becomes %s reads as expired: the sheet says so and no answer is sent (owner never asked)',
+    async (_name, spoil) => {
+      jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)
+      const open = prompt()
+      confirmItsYou.confirmPromptStore.set(open)
+      const owner = jest.fn(async () => ({ ok: true }))
+      setConfirmOwnerCheckForTests(owner)
+      // The real answer, not a stand-in: it must itself refuse the request as past due.
+      const answer = jest.spyOn(confirmItsYou, 'answerConfirmRequest')
+      const tree = await show(<ConfirmItsYouModal />)
+      expect(tree.getByTestId(id(ConfirmItsYouModalIds.itsMe))).toBeTruthy()
+      spoil(open)
+      await userEvent.setup().press(tree.getByTestId(id(ConfirmItsYouModalIds.itsMe)))
+      await expect(answer.mock.results[0].value).resolves.toBe('gone')
+      expect(owner).not.toHaveBeenCalled()
+      expect(tree.getByTestId(id(ConfirmItsYouModalIds.expired)).props.children).toBe(
+        'ConfirmItsYou.ExpiredPromptTitle'
+      )
+      expect(tree.queryByTestId(id(ConfirmItsYouModalIds.itsMe))).toBeNull()
+      expect(tree.queryByTestId(id(ConfirmItsYouModalIds.notMe))).toBeNull()
+    }
+  )
+
   test("'gone' for a request still in time (answered elsewhere) is not called expired", async () => {
     jest.spyOn(confirmItsYou, 'restoreConfirmPrompts').mockResolvedValue(undefined)
     confirmItsYou.confirmPromptStore.set(prompt())
