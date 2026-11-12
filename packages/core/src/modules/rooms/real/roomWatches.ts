@@ -81,7 +81,8 @@ export class RoomWatches {
    * already. Returns at once; the request goes after any still out.
    */
   want(roomId: string, member: string, host: string, sinceVersion: number): void {
-    // Stopped is said once, when the refusal came in; the other reasons are said here, once each until one arms.
+    // Stopped is said once, when the refusal came in; the other reasons are said here, each once until a
+    // want passes all three checks (on, what the agent serves known, the task in it): a reason back after that is said again.
     if (this.stopped) return
     const served = this.deps.served()
     const unwatched = !this.deps.on()

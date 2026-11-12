@@ -117,7 +117,7 @@ describe('arming', () => {
     expect(unwatchedLines(s.warn)[0]).not.toMatch(/room:|persona|host:/)
   })
 
-  test('a new reason is said again, and so is the same one after a watch was armed in between', async () => {
+  test('a new reason is said again, and so is the same one once a want passed in between', async () => {
     let served: string[] | null = null
     let on = true
     const warn = jest.fn()
