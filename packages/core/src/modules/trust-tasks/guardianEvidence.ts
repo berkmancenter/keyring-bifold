@@ -937,3 +937,28 @@ export async function guardianStandings(
   }
   return standings
 }
+
+/**
+ * Who approves (B, 11-12): for each approver whose kept card names a root this phone's list marks demo
+ * (isDemoStateRoot), that root's name, by the approver DID it is shown beside, whatever the card's standing (verified,
+ * unreachable, revoked, couldn't verify). The screen draws the state's own box, titled with that name and the Demo
+ * pill, from it. Read from the list's own entry, never from the card's word or inferred from the name; a card whose
+ * root is not on the list, or not demo, has no entry. Empty with either switch off. Runs no check.
+ */
+export async function guardianDemoStates(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, string>> {
+  if (!isOn()) return {}
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  const roots = trustedStateRoots().filter((root) => isDemoStateRoot(root.aid))
+  const named: Record<string, string> = {}
+  for (const record of records) {
+    const ask = record.content as unknown as RoleOfferAsk
+    const guardian = ask?.guardian
+    if (!guardian) continue
+    const beside = shownBeside(ask, guardian)
+    if (!beside) continue
+    const said = JSON.stringify([guardian.evidence.kels, guardian.evidence.tels, guardian.evidence.creds])
+    const root = roots.find((r) => said.includes(r.aid))
+    if (root) named[beside] = root.name
+  }
+  return named
+}
