@@ -32,6 +32,7 @@ import {
   cancelConfirmRequest,
   confirmStatusOf,
   namedLock,
+  pastDue,
   sendConfirmRequest,
   type ConfirmAsk,
   type ConfirmPrompt,
@@ -65,10 +66,13 @@ export type ConfirmChatEntry =
 /** Where the contact's request stands on this phone. */
 export type TheirStatus = 'open' | 'answered' | 'expired'
 
-export function theirStatusOf(prompt: Pick<ConfirmPrompt, 'open' | 'expiresAt' | 'answered'>, now = Date.now()) {
-  if (!prompt.open && prompt.answered) return 'answered' as const
-  const at = Date.parse(prompt.expiresAt)
-  return Number.isFinite(at) && at > now && prompt.open ? ('open' as const) : ('expired' as const)
+/** Answered once this phone answered; else open until its time is past (pastDue, the module's own), then expired. */
+export function theirStatusOf(
+  prompt: Pick<ConfirmPrompt, 'open' | 'expiresAt' | 'answered'>,
+  now = Date.now()
+): TheirStatus {
+  if (!prompt.open && prompt.answered) return 'answered'
+  return prompt.open && !pastDue(prompt.expiresAt, now) ? 'open' : 'expired'
 }
 
 /** The phone owner's check; replaceable in tests only (as ConfirmItsYouModal's is). */

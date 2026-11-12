@@ -114,7 +114,7 @@ const proofUnder = (agent: Agent, controller: string) => ({
  * Past its time, or a time that cannot be read: either way, not answerable. The isFinite check is what makes an
  * unreadable or missing expiresAt (NaN) read as past due: `at <= now` alone is false for NaN.
  */
-const pastDue = (expiresAt: string, now: number) => {
+export const pastDue = (expiresAt: string, now = Date.now()) => {
   const at = Date.parse(expiresAt)
   return !Number.isFinite(at) || at <= now
 }
