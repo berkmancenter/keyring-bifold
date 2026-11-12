@@ -275,6 +275,21 @@ describe('theirs (the contact asked this phone)', () => {
     expect(tree.queryByTestId(id(ConfirmChatCardIds.notMe))).toBeNull()
   })
 
+  test.each([
+    ['unreadable', 'not a time'],
+    ['empty', ''],
+  ])(
+    'an %s expiry is expired, never answerable (control: a readable future time is open)',
+    async (_label, expiresAt) => {
+      const odd = prompt({ expiresAt })
+      expect(theirStatusOf(odd)).toBe('expired')
+      const tree = await show({ side: 'theirs', prompt: odd })
+      expect(statusOf(tree)).toBe('ConfirmItsYou.ExpiredPromptTitle')
+      expect(tree.queryByTestId(id(ConfirmChatCardIds.itsMe))).toBeNull()
+      expect(theirStatusOf(prompt())).toBe('open')
+    }
+  )
+
   test('answered: what was told, no buttons, even with a time still left on it', async () => {
     const tree = await show({ side: 'theirs', prompt: prompt({ open: false, answered: 'itsMe' }) })
     expect(statusOf(tree)).toBe('ConfirmItsYou.YouToldItsMe')
