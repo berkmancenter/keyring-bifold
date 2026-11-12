@@ -157,8 +157,15 @@ type Words = (key: string, extra?: Record<string, unknown>) => string
 /** A refusal in plain words, with the pill it puts on the pass. */
 function refusalWords(reason: string, words: Words): { status: string; pill: string } {
   switch (reason) {
+    // A revocation says whose record shows it, in Who approves' own words (the StateCard keys mirror the Approver ones,
+    // and a row holds them equal in every language): the card's own copy, an issuer's published history, or the
+    // state root's own. Never the generic words: a revoked card is not a broken one.
     case 'revoked':
       return { status: words('StateCard.Revoked'), pill: words('StateCard.PillRevoked') }
+    case 'revokedInIssuerRecord':
+      return { status: words('StateCard.RevokedIssuer'), pill: words('StateCard.PillRevoked') }
+    case 'revokedInStateRecord':
+      return { status: words('StateCard.RevokedState'), pill: words('StateCard.PillRevoked') }
     case 'expired':
       return { status: words('StateCard.Expired'), pill: words('StateCard.PillExpired') }
     case 'untrustedRoot':
@@ -182,7 +189,8 @@ export function stateCardView(
   evidence: GuardianEvidence,
   check: HeldCheck,
   t: TFunction,
-  localDate: (iso: string) => string
+  localDate: (iso: string) => string,
+  localClock: (iso: string) => string = (iso) => iso
 ): StateCardView {
   const words: Words = (key, extra = {}) => t(key, { ...extra, interpolation: { escapeValue: false } }) as string
   const a = attributesOf(evidence)
@@ -191,8 +199,12 @@ export function stateCardView(
   // One answer to "is this a demo root", the one Who approves and the card question use (stateRoots).
   const demo = ok ? isDemoStateRoot(ok.root) : false
   const asOf = words(ok?.fetchedFrom ? STATE_CARD_AS_OF_LIVE : STATE_CARD_AS_OF)
+  // A fetch reused because the host just failed (our own last live result, under five minutes old) says when it was
+  // fetched: the result is no fresher than that. The status is still the full check's, run again on it.
   const source = ok?.fetchedFrom
-    ? words('Approver.GuardianFetchedLive', { host: ok.fetchedFrom })
+    ? ok.fetchedAt
+      ? words('Approver.GuardianFetchedLiveAt', { host: ok.fetchedFrom, time: localClock(ok.fetchedAt) })
+      : words('Approver.GuardianFetchedLive', { host: ok.fetchedFrom })
     : demo
       ? words('Approver.GuardianDemoCopy')
       : undefined

@@ -3728,6 +3728,8 @@
     "Checking": "Verificando o cartão com o estado…",
     "PillChecking": "Verificando",
     "NotReached": "Não foi possível falar com o estado para verificar este cartão. Ele não é verificado pela cópia deste telefone no lugar. Tente de novo mais tarde.",
-    "PillNotReached": "Sem resposta"
+    "PillNotReached": "Sem resposta",
+    "RevokedIssuer": "O registro publicado pelo emissor mostra que ele foi revogado",
+    "RevokedState": "O registro publicado pelo estado mostra que ele foi revogado"
   }
 }

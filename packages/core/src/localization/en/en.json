@@ -3854,6 +3854,8 @@
     "Checking": "Checking the card with the state…",
     "PillChecking": "Checking",
     "NotReached": "Couldn't reach the state to check this card. It isn't checked against the copy on this phone instead. Try again later.",
-    "PillNotReached": "Couldn't reach"
+    "PillNotReached": "Couldn't reach",
+    "RevokedIssuer": "The issuer's published record shows it was revoked",
+    "RevokedState": "The state's published record shows it was revoked"
   }
 }

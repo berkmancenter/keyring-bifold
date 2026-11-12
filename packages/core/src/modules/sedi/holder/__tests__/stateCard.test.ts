@@ -16,6 +16,7 @@ import {
 import { setTrustTestStateEnabled } from '../../../trust-tasks/module/trustTestStateFlag'
 import { setTrustedApproversEnabled } from '../../../trust-tasks/module/trustedApproversFlag'
 import { resetGuardianCheckMemo, type GuardianEvidence } from '../../../trust-tasks/guardianEvidence'
+import { K0_REVOKED_OMITTED_CARD } from '../../guardian/k0RevokedOmittedCard'
 import { K0_TEST_GUARDIAN_CARD } from '../../guardian/k0TestCard'
 import { K0_TEST_ROOT } from '../../guardian/stateRoots'
 import { readFileSync } from 'fs'
@@ -189,6 +190,8 @@ describe('the state card: what it says', () => {
     ['noWard', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
     ['expiryUnreadable', 'StateCard.Broken', 'StateCard.PillCouldNotVerify'],
     ['stateNotResolved', 'StateCard.NotReached', 'StateCard.PillNotReached'],
+    ['revokedInIssuerRecord', 'StateCard.RevokedIssuer', 'StateCard.PillRevoked'],
+    ['revokedInStateRecord', 'StateCard.RevokedState', 'StateCard.PillRevoked'],
   ])('refused (%s): its words, a red pill, no state name, no root, no "Demo"', async (reason, status, pill) => {
     const v = view(refused(reason))
     expect([v.tone, v.status, v.pill, v.title, v.technical.root]).toEqual([
@@ -343,4 +346,76 @@ describe('the state card: checking, and checked live', () => {
     setDemoStateHost(null)
     expect(checkKeyOf(card)).toBe(copy)
   })
+
+  test('a fetch reused because the host just failed says when it was fetched; a fresh one does not (control)', () => {
+    const verdict = (extra: object): HeldCheck => ({
+      checked: true,
+      verdict: {
+        ok: true,
+        root: K0_TEST_ROOT.aid,
+        state: K0_TEST_ROOT.name,
+        demo: true,
+        checkedAt: NOW.toISOString(),
+        fetchedFrom: 'example.org',
+        ...extra,
+      },
+    })
+    const clock = (iso: string) => `clock(${iso})`
+    const reused = stateCardView(card, verdict({ fetchedAt: '2026-11-12T11:58:00Z', reused: true }), t, day, clock)
+    expect(reused.source).toBe(
+      'Approver.GuardianFetchedLiveAt{"host":"example.org","time":"clock(2026-11-12T11:58:00Z)"}'
+    )
+    // The status is the full check's, run again on the reused history: "Checks out", as of the published record.
+    expect(reused.status).toBe(`StateCard.ChecksOut{"asOf":"${STATE_CARD_AS_OF_LIVE}"}`)
+    const fresh = stateCardView(card, verdict({}), t, day, clock)
+    expect(fresh.source).toBe('Approver.GuardianFetchedLive{"host":"example.org"}')
+  })
+
+  test('the root answers but an issuer in its chain can\'t be reached: "Couldn\'t reach", never "Checks out"', async () => {
+    setDemoStateHost('example.org')
+    const resolveRootKel = jest.fn(async (did: string) => {
+      const aid = did.slice(did.lastIndexOf(':') + 1)
+      return aid === K0_TEST_ROOT.aid
+        ? { ok: true as const, aid, kel: chainKel(aid) }
+        : { ok: false as const, reason: 'unreachable', detail: 'offline' }
+    })
+    const v = view(await checkHeldCard(card, NOW, () => undefined, { resolveRootKel }))
+    expect(resolveRootKel.mock.calls.length).toBeGreaterThan(1)
+    expect([v.tone, v.status, v.pill]).toEqual(['problem', 'StateCard.NotReached', 'StateCard.PillNotReached'])
+    expect(v.status).not.toMatch(CHECKS_OUT)
+  })
+
+  test("the real card that leaves out its revocation: the issuer's published record shows it (control: from its own copy, it checks out)", async () => {
+    const omitted = K0_REVOKED_OMITTED_CARD as GuardianEvidence
+    const all = jest.fn(async (did: string) => {
+      const aid = did.slice(did.lastIndexOf(':') + 1)
+      return { ok: true as const, aid, kel: chainKel(aid) }
+    })
+    // Control: no host, so the card's own copy, which leaves the revocation out, is all there is to read.
+    expect(view(await checkHeldCard(omitted, NOW, () => undefined, { resolveRootKel: all })).status).toMatch(CHECKS_OUT)
+    setDemoStateHost('example.org')
+    const v = view(await checkHeldCard(omitted, NOW, () => undefined, { resolveRootKel: all }))
+    expect([v.tone, v.status, v.pill, v.technical.result]).toEqual([
+      'problem',
+      'StateCard.RevokedIssuer',
+      'StateCard.PillRevoked',
+      'revokedInIssuerRecord',
+    ])
+  })
+})
+
+describe('the state card: the same revocation words as Who approves, in every language', () => {
+  test.each(['en', 'fr', 'pt-br'])(
+    '%s: StateCard.RevokedIssuer / RevokedState equal Approver.GuardianRevokedIssuer / State',
+    (lang) => {
+      const words = JSON.parse(
+        readFileSync(join(__dirname, '..', '..', '..', '..', 'localization', lang, `${lang}.json`), 'utf8')
+      ) as Record<string, Record<string, string>>
+      expect([words.StateCard.RevokedIssuer, words.StateCard.RevokedState]).toEqual([
+        words.Approver.GuardianRevokedIssuer,
+        words.Approver.GuardianRevokedState,
+      ])
+      expect(words.StateCard.RevokedIssuer).toBeTruthy()
+    }
+  )
 })
