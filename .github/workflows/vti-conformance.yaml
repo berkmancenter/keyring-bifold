@@ -24,7 +24,6 @@ on:
       - 'packages/core/src/modules/trust-tasks/**'
       - 'packages/trust-tasks/**'
       - '.github/workflows/vti-conformance.yaml'
-  # Dispatched on main, it saves a fresh cache of the checker's build (see the cache step).
   workflow_dispatch:
 
 permissions:
@@ -32,36 +31,21 @@ permissions:
 
 jobs:
   upstream-judges-keyring:
-    # ubuntu-24.04: two cold builds of the checker on ubuntu-22.04 were cut off by
-    # a runner shutdown signal (exit 143) at "Build card-verify" on 11-11. Fewer
-    # cargo jobs keep a cold build's memory down; a cold build is ~25-50+ min, a
-    # warm one ~6 min, with two cold builds (card-verify and card-verify-v047) 180 min is a ceiling, not a target.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    env:
-      # Memory, measured (11-11, run 42954124714): a cold build with three jobs fell
-      # from 14.8 GB to 0.5 GB free over its last ~6 minutes, on the large Affinidi
-      # and trust-tasks-rs crates, and the runner was killed (exit 143); disk stayed
-      # at 94 GB free throughout. So one rustc at a time, no optimiser and no debug
-      # info: the checker judges a handful of documents, so its speed is irrelevant.
-      CARGO_BUILD_JOBS: '1'
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
-      CARGO_PROFILE_RELEASE_DEBUG: '0'
-      # One rustc with opt-level 0 still ran out on trust-tasks-rs 0.37.2 (run
-      # 42955825509), so split each crate into many small codegen units.
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '256'
+    # The checker is BUILT ONCE PER PIN, not per run: since the VTI pin moved to
+    # vta-service-v0.79.0 (wallet #901), one dependency (trust-tasks-rs 0.37.2)
+    # needs more than 14 GB of memory to compile, and five cold builds on GitHub's
+    # standard Linux runners were killed (exit 143) whatever the profile, job
+    # count or image (11-11; the memory samples are in bifold #1029's history).
+    # So the wallet builds card-verify and card-verify-v047 once for macOS
+    # (scripts/openvtc/card-verify-dist/build.sh), publishes them as a release
+    # asset, and records each sha256 in scripts/openvtc/card-verify-dist/DIST.json.
+    # This job runs on macOS so it can run those binaries, downloads them, checks
+    # each sha256 and that DIST.json was built at the pins in PINS.json, and then
+    # judges exactly as before: upstream's own code still judges Keyring's output.
+    runs-on: macos-15
+    timeout-minutes: 60
     name: VTI SDK accepts Keyring's card and statement
     steps:
-      # Three cold builds died with a runner shutdown signal (exit 143) at
-      # "Build card-verify", in the same crates each time, on two images. A full
-      # disk takes the runner service down that way, so free the preinstalled
-      # SDKs this job never uses and log the space before and after the builds.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY/CodeQL" || true
-          df -h /
-
       - name: Checkout bifold
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
@@ -74,57 +58,66 @@ jobs:
       - name: Build Workspace
         run: yarn build
 
-      - name: Fetch the wallet's checker and the VTI pin
+      - name: Fetch the wallet's prebuilt checkers at the VTI pins
         run: |
           git clone --depth 1 --filter=blob:none --sparse https://github.com/berkmancenter/keyring-wallet.git "$RUNNER_TEMP/wallet"
           git -C "$RUNNER_TEMP/wallet" sparse-checkout set scripts/openvtc
-          vti="$(node -e "process.stdout.write(require('$RUNNER_TEMP/wallet/scripts/openvtc/PINS.json').repos['verifiable-trust-infrastructure'].sha)")"
-          echo "VTI pin: $vti"
-          git clone --filter=blob:none https://github.com/OpenVTC/verifiable-trust-infrastructure.git "$RUNNER_TEMP/wallet/external/verifiable-trust-infrastructure"
-          git -C "$RUNNER_TEMP/wallet/external/verifiable-trust-infrastructure" checkout --detach "$vti"
-          # 228: a second, separate VTI clone at the 0.47 pin, for card-verify-v047,
-          # which judges the vetted/1 statement Keyring writes behind its flag.
-          vti047="$(node -e "process.stdout.write(require('$RUNNER_TEMP/wallet/scripts/openvtc/PINS.json').repos['verifiable-trust-infrastructure-v047'].sha)")"
-          echo "VTI 0.47 pin: $vti047"
-          git clone --filter=blob:none https://github.com/OpenVTC/verifiable-trust-infrastructure.git "$RUNNER_TEMP/wallet/external/verifiable-trust-infrastructure-v047"
-          git -C "$RUNNER_TEMP/wallet/external/verifiable-trust-infrastructure-v047" checkout --detach "$vti047"
-
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-
-      # Only main saves; a PR restores main's copy. A copy saved per PR was ~850 MiB of the repo's 10 GiB cache store
-      # each. The checker is the wallet's main (not pinned), so a bifold PR can't change it, but a wallet change can:
-      # rust-cache keys on the lockfile and toolchain it finds, so that gives a new key and a miss, never a wrong
-      # restore. After a miss or an eviction, PRs build cold until a push to main on the paths above, or a run
-      # dispatched on main, saves a new copy.
-      - name: Cache the checker's build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: |
-            ${{ runner.temp }}/wallet/scripts/openvtc/card-verify -> target
-            ${{ runner.temp }}/wallet/scripts/openvtc/card-verify-v047 -> target
-
-      - name: Build card-verify
-        working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify
-        # The sampler writes free disk and memory into this step's own log every
-        # 15 s, so the last line before a runner kill is the state at death
-        # (a later step cannot report it: a killed job runs nothing after).
-        run: |
-          ( while :; do echo "SAMPLE $(date -u +%H:%M:%S) disk_avail=$(df -h --output=avail / | tail -1 | tr -d ' ') mem_avail_mb=$(free -m | awk '/^Mem:/{print $7}')"; sleep 15; done ) &
-          cargo build --release --locked
-
-      - name: Disk after the first build
-        run: df -h /
-
-      - name: Build card-verify-v047
-        working-directory: ${{ runner.temp }}/wallet/scripts/openvtc/card-verify-v047
-        # The sampler writes free disk and memory into this step's own log every
-        # 15 s, so the last line before a runner kill is the state at death
-        # (a later step cannot report it: a killed job runs nothing after).
-        run: |
-          ( while :; do echo "SAMPLE $(date -u +%H:%M:%S) disk_avail=$(df -h --output=avail / | tail -1 | tr -d ' ') mem_avail_mb=$(free -m | awk '/^Mem:/{print $7}')"; sleep 15; done ) &
-          cargo build --release --locked
+          d="$RUNNER_TEMP/wallet/scripts/openvtc"
+          dist="$d/card-verify-dist/DIST.json"
+          if [ ! -f "$dist" ]; then
+            echo "::error::$dist is missing: build the checkers with scripts/openvtc/card-verify-dist/build.sh and publish them"
+            exit 1
+          fi
+          node - "$d/PINS.json" "$dist" <<'NODE'
+          const [pinsPath, distPath] = process.argv.slice(2)
+          const pins = require(pinsPath).repos
+          const dist = require(distPath)
+          const want = { 'card-verify': pins['verifiable-trust-infrastructure'].sha, 'card-verify-v047': pins['verifiable-trust-infrastructure-v047'].sha }
+          let bad = false
+          for (const [name, sha] of Object.entries(want)) {
+            const a = dist.checkers && dist.checkers[name]
+            if (!a || a.vtiPin !== sha) {
+              console.log(`::error::${name} in DIST.json was built at VTI ${a && a.vtiPin}, but PINS.json pins ${sha}: rebuild with scripts/openvtc/card-verify-dist/build.sh after a pin bump`)
+              bad = true
+            }
+          }
+          process.exit(bad ? 1 : 0)
+          NODE
+          # The binary must have been built from the checker sources on the wallet's
+          # main at these pins: recompute their digest (digest.mjs) and compare.
+          for name in card-verify card-verify-v047; do
+            if [ "$name" = card-verify ]; then pin="$(node -e "process.stdout.write(require('$d/PINS.json').repos['verifiable-trust-infrastructure'].sha)")"; else pin="$(node -e "process.stdout.write(require('$d/PINS.json').repos['verifiable-trust-infrastructure-v047'].sha)")"; fi
+            have="$(node "$d/card-verify-dist/digest.mjs" "$d/$name" "$pin")"
+            want="$(node -e "process.stdout.write(require('$dist').checkers['$name'].sourceDigest)")"
+            if [ "$have" != "$want" ]; then
+              echo "::error::$name's sources or pin changed since its binary was built (digest $have, DIST.json $want): rebuild with scripts/openvtc/card-verify-dist/build.sh"
+              exit 1
+            fi
+          done
+          for name in card-verify card-verify-v047; do
+            url="$(node -e "process.stdout.write(require('$dist').checkers['$name'].url)")"
+            sum="$(node -e "process.stdout.write(require('$dist').checkers['$name'].sha256)")"
+            out="$d/$name/target/release/$name"
+            mkdir -p "$(dirname "$out")"
+            target="$(node -e "process.stdout.write(require('$dist').checkers['$name'].target)")"
+            minos="$(node -e "process.stdout.write(require('$dist').checkers['$name'].minMacOS)")"
+            if [ "$target" != aarch64-apple-darwin ] || [ "$(uname -m)" != arm64 ]; then
+              echo "::error::$name is built for $target, but this runner is $(uname -m): run the job on an Apple-silicon macOS runner"
+              exit 1
+            fi
+            if [ "$(printf '%s\n%s\n' "$minos" "$(sw_vers -productVersion)" | sort -V | head -1)" != "$minos" ]; then
+              echo "::error::$name needs macOS $minos or later, but this runner is macOS $(sw_vers -productVersion)"
+              exit 1
+            fi
+            if ! curl -fsSL --retry 3 -o "$out" "$url"; then
+              echo "::error::$name could not be downloaded from $url: nothing has been judged. Publish it with scripts/openvtc/card-verify-dist/build.sh --publish"
+              exit 1
+            fi
+            echo "$sum  $out" | shasum -a 256 -c -
+            chmod +x "$out"
+            "$out" --help >/dev/null 2>&1 || true
+            echo "$name: $url ($sum)"
+          done
 
       - name: Keyring makes a card and a statement
         working-directory: packages/core
