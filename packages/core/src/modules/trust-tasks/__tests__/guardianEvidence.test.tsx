@@ -48,12 +48,15 @@ import {
   evidenceBytes,
   resetGuardianCheckMemo,
   guardianStandings,
+  guardianSourceKey,
   handleGuardianEvidence,
   holdGuardianEvidence,
   sendGuardianEvidence,
   setStateWard,
   type GuardianEvidence,
   type GuardianOnAsk,
+  type GuardianStanding,
+  type GuardianVerdict,
 } from '../guardianEvidence'
 import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
 import {
@@ -1636,7 +1639,13 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+      [JORDAN]: {
+        kind: 'verified',
+        state: 'State of Example',
+        demo: true,
+        fetchedFrom: 'example.org',
+        fetchedIssuers: true,
+      },
     })
     // A demo root's chain issuers (the org unit and the issuing agent) are fetched from the same host and path too.
     expect(fetch.asked).toEqual(chainUrls())
@@ -1647,8 +1656,20 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
-      [AMY]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+      [JORDAN]: {
+        kind: 'verified',
+        state: 'State of Example',
+        demo: true,
+        fetchedFrom: 'example.org',
+        fetchedIssuers: true,
+      },
+      [AMY]: {
+        kind: 'verified',
+        state: 'State of Example',
+        demo: true,
+        fetchedFrom: 'example.org',
+        fetchedIssuers: true,
+      },
     })
     expect(fetch.asked).toHaveLength(6)
   })
@@ -1671,7 +1692,13 @@ describe('a root read from its did:webs', () => {
     expect((await guardianStandings(sam.agent, { fetch: host(true) }))[JORDAN].kind).toBe('unreachable')
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+      [JORDAN]: {
+        kind: 'verified',
+        state: 'State of Example',
+        demo: true,
+        fetchedFrom: 'example.org',
+        fetchedIssuers: true,
+      },
     })
     expect(fetch.asked).toHaveLength(6)
   })
@@ -1729,7 +1756,13 @@ describe('a root read from its did:webs', () => {
     const fetch = host()
     const replacement = jest.fn(honest)
     expect(await guardianStandings(sam.agent, { fetch, resolveRootKel: replacement })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+      [JORDAN]: {
+        kind: 'verified',
+        state: 'State of Example',
+        demo: true,
+        fetchedFrom: 'example.org',
+        fetchedIssuers: true,
+      },
     })
     expect(replacement).toHaveBeenCalledWith(DID)
     expect(fetch.asked).toEqual([])
@@ -1760,7 +1793,13 @@ describe('a root read from its did:webs', () => {
     websModule.setRootKelResolver(replacement)
     try {
       expect(await guardianStandings(sam.agent)).toEqual({
-        [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' },
+        [JORDAN]: {
+          kind: 'verified',
+          state: 'State of Example',
+          demo: true,
+          fetchedFrom: 'example.org',
+          fetchedIssuers: true,
+        },
       })
       expect(replacement).toHaveBeenCalledTimes(3) // the root, then its two chain issuers
     } finally {
@@ -1836,7 +1875,7 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     websModule.setDemoStateHost(TUNNEL)
     expect(await guardianStandings(sam.agent, { fetch: tunnel })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: TUNNEL },
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: TUNNEL, fetchedIssuers: true },
     })
     expect(asked.length).toBeGreaterThan(0)
     expect(asked.every((u) => u.startsWith(`https://${TUNNEL}/`))).toBe(true)
@@ -1915,6 +1954,7 @@ describe('a root read from its did:webs', () => {
       state: 'State of Example',
       demo: true,
       fetchedFrom: 'example.org',
+      fetchedIssuers: true,
     })
   })
 
@@ -1961,7 +2001,9 @@ describe('a root read from its did:webs', () => {
     try {
       jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ ...stateRoots.K0_TEST_ROOT, webs: DID }])
       const fetch = host()
-      expect((await guardianStandings(sam.agent, { fetch }))[JORDAN]).toMatchObject({ kind: 'verified' })
+      const standing = (await guardianStandings(sam.agent, { fetch }))[JORDAN]
+      expect(standing).toMatchObject({ kind: 'verified', fetchedFrom: 'example.org' })
+      expect(standing).not.toHaveProperty('fetchedIssuers')
       expect(fetch.asked).toEqual([`${BASE}/keri.cesr`, `${BASE}/did.json`])
     } finally {
       ;(stateRoots.K0_TEST_ROOT as { demo?: true }).demo = was
@@ -2034,6 +2076,65 @@ describe('a root read from its did:webs', () => {
       'Approver.GuardianRevokedState'
     )
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
+  })
+
+  test('G1 (derived guard): every root this build could trust, under every flag combination, plus a synthetic NON-demo root with a did:webs: a root that is not demo never gets the all-fetched line, a demo root always does (the set must hold at least one non-demo root)', async () => {
+    // Every root on the list, as stateRootsFor gives it under each combination of its two flags, then a synthetic
+    // NON-demo root (K0's AID with its demo mark cleared, as a real state's entry would be). Expectations are derived
+    // from isDemoStateRoot, read live for each, never written per root.
+    const listed = [false, true].flatMap((dev) =>
+      [false, true].flatMap((trust) => stateRoots.stateRootsFor(dev, trust))
+    )
+    const unique = [...new Map(listed.map((r) => [r.aid, r])).values()].map((r) => ({ root: r, synthetic: false }))
+    const cases = [...unique, { root: { ...stateRoots.K0_TEST_ROOT, name: 'Synthetic state' }, synthetic: true }]
+    const was = stateRoots.K0_TEST_ROOT.demo
+    const seen: { demo: boolean; key: string | null }[] = []
+    try {
+      for (const { root, synthetic } of cases) {
+        ;(stateRoots.K0_TEST_ROOT as { demo?: true }).demo = synthetic ? undefined : was
+        resetGuardianCheckMemo()
+        const sam = await kept()
+        websModule.setDemoStateHost('example.org')
+        const spy = jest
+          .spyOn(stateRoots, 'trustedStateRoots')
+          .mockReturnValue([{ ...root, ...(synthetic ? { demo: undefined } : {}), webs: DID }])
+        const standing = (await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]
+        spy.mockRestore()
+        expect(standing).toMatchObject({ kind: 'verified' })
+        const demo = stateRoots.isDemoStateRoot(root.aid) === true
+        const key = guardianSourceKey(standing as Extract<GuardianStanding, { kind: 'verified' }>)
+        seen.push({ demo, key })
+        expect(key).toBe(demo ? 'Approver.GuardianFetchedLive' : 'Approver.GuardianFetchedRootLive')
+      }
+    } finally {
+      ;(stateRoots.K0_TEST_ROOT as { demo?: true }).demo = was
+    }
+    // Not vacuous: at least one non-demo root was checked (remove the synthetic one and this fails).
+    expect(seen.some((c) => !c.demo)).toBe(true)
+    expect(seen.some((c) => c.demo)).toBe(true)
+  })
+
+  test('W1: a verdict that differs only in whether the issuers were fetched live is written back (the screen reads it) (control: unchanged, the stored record is untouched)', async () => {
+    const sam = await kept()
+    rootAtWebs()
+    await guardianStandings(sam.agent, { fetch: host() })
+    const stored = () => sam.askRecord().guardian?.verdict as GuardianVerdict & { fetchedIssuers?: true }
+    expect(stored()).toMatchObject({ ok: true, fetchedIssuers: true })
+    // The kept verdict loses only that field (as one checked when only the root was live would have it).
+    const row = sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK)!
+    const ask = row.content as unknown as approverRole.RoleOfferAsk & { guardian: GuardianOnAsk }
+    const { fetchedIssuers: _drop, ...without } = ask.guardian.verdict as GuardianVerdict & { fetchedIssuers?: true }
+    row.content = { ...ask, guardian: { ...ask.guardian, verdict: without } } as never
+    // The double's update is already a jest.fn that counted the arrival and the first open: count from here.
+    const updates = jest.spyOn(sam.agent.genericRecords, 'update')
+    updates.mockClear()
+    await guardianStandings(sam.agent, { fetch: host() })
+    expect(stored()).toMatchObject({ ok: true, fetchedIssuers: true })
+    expect(updates).toHaveBeenCalledTimes(1)
+    // Control: nothing moved this time, so nothing is written.
+    updates.mockClear()
+    await guardianStandings(sam.agent, { fetch: host() })
+    expect(updates).not.toHaveBeenCalled()
   })
 
   test('I8: Who approves says "The issuer\'s published record shows it was revoked", its own line, not "Couldn\'t verify" (control: a card carrying its own revocation keeps the generic line)', async () => {
@@ -2140,7 +2241,13 @@ describe('a root read from its did:webs', () => {
       })
     )
     afterEach(() => jest.useRealTimers())
-    const FRESH = { kind: 'verified', state: 'State of Example', demo: true, fetchedFrom: 'example.org' }
+    const FRESH = {
+      kind: 'verified',
+      state: 'State of Example',
+      demo: true,
+      fetchedFrom: 'example.org',
+      fetchedIssuers: true,
+    }
 
     test('U1: a success, then a failure under five minutes later: our earlier result, saying when (control: the first open is fresh, no time)', async () => {
       const sam = await kept()

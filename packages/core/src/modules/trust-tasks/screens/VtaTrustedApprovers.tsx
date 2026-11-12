@@ -43,6 +43,7 @@ import {
   cardConsents,
   cardToShare,
   guardianCardEvents,
+  guardianSourceKey,
   guardianStandings,
   shareGuardianCard,
   type CardConsent,
@@ -320,17 +321,13 @@ const VtaTrustedApprovers: React.FC = () => {
         </ThemedText>
         {standing.fetchedFrom ? (
           <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianFetchedLive(did))}>
-            {standing.fetchedAt
-              ? // Our own earlier live result, reused because the host just failed: it says when, never "just now".
-                t('Approver.GuardianFetchedLiveAt', {
-                  host: standing.fetchedFrom,
-                  time: localClock(standing.fetchedAt),
-                  interpolation: { escapeValue: false },
-                })
-              : t('Approver.GuardianFetchedLive', {
-                  host: standing.fetchedFrom,
-                  interpolation: { escapeValue: false },
-                })}
+            {/* Which line: guardianSourceKey decides (root and issuers live, or the root only), with the "at <time>"
+                variant for our own earlier live result reused because the host just failed, never "just now". */}
+            {t(guardianSourceKey(standing) ?? 'Approver.GuardianFetchedLive', {
+              host: standing.fetchedFrom,
+              ...(standing.fetchedAt ? { time: localClock(standing.fetchedAt) } : {}),
+              interpolation: { escapeValue: false },
+            })}
           </ThemedText>
         ) : standing.demo ? (
           <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianDemoCopy(did))}>

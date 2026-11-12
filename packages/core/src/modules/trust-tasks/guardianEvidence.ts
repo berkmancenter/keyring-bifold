@@ -103,6 +103,12 @@ export type GuardianVerdict =
        */
       fetchedAt?: string
       reused?: true
+      /**
+       * Set only when, besides the root, every issuer in the card's chain was fetched live too (a demo root; the org
+       * unit's and issuing agent's histories, where the agent's credential and the card itself are anchored). Absent
+       * when only the root's history was fetched and the issuers' came from the card: the screen then says so.
+       */
+      fetchedIssuers?: true
     }
   | { ok: false; reason: string; detail: string; checkedAt: string }
 
@@ -125,7 +131,7 @@ export interface GuardianOnAsk {
  * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
  */
 export type GuardianStanding =
-  | { kind: 'verified'; state: string; demo?: true; fetchedFrom?: string; fetchedAt?: string }
+  | { kind: 'verified'; state: string; demo?: true; fetchedFrom?: string; fetchedAt?: string; fetchedIssuers?: true }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
 
@@ -293,6 +299,8 @@ export async function checkGuardianEvidenceResolving(
     const rootKels: Uint8Array[] = []
     const fetchedFrom = new Map<string, string>()
     const reusedFrom = new Map<string, string>()
+    // The roots whose chain issuers were fetched live too (demo roots); for any other, the issuers came from the card.
+    const issuersFetched = new Set<string>()
     for (const root of roots) {
       const did = root.webs
       let pending = resolves.get(did)
@@ -348,6 +356,7 @@ export async function checkGuardianEvidenceResolving(
           if (!was || ir.fetchedAt < was) reusedFrom.set(root.aid, ir.fetchedAt)
         }
       }
+      issuersFetched.add(root.aid)
     }
     // The full check runs on the KEL either way, fresh or reused, with today's ward, roots and card text.
     const verdict = checkWith(evidence, ward, now, onThrow, resolvedKels)
@@ -366,7 +375,12 @@ export async function checkGuardianEvidenceResolving(
     const host = verdict.ok === true ? fetchedFrom.get(verdict.root) : undefined
     if (!host || verdict.ok !== true) return verdict
     const at = reusedFrom.get(verdict.root)
-    return { ...verdict, fetchedFrom: host, ...(at ? { fetchedAt: at, reused: true as const } : {}) }
+    return {
+      ...verdict,
+      fetchedFrom: host,
+      ...(at ? { fetchedAt: at, reused: true as const } : {}),
+      ...(issuersFetched.has(verdict.root) ? { fetchedIssuers: true as const } : {}),
+    }
   } catch (e) {
     const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
     onThrow(message)
@@ -825,6 +839,27 @@ async function verdictNow(
   return verdict
 }
 
+/**
+ * Which "fetched live" line a verified standing gets, as a translation key (or none: checked from the card's copy).
+ * The full line ("Fetched live from <host>…") only when the root AND every issuer in its chain were fetched live
+ * (`fetchedIssuers`); with only the root fetched, the line says the issuers' records came from the card. Each has its
+ * "at <time>" variant for our own earlier live result reused (sedi/webs/lastLive). One place decides, so the screen
+ * and the guard row that holds it read the same answer.
+ */
+export function guardianSourceKey(
+  standing: Extract<GuardianStanding, { kind: 'verified' }>
+):
+  | 'Approver.GuardianFetchedLive'
+  | 'Approver.GuardianFetchedLiveAt'
+  | 'Approver.GuardianFetchedRootLive'
+  | 'Approver.GuardianFetchedRootLiveAt'
+  | null {
+  if (!standing.fetchedFrom) return null
+  if (standing.fetchedIssuers)
+    return standing.fetchedAt ? 'Approver.GuardianFetchedLiveAt' : 'Approver.GuardianFetchedLive'
+  return standing.fetchedAt ? 'Approver.GuardianFetchedRootLiveAt' : 'Approver.GuardianFetchedRootLive'
+}
+
 /** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
 function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
   if (verdict.ok === true)
@@ -834,6 +869,7 @@ function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): Guard
       ...(verdict.demo ? { demo: true as const } : {}),
       ...(verdict.fetchedFrom ? { fetchedFrom: verdict.fetchedFrom } : {}),
       ...(verdict.fetchedAt ? { fetchedAt: verdict.fetchedAt } : {}),
+      ...(verdict.fetchedIssuers ? { fetchedIssuers: true as const } : {}),
     }
   if (verdict.reason === 'stateNotResolved')
     return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
@@ -849,7 +885,9 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
       a.demo === b.demo &&
       a.expires === b.expires &&
       a.fetchedFrom === b.fetchedFrom &&
-      a.fetchedAt === b.fetchedAt
+      a.fetchedAt === b.fetchedAt &&
+      // The screen reads it (which "fetched live" line), so a verdict differing only in it is written back.
+      a.fetchedIssuers === b.fetchedIssuers
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**
