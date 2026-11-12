@@ -39,7 +39,7 @@ async function theirsOn(
   const live = confirmPromptStore.get(connectionId)
   if (live) return { prompt: live }
   const [record] = (await agent.genericRecords.findAllByQuery({ recordType: CONFIRM_PROMPT, connectionId })) ?? []
-  const kept = record?.content as (ConfirmPrompt & { answeredAt?: string }) | undefined
+  const kept = record?.content as ConfirmPrompt | undefined
   if (!kept?.connectionId || !kept.expiresAt) return undefined
   return { prompt: kept, ...(kept.answeredAt ? { answeredAt: kept.answeredAt } : {}) }
 }

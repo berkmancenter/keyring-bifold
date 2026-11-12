@@ -142,12 +142,16 @@ describe('the items', () => {
 
   test('with no live prompt, the kept record is read for that connection (an answered one shows as answered)', async () => {
     jest.spyOn(confirmItsYou, 'confirmAsksOn').mockResolvedValue([])
-    findAllByQuery.mockResolvedValue([{ content: prompt({ open: false, answered: 'notMe' }) }])
+    findAllByQuery.mockResolvedValue([
+      { content: { ...prompt({ open: false, answered: 'notMe' }), answeredAt: '2026-11-12T10:41:00Z' } },
+    ])
     const { result } = renderHook(() => useConfirmChatItems(CONN, 'Jordan'))
     await act(async () => undefined)
     expect(findAllByQuery).toHaveBeenCalledWith({ recordType: confirmItsYou.CONFIRM_PROMPT, connectionId: CONN })
     const tree = render(<BasicAppContext>{result.current[0].renderEvent()}</BasicAppContext>)
     expect(tree.getByTestId(id(ConfirmChatCardIds.status)).props.children).toBe('ConfirmItsYou.YouToldNotMe')
+    // The time it was answered, from the kept record (control: without it, no time line at all).
+    expect(tree.getByText('ConfirmItsYou.SentSignedNoLock')).toBeTruthy()
   })
 
   test('a waiting request turns into no answer on a clock, with no event (control: before its time it still waits)', async () => {
@@ -266,7 +270,7 @@ describe('theirs (the contact asked this phone)', () => {
     expect(theirStatusOf(late)).toBe('expired')
     expect(theirStatusOf(prompt())).toBe('open')
     const tree = await show({ side: 'theirs', prompt: late })
-    expect(statusOf(tree)).toBe('ConfirmItsYou.Chat.RequestExpired')
+    expect(statusOf(tree)).toBe('ConfirmItsYou.ExpiredPromptTitle')
     expect(tree.queryByTestId(id(ConfirmChatCardIds.itsMe))).toBeNull()
     expect(tree.queryByTestId(id(ConfirmChatCardIds.notMe))).toBeNull()
   })

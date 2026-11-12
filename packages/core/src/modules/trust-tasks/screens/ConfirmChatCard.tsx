@@ -234,7 +234,7 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
   )
   const kindLine = (who: string, style?: object) => (
     <ThemedText style={[styles.kind, style]}>
-      {t('ConfirmItsYou.Chat.Kind', { name: who, interpolation: { escapeValue: false } })}
+      {t('ConfirmItsYou.Title', { name: who, interpolation: { escapeValue: false } })}
     </ThemedText>
   )
 
@@ -440,9 +440,9 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
     styles.quiet,
     <>
       <ThemedText variant="bold" testID={testIdWithKey(ConfirmChatCardIds.status)}>
-        {t('ConfirmItsYou.Chat.RequestExpired')}
+        {t('ConfirmItsYou.ExpiredPromptTitle')}
       </ThemedText>
-      <ThemedText style={styles.muted}>{t('ConfirmItsYou.Chat.NothingToAnswer')}</ThemedText>
+      <ThemedText style={styles.muted}>{t('ConfirmItsYou.ExpiredPromptBody', words)}</ThemedText>
     </>
   )
 }
