@@ -155,17 +155,23 @@ describe('the items', () => {
       jest
         .spyOn(confirmItsYou, 'confirmAsksOn')
         .mockResolvedValue([ask({ expiresAt: new Date(Date.now() + 2 * MIN).toISOString() })])
-      const { result } = renderHook(() => useConfirmChatItems(CONN, 'Jordan'))
+      // One live tree, driven only by the hook: nothing outside re-renders it, so only the hook's own clock can.
+      const Chat = () => <>{useConfirmChatItems(CONN, 'Jordan').map((item) => item.renderEvent())}</>
+      const tree = render(
+        <BasicAppContext>
+          <Chat />
+        </BasicAppContext>
+      )
       await act(async () => undefined)
-      const statusNow = () =>
-        render(<BasicAppContext>{result.current[0].renderEvent()}</BasicAppContext>).getByTestId(
-          id(ConfirmChatCardIds.status)
-        ).props.children
-      expect(statusNow()).toBe('ConfirmItsYou.WaitingTitle')
+      expect(statusOf(tree)).toBe('ConfirmItsYou.WaitingTitle')
       await act(async () => {
-        jest.advanceTimersByTime(2 * MIN + 100)
+        jest.advanceTimersByTime(MIN)
       })
-      expect(statusNow()).toBe('ConfirmItsYou.ExpiredTitle')
+      expect(statusOf(tree)).toBe('ConfirmItsYou.WaitingTitle')
+      await act(async () => {
+        jest.advanceTimersByTime(MIN + 100)
+      })
+      expect(statusOf(tree)).toBe('ConfirmItsYou.ExpiredTitle')
     } finally {
       jest.useRealTimers()
     }
