@@ -84,6 +84,7 @@ export const TrustedApproversIds = {
   guardianUnverified: (did: string) => `TrustedApproverGuardianUnverified_${did}`,
   guardianRevokedIssuer: (did: string) => `TrustedApproverGuardianRevokedIssuer_${did}`,
   guardianRevokedState: (did: string) => `TrustedApproverGuardianRevokedState_${did}`,
+  guardianRevoked: (did: string) => `TrustedApproverGuardianRevoked_${did}`,
   guardianOutcome: (did: string) => `TrustedApproverGuardianOutcome_${did}`,
   guardianUnreachable: (did: string) => `TrustedApproverGuardianUnreachable_${did}`,
   guardianFetchedLive: (did: string) => `TrustedApproverGuardianFetchedLive_${did}`,
@@ -305,6 +306,16 @@ const VtaTrustedApprovers: React.FC = () => {
               state: standing.state,
               interpolation: { escapeValue: false },
             })}
+          </ThemedText>
+        </View>
+      )
+    // A card that carries its own revocation: its own words, never the generic "Couldn't verify" (it was checked, and
+    // the check found the card revoked).
+    if (standing.kind === 'unverified' && standing.outcome === 'revoked')
+      return (
+        <View>
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevoked(did))}>
+            {t('Approver.GuardianRevoked')}
           </ThemedText>
         </View>
       )

@@ -44,6 +44,7 @@ import {
   checkGuardianEvidence,
   heldGuardianEvidence,
   holdK0TestGuardianCard,
+  holdK0RevokedTestCard,
   stateWardOf,
   evidenceBytes,
   resetGuardianCheckMemo,
@@ -465,6 +466,7 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     off()
     const jordan = phone()
     expect(await holdK0TestGuardianCard(jordan.agent)).toBe('off')
+    expect(await holdK0RevokedTestCard(jordan.agent)).toBe('off')
     expect(await heldGuardianEvidence(jordan.agent)).toBeUndefined()
     const sam = phone()
     expect(await becomeK0TestWard(sam.agent)).toBe('off')
@@ -497,12 +499,79 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     }
   )
 
+  test('"Hold the revoked test card (K0)" holds the K0 revoked card WITH its revocation, replacing the ok card (control: the ok card first)', async () => {
+    const jordan = phone()
+    expect(await holdK0TestGuardianCard(jordan.agent)).toBe('done')
+    expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-ok'))
+    expect(await holdK0RevokedTestCard(jordan.agent)).toBe('done')
+    expect(await heldGuardianEvidence(jordan.agent)).toEqual(card('G-revoked'))
+  })
+
+  test('a revoked card whose bundle omits its revocation is refused as statusNotCurrent: the issuer KEL anchors the omitted update (control: the full revoked card is refused as revoked)', async () => {
+    g.__DEV__ = false
+    const full = card('G-revoked')
+    // The omission: G-revoked's status log cut to its issuance, with the issued-state proof, as a holder could send it.
+    const omitted: GuardianEvidence = {
+      ...full,
+      tels: [full.tels[0], full.tels[1], tel('G-revoked', ['issued'])],
+      creds: [full.creds[0], full.creds[1], text('acdc-G-revoked-issued-proofed.cesr')],
+    }
+    const omittedVerdict = checkGuardianEvidence(omitted, SAM_WARD, new Date(), () => undefined)
+    expect(omittedVerdict).toMatchObject({ ok: false, reason: 'statusNotCurrent' })
+    // Sue's KEL, which comes with the card itself, still carries the seal for the n=2 update the bundle left out.
+    expect((omittedVerdict as { detail: string }).detail).toMatch(
+      /anchors registry events to n=2, the newest presented is n=1/
+    )
+    const sam = phone()
+    await becomeK0TestWard(sam.agent)
+    sam.ask()
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(omitted), context)
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'unverified', outcome: 'statusNotCurrent' },
+    })
+    // Control: the full revoked card, revocation included, is refused as revoked.
+    expect(checkGuardianEvidence(full, SAM_WARD, new Date(), () => undefined)).toMatchObject({
+      ok: false,
+      reason: 'revoked',
+    })
+  })
+
+  test('a tester build: Jordan holds the revoked test card, and Sam refuses it as revoked (control: the ok card verifies)', async () => {
+    g.__DEV__ = false
+    const sam = phone()
+    await becomeK0TestWard(sam.agent)
+    sam.ask()
+    const jordan = phone()
+    await holdK0RevokedTestCard(jordan.agent)
+    await handleGuardianEvidence(
+      sam.agent,
+      sam.service,
+      documentOf((await heldGuardianEvidence(jordan.agent))!),
+      context
+    )
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'revoked' } })
+    const control = phone()
+    await becomeK0TestWard(control.agent)
+    control.ask()
+    await holdK0TestGuardianCard(jordan.agent)
+    await handleGuardianEvidence(
+      control.agent,
+      control.service,
+      documentOf((await heldGuardianEvidence(jordan.agent))!),
+      context
+    )
+    expect(await guardianStandings(control.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'State of Example', demo: true },
+    })
+  })
+
   test('as the package exports them, the actions are the same and gated the same (control: on, they act)', async () => {
     const exported = jest.requireActual('../developerTestState') as typeof import('../developerTestState')
     setTrustTestStateEnabled(false)
     const jordan = phone()
     const sam = phone()
     expect(await exported.holdK0TestGuardianCard(jordan.agent)).toBe('off')
+    expect(await exported.holdK0RevokedTestCard(jordan.agent)).toBe('off')
     expect(await exported.becomeK0TestWard(sam.agent)).toBe('off')
     setTrustTestStateEnabled(true)
     expect(await exported.holdK0TestGuardianCard(jordan.agent)).toBe('done')
@@ -1170,11 +1239,21 @@ describe('Who approves: the state card line', () => {
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianDemo(JORDAN)))).toBeNull()
   })
 
-  test("a revoked card: couldn't verify, with the outcome, and never verified (control: the row above)", async () => {
+  test('a card carrying its revocation: "The card shows it was revoked", never "Couldn\'t verify" and never verified (control: the valid row above)', async () => {
     const tree = await showFor(await writtenWith(card('G-revoked')))
+    expect(tree.getByTestId(id(TrustedApproversIds.guardianRevoked(JORDAN))).props.children).toBe(
+      'Approver.GuardianRevoked'
+    )
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
+    expect(tree.queryByText('Approver.GuardianCouldNotVerify')).toBeNull()
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
+  })
+
+  test('any other refusal keeps "Couldn\'t verify" with its outcome, not the revoked words (control: the revoked row above)', async () => {
+    const tree = await showFor(await writtenWith(card('G-untrusted')))
     expect(tree.getByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeTruthy()
     expect(tree.getByTestId(id(TrustedApproversIds.guardianOutcome(JORDAN)))).toBeTruthy()
-    expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianRevoked(JORDAN)))).toBeNull()
   })
 
   test('no card: no line at all (control: the rows above)', async () => {
@@ -2076,6 +2155,7 @@ describe('a root read from its did:webs', () => {
       'Approver.GuardianRevokedState'
     )
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
+    expect(tree.queryByTestId(id(TrustedApproversIds.guardianRevoked(JORDAN)))).toBeNull()
   })
 
   test('G1 (derived guard): every root this build could trust, under every flag combination, plus a synthetic NON-demo root with a did:webs: a root that is not demo never gets the all-fetched line, a demo root always does (the set must hold at least one non-demo root)', async () => {
@@ -2137,7 +2217,7 @@ describe('a root read from its did:webs', () => {
     expect(updates).not.toHaveBeenCalled()
   })
 
-  test('I8: Who approves says "The issuer\'s published record shows it was revoked", its own line, not "Couldn\'t verify" (control: a card carrying its own revocation keeps the generic line)', async () => {
+  test('I8: Who approves says "The issuer\'s published record shows it was revoked", its own line, not "Couldn\'t verify" (controls: a card carrying its own revocation shows #1044 own line; I9, the state record line); each render shows exactly one of the three revocation lines', async () => {
     const sam = await kept(false, omitted())
     ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
     ;(useAgent as jest.Mock).mockReturnValue({ agent: sam.agent })
@@ -2162,13 +2242,19 @@ describe('a root read from its did:webs', () => {
       'Approver.GuardianRevokedIssuer'
     )
     expect(live.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
+    expect(live.queryByTestId(id(TrustedApproversIds.guardianRevoked(JORDAN)))).toBeNull()
+    expect(live.queryByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN)))).toBeNull()
     live.unmount()
-    // Control: a card that carries its own revocation is refused as revoked, on the generic line.
+    // Control: a card that carries its own revocation is refused as `revoked`, on #1044's own line ("The card shows it
+    // was revoked"), never shadowed by the published-record lines.
     const own = await kept(false, card('G-revoked'))
     ;(useAgent as jest.Mock).mockReturnValue({ agent: own.agent })
-    const generic = await screen()
-    expect(generic.getByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeTruthy()
-    expect(generic.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
+    const carried = await screen()
+    expect(carried.getByTestId(id(TrustedApproversIds.guardianRevoked(JORDAN))).props.children).toBe(
+      'Approver.GuardianRevoked'
+    )
+    expect(carried.queryByTestId(id(TrustedApproversIds.guardianRevokedIssuer(JORDAN)))).toBeNull()
+    expect(carried.queryByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN)))).toBeNull()
   })
 
   test('L2: the live line, in every language, names the host and says the designated-alias check is not done (control: the key exists in all three)', () => {
