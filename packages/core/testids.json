@@ -1559,18 +1559,9 @@
     "TrustedApproverStepDownError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApprovers": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversApprovingFor": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
-    "TrustedApproversCheck": [
-      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx",
-      "src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"
-    ],
-    "TrustedApproversCheckPrompt": [
-      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx",
-      "src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"
-    ],
-    "TrustedApproversCheckResult": [
-      "src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx",
-      "src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"
-    ],
+    "TrustedApproversCheck": ["src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"],
+    "TrustedApproversCheckPrompt": ["src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"],
+    "TrustedApproversCheckResult": ["src/modules/trust-tasks/screens/approver/EnforcementCheckCard.tsx"],
     "TrustedApproversError": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversNone": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],
     "TrustedApproversOff": ["src/modules/trust-tasks/screens/VtaTrustedApprovers.tsx"],

@@ -14,7 +14,6 @@ import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
 import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import * as enforcement from '../screens/approverEnforcementCheck'
 import { EnforcementCheckCard, EnforcementCheckIds } from '../screens/approver/EnforcementCheckCard'
-import { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 
@@ -41,10 +40,12 @@ beforeEach(() => {
 afterAll(() => setTrustedApproversEnabled(false))
 
 describe('the shared practice-request card', () => {
-  test('its IDs are the ones Who approves always used (e2e and the wallet find it by them)', () => {
-    expect(EnforcementCheckIds.check).toBe(TrustedApproversIds.check)
-    expect(EnforcementCheckIds.checkResult).toBe(TrustedApproversIds.checkResult)
-    expect(EnforcementCheckIds.checkPrompt).toBe(TrustedApproversIds.checkPrompt)
+  test('its IDs are the strings Who approves always rendered (e2e and the wallet find it by them)', () => {
+    expect(EnforcementCheckIds).toEqual({
+      check: 'TrustedApproversCheck',
+      checkResult: 'TrustedApproversCheckResult',
+      checkPrompt: 'TrustedApproversCheckPrompt',
+    })
   })
 
   test.each([

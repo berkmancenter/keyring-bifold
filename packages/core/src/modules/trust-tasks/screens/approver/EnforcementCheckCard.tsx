@@ -22,7 +22,7 @@ import { isTrustedApproversEnabled } from '../../module/trustedApproversFlag'
 import { vtaAgent } from '../../module/vtaAgent'
 import { checkEnforcement, lastEnforcementCheck, type EnforcementCheck } from '../approverEnforcementCheck'
 
-/** The same IDs Who approves has always used for this card (TrustedApproversIds.check, …). */
+/** The IDs this card has always rendered under on Who approves (the strings are kept; only this object holds them). */
 export const EnforcementCheckIds = {
   check: 'TrustedApproversCheck',
   checkResult: 'TrustedApproversCheckResult',
