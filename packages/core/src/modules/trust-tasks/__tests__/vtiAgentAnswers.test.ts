@@ -929,6 +929,49 @@ describe('an ask as an identity, over its own session', () => {
     ).rejects.toBeInstanceOf(VtiNoOwnSession)
   })
 
+  // ee's read of #1022 (11-12): the listener can let go of the identity while its ask is out. A poll signs the shared
+  // session in as it (a mediator keeps one live connection per DID, so the listener steps aside), or the listener
+  // restarts. The answer then comes on another session; it reaches the ask by its thread, and only once.
+  it('handed over mid-ask: the answer on the shared session, now signed in as the identity, answers it, once', async () => {
+    const community = 'did:webvh:c:own-handover'
+    await connectTo(community, 'didcomm', 'did:webvh:p:shared-handover')
+    const mine = own()
+    keepOwnSession('did:webvh:p:own-handover', mine.session)
+    const asked = vtiAgent.askAs(persona('did:webvh:p:own-handover'), community, STATUS, {}, 1000)
+    await until(() => mine.sent.length === 1)
+    // The listener steps aside, and the shared session signs in as the identity.
+    dropOwnSession('did:webvh:p:own-handover', mine.session)
+    const shared = await connectTo(community, 'didcomm', 'did:webvh:p:own-handover')
+    const reply = didcommReply(mine.sent[0], STATUS, { status: 'approved' })
+    shared.onMessage(reply)
+    expect(await asked).toMatchObject({ body: { payload: { status: 'approved' } } })
+    // The same answer heard again on the identity's listener answers nothing more.
+    expect(vtiAgent.answerFromListener('did:webvh:p:own-handover', reply as never)).not.toBe('answered')
+    expect(shared.didcomm).toHaveLength(0)
+  })
+
+  it('restarted mid-ask: the answer on the new listener answers it, and later asks go out on the new one', async () => {
+    const community = 'did:webvh:c:own-restart'
+    await connectTo(community, 'didcomm', 'did:webvh:p:shared-restart')
+    const older = own()
+    keepOwnSession('did:webvh:p:own-restart', older.session)
+    const asked = vtiAgent.askAs(persona('did:webvh:p:own-restart'), community, STATUS, {}, 1000)
+    await until(() => older.sent.length === 1)
+    // The listener restarts: the new one registers, then the old one's stop lets go of only its own session.
+    const newer = own()
+    keepOwnSession('did:webvh:p:own-restart', newer.session)
+    dropOwnSession('did:webvh:p:own-restart', older.session)
+    const reply = didcommReply(older.sent[0], STATUS, { status: 'pending' })
+    expect(vtiAgent.answerFromListener('did:webvh:p:own-restart', reply as never)).toBe('answered')
+    expect(await asked).toMatchObject({ body: { payload: { status: 'pending' } } })
+    expect(vtiAgent.answerFromListener('did:webvh:p:own-restart', reply as never)).not.toBe('answered')
+    const again = vtiAgent.askAs(persona('did:webvh:p:own-restart'), community, STATUS, {}, 1000)
+    await until(() => newer.sent.length === 1)
+    expect(older.sent).toHaveLength(1)
+    vtiAgent.answerFromListener('did:webvh:p:own-restart', didcommReply(newer.sent[0], STATUS, {}) as never)
+    await again
+  })
+
   it("a listener that stops drops only its own session, never a newer one's (control)", () => {
     const older = own().session
     const newer = own().session
