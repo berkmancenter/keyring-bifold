@@ -171,6 +171,8 @@ export interface NoteSummary {
   createdAt?: string
   /** Who wrote the record's first version, as the host recorded it. Only where an agent serves it, never on a private room. */
   createdBy?: Identity
+  /** When the host stored the body now held (an edit moves it; a curation does not). Only where an agent serves it. */
+  bodyStoredAt?: string
   /** Upstream's curation state (`RecordMetadata.status`). `retracted` is a tombstone: no body. */
   status: 'active' | 'deprecated' | 'retracted'
   pinned: boolean
@@ -524,6 +526,21 @@ export interface RoomsService {
    * (a {@link RecordUnopenedReason}); any other failure arrives as it came.
    */
   readNote(roomId: string, key: string): Promise<Note>
+  /**
+   * Several records, together where the agent can. Returns exactly one promise per key, in the order asked: callers
+   * pair `answers[i]` with `keys[i]` (useRoomPosts), so the length and the order are part of the contract. Each settles
+   * as `readNote` would for its key.
+   */
+  readNotes?(roomId: string, keys: readonly string[]): Promise<Note>[]
+  /**
+   * Ask to hear when `roomId` moves past `sinceVersion` (the newest version read), instead of polling it: where the
+   * agent and the room's host can watch, the room is armed at its host. Returns at once; nothing is said if it can't.
+   */
+  watchRoom?(roomId: string, sinceVersion: number): void
+  /** True while `roomId` has a watch armed: its timed poll can wait, and a change comes through `onRoomChanged`. */
+  roomWatched?(roomId: string): boolean
+  /** Hear each room a watch said changed: read it once. Returns the way to stop hearing. */
+  onRoomChanged?(listener: (roomId: string) => void): () => void
   /** For logs: how many records one page of a room could not open, by reason (`other` for any other failure). */
   noteUnread?(roomId: string, counts: Readonly<Record<string, number>>): void
   prepareWrite(roomId: string, draft: WriteDraft): Promise<WritePreview>
