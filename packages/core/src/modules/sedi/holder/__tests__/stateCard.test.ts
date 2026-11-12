@@ -17,6 +17,7 @@ import { setTrustTestStateEnabled } from '../../../trust-tasks/module/trustTestS
 import { setTrustedApproversEnabled } from '../../../trust-tasks/module/trustedApproversFlag'
 import { resetGuardianCheckMemo, type GuardianEvidence } from '../../../trust-tasks/guardianEvidence'
 import { K0_REVOKED_OMITTED_CARD } from '../../guardian/k0RevokedOmittedCard'
+import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../../guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../../guardian/k0TestCard'
 import { K0_TEST_ROOT } from '../../guardian/stateRoots'
 import { readFileSync } from 'fs'
@@ -395,6 +396,17 @@ describe('the state card: checking, and checked live', () => {
     expect(v.status).not.toMatch(CHECKS_OUT)
   })
 
+  test('the real card that CARRIES its revocation (#1044): "The card shows it was revoked", from its own copy', async () => {
+    const v = view(await checked(K0_REVOKED_TEST_GUARDIAN_CARD as GuardianEvidence))
+    expect([v.tone, v.status, v.pill, v.technical.result]).toEqual([
+      'problem',
+      'StateCard.Revoked',
+      'StateCard.PillRevoked',
+      'revoked',
+    ])
+    expect(v.status).not.toMatch(CHECKS_OUT)
+  })
+
   test("the real card that leaves out its revocation: the issuer's published record shows it (control: from its own copy, it checks out)", async () => {
     const omitted = K0_REVOKED_OMITTED_CARD as GuardianEvidence
     const all = jest.fn(async (did: string) => {
@@ -416,12 +428,13 @@ describe('the state card: checking, and checked live', () => {
 
 describe('the state card: the same revocation words as Who approves, in every language', () => {
   test.each(['en', 'fr', 'pt-br'])(
-    '%s: StateCard.RevokedIssuer / RevokedState equal Approver.GuardianRevokedIssuer / State',
+    '%s: StateCard.Revoked / RevokedIssuer / RevokedState equal Approver.GuardianRevoked / RevokedIssuer / RevokedState',
     (lang) => {
       const words = JSON.parse(
         readFileSync(join(__dirname, '..', '..', '..', '..', 'localization', lang, `${lang}.json`), 'utf8')
       ) as Record<string, Record<string, string>>
-      expect([words.StateCard.RevokedIssuer, words.StateCard.RevokedState]).toEqual([
+      expect([words.StateCard.Revoked, words.StateCard.RevokedIssuer, words.StateCard.RevokedState]).toEqual([
+        words.Approver.GuardianRevoked,
         words.Approver.GuardianRevokedIssuer,
         words.Approver.GuardianRevokedState,
       ])
