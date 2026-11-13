@@ -182,6 +182,11 @@
       "src/modules/trust-tasks/screens/MyAgent.ids.ts",
       "src/modules/trust-tasks/screens/RequestCard.tsx"
     ],
+    "ApproverAdd": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddFailed": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddLock": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddNotNow": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddYes": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
     "ApproverAlreadyApproves": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverApproved": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverAsk": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
@@ -201,6 +206,8 @@
     "ApproverOfferCardAskDemo": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferCardDont": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferCardSend": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferCardSwitch": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
+    "ApproverOfferCardSwitchDemo": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferFaceId": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferFailed": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
     "ApproverOfferNeedsAgent": ["src/modules/trust-tasks/components/ApproverOfferModal.tsx"],
@@ -210,6 +217,7 @@
     "ApproverPickCancel": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverPickSend": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverSteppedDown": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverSteps": ["src/modules/trust-tasks/screens/approver/ApproverSteps.tsx"],
     "ApproverWait": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitCode": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitOpen": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
@@ -464,6 +472,7 @@
     "ConnectionLoading": ["src/screens/Connection.tsx"],
     "Contact": ["src/components/listItems/ContactListItem.tsx"],
     "ContactAddedToYourWallet": ["src/screens/CredentialOfferAccept.tsx"],
+    "ContactApprover": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactAvatarImage": ["src/modules/vrc/components/ContactCard.tsx", "src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactCard": ["src/modules/vrc/components/ContactCard.tsx", "src/modules/vrc/screens/ListContacts.tsx"],
     "ContactHardwareChecking": ["src/modules/vrc/components/ContactCard.tsx"],
@@ -2345,6 +2354,21 @@
       "src/modules/sedi/identity/StateOfficeCodes.tsx": "text"
     },
     {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.add"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.failed"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.lock"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.notNow"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.title"
+    },
+    {
       "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.body"
     },
     {
@@ -2355,6 +2379,9 @@
     },
     {
       "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.cardSend"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.cardSwitch"
     },
     {
       "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.faceId"
@@ -3873,6 +3900,12 @@
     },
     {
       "src/modules/trust-tasks/screens/VtiVetting.tsx": "requestTestKey(r.requestDocumentId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/approver/ApproverSteps.tsx": "ApproverStepsIds.step(step.key)"
+    },
+    {
+      "src/modules/trust-tasks/screens/approver/ApproverSteps.tsx": "ApproverStepsIds.steps"
     },
     {
       "src/modules/trust-tasks/screens/approver/ApproverZones.tsx": "`${testID}_${kind}`"

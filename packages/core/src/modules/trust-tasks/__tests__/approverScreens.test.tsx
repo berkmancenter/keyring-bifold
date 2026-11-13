@@ -13,12 +13,13 @@ import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import * as approverRole from '../approverRole'
 import { ROLE_ACTIONS } from '../approverRoleSpec'
+import { ApproverAddIds, resetAddPutOff } from '../components/ApproverAddSheet'
 import ApproverOfferModal, { ApproverOfferIds, resetPutOff } from '../components/ApproverOfferModal'
 import { trustedApproversView } from '../module/trustedApprovers'
 import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
 import { TRUSTED_APPROVERS_REMOTE_OFF, setTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
-import { DeviceActionRefused } from '../module/vtaOwner'
+import { DeviceActionRefused, OwnerNotConfirmed } from '../module/vtaOwner'
 import ApproverAskRow, { ApproverAskRowIds } from '../screens/ApproverAskRow'
 import ApproverWaitNote, {
   APPROVED_SHOWN_MS,
@@ -88,12 +89,13 @@ describe("the contact's row", () => {
       fireEvent.press(tree.getByTestId(id(key)))
     })
 
-  test('Ask shows the choice first and sends nothing; Send offers every action by default, naming the linked agent, then says it waits', async () => {
+  test('"Make Jordan my approver" shows the choice first and sends nothing; Send offers joining a community and changing who approves by default (Q5, 11-13), naming the linked agent, then says it waits', async () => {
     linked(SAM_AGENT)
     const read = jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(undefined)
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
-    expect(tree.getByText('Approver.Ask')).toBeTruthy()
+    expect(tree.getByText('Approver.Make')).toBeTruthy()
+    expect(tree.getByText('Approver.MakeCaption')).toBeTruthy()
 
     await press(tree, ApproverAskRowIds.ask)
     expect(offer).not.toHaveBeenCalled()
@@ -103,24 +105,25 @@ describe("the contact's row", () => {
     await press(tree, ApproverAskRowIds.send)
     expect(offer).toHaveBeenCalledTimes(1)
     expect(offer.mock.calls[0].slice(0, 3)).toEqual([AGENT, CONN, SAM_AGENT])
-    expect([...offer.mock.calls[0][3]].sort()).toEqual([...ROLE_ACTIONS].sort())
+    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'joinCommunity'])
     expect(tree.getByTestId(id(ApproverAskRowIds.status)).props.children).toBe('Approver.Waiting')
     expect(tree.getByTestId(id(ApproverAskRowIds.asked)).props.children).toHaveLength(ROLE_ACTIONS.length)
     expect(tree.queryByTestId(id(ApproverAskRowIds.ask))).toBeNull()
   })
 
-  test('only the chosen actions are offered, and changing who approves always is (control: the default above offers all)', async () => {
+  test('only the chosen actions are offered, and changing who approves always is (control: the default above)', async () => {
     linked(SAM_AGENT)
     jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(undefined)
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
     await press(tree, ApproverAskRowIds.ask)
+    // Tick sharing a card, untick joining a community.
     await press(tree, ApproverAskRowIds.pick('shareCredential'))
-    await press(tree, ApproverAskRowIds.pick('addDevice'))
+    await press(tree, ApproverAskRowIds.pick('joinCommunity'))
     // Pressing the locked row changes nothing.
     await press(tree, ApproverAskRowIds.pick('changeApprovers'))
     await press(tree, ApproverAskRowIds.send)
-    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'joinCommunity'])
+    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'shareCredential'])
   })
 
   test('with only the locked action left, Send is off and nothing goes (control: one chosen, it goes)', async () => {
@@ -129,8 +132,8 @@ describe("the contact's row", () => {
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
     await press(tree, ApproverAskRowIds.ask)
-    for (const action of ['joinCommunity', 'shareCredential', 'addDevice'] as const)
-      await press(tree, ApproverAskRowIds.pick(action))
+    // The default ticks joining a community; untick it and only the locked one is left.
+    await press(tree, ApproverAskRowIds.pick('joinCommunity'))
     expect(tree.getByText('Approver.PickOne')).toBeTruthy()
     await press(tree, ApproverAskRowIds.send)
     expect(offer).not.toHaveBeenCalled()
@@ -688,6 +691,146 @@ describe('the offer sheet', () => {
     setTrustedApproversEnabled(true)
     expect((await show(<ApproverOfferModal />)).getByTestId(id(ApproverOfferIds.sheet))).toBeTruthy()
     expect(restore).toHaveBeenCalledWith(AGENT)
+  })
+})
+
+describe('the add prompt, once a yes lands (Q4 (a), 11-13: one Face ID prompt, no silent path)', () => {
+  const held = (approvers: string[], keys: TrustedApproversState['view']['keys'], heldElsewhere: typeof keys = []) =>
+    ({ view: { approvers, keys, heldElsewhere }, version: 3 }) as TrustedApproversState
+  const YES = ask({ state: 'accepted', acceptedAs: JORDAN, actions: ['joinCommunity', 'addDevice'] })
+  const kept = (yeses: approverRole.RoleOfferAsk[]) => {
+    const read = jest.spyOn(approverRole, 'acceptedRoleOffers').mockResolvedValue(yeses)
+    jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
+    return read
+  }
+  const press = async (tree: Awaited<ReturnType<typeof show>>, key: string) => {
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(id(key)))
+    })
+  }
+  const prompt = (tree: Awaited<ReturnType<typeof show>>) => tree.queryByTestId(id(ApproverAddIds.title))
+
+  beforeEach(() => {
+    jest.spyOn(approverRole, 'restoreRoleOfferPrompts').mockResolvedValue(undefined)
+    resetAddPutOff()
+    linked(SAM_AGENT)
+  })
+
+  test('a kept yes prompts once, naming them and what they approve; Add writes them in (less what is held elsewhere) and closes the offer as written', async () => {
+    kept([YES])
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], [], ['addDevice']))
+    const write = jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([JORDAN], ['joinCommunity']))
+    const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
+    const tree = await show(<ApproverOfferModal />)
+    expect(prompt(tree)?.props.children).toBe('Approver.AddTitle')
+    expect(tree.getByText('• Approver.Action.joinCommunity')).toBeTruthy()
+    kept([])
+    await press(tree, ApproverAddIds.add)
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(write).toHaveBeenCalledWith(AGENT, [JORDAN], ['joinCommunity'])
+    expect(close).toHaveBeenCalledWith(AGENT, CONN, true)
+    expect(prompt(tree)).toBeNull()
+  })
+
+  test('Add goes through the owner check: cancelled, nothing is written on the agent, nothing closes, no error, and the prompt stays', async () => {
+    kept([YES])
+    jest.spyOn(vtaAgent, 'agentAddress').mockReturnValue(SAM_AGENT)
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], []))
+    const confirmOwner = jest.fn(async () => ({ ok: false, reason: 'cancelled' }) as never)
+    vtaAgent.setOwnerChecks({ confirmOwner, deviceCanOwn: async () => true })
+    const signIn = jest.spyOn(vtaAgent as never, 'signedIn' as never)
+    const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
+    const tree = await show(<ApproverOfferModal />)
+    await press(tree, ApproverAddIds.add)
+    expect(confirmOwner).toHaveBeenCalledWith('Change who approves for you')
+    expect(signIn).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+    expect(tree.queryByTestId(id(ApproverAddIds.failed))).toBeNull()
+    expect(prompt(tree)).toBeTruthy()
+  })
+
+  test.each([
+    ['the agent refused the write', () => Promise.reject(new DeviceActionRefused('failed', 'no'))],
+    ['the rules came back without them', () => Promise.resolve(held([AMY], ['joinCommunity']))],
+  ])('%s: nothing closes, it says so, and the prompt stays (control: written, the first row)', async (_, answer) => {
+    kept([YES])
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], []))
+    jest.spyOn(vtaAgent, 'setTrustedApprovers').mockImplementation(answer as never)
+    const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
+    const tree = await show(<ApproverOfferModal />)
+    await press(tree, ApproverAddIds.add)
+    expect(close).not.toHaveBeenCalled()
+    expect(tree.getByTestId(id(ApproverAddIds.failed))).toBeTruthy()
+    expect(prompt(tree)).toBeTruthy()
+  })
+
+  test('Face ID cancelled reads as no error, not a failure (control: refused, the row above)', async () => {
+    kept([YES])
+    jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], []))
+    jest.spyOn(vtaAgent, 'setTrustedApprovers').mockRejectedValue(new OwnerNotConfirmed('cancelled'))
+    const tree = await show(<ApproverOfferModal />)
+    await press(tree, ApproverAddIds.add)
+    expect(tree.queryByTestId(id(ApproverAddIds.failed))).toBeNull()
+    expect(prompt(tree)).toBeTruthy()
+  })
+
+  test('Not now hides it for this run, nothing is written; after a restart it shows again', async () => {
+    kept([YES])
+    const write = jest.spyOn(vtaAgent, 'setTrustedApprovers')
+    const tree = await show(<ApproverOfferModal />)
+    await press(tree, ApproverAddIds.notNow)
+    expect(prompt(tree)).toBeNull()
+    expect(write).not.toHaveBeenCalled()
+    tree.unmount()
+    expect(prompt(await show(<ApproverOfferModal />))).toBeNull()
+    resetAddPutOff()
+    expect(prompt(await show(<ApproverOfferModal />))).toBeTruthy()
+  })
+
+  test('a yes that lands while the app is open prompts then (control: before it, nothing)', async () => {
+    kept([])
+    const tree = await show(<ApproverOfferModal />)
+    expect(prompt(tree)).toBeNull()
+    kept([YES])
+    await act(async () => {
+      approverRole.approverRoleEvents.emit('answered', { connectionId: CONN, decision: 'accepted' })
+    })
+    expect(prompt(tree)).toBeTruthy()
+  })
+
+  test('not linked to an agent: no prompt (control: linked, it shows)', async () => {
+    kept([YES])
+    linked()
+    expect(prompt(await show(<ApproverOfferModal />))).toBeNull()
+    linked(SAM_AGENT)
+    expect(prompt(await show(<ApproverOfferModal />))).toBeTruthy()
+  })
+
+  test('trusted approvers off: no prompt and the yeses are not read (control: on, it shows)', async () => {
+    const read = kept([YES])
+    setTrustedApproversEnabled(false)
+    expect(prompt(await show(<ApproverOfferModal />))).toBeNull()
+    expect(read).not.toHaveBeenCalled()
+    setTrustedApproversEnabled(true)
+    expect(prompt(await show(<ApproverOfferModal />))).toBeTruthy()
+  })
+
+  test('an open offer shows first; the prompt waits until it is answered or put off', async () => {
+    kept([YES])
+    approverRole.roleOfferPromptStore.set({
+      open: true,
+      connectionId: 'c-amy',
+      asker: 'Amy',
+      agentDid: 'did:webvh:amys-agent.example',
+      actions: ['joinCommunity'],
+      request: { payload: { challenge: 'c'.repeat(43) } },
+      receivedAt: new Date().toISOString(),
+    } as never)
+    const tree = await show(<ApproverOfferModal />)
+    expect(tree.getByTestId(id(ApproverOfferIds.body))).toBeTruthy()
+    expect(prompt(tree)).toBeNull()
+    await press(tree, ApproverOfferIds.notNow)
+    expect(prompt(tree)).toBeTruthy()
   })
 })
 

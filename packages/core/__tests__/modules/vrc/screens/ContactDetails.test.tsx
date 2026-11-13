@@ -1,5 +1,5 @@
 import { W3cCredentialRecord } from '@credo-ts/core'
-import { act, render, waitFor, fireEvent } from '@testing-library/react-native'
+import { act, render, waitFor, fireEvent, within } from '@testing-library/react-native'
 import React from 'react'
 import { container } from 'tsyringe'
 import { useAgent } from '@bifold/react-hooks'
@@ -20,6 +20,7 @@ import {
   CONFIRM_ITS_YOU_REMOTE_OFF,
   setConfirmItsYouEnabled,
 } from '../../../../src/modules/trust-tasks/module/confirmItsYouFlag'
+import { setTrustedApproversEnabled } from '../../../../src/modules/trust-tasks/module/trustedApproversFlag'
 
 // ContactDetails resolves TOKENS.COMPONENT_CONTACT_DETAILS_FOOTER via
 // useServices, so every render needs a real container in context — the same
@@ -754,6 +755,51 @@ describe('ContactDetails Screen', () => {
       await relationshipRead()
       expect(queryByText('ContactDetails.LinkedProfile')).toBeNull()
       expect(queryByTestId('LinkedProfileCard')).toBeNull()
+    })
+  })
+
+  describe('the Approver section, apart from Safety (mock E1, 11-13)', () => {
+    afterEach(() => {
+      setTrustedApproversEnabled(false)
+      setConfirmItsYouEnabled(false)
+    })
+
+    test("trusted approvers on: its own Approver section, and no Safety section with Confirm it's you off (control: both off, neither)", async () => {
+      mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue(null)
+      const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
+
+      const off = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
+      expect(await off.findByText('Alice Smith')).toBeTruthy()
+      await relationshipRead()
+      expect(off.queryByTestId(testIdWithKey('ContactApprover'))).toBeNull()
+      expect(off.queryByTestId(testIdWithKey('ContactSafety'))).toBeNull()
+      off.unmount()
+
+      setTrustedApproversEnabled(true)
+      const on = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
+      expect(await on.findByText('Alice Smith')).toBeTruthy()
+      await relationshipRead()
+      expect(on.getByTestId(testIdWithKey('ContactApprover'))).toBeTruthy()
+      expect(on.getByText('Approver.AskTitle')).toBeTruthy()
+      expect(on.queryByTestId(testIdWithKey('ContactSafety'))).toBeNull()
+    })
+
+    test('both on: two sections, Approver first, and the approver row is never inside Safety', async () => {
+      mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue(null)
+      setTrustedApproversEnabled(true)
+      setConfirmItsYouEnabled(true)
+      const tree = render(<ContactDetails {...createRouteParams({ issuer: TEST_CONTACTS.alice.issuer })} />, {
+        wrapper: TestContainerWrapper,
+      })
+      expect(await tree.findByText('Alice Smith')).toBeTruthy()
+      await relationshipRead()
+      const safety = tree.getByTestId(testIdWithKey('ContactSafety'))
+      const approver = tree.getByTestId(testIdWithKey('ContactApprover'))
+      expect(within(safety).queryByText('Approver.AskTitle')).toBeNull()
+      const order = tree.UNSAFE_root.findAll(
+        (n) => n.props.testID === testIdWithKey('ContactApprover') || n.props.testID === testIdWithKey('ContactSafety')
+      )
+      expect(order[0].props.testID).toBe(approver.props.testID)
     })
   })
 

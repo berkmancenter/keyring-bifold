@@ -79,7 +79,8 @@ import {
 import { sediDemoHiddenByKill, setUpSediDemo, turnOffSediDemo } from '../developerTestState'
 import * as evidenceModule from '../guardianEvidence'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
-import ApproverOfferModal, { ApproverOfferIds } from '../components/ApproverOfferModal'
+import { OwnerNotConfirmed } from '../module/vtaOwner'
+import ApproverOfferModal, { ApproverOfferIds, resetPutOff } from '../components/ApproverOfferModal'
 import VtaTrustedApprovers, { TrustedApproversIds } from '../screens/VtaTrustedApprovers'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -1575,6 +1576,145 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       const tree = await show(jordan)
       expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.body))).toBeTruthy()
       expect(tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+    })
+  })
+
+  describe('the card switch on the offer itself (Q6, 11-13: the card folds into Accept, on by default)', () => {
+    /** Jordan's phone with Sam's offer open, linked, and Face ID answering as `faceId` says. */
+    const open = async (jordan: ReturnType<typeof phone>, faceId: 'ok' | 'cancelled' = 'ok') => {
+      ;(useAgent as jest.Mock).mockReturnValue({ agent: jordan.agent })
+      jest.spyOn(approverRole, 'restoreRoleOfferPrompts').mockResolvedValue(undefined)
+      jest.spyOn(vtaAgent, 'getState').mockReturnValue({ link: { kind: 'linked' } } as never)
+      jest
+        .spyOn(vtaAgent, 'acceptAsApprover')
+        .mockImplementation(async () => (faceId === 'ok' ? JORDAN : Promise.reject(new OwnerNotConfirmed('cancelled'))))
+      approverRole.roleOfferPromptStore.set(offer())
+      const tree = render(
+        <BasicAppContext>
+          <ApproverOfferModal />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      return tree
+    }
+    // Not now is kept by connection for the run; each row starts with none put off.
+    beforeEach(() => resetPutOff())
+    const press = async (tree: ReturnType<typeof render>, id: string) => {
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey(id)))
+      })
+    }
+    const switchOf = (tree: ReturnType<typeof render>) => tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardSwitch))
+    const yesSent = () =>
+      sent.filter(
+        (d) => (d.type as string).includes('role-offer') && (d.payload as { decision?: string }).decision === 'accepted'
+      )
+
+    test('on by default, naming the state: Accept keeps a yes and sends the card with the yes, and asks nothing more', async () => {
+      const jordan = await jordanWithCard()
+      const tree = await open(jordan)
+      expect(switchOf(tree)?.props.accessibilityState).toMatchObject({ checked: true })
+      expect(switchOf(tree)?.props.accessibilityLabel).toBe('Approver.OfferCardSend')
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.cardSwitchDemo))).toBeTruthy()
+      await press(tree, ApproverOfferIds.yes)
+      expect(yesSent()).toHaveLength(1)
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
+      expect(cards()).toHaveLength(1)
+      expect(cardQuestions.first()).toBeUndefined()
+      expect(tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardAsk))).toBeNull()
+    })
+
+    test('turned off: Accept keeps a no, the yes goes, the card does not, and nothing is asked (control: the row above)', async () => {
+      const jordan = await jordanWithCard()
+      const tree = await open(jordan)
+      await press(tree, ApproverOfferIds.cardSwitch)
+      expect(switchOf(tree)?.props.accessibilityState).toMatchObject({ checked: false })
+      await press(tree, ApproverOfferIds.yes)
+      expect(yesSent()).toHaveLength(1)
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('no')
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toBeUndefined()
+    })
+
+    test('a kept no for this contact shows the switch off, and Accept keeps it a no (control: never asked shows it on)', async () => {
+      const jordan = await jordanWithCard()
+      await setCardConsent(jordan.agent, CONN, 'no')
+      const tree = await open(jordan)
+      expect(switchOf(tree)?.props.accessibilityState).toMatchObject({ checked: false })
+      await press(tree, ApproverOfferIds.yes)
+      expect(await cardConsentOn(jordan.agent, CONN)).toBe('no')
+      expect(cards()).toHaveLength(0)
+      tree.unmount()
+      const fresh = await open(await jordanWithCard())
+      expect(switchOf(fresh)?.props.accessibilityState).toMatchObject({ checked: true })
+    })
+
+    test('no card held: no switch, and Accept keeps no answer (control: with a card, the switch shows)', async () => {
+      const jordan = phone()
+      const tree = await open(jordan)
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.yes))).toBeTruthy()
+      expect(switchOf(tree)).toBeNull()
+      await press(tree, ApproverOfferIds.yes)
+      expect(yesSent()).toHaveLength(1)
+      expect(answers(jordan)).toHaveLength(0)
+      tree.unmount()
+      expect(switchOf(await open(await jordanWithCard()))).toBeTruthy()
+    })
+
+    test('state-verified approvers off: no switch, the yes goes, and nothing about a card is kept or sent (control: on, it shows)', async () => {
+      const jordan = await jordanWithCard()
+      setStateVerifiedApproversEnabled(false)
+      const tree = await open(jordan)
+      expect(switchOf(tree)).toBeNull()
+      await press(tree, ApproverOfferIds.yes)
+      expect(yesSent()).toHaveLength(1)
+      expect(answers(jordan)).toHaveLength(0)
+      expect(cards()).toHaveLength(0)
+      tree.unmount()
+      setStateVerifiedApproversEnabled(true)
+      expect(switchOf(await open(await jordanWithCard()))).toBeTruthy()
+    })
+
+    test('No keeps no answer about the card and sends none (control: Accept with the switch on keeps a yes, above)', async () => {
+      const jordan = await jordanWithCard()
+      const tree = await open(jordan)
+      expect(switchOf(tree)).toBeTruthy()
+      await press(tree, ApproverOfferIds.no)
+      expect(answers(jordan)).toHaveLength(0)
+      expect(cards()).toHaveLength(0)
+    })
+
+    test('Face ID cancelled: nothing is kept and nothing goes, and the offer stays (control: confirmed, above)', async () => {
+      const jordan = await jordanWithCard()
+      const tree = await open(jordan, 'cancelled')
+      await press(tree, ApproverOfferIds.yes)
+      expect(answers(jordan)).toHaveLength(0)
+      expect(sent).toHaveLength(0)
+      expect(tree.getByTestId(testIdWithKey(ApproverOfferIds.yes))).toBeTruthy()
+    })
+
+    test("read again for each offer: after Not now on Sam's, Amy's shows Amy's kept no (control: Sam's showed on)", async () => {
+      const jordan = await jordanWithCard()
+      await setCardConsent(jordan.agent, CONN2, 'no')
+      const tree = await open(jordan)
+      expect(switchOf(tree)?.props.accessibilityState).toMatchObject({ checked: true })
+      approverRole.roleOfferPromptStore.set(offer(CONN2, 'Amy'))
+      await press(tree, ApproverOfferIds.notNow)
+      expect(tree.getByText('Approver.OfferTitle')).toBeTruthy()
+      expect(switchOf(tree)?.props.accessibilityState).toMatchObject({ checked: false })
+      await press(tree, ApproverOfferIds.yes)
+      expect(await cardConsentOn(jordan.agent, CONN2)).toBe('no')
+      expect(await cardConsentOn(jordan.agent, CONN)).toBeUndefined()
+    })
+
+    test('keeping the answer fails: the yes still goes, no card goes, and Jordan is asked instead (control: kept, nothing asked)', async () => {
+      const jordan = await jordanWithCard()
+      const tree = await open(jordan)
+      jest.spyOn(evidenceModule, 'setCardConsent').mockRejectedValueOnce(new Error('storage'))
+      await press(tree, ApproverOfferIds.yes)
+      expect(yesSent()).toHaveLength(1)
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN })
     })
   })
 

@@ -52,12 +52,15 @@ import {
   writtenAsOf,
   writtenActionsOf,
 } from '../approverRole'
-import { ROLE_ACTIONS } from '../approverRoleSpec'
+import { guardianStandings, type GuardianStanding } from '../guardianEvidence'
 import { releaseWarn } from '../module/releaseLog'
+import { isStateVerifiedApproversEnabled } from '../module/stateVerifiedApproversFlag'
 import { TRUSTED_TASKS } from '../module/trustedApprovers'
 import type { TrustedApproversView } from '../module/trustedApprovers'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent } from '../module/vtaAgent'
+
+import ApproverSteps from './approver/ApproverSteps'
 
 export const ApproverAskRowIds = {
   row: 'ApproverAsk',
@@ -78,6 +81,11 @@ export const ApproverAskRowIds = {
 
 /** Always offered, never switched off here. */
 const LOCKED: RoleAction = 'changeApprovers'
+/**
+ * Ticked when the choice opens (Alberto's pick, Q5 of mock E2, 2026-11-13): joining a community, and changing who
+ * approves (always). The others are there to tick.
+ */
+export const DEFAULT_PICK: readonly RoleAction[] = ['joinCommunity', LOCKED]
 /** The order the choice shows them in (the mock's). */
 const PICK_ORDER: RoleAction[] = ['joinCommunity', 'shareCredential', 'addDevice', 'changeApprovers']
 const conditional = (action: RoleAction) => TRUSTED_TASKS.find((t) => t.key === action)?.conditional ?? false
@@ -104,7 +112,9 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   /** The agent's own rules, as last read; null while unread, not read, or when the read failed (then it withholds). */
   const [held, setHeld] = useState<TrustedApproversView | null>(null)
   const [picking, setPicking] = useState(false)
-  const [chosen, setChosen] = useState<RoleAction[]>([...ROLE_ACTIONS])
+  const [chosen, setChosen] = useState<RoleAction[]>([...DEFAULT_PICK])
+  /** Their state card, from this open's check (guardianStandings); `read` once that check answered. */
+  const [card, setCard] = useState<{ read: boolean; standing?: GuardianStanding }>({ read: false })
   const on = isTrustedApproversEnabled()
 
   const load = useCallback(async () => {
@@ -112,7 +122,16 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
     const record = await roleOfferAskOn(agent, connectionId).catch(() => undefined)
     setAsk(record)
     // The agent is read only when the record names a DID the contact approves as: otherwise nothing could match.
-    if (approverDidsOf(record).length === 0) return setHeld(null)
+    const dids = approverDidsOf(record)
+    if (dids.length === 0) {
+      setCard({ read: false })
+      return setHeld(null)
+    }
+    // Their card, checked as Who approves checks it on open: a failed check is "not read", never "no card".
+    if (isStateVerifiedApproversEnabled())
+      void guardianStandings(agent)
+        .then((cards) => setCard({ read: true, standing: dids.map((did) => cards[did]).find(Boolean) }))
+        .catch(() => setCard({ read: false }))
     setHeld(
       await vtaAgent
         .trustedApprovers(agent)
@@ -204,6 +223,18 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   const toggle = (action: RoleAction) =>
     setChosen((now) => (now.includes(action) ? now.filter((a) => a !== action) : [...now, action]))
 
+  // Where it stands, on the contact itself (mock E3/E5): shown once there is an ask, with the card step only with
+  // state-verified approvers on.
+  const steps = ask ? (
+    <ApproverSteps
+      ask={ask}
+      name={name}
+      listed={listed}
+      card={card.standing}
+      cardRead={card.read}
+      showCard={isStateVerifiedApproversEnabled()}
+    />
+  ) : null
   let body: React.ReactNode
   if (picking) {
     // Mock frame 1b: what needs the contact's yes.
@@ -274,6 +305,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         <ThemedText variant="bold" testID={testIdWithKey(ApproverAskRowIds.status)}>
           {t('Approver.Waiting', words)}
         </ThemedText>
+        {steps}
         <ThemedText>{t('Approver.WaitingBody', words)}</ThemedText>
         {actionLines(ask.actions)}
         <ThemedText style={styles.muted}>{t('Approver.WaitingNo', words)}</ThemedText>
@@ -297,7 +329,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
           onPress={() => {
             setSaid(undefined)
             setAlready(false)
-            setChosen(ask?.actions?.length ? [...ask.actions] : [...ROLE_ACTIONS])
+            setChosen(ask?.actions?.length ? [...ask.actions] : [...DEFAULT_PICK])
             setPicking(true)
           }}
           disabled={busy}
@@ -310,44 +342,41 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
     body =
       state === 'accepted' && !listed ? (
         <>
+          {steps}
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.SaidYes', words)}</ThemedText>
           {change}
         </>
       ) : (
         <>
+          {steps}
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.IsApprover', words)}</ThemedText>
           {steppedDown}
           {ask?.steppedDown ? null : change}
         </>
       )
   } else {
-    // Mock frame 1a.
+    // Mock E1 (11-13): one button and one line, on the contact's own Approver section.
     body = (
       <View style={styles.card}>
         {steppedDown}
-        <ThemedText variant="bold">{t('Approver.AskHeading')}</ThemedText>
-        <ThemedText>{t('Approver.AskBody', words)}</ThemedText>
         <Button
-          title={t('Approver.Ask', words)}
-          buttonType={ButtonType.Secondary}
+          title={t('Approver.Make', words)}
+          buttonType={ButtonType.Primary}
           onPress={() => {
             setSaid(undefined)
-            setChosen([...ROLE_ACTIONS])
+            setChosen([...DEFAULT_PICK])
             setPicking(true)
           }}
           disabled={busy}
           testID={testIdWithKey(ApproverAskRowIds.ask)}
         />
-        <ThemedText style={styles.muted}>{t('Approver.AskCaption', words)}</ThemedText>
+        <ThemedText style={styles.muted}>{t('Approver.MakeCaption', words)}</ThemedText>
       </View>
     )
   }
 
   return (
     <View style={styles.row} testID={testIdWithKey(ApproverAskRowIds.row)}>
-      <ThemedText variant="bold" accessibilityRole="header">
-        {t('Approver.AskTitle')}
-      </ThemedText>
       {body}
       {already ? (
         <ThemedText style={styles.muted} testID={testIdWithKey(ApproverAskRowIds.already)}>

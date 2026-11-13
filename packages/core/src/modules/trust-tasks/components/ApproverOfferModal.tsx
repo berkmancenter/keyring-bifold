@@ -7,9 +7,22 @@
  * needs this phone linked; without that only No and Not now are offered, and it says why. No sends a signed no.
  * Not now sends nothing and hides the offer until the app starts again (it is kept, and comes back then).
  *
- * After a yes, if this phone holds a state Guardian card and its person was never asked about this contact, the same
- * sheet asks once: "Also send your Guardian card to <asker>?" (guardianEvidence.ts). Send keeps the answer and sends
- * the card; Don't send keeps a no, and nothing goes. The yes already stands either way.
+ * With state-verified approvers on and a state Guardian card held, the offer itself carries "Also send my Guardian
+ * card" as a switch, on by default (Alberto's pick Q6, 2026-11-13: the card folds into Accept, not a second sheet). A
+ * kept no for this contact shows it off. Accept keeps the switch's answer (cardConsents, guardianEvidence.ts) once Face
+ * ID is confirmed and before the yes is sent, so the yes then sends the card or doesn't, and asks nothing more. No and
+ * Not now keep nothing. If keeping the answer fails, the yes still goes and the card falls back to the question below.
+ * If the yes then fails to send, the kept answer has no reader: respondToRoleOffer sends before it records the offer
+ * as answered, so `approvingFor` never lists it and no card line shows, and the card is sent only after a yes is both
+ * sent and kept. On a retry the switch shows the kept answer.
+ *
+ * After a yes, if this phone holds a state Guardian card and its person was never asked about this contact (a yes from
+ * a build before the switch, or one whose answer was not kept), the same sheet asks once: "Also send your Guardian card
+ * to <asker>?". Send keeps the answer and sends the card; Don't send keeps a no, and nothing goes. The yes already
+ * stands either way.
+ *
+ * On the asking phone, the same sheet then prompts to add a contact whose yes landed (ApproverAddSheet.tsx, Q4 (a)):
+ * after an open offer and a card question, so one sheet shows at a time.
  *
  * Self-contained: mounted once at the root beside ContinuityCheckModal. With the trusted-approvers switch off it shows
  * nothing and brings nothing back; with state-verified approvers off it asks nothing about a card.
@@ -17,7 +30,7 @@
 import { useAgent } from '@bifold/react-hooks'
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ScrollView, StyleSheet } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
@@ -32,7 +45,16 @@ import {
   roleOfferPromptStore,
   type RoleOfferPrompt,
 } from '../approverRole'
-import { cardQuestions, guardianCardEvents, shareGuardianCard, type CardQuestion } from '../guardianEvidence'
+import {
+  cardConsentOn,
+  cardQuestions,
+  cardToShare,
+  guardianCardEvents,
+  setCardConsent,
+  shareGuardianCard,
+  type CardQuestion,
+} from '../guardianEvidence'
+import { ApproverAddBody, useApproverToAdd } from './ApproverAddSheet'
 import { DemoPill } from './DemoPill'
 import { releaseWarn } from '../module/releaseLog'
 import { ownerLockKind, type OwnerLockKind } from '../module/ownerConfirm'
@@ -54,7 +76,11 @@ export const ApproverOfferIds = {
   cardAskDemo: 'ApproverOfferCardAskDemo',
   cardSend: 'ApproverOfferCardSend',
   cardDont: 'ApproverOfferCardDont',
+  cardSwitch: 'ApproverOfferCardSwitch',
+  cardSwitchDemo: 'ApproverOfferCardSwitchDemo',
 } as const
+
+type ShareableCard = NonNullable<Awaited<ReturnType<typeof cardToShare>>>
 
 /** Offers put off with Not now, by connection, until the app starts again. */
 const putOff = new Set<string>()
@@ -83,6 +109,27 @@ const ApproverOfferModal: React.FC = () => {
   }, [])
   const [question, setQuestion] = useState<CardQuestion | undefined>(() => (on ? cardQuestions.first() : undefined))
   const linked = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().link.kind === 'linked')
+  // The card this phone could send with the yes, for the offer on screen, read again for each offer; none (no card, or
+  // either switch off: cardToShare says so), no switch.
+  const [withCard, setWithCard] = useState<{ card: ShareableCard; send: boolean }>()
+  const offerId = prompt?.connectionId
+  const { pending: toAdd, refresh: refreshToAdd } = useApproverToAdd(on, linked)
+  useEffect(() => {
+    setWithCard(undefined)
+    if (!agent || !on || !offerId) return
+    let live = true
+    void (async () => {
+      const card = await cardToShare(agent)
+      if (!card) return
+      const kept = await cardConsentOn(agent, offerId)
+      if (live) setWithCard({ card, send: kept !== 'no' })
+    })().catch((error: unknown) =>
+      releaseWarn(`[VTI] guardian card for the offer not read (${(error as Error)?.name ?? 'error'})`)
+    )
+    return () => {
+      live = false
+    }
+  }, [agent, on, offerId])
 
   useEffect(() => {
     if (!agent || !on) return
@@ -143,6 +190,11 @@ const ApproverOfferModal: React.FC = () => {
               })
             )
           : undefined
+        // Face ID confirmed: the card switch's answer is kept first, so the yes below sends the card or doesn't.
+        if (accept && withCard)
+          await setCardConsent(agent, prompt.connectionId, withCard.send ? 'yes' : 'no').catch((error: unknown) =>
+            releaseWarn(`[VTI] guardian card answer not kept with the yes (${(error as Error)?.name ?? 'error'})`)
+          )
         await respondToRoleOffer(agent, prompt.connectionId, accept, approverDid)
         releaseWarn(`[VTI] approver offer answered: ${accept ? 'yes' : 'no'}`)
       } catch (error) {
@@ -155,7 +207,7 @@ const ApproverOfferModal: React.FC = () => {
         setBusy(false)
       }
     },
-    [agent, prompt, busy, t]
+    [agent, prompt, busy, t, withCard]
   )
 
   const notNow = useCallback(() => {
@@ -165,9 +217,13 @@ const ApproverOfferModal: React.FC = () => {
     setPrompt(firstShown())
   }, [prompt])
 
-  // An offer comes first; a card question shows when no offer is open, and only with state-verified approvers on.
+  // One sheet at a time, ranked by who is waiting: an open offer first (someone else is blocked on this phone's answer),
+  // then a card question (a follow-up to a yes already given), then a yes to add (nobody waits on it). Each mode needs
+  // the ones above it empty, so no two show at once. The card question only with state-verified approvers on.
   const asking = !prompt && question && isStateVerifiedApproversEnabled() ? question : undefined
-  if (!on || (!prompt && !asking)) return null
+  // On the asking phone, a contact's yes to add (Q4 (a)).
+  const adding = !prompt && !asking ? toAdd : undefined
+  if (!on || (!prompt && !asking && !adding)) return null
 
   const words = {
     asker: prompt?.asker || t('Approver.UnnamedContact'),
@@ -185,6 +241,8 @@ const ApproverOfferModal: React.FC = () => {
     centred: { textAlign: 'center' },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     error: { color: ColorPalette.semantic.error, textAlign: 'center' },
+    cardRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
+    grow: { flex: 1, gap: 2 },
   })
 
   return (
@@ -196,6 +254,7 @@ const ApproverOfferModal: React.FC = () => {
             contentContainerStyle={styles.container}
             testID={testIdWithKey(ApproverOfferIds.sheet)}
           >
+            {adding ? <ApproverAddBody pending={adding} lockKind={lockKind} onDone={refreshToAdd} /> : null}
             {asking ? (
               <>
                 <ThemedText
@@ -250,6 +309,48 @@ const ApproverOfferModal: React.FC = () => {
                   <ThemedText key={action}>• {t(`Approver.Action.${action}`)}</ThemedText>
                 ))}
                 <ThemedText style={styles.muted}>{t('Approver.OfferHow')}</ThemedText>
+                {withCard ? (
+                  <Pressable
+                    style={styles.cardRow}
+                    onPress={() => setWithCard({ ...withCard, send: !withCard.send })}
+                    disabled={busy}
+                    accessibilityRole="switch"
+                    accessibilityLabel={
+                      withCard.card.state
+                        ? t('Approver.OfferCardSend', {
+                            state: withCard.card.state,
+                            interpolation: { escapeValue: false },
+                          })
+                        : t('Approver.OfferCardSendNoState')
+                    }
+                    accessibilityHint={t('Approver.OfferCardNote', words)}
+                    accessibilityState={{ checked: withCard.send, disabled: busy }}
+                    testID={testIdWithKey(ApproverOfferIds.cardSwitch)}
+                  >
+                    <View style={styles.grow}>
+                      <ThemedText>
+                        {withCard.card.state
+                          ? t('Approver.OfferCardSend', {
+                              state: withCard.card.state,
+                              interpolation: { escapeValue: false },
+                            })
+                          : t('Approver.OfferCardSendNoState')}
+                      </ThemedText>
+                      {withCard.card.state && withCard.card.demo ? (
+                        <DemoPill testID={ApproverOfferIds.cardSwitchDemo} test={withCard.card.test === true} />
+                      ) : null}
+                      <ThemedText style={styles.muted}>{t('Approver.OfferCardNote', words)}</ThemedText>
+                    </View>
+                    {/* Shown, never pressed: the row takes the press (as on ApproverAskRow). */}
+                    <View
+                      pointerEvents="none"
+                      importantForAccessibility="no-hide-descendants"
+                      accessibilityElementsHidden
+                    >
+                      <Switch value={withCard.send} disabled={busy} />
+                    </View>
+                  </Pressable>
+                ) : null}
                 {!linked ? (
                   <ThemedText style={styles.muted} testID={testIdWithKey(ApproverOfferIds.needsAgent)}>
                     {t('Approver.OfferNeedsAgent')}
