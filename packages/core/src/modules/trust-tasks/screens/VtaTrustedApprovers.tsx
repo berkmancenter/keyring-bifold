@@ -131,7 +131,7 @@ const VtaTrustedApprovers: React.FC = () => {
   const [demoStates, setDemoStates] = useState<Record<string, string>>({})
   const [mine, setMine] = useState<RoleOfferPrompt[]>([])
   /** On an approver's phone: the card it could share (none, no card lines) and its answer for each person. */
-  const [shareable, setShareable] = useState<{ state?: string } | undefined>()
+  const [shareable, setShareable] = useState<{ state?: string; k1?: true } | undefined>()
   const [consents, setConsents] = useState<Record<string, CardConsent>>({})
   const [error, setError] = useState<string | undefined>()
   const [busy, setBusy] = useState<string | undefined>()
@@ -555,7 +555,9 @@ const VtaTrustedApprovers: React.FC = () => {
     return (
       <View>
         <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.cardStatus(prompt.connectionId))}>
-          {t(goes ? 'Approver.CardSentTo' : 'Approver.CardNotSentTo', asker)}
+          {/* A K1 card goes as guardian-evidence/0.2: a phone on an older build will not show it, and nothing tells
+              this phone either way, so the line says what is known and claims no receipt. */}
+          {t(goes ? (shareable.k1 ? 'Approver.CardSentToK1' : 'Approver.CardSentTo') : 'Approver.CardNotSentTo', asker)}
         </ThemedText>
         {goes ? <ThemedText style={styles.muted}>{t('Approver.CardStopNote', asker)}</ThemedText> : null}
         <Button

@@ -3799,7 +3799,8 @@
     "GuardianFetchedFromCardHostAt": "Récupéré en direct depuis {{host}}, un hôte que l'État désigne, à {{time}} ; {{host}} est injoignable pour le moment.",
     "GuardianHostNotNamed": "L'État ne désigne pas {{host}} ; cette carte a donc été vérifiée avec sa propre copie.",
     "GuardianHostUnchecked": "Impossible de vérifier que l'État désigne {{host}} ; cette carte a donc été vérifiée avec sa propre copie.",
-    "NeedsNewerKeyring": "Le téléphone de {{name}} a besoin de la nouvelle version de Keyring pour recevoir cette carte."
+    "NeedsNewerKeyring": "Le téléphone de {{name}} a besoin de la nouvelle version de Keyring pour recevoir cette carte.",
+    "CardSentToK1": "Envoyée à {{asker}}. Si son Keyring est plus ancien que celui-ci, la carte ne s'affichera pas."
   },
   "StateCard": {
     "Kind": "Tuteur",

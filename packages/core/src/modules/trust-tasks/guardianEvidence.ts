@@ -626,9 +626,8 @@ export async function sendGuardianEvidence(
   const id = utils.uuid()
   // The host goes ONLY with a K1 card, and only as 0.2: a K0 card stays 0.1, exactly what earlier builds send and
   // accept. A phone that knows only 0.1 refuses a 0.2 document by its type (and, today, silently: it answers nothing).
-  const k1 = k1Root()
-  const isK1Card = !!k1 && JSON.stringify([held.kels, held.creds]).includes(k1.aid)
-  const stateHost = isK1Card ? await heldGuardianStateHost(agent) : undefined
+  const k1Card = isK1Card(held)
+  const stateHost = k1Card ? await heldGuardianStateHost(agent) : undefined
   const payload: GuardianEvidencePayload = {
     agent: agentDid,
     approver: approverDid,
@@ -639,7 +638,7 @@ export async function sendGuardianEvidence(
   }
   const document: Record<string, unknown> = {
     id,
-    type: isK1Card ? GUARDIAN_EVIDENCE_V2_TYPE_URI : GUARDIAN_EVIDENCE_TYPE_URI,
+    type: k1Card ? GUARDIAN_EVIDENCE_V2_TYPE_URI : GUARDIAN_EVIDENCE_TYPE_URI,
     threadId: id,
     issuer: connection.did,
     recipient: connection.theirDid,
@@ -761,13 +760,23 @@ function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true } {
 }
 
 /** The card this phone could share, and the state it is from: none with either switch off or no card held. */
+/** Whether a card is K1's (a state office's): it names K1's root. Such a card goes as guardian-evidence/0.2. */
+export function isK1Card(evidence: GuardianEvidence): boolean {
+  const k1 = k1Root()
+  return !!k1 && JSON.stringify([evidence.kels, evidence.creds]).includes(k1.aid)
+}
+
+/**
+ * The card this phone would send, for the screens: its state, its demo mark, and `k1` when it is K1's (sent as 0.2, so
+ * a phone on an older build will not show it; the line says so, and claims nothing about receipt).
+ */
 export async function cardToShare(
   agent: Pick<Agent, 'genericRecords'>
-): Promise<{ state?: string; demo?: true } | undefined> {
+): Promise<{ state?: string; demo?: true; k1?: true } | undefined> {
   if (!isOn()) return undefined
   const held = await heldGuardianEvidence(agent)
   if (!held) return undefined
-  return stateOf(held)
+  return { ...stateOf(held), ...(isK1Card(held) ? { k1: true as const } : {}) }
 }
 
 export type CardAfterYesResult = EvidenceSendResult | 'declined' | 'asked' | 'notApproving'
