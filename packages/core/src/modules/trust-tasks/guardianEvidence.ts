@@ -424,6 +424,16 @@ export async function heldGuardianEvidence(
   return held?.guardianSaid ? evidenceOf(held) : undefined
 }
 
+/**
+ * Hold no card on this phone (Developer setup "as the person": the person's phone holds no card, so no state card
+ * shows there). The held record is overwritten with no card in it, never deleted, exactly as holding another card
+ * replaces it; heldGuardianEvidence then finds none. Cards already sent stay with whoever has them.
+ */
+export async function holdNoGuardianEvidence(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
+  if (existing) await keepOne(agent, GUARDIAN_EVIDENCE_HELD, { noneSince: new Date().toISOString() })
+}
+
 export type EvidenceSendResult = 'sent' | 'off' | 'none' | 'tooLarge' | 'noRelationship'
 
 /**
@@ -712,6 +722,16 @@ export async function stateWardOf(agent: Pick<Agent, 'genericRecords'>): Promise
   return typeof ward === 'string' && ward.length > 0 ? ward : null
 }
 
+/**
+ * Set no ward on this phone (Developer setup "as the guardian": the guardian's phone is not the person the card
+ * names). The ward record is overwritten with an empty ward, never deleted; stateWardOf then reads null, so no card
+ * received here verifies.
+ */
+export async function unsetStateWard(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType: STATE_WARD })) ?? []
+  if (existing) await keepOne(agent, STATE_WARD, { ward: '', unsetAt: new Date().toISOString() })
+}
+
 const dropped = (agent: Agent, connectionId: string, why: string) =>
   warn(agent, `a guardian card on connection ${connectionId} not taken: ${why}`)
 
@@ -936,4 +956,34 @@ export async function guardianStandings(
     standings[beside] = standingOf(verdict, guardian.evidence)
   }
   return standings
+}
+
+/**
+ * Who approves (B, 11-12): for each approver whose kept card carries the key history (KEL) of a root this phone's
+ * list marks demo (isDemoStateRoot), that root's name, by the approver DID it is shown beside, whatever the card's standing (verified,
+ * unreachable, revoked, couldn't verify). The screen draws the state's own box, titled with that name and the Demo
+ * pill, from it. Read from the list's own entry, never from the card's word or inferred from the name; a card whose
+ * root is not on the list, or not demo, has no entry. Empty with either switch off. Runs no check.
+ */
+export async function guardianDemoStates(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, string>> {
+  if (!isOn()) return {}
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  const roots = trustedStateRoots().filter((root) => isDemoStateRoot(root.aid))
+  const named: Record<string, string> = {}
+  for (const record of records) {
+    const ask = record.content as unknown as RoleOfferAsk
+    const guardian = ask?.guardian
+    if (!guardian) continue
+    const beside = shownBeside(ask, guardian)
+    if (!beside) continue
+    // Matched on the key histories the card carries (kels) only, never on its credentials or registries: a demo
+    // root's AID named only as a reference inside `creds` or `tels` gives no name. This is PRESENCE in a carried KEL,
+    // not proof the card is anchored at that root; it only labels a box on a Developer-gated demo screen, and the
+    // screen shows it only beside a card that checked up to a revocation or whose live fetch failed, never beside
+    // any other refusal. Making it structural (one helper with websRootsFor) is backlog (ac, 11-12).
+    const kels = JSON.stringify(guardian.evidence.kels)
+    const root = roots.find((r) => kels.includes(r.aid))
+    if (root) named[beside] = root.name
+  }
+  return named
 }
