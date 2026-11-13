@@ -406,8 +406,16 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
   ])('%s: a release trusts no root even with the setting on (control: all on, the K0 root)', (_, off) => {
     asBuild(false)
     setTrustTestStateEnabled(true)
-    // All on: the K0 root, and K1 (the state office's root, trusted with both switches on, no setting needed).
-    expect(stateRoots.trustedStateRoots()).toEqual([stateRoots.K0_TEST_ROOT, stateRoots.k1Root()])
+    // All on: the K0 root, and K1 (the state office's root, trusted with both switches on, no setting needed), pinned by
+    // literals so a wrong AID, name or demo mark on K1's entry fails here; exactly two, so a third root fails too.
+    const all = stateRoots.trustedStateRoots()
+    expect(all).toHaveLength(2)
+    expect(all[0]).toEqual(stateRoots.K0_TEST_ROOT)
+    expect(all[1]).toMatchObject({
+      aid: 'IIOfwtkpq00RMwoUH8346kzNKq877GJXQStI6Dyg66Bs',
+      name: 'State of Utah',
+      demo: true,
+    })
     off()
     expect(stateRoots.trustedStateRoots()).toEqual([])
   })
