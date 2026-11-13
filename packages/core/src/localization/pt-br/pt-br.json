@@ -3711,8 +3711,11 @@
     "ApprovedGoAhead": "{{names}} disse sim, então seu agente pode seguir.",
     "AcceptReason": "Aceitar ser aprovador de {{asker}}",
     "AcceptAsksLock": "Para aceitar, confirme {{method}}. Recusar é um toque.",
-    "GuardianFetchedFromCardHost": "Obtido de {{host}}, o host que o cartão de {{name}} indica; a verificação de aliases designados ainda não é suportada.",
-    "GuardianFetchedFromCardHostAt": "Obtido de {{host}}, o host que o cartão de {{name}} indica, às {{time}}; {{host}} não pode ser alcançado agora."
+    "GuardianFetchedFromCardHost": "Obtido ao vivo de {{host}}, um host que o estado indica.",
+    "GuardianFetchedFromCardHostAt": "Obtido ao vivo de {{host}}, um host que o estado indica, às {{time}}; {{host}} não pode ser alcançado agora.",
+    "GuardianHostNotNamed": "O estado não indica {{host}}, então este cartão foi verificado com a própria cópia.",
+    "GuardianHostUnchecked": "Não foi possível verificar se o estado indica {{host}}, então este cartão foi verificado com a própria cópia.",
+    "NeedsNewerKeyring": "O telefone de {{name}} precisa do Keyring mais novo para receber este cartão."
   },
   "StateCard": {
     "Kind": "Responsável",
@@ -3754,10 +3757,12 @@
     "PillNotReached": "Sem resposta",
     "RevokedIssuer": "O registro publicado pelo emissor mostra que ele foi revogado",
     "RevokedState": "O registro publicado pelo estado mostra que ele foi revogado",
-    "AsOfQrHost": "segundo o registro do host que o QR do estado indicou",
-    "FetchedFromQrHost": "Obtido ao vivo de {{host}}, o host que o QR do estado indicou.",
-    "FetchedFromQrHostAt": "Obtido ao vivo de {{host}}, o host que o QR do estado indicou, às {{time}}; {{host}} não pode ser alcançado agora.",
-    "DemoNoteOffice": "Cartão de demonstração, emitido por um escritório estadual de demonstração; não emitido pelo Estado de Utah"
+    "AsOfQrHost": "segundo o registro de um host que o estado indica",
+    "FetchedFromQrHost": "Obtido ao vivo de {{host}}, um host que o estado indica.",
+    "FetchedFromQrHostAt": "Obtido ao vivo de {{host}}, um host que o estado indica, às {{time}}; {{host}} não pode ser alcançado agora.",
+    "DemoNoteOffice": "Cartão de demonstração, emitido por um escritório estadual de demonstração; não emitido pelo Estado de Utah",
+    "HostNotNamed": "O estado não indica {{host}}, então este cartão foi verificado com a própria cópia.",
+    "HostUnchecked": "Não foi possível verificar se o estado indica {{host}}, então este cartão foi verificado com a própria cópia."
   },
   "GuardianCard": {
     "Checking": "Verificando o cartão…",
@@ -3773,7 +3778,8 @@
     "Unreadable": "Este cartão não pôde ser lido.",
     "NotForThisPhone": "Este cartão foi emitido para outro telefone, então não foi guardado.",
     "Revoked": "O estado mostra que este cartão foi revogado, então não foi guardado.",
-    "DidNotCheckOut": "Este cartão não é válido, então não foi guardado."
+    "DidNotCheckOut": "Este cartão não é válido, então não foi guardado.",
+    "HostNotNamed": "O estado não indica o host deste link, então o cartão não foi guardado."
   },
   "StateOffice": {
     "Entry": "Seus códigos para um escritório estadual",

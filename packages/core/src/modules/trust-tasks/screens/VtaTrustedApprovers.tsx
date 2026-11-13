@@ -103,6 +103,8 @@ export const TrustedApproversIds = {
   mark: (did: string) => `TrustedApproverMark_${did}`,
   noCard: (did: string) => `TrustedApproverNoCard_${did}`,
   checkAgain: (did: string) => `TrustedApproverCheckAgain_${did}`,
+  guardianHostWithheld: (did: string) => `TrustedApproverGuardianHostWithheld_${did}`,
+  checkHostAgain: (did: string) => `TrustedApproverCheckHostAgain_${did}`,
   triedAgain: (did: string) => `TrustedApproverTriedAgain_${did}`,
 } as const
 
@@ -352,6 +354,32 @@ const VtaTrustedApprovers: React.FC = () => {
           interpolation: { escapeValue: false },
         })}
       </ThemedText>
+    ) : standing.hostWithheld ? (
+      // The host the card came with was not fetched, because the state does not name it (or that could not be read):
+      // checked against the card's own copy, said so. "Check again" only for a failure to read that can pass; never
+      // when the state said no, and never when the check was switched off (ac, #1059).
+      <View style={{ gap: 4 }}>
+        <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianHostWithheld(did))}>
+          {t(
+            standing.hostWithheld.result === 'unreachable'
+              ? 'Approver.GuardianHostUnchecked'
+              : 'Approver.GuardianHostNotNamed',
+            {
+              host: standing.hostWithheld.host,
+              interpolation: { escapeValue: false },
+            }
+          )}
+        </ThemedText>
+        {standing.hostWithheld.retryable ? (
+          <Button
+            title={t('Approver.CheckAgain')}
+            buttonType={ButtonType.Tertiary}
+            onPress={() => void onCheckAgain()}
+            disabled={busy !== undefined}
+            testID={testIdWithKey(TrustedApproversIds.checkHostAgain(did))}
+          />
+        ) : null}
+      </View>
     ) : standing.demo ? (
       <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianDemoCopy(did))}>
         {t('Approver.GuardianDemoCopy')}

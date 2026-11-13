@@ -11,10 +11,17 @@
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-import { GUARDIAN_EVIDENCE_MAX_BYTES, GUARDIAN_EVIDENCE_SPEC } from '../../trust-tasks/approverRoleSpec'
+import {
+  GUARDIAN_EVIDENCE_MAX_BYTES,
+  GUARDIAN_EVIDENCE_SPEC,
+  GUARDIAN_EVIDENCE_TYPE_URI,
+  GUARDIAN_EVIDENCE_V2_SPEC,
+  GUARDIAN_EVIDENCE_V2_TYPE_URI,
+} from '../../trust-tasks/approverRoleSpec'
 import {
   GUARDIAN_EVIDENCE_HELD,
   checkGuardianEvidenceResolving,
+  handleGuardianEvidence,
   heldGuardianStateHost,
   holdGuardianEvidence,
   sendGuardianEvidence,
@@ -109,6 +116,10 @@ function state(down = false) {
   return Object.assign(f, { asked })
 }
 
+/** The state's answer on whether it names a host (sedi/webs designatedAliases), as a row chooses it. */
+const named = (result: 'designated' | 'notDesignated' | 'unreachable' | 'badFile' = 'designated', why = result) =>
+  jest.fn(async () => ({ result, why }))
+
 const phone = () => {
   const genericRecords = fakeRecords()
   return { genericRecords, agent: { genericRecords, kms: fakeKms() } as never }
@@ -197,7 +208,11 @@ describe("receiving a card from the office's link", () => {
     const p = phone()
     const fetchCard = office()
     const fetch = state()
-    const r = await receiveGuardianCard(p.agent, CARD_URL, { fetchCard, fetch: fetch as never })
+    const r = await receiveGuardianCard(p.agent, CARD_URL, {
+      fetchCard,
+      fetch: fetch as never,
+      checkDesignation: named(),
+    })
     expect(r).toMatchObject({
       kind: 'kept',
       state: 'State of Utah',
@@ -215,7 +230,11 @@ describe("receiving a card from the office's link", () => {
   it('R02: under fromCard a host typed in the Developer field never reaches K1 (the check fetches the link host only)', async () => {
     setDemoStateHost('typed.example.net')
     const fetch = state()
-    const r = await checkGuardianCard(phone().agent, CARD_URL, { fetchCard: office(), fetch: fetch as never })
+    const r = await checkGuardianCard(phone().agent, CARD_URL, {
+      fetchCard: office(),
+      fetch: fetch as never,
+      checkDesignation: named(),
+    })
     expect(r).toMatchObject({ kind: 'checked', fetchedFrom: 'example.org' })
     expect(fetch.asked.some((u) => u.includes('typed.example.net'))).toBe(false)
   })
@@ -247,7 +266,7 @@ describe("receiving a card from the office's link", () => {
     expect(fetchCard).not.toHaveBeenCalled()
     const other = `https://state.example.net/cards/${ID}.json`
     const fetch = state()
-    await checkGuardianCard(phone().agent, other, { fetchCard, fetch: fetch as never })
+    await checkGuardianCard(phone().agent, other, { fetchCard, fetch: fetch as never, checkDesignation: named() })
     expect(fetchCard.asked).toEqual([other])
     expect(fetch.asked.length).toBeGreaterThan(0)
     expect(fetch.asked.every((u) => u.startsWith('https://state.example.net/'))).toBe(true)
@@ -287,7 +306,13 @@ describe("receiving a card from the office's link", () => {
     jest.spyOn(controller, 'holderCodeOf').mockResolvedValue('I' + 'x'.repeat(43))
     const p = phone()
     const fetch = state()
-    expect(await receiveGuardianCard(p.agent, CARD_URL, { fetchCard: office(), fetch: fetch as never })).toEqual({
+    expect(
+      await receiveGuardianCard(p.agent, CARD_URL, {
+        fetchCard: office(),
+        fetch: fetch as never,
+        checkDesignation: named(),
+      })
+    ).toEqual({
       kind: 'notForThisPhone',
     })
     expect(fetch).not.toHaveBeenCalled()
@@ -299,6 +324,7 @@ describe("receiving a card from the office's link", () => {
     const r = await receiveGuardianCard(p.agent, CARD_URL, {
       fetchCard: office(cardFile(K0_REVOKED_TEST_GUARDIAN_CARD)),
       fetch: state() as never,
+      checkDesignation: named(),
     })
     expect(r).toMatchObject({ kind: 'refused', reason: 'revoked' })
     expect(heldRecord(p)).toBeUndefined()
@@ -306,7 +332,11 @@ describe("receiving a card from the office's link", () => {
 
   it('R10: the state unreachable: refused, not the card copy instead, nothing kept', async () => {
     const p = phone()
-    const r = await receiveGuardianCard(p.agent, CARD_URL, { fetchCard: office(), fetch: state(true) as never })
+    const r = await receiveGuardianCard(p.agent, CARD_URL, {
+      fetchCard: office(),
+      fetch: state(true) as never,
+      checkDesignation: named(),
+    })
     expect(r).toMatchObject({ kind: 'refused', reason: 'stateNotResolved' })
     expect(heldRecord(p)).toBeUndefined()
   })
@@ -342,8 +372,13 @@ describe("the person's phone checks the card with the host it came with, and onl
   const check = (stateHost: string | undefined, fetch = state()) =>
     checkGuardianEvidenceResolving(K0_TEST_GUARDIAN_CARD, WARD, new Date(), () => undefined, {
       fetch: fetch as never,
+      checkDesignation,
       ...(stateHost !== undefined ? { stateHost } : {}),
     })
+  let checkDesignation = named()
+  beforeEach(() => {
+    checkDesignation = named()
+  })
 
   it('P01: the payload host: fetched there and labelled as the card host (hostFromCard), the field ignored', async () => {
     setDemoStateHost('typed.example.net')
@@ -378,17 +413,24 @@ describe("the person's phone checks the card with the host it came with, and onl
     }
   )
 
-  it('P04: the payload schema takes stateHost as optional (with and without), and refuses a host with a path', () => {
+  it('P04: 0.1 is what 278.18 reads (no stateHost); 0.2 takes stateHost and social as optional, and refuses a host with a path', () => {
     const payload = {
       agent: 'did:webvh:a.example',
       approver: 'did:peer:2.b',
       ...K0_TEST_GUARDIAN_CARD,
       sentAt: '2026-11-13T00:00:00Z',
     }
-    const takes = (p: unknown) => trustTaskPayloadValidator.validate(GUARDIAN_EVIDENCE_SPEC.payloadSchema, p) === true
-    expect(takes(payload)).toBe(true)
-    expect(takes({ ...payload, stateHost: 'example.org' })).toBe(true)
-    expect(takes({ ...payload, stateHost: 'example.org/x' })).toBe(false)
+    const takes = (spec: { payloadSchema: object }, p: unknown) =>
+      trustTaskPayloadValidator.validate(spec.payloadSchema as never, p) === true
+    expect(takes(GUARDIAN_EVIDENCE_SPEC, payload)).toBe(true)
+    expect(takes(GUARDIAN_EVIDENCE_SPEC, { ...payload, stateHost: 'example.org' })).toBe(false)
+    expect(takes(GUARDIAN_EVIDENCE_V2_SPEC, payload)).toBe(true)
+    expect(takes(GUARDIAN_EVIDENCE_V2_SPEC, { ...payload, stateHost: 'example.org' })).toBe(true)
+    expect(takes(GUARDIAN_EVIDENCE_V2_SPEC, { ...payload, social: { said: K0_TEST_GUARDIAN_CARD.guardianSaid } })).toBe(
+      true
+    )
+    expect(takes(GUARDIAN_EVIDENCE_V2_SPEC, { ...payload, stateHost: 'example.org/x' })).toBe(false)
+    expect(takes(GUARDIAN_EVIDENCE_V2_SPEC, { ...payload, social: { said: 'x', more: 1 } })).toBe(false)
   })
 
   it('P05: a K0 card held from the Developer settings keeps no host (a later card replaces a host it did not come with)', async () => {
@@ -429,20 +471,22 @@ describe("the card's host goes to the person's phone only with a K1 card", () =>
     sent.length = 0
   })
 
-  it('X01: a K1 card held with its host: the payload carries stateHost (control for X02)', async () => {
+  it('X01: a K1 card held with its host goes as 0.2, carrying stateHost (control for X02)', async () => {
     const j = jordan()
     await holdGuardianEvidence(j.agent, K0_TEST_GUARDIAN_CARD, { stateHost: 'example.org' })
     expect(await sendGuardianEvidence(j.agent, 'c1', 'did:webvh:a.example', 'did:peer:2.b')).toBe('sent')
+    expect(sent[0].type).toBe(GUARDIAN_EVIDENCE_V2_TYPE_URI)
     expect((sent[0].payload as { stateHost?: string }).stateHost).toBe('example.org')
   })
 
-  it("X02: a K0 card's payload has NO stateHost, exactly what earlier builds send, even if a host were kept with it", async () => {
+  it('X02: a K0 card goes as 0.1 with NO stateHost, exactly what 278.18 sends, even if a host were kept with it', async () => {
     // A K0 card: K1 is somewhere else, so the card does not name K1's root.
     stateRoots.k1SettingsForTests.reset()
     const j = jordan()
     await holdGuardianEvidence(j.agent, K0_TEST_GUARDIAN_CARD, { stateHost: 'example.org' })
     expect(await sendGuardianEvidence(j.agent, 'c1', 'did:webvh:a.example', 'did:peer:2.b')).toBe('sent')
     const payload = sent[0].payload as Record<string, unknown>
+    expect(sent[0].type).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
     expect('stateHost' in payload).toBe(false)
     expect(Object.keys(payload).sort()).toEqual([
       'agent',
@@ -454,5 +498,133 @@ describe("the card's host goes to the person's phone only with a K1 card", () =>
       'sentAt',
       'tels',
     ])
+  })
+})
+
+describe('a host is fetched only if the state names it (its designated aliases, #1059)', () => {
+  it('D01: at receipt, a link host the state does not name: hostNotNamed, nothing kept, no KEL fetched', async () => {
+    for (const result of ['notDesignated', 'badFile'] as const) {
+      const p = phone()
+      const fetch = state()
+      const r = await receiveGuardianCard(p.agent, CARD_URL, {
+        fetchCard: office(),
+        fetch: fetch as never,
+        checkDesignation: named(result),
+      })
+      expect(r).toEqual({ kind: 'hostNotNamed' })
+      expect(fetch).not.toHaveBeenCalled()
+      expect(heldRecord(p)).toBeUndefined()
+    }
+  })
+
+  it("D02: at receipt, the state's list unreadable: unreachable, nothing kept (control: designated, R01 keeps it)", async () => {
+    const p = phone()
+    const r = await receiveGuardianCard(p.agent, CARD_URL, {
+      fetchCard: office(),
+      fetch: state() as never,
+      checkDesignation: named('unreachable', 'timeout'),
+    })
+    expect(r).toMatchObject({ kind: 'unreachable' })
+    expect(heldRecord(p)).toBeUndefined()
+  })
+
+  const check = (checkDesignation: ReturnType<typeof named>, fetch = state()) =>
+    checkGuardianEvidenceResolving(K0_TEST_GUARDIAN_CARD, WARD, new Date(), () => undefined, {
+      fetch: fetch as never,
+      stateHost: 'example.org',
+      checkDesignation,
+    })
+
+  it("D03: the person's phone, a host the state does not name: no live fetch, the copy only, said so (not retryable)", async () => {
+    const fetch = state()
+    const v = await check(named('notDesignated', 'hostNotListed'), fetch)
+    expect(v).toMatchObject({
+      ok: true,
+      hostWithheld: { host: 'example.org', result: 'notDesignated', why: 'hostNotListed', retryable: false },
+    })
+    expect(v.ok === true && v.fetchedFrom).toBeFalsy()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['unreachable', true],
+    ['timeout', true],
+    ['switchedOff', false],
+  ])(
+    'D04: the list could not be read (%s): copy only; Check again offered only for a failure that can pass (%s)',
+    async (why, retryable) => {
+      const v = await check(named('unreachable', why))
+      expect(v).toMatchObject({ ok: true, hostWithheld: { result: 'unreachable', why, retryable } })
+    }
+  )
+
+  it('D05: designated: fetched live there, and named as a host the state names (control for D03)', async () => {
+    const designation = named()
+    const v = await check(designation)
+    expect(v).toMatchObject({ ok: true, fetchedFrom: 'example.org', hostFromCard: true })
+    expect(v.ok === true && v.hostWithheld).toBeFalsy()
+    expect(designation).toHaveBeenCalledWith(K0_ROOT, 'example.org', expect.anything())
+  })
+})
+
+describe("on the person's phone, the host is read from 0.2 only", () => {
+  const arrive = async (type: string) => {
+    const p = phone()
+    const conn = 'c1'
+    const agent = {
+      ...(p.agent as object),
+      context: {},
+      config: { logger: { warn: jest.fn(), info: jest.fn() } },
+      dependencyManager: {
+        resolve: () => ({
+          getAll: async () => [
+            {
+              connectionId: conn,
+              myRelationshipDid: 'did:peer:2.mine',
+              counterpartyRelationshipDid: 'did:peer:2.theirs',
+            },
+          ],
+        }),
+      },
+    } as never
+    await p.genericRecords.save({
+      content: { state: 'accepted', connectionId: conn, agentDid: 'did:webvh:a.example', acceptedAs: 'did:peer:2.b' },
+      tags: { recordType: 'keyring.approver-role-offer-ask', connectionId: conn },
+    })
+    const consume = jest.fn(async () => ({ kind: 'handled' as const }))
+    const document = {
+      id: 'd1',
+      type,
+      threadId: 'd1',
+      issuer: 'did:peer:them',
+      recipient: 'did:peer:me',
+      issuedAt: '2026-11-13T00:00:00Z',
+      payload: {
+        agent: 'did:webvh:a.example',
+        approver: 'did:peer:2.b',
+        ...K0_TEST_GUARDIAN_CARD,
+        stateHost: 'example.org',
+        sentAt: '2026-11-13T00:00:00Z',
+      },
+    }
+    await handleGuardianEvidence(agent, { consume } as never, document, {
+      connectionId: conn,
+      recipientDid: 'did:peer:me',
+      senderDid: 'did:peer:them',
+    } as never)
+    const ask = p.genericRecords.records.find((r) => r.tags.recordType === 'keyring.approver-role-offer-ask')
+    return { consume, guardian: (ask?.content as { guardian?: { stateHost?: string } }).guardian }
+  }
+
+  it('A01: a 0.2 card keeps the host it came with, checked against the 0.2 spec', async () => {
+    const { consume, guardian } = await arrive(GUARDIAN_EVIDENCE_V2_TYPE_URI)
+    expect((consume.mock.calls[0] as unknown[])[1]).toMatchObject({ spec: GUARDIAN_EVIDENCE_V2_SPEC })
+    expect(guardian?.stateHost).toBe('example.org')
+  })
+
+  it('A02: a 0.1 document never carries a host to this phone, whatever its payload says (control: A01)', async () => {
+    const { consume, guardian } = await arrive(GUARDIAN_EVIDENCE_TYPE_URI)
+    expect((consume.mock.calls[0] as unknown[])[1]).toMatchObject({ spec: GUARDIAN_EVIDENCE_SPEC })
+    expect(guardian?.stateHost).toBeUndefined()
   })
 })

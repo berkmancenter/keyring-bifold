@@ -15,8 +15,9 @@
  * 5. the file: our card shape ('badCard');
  * 6. the holder: the card must be issued to THIS phone's own holder code ('notForThisPhone'). A card is public, so a
  *    phone that is not its holder keeps nothing: the link is not a secret;
- * 7. the check: the full Guardian check with K1's history fetched live from that same host, the ward being the one the
- *    card names, and the chain ending at K1 ('refused', with the check's own reason);
+ * 7. the check: the full Guardian check with K1's history fetched live from that same host, ONLY if the state names it
+ *    (its designated aliases: 'hostNotNamed' when it does not, 'unreachable' when that cannot be read), the ward being
+ *    the one the card names, and the chain ending at K1 ('refused', with the check's own reason);
  * 8. kept (holdGuardianEvidence), in place of any card held before, WITH the host it came from in 'fromCard' mode, so
  *    its later checks, and the person's phone it is sent to, fetch the state from that host only. Nothing is ever
  *    deleted.
@@ -46,6 +47,7 @@ const TIMEOUT_MS = 10_000
 export type CardCheckFailure =
   | { kind: 'off' }
   | { kind: 'noHost' }
+  | { kind: 'hostNotNamed' }
   | { kind: 'wrongHost' }
   | { kind: 'unreachable'; detail: string }
   | { kind: 'tooLarge' }
@@ -73,6 +75,8 @@ export interface ReceiveDeps {
   /** For the did:webs fetches of the check (see guardianEvidence checkGuardianEvidenceResolving). */
   fetch?: WebsFetch
   resolveRootKel?: RootKelResolver
+  /** The designation check (default: sedi/webs designatedAliases checkDesignation). */
+  checkDesignation?: import('../../trust-tasks/guardianEvidence').DesignationCheckFn
   now?: Date
   warn?: (message: string) => void
 }
@@ -242,8 +246,19 @@ export async function checkGuardianCard(
     ward,
     deps.now ?? new Date(),
     deps.warn ?? (() => undefined),
-    { fetch: deps.fetch, resolveRootKel: deps.resolveRootKel, ...(where.fromCard ? { stateHost: where.host } : {}) }
+    {
+      fetch: deps.fetch,
+      resolveRootKel: deps.resolveRootKel,
+      checkDesignation: deps.checkDesignation,
+      ...(where.fromCard ? { stateHost: where.host } : {}),
+    }
   )
+  // A link host the state does not name is refused at receipt: the card is not kept from a host the state never named,
+  // even though its own copy might check out. A failure to read the designation is a failure to reach, said as one.
+  if (verdict.hostWithheld)
+    return verdict.hostWithheld.result === 'unreachable'
+      ? { kind: 'unreachable', detail: `the state's list of its hosts: ${verdict.hostWithheld.why}` }
+      : { kind: 'hostNotNamed' }
   if (verdict.ok !== true) return { kind: 'refused', reason: verdict.reason, detail: verdict.detail }
   // The card must come from the state the link's address belongs to, never another root on this phone's list.
   if (verdict.root !== k1.aid)

@@ -225,13 +225,19 @@ export function stateCardView(
         ? 'StateCard.FetchedFromQrHostAt'
         : 'StateCard.FetchedFromQrHost'
       : null
-  const source = qrKey
-    ? words(qrKey, { host: ok?.fetchedFrom, ...(ok?.fetchedAt ? { time: localClock(ok.fetchedAt) } : {}) })
-    : sourceKey
-      ? words(sourceKey, { host: ok?.fetchedFrom, ...(ok?.fetchedAt ? { time: localClock(ok.fetchedAt) } : {}) })
-      : demo
-        ? words('Approver.GuardianDemoCopy')
-        : undefined
+  // A host the card came with that the state does not name was not fetched: the copy was checked, and it says so.
+  const withheld = verdict?.hostWithheld
+  const source = withheld
+    ? words(withheld.result === 'unreachable' ? 'StateCard.HostUnchecked' : 'StateCard.HostNotNamed', {
+        host: withheld.host,
+      })
+    : qrKey
+      ? words(qrKey, { host: ok?.fetchedFrom, ...(ok?.fetchedAt ? { time: localClock(ok.fetchedAt) } : {}) })
+      : sourceKey
+        ? words(sourceKey, { host: ok?.fetchedFrom, ...(ok?.fetchedAt ? { time: localClock(ok.fetchedAt) } : {}) })
+        : demo
+          ? words('Approver.GuardianDemoCopy')
+          : undefined
 
   let tone: StateCardTone
   let status: string

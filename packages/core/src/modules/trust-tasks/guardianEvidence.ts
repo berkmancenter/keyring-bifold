@@ -33,14 +33,7 @@ import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
 import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
 import { K0_REVOKED_OMITTED_CARD } from '../sedi/guardian/k0RevokedOmittedCard'
-import {
-  K0_TEST_WARD,
-  hostAllowedForRoot,
-  isDemoStateRoot,
-  k1Root,
-  trustedStateRoots,
-  type StateRoot,
-} from '../sedi/guardian/stateRoots'
+import { K0_TEST_WARD, isDemoStateRoot, k1Root, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
 import {
   ourRootKelResolver,
   parseWebsDid,
@@ -49,6 +42,7 @@ import {
   type RootKelResolver,
   type WebsFetch,
 } from '../sedi/webs'
+import { checkDesignation, type DesignationCheck } from '../sedi/webs/designatedAliases'
 import { demoStateHostProblem, websDidToFetch } from '../sedi/webs/demoStateHost'
 import { resetLiveResolutions, resolveRootKelReusing, type LiveRootKel } from '../sedi/webs/lastLive'
 
@@ -66,6 +60,8 @@ import {
   GUARDIAN_EVIDENCE_MAX_BYTES,
   GUARDIAN_EVIDENCE_SPEC,
   GUARDIAN_EVIDENCE_TYPE_URI,
+  GUARDIAN_EVIDENCE_V2_SPEC,
+  GUARDIAN_EVIDENCE_V2_TYPE_URI,
   type GuardianEvidencePayload,
 } from './approverRoleSpec'
 import { signDocumentProof } from './documentProof'
@@ -123,8 +119,22 @@ export type GuardianVerdict =
        * names", never "the state's record".
        */
       hostFromCard?: true
+      /** Set when the card came with a host the state does not name (or it could not be told): see HostWithheld. */
+      hostWithheld?: HostWithheld
     }
-  | { ok: false; reason: string; detail: string; checkedAt: string }
+  | { ok: false; reason: string; detail: string; checkedAt: string; hostWithheld?: HostWithheld }
+
+/**
+ * A host a card came with that was NOT fetched, because the state root does not designate it (sedi/webs
+ * designatedAliases): the card was checked against its own copy instead. `retryable` only for a transient failure to
+ * read the designation (unreachable, timeout), never when the check was switched off or the state said no.
+ */
+export interface HostWithheld {
+  host: string
+  result: Exclude<DesignationCheck['result'], 'designated'>
+  why: string
+  retryable: boolean
+}
 
 /** Kept on the offer's record (RoleOfferAsk.guardian): the card a contact sent, as whom, and the last verdict. */
 export interface GuardianOnAsk {
@@ -155,6 +165,7 @@ export type GuardianStanding =
       fetchedAt?: string
       fetchedIssuers?: true
       hostFromCard?: true
+      hostWithheld?: HostWithheld
     }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
@@ -273,15 +284,33 @@ function websRootsFor(
 }
 
 /**
- * Why a host a card came with may not be fetched for `root`, or null when it may: a bare public hostname (the Developer
- * "Demo state host" field's own rules: no path, no address, no local name), and one the root allows
- * (stateRoots hostAllowedForRoot). A refused host refuses the check; it is never quietly replaced by the card's copy.
+ * Why a host a card came with is not even a host, or null when it is one: a bare public hostname, by the Developer
+ * "Demo state host" field's own rules (no path, no address, no local name). Such a host refuses the check outright; it
+ * is never read past. Whether the STATE names it is a separate, network question ({@link designationFor}).
  */
-export function cardStateHostProblem(root: Pick<StateRoot, 'aid'>, host: string): string | null {
-  const problem = demoStateHostProblem(host)
-  if (problem) return problem
-  return hostAllowedForRoot(root.aid, host.toLowerCase()) ? null : 'not a host this state names'
+export function cardStateHostProblem(_root: Pick<StateRoot, 'aid'>, host: string): string | null {
+  return demoStateHostProblem(host)
 }
+
+/** The designation check a Guardian check uses: the real one, or one a row passes in. */
+export type DesignationCheckFn = (rootAid: string, host: string, fetchImpl?: WebsFetch) => Promise<DesignationCheck>
+
+/**
+ * Whether the state root names `host` as one of its own (its designated-aliases file there, checked against its live
+ * KEL there: sedi/webs designatedAliases). Only 'designated' lets the host be fetched; every other answer withholds it,
+ * and the card is checked against its own copy, said so.
+ */
+async function designationFor(
+  root: StateRoot,
+  host: string,
+  deps: { fetch?: WebsFetch; checkDesignation?: DesignationCheckFn }
+): Promise<DesignationCheck> {
+  return (deps.checkDesignation ?? checkDesignation)(root.aid, host.toLowerCase(), deps.fetch)
+}
+
+/** A designation answer that can come out differently if asked again soon: a failure to read, never a "no". */
+const transient = (d: DesignationCheck) =>
+  d.result === 'unreachable' && (d.why === 'unreachable' || d.why === 'timeout')
 
 /** A 'fromCard' root's did:webs with the card's host in place of its placeholder host; none without a usable host. */
 function websFromCardHost(root: StateRoot, stateHost?: string): string | undefined {
@@ -337,16 +366,25 @@ const intermediateDid = (rootDid: string, aid: string) => rootDid.slice(0, rootD
  * intermediates are not fetched: only the root publishes at a did:webs on our list, so for a real state this still
  * reads the issuers' histories from the card (a real state's units and agents would need their own did:webs).
  */
+export type GuardianCheckDeps = {
+  fetch?: WebsFetch
+  resolveRootKel?: RootKelResolver
+  resolves?: WebsResolves
+  /** The host the card came with (K1 'fromCard'): fetched only if the state names it. */
+  stateHost?: string
+  checkDesignation?: DesignationCheckFn
+}
+
 export async function checkGuardianEvidenceResolving(
   evidence: GuardianEvidence,
   ward: string | null,
   now: Date,
   onThrow: (message: string) => void,
-  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves?: WebsResolves; stateHost?: string } = {}
+  deps: GuardianCheckDeps = {}
 ): Promise<GuardianVerdict> {
   const checkedAt = now.toISOString()
   try {
-    // A host the card came with that may not be fetched (a path, an address, a local name) refuses the check: it is
+    // A host the card came with that is not a host at all (a path, an address, a local name) refuses the check: it is
     // never read past, and never replaced by the card's own copy.
     const badHost = refusedCardHost(evidence, trustedStateRoots(), deps.stateHost)
     if (badHost)
@@ -356,6 +394,42 @@ export async function checkGuardianEvidenceResolving(
         detail: `${badHost.name}: the card's host ${deps.stateHost} is ${cardStateHostProblem(badHost, deps.stateHost as string)}`,
         checkedAt,
       }
+    // A host the card came with is fetched only if the state names it; otherwise the copy is checked, and said so.
+    const fromCard = cardHostRoot(evidence, trustedStateRoots())
+    let liveHost = deps.stateHost
+    let withheld: HostWithheld | undefined
+    if (fromCard && deps.stateHost) {
+      const d = await designationFor(fromCard, deps.stateHost, deps)
+      if (d.result !== 'designated') {
+        liveHost = undefined
+        withheld = { host: deps.stateHost, result: d.result, why: d.why, retryable: transient(d) }
+      }
+    }
+    const verdict = await checkResolving(evidence, ward, now, onThrow, { ...deps, stateHost: liveHost })
+    return withheld ? { ...verdict, hostWithheld: withheld } : verdict
+  } catch (e) {
+    const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
+    onThrow(message)
+    return { ok: false, reason: 'checkFailed', detail: message, checkedAt }
+  }
+}
+
+/** The 'fromCard' root (K1) a card names, if it names one. */
+function cardHostRoot(evidence: GuardianEvidence, roots: StateRoot[]): StateRoot | undefined {
+  const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
+  return roots.find((r) => r.hostFromCard && said.includes(r.aid))
+}
+
+/** The check itself, with the host already decided (a host the state names, or none). */
+async function checkResolving(
+  evidence: GuardianEvidence,
+  ward: string | null,
+  now: Date,
+  onThrow: (message: string) => void,
+  deps: GuardianCheckDeps
+): Promise<GuardianVerdict> {
+  const checkedAt = now.toISOString()
+  try {
     const roots = websRootsFor(evidence, trustedStateRoots(), deps.stateHost)
     if (!ward || roots.length === 0) return checkWith(evidence, ward, now, onThrow, [])
     const resolves = deps.resolves ?? new Map()
@@ -550,8 +624,8 @@ export async function sendGuardianEvidence(
   if (!connection.did || !connection.theirDid) return 'noRelationship'
 
   const id = utils.uuid()
-  // The host goes ONLY with a K1 card: a phone on an older build refuses a payload carrying it, so a K0 card's payload
-  // stays exactly what earlier builds send and accept.
+  // The host goes ONLY with a K1 card, and only as 0.2: a K0 card stays 0.1, exactly what earlier builds send and
+  // accept. A phone that knows only 0.1 refuses a 0.2 document by its type (and, today, silently: it answers nothing).
   const k1 = k1Root()
   const isK1Card = !!k1 && JSON.stringify([held.kels, held.creds]).includes(k1.aid)
   const stateHost = isK1Card ? await heldGuardianStateHost(agent) : undefined
@@ -565,7 +639,7 @@ export async function sendGuardianEvidence(
   }
   const document: Record<string, unknown> = {
     id,
-    type: GUARDIAN_EVIDENCE_TYPE_URI,
+    type: isK1Card ? GUARDIAN_EVIDENCE_V2_TYPE_URI : GUARDIAN_EVIDENCE_TYPE_URI,
     threadId: id,
     issuer: connection.did,
     recipient: connection.theirDid,
@@ -852,8 +926,12 @@ export async function handleGuardianEvidence(
   const relationship = await relationshipOn(agent, context.connectionId)
   if (!relationship)
     return dropped(agent, context.connectionId, 'no relationship with this contact to check it against')
+  // Either version this build knows, by the document's own type: 0.2 may carry stateHost (and social); 0.1 never does.
+  const v2 = document?.type === GUARDIAN_EVIDENCE_V2_TYPE_URI
+  if (!v2 && document?.type !== GUARDIAN_EVIDENCE_TYPE_URI)
+    return dropped(agent, context.connectionId, `its type ${String(document?.type)} is not one this build knows`)
   const outcome = await service.consume(agent.context, {
-    spec: GUARDIAN_EVIDENCE_SPEC as never,
+    spec: (v2 ? GUARDIAN_EVIDENCE_V2_SPEC : GUARDIAN_EVIDENCE_SPEC) as never,
     document,
     myDid: context.recipientDid,
     senderDid: context.senderDid,
@@ -874,7 +952,7 @@ export async function handleGuardianEvidence(
 
   const evidence = evidenceOf(payload)
   // The host the card came with, and only that: never this phone's Developer field, never a host from elsewhere.
-  const stateHost = typeof payload.stateHost === 'string' ? payload.stateHost : undefined
+  const stateHost = v2 && typeof payload.stateHost === 'string' ? payload.stateHost : undefined
   const verdict = await checkGuardianEvidenceResolving(
     evidence,
     await stateWardOf(agent),
@@ -1020,6 +1098,7 @@ function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence, stateH
       ...(verdict.fetchedAt ? { fetchedAt: verdict.fetchedAt } : {}),
       ...(verdict.fetchedIssuers ? { fetchedIssuers: true as const } : {}),
       ...(verdict.hostFromCard ? { hostFromCard: true as const } : {}),
+      ...(verdict.hostWithheld ? { hostWithheld: verdict.hostWithheld } : {}),
     }
   if (verdict.reason === 'stateNotResolved')
     return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots(), stateHost)[0]?.name ?? '' }
@@ -1038,7 +1117,9 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
       a.fetchedAt === b.fetchedAt &&
       // The screen reads it (which "fetched live" line), so a verdict differing only in it is written back.
       a.fetchedIssuers === b.fetchedIssuers &&
-      a.hostFromCard === b.hostFromCard
+      a.hostFromCard === b.hostFromCard &&
+      a.hostWithheld?.result === b.hostWithheld?.result &&
+      a.hostWithheld?.why === b.hostWithheld?.why
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**

@@ -3837,8 +3837,11 @@
     "ApprovedGoAhead": "{{names}} said yes, so your agent can go ahead.",
     "AcceptReason": "Accept being {{asker}}'s approver",
     "AcceptAsksLock": "Accept asks for {{method}}. Decline is one tap.",
-    "GuardianFetchedFromCardHost": "Fetched from {{host}}, the host {{name}}'s card names; the designated-alias check isn't supported yet.",
-    "GuardianFetchedFromCardHostAt": "Fetched from {{host}}, the host {{name}}'s card names, at {{time}}; {{host}} can't be reached right now."
+    "GuardianFetchedFromCardHost": "Fetched live from {{host}}, a host the state names.",
+    "GuardianFetchedFromCardHostAt": "Fetched live from {{host}}, a host the state names, at {{time}}; {{host}} can't be reached right now.",
+    "GuardianHostNotNamed": "The state doesn't name {{host}}, so this card was checked against its own copy.",
+    "GuardianHostUnchecked": "Couldn't check that the state names {{host}}, so this card was checked against its own copy.",
+    "NeedsNewerKeyring": "{{name}}'s phone needs the newer Keyring to receive this card."
   },
   "StateCard": {
     "Kind": "Guardian",
@@ -3880,10 +3883,12 @@
     "PillNotReached": "Couldn't reach",
     "RevokedIssuer": "The issuer's published record shows it was revoked",
     "RevokedState": "The state's published record shows it was revoked",
-    "AsOfQrHost": "as of the record at the host the state's QR named",
-    "FetchedFromQrHost": "Fetched live from {{host}}, the host the state's QR named.",
-    "FetchedFromQrHostAt": "Fetched live from {{host}}, the host the state's QR named, at {{time}}; {{host}} can't be reached right now.",
-    "DemoNoteOffice": "Demo card, issued by a demo state office; not issued by the State of Utah"
+    "AsOfQrHost": "as of the record at a host the state names",
+    "FetchedFromQrHost": "Fetched live from {{host}}, a host the state names.",
+    "FetchedFromQrHostAt": "Fetched live from {{host}}, a host the state names, at {{time}}; {{host}} can't be reached right now.",
+    "DemoNoteOffice": "Demo card, issued by a demo state office; not issued by the State of Utah",
+    "HostNotNamed": "The state doesn't name {{host}}, so this card was checked against its own copy.",
+    "HostUnchecked": "Couldn't check that the state names {{host}}, so this card was checked against its own copy."
   },
   "GuardianCard": {
     "Checking": "Checking the card…",
@@ -3899,7 +3904,8 @@
     "Unreadable": "This card couldn't be read.",
     "NotForThisPhone": "This card was issued to another phone, so it wasn't kept.",
     "Revoked": "The state shows this card was revoked, so it wasn't kept.",
-    "DidNotCheckOut": "This card didn't check out, so it wasn't kept."
+    "DidNotCheckOut": "This card didn't check out, so it wasn't kept.",
+    "HostNotNamed": "The state doesn't name this link's host, so the card wasn't kept."
   },
   "StateOffice": {
     "Entry": "Your codes for a state office",

@@ -58,6 +58,8 @@ export function guardianCardWords(t: TFunction, shown: Shown): string {
       return t('GuardianCard.Off')
     case 'noHost':
       return t('GuardianCard.NoHostInBuild')
+    case 'hostNotNamed':
+      return t('GuardianCard.HostNotNamed')
     case 'badLink':
     case 'wrongHost':
       return t('GuardianCard.WrongPlace')

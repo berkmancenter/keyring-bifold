@@ -170,17 +170,6 @@ export function k1FixedHost(): string | undefined {
 }
 
 /**
- * Whether `host` may serve `rootAid`'s identifiers, as a card's link or payload names it. TODO(designated aliases):
- * true for now. The next PR reads the root's designated-aliases ACDC (published at keyring-demo-state/<root>/
- * designated-aliases.json, anchored in the root's KEL; its ids list did:webs:<host>:keyring-demo-state:<aid>) and
- * refuses a host it does not name. Trust never rests
- * on this either way: the root AID is self-certifying, and a host can only withhold.
- */
-export function hostAllowedForRoot(rootAid: string, host: string): boolean {
-  return typeof rootAid === 'string' && rootAid.length > 0 && typeof host === 'string' && host.length > 0
-}
-
-/**
  * K1's entry, or undefined while its root AID is a placeholder. With a fixed host its did:webs is built from it; in
  * 'fromCard' its did:webs is a placeholder whose host each check fills from the card's own host (hostFromCard); with
  * no host at all it has none, so nothing is fetched and its cards are checked against their own copy.

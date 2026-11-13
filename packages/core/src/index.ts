@@ -366,7 +366,6 @@ export {
   K1_NAME,
   K1_ROOT_AID,
   K1_WEBS_HOST,
-  hostAllowedForRoot,
   k1HostMode,
   k1Root,
   type K1WebsHost,

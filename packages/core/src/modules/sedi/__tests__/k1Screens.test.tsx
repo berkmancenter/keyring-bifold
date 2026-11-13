@@ -162,7 +162,7 @@ describe('the codes screen and its entry', () => {
 })
 
 describe('the words for a host that came with the card', () => {
-  it("W01: Who approves names the host the approver's card names, never the state's record", () => {
+  it("W01: Who approves says the host is one the state names, never the state's record", () => {
     const key = guardianSourceKey({
       kind: 'verified',
       state: 'State of Utah',
@@ -170,14 +170,14 @@ describe('the words for a host that came with the card', () => {
       hostFromCard: true,
     })
     expect(key).toBe('Approver.GuardianFetchedFromCardHost')
-    expect(en.Approver.GuardianFetchedFromCardHost).toContain("the host {{name}}'s card names")
+    expect(en.Approver.GuardianFetchedFromCardHost).toBe('Fetched live from {{host}}, a host the state names.')
     // Control: without the mark, the live line it always was.
     expect(guardianSourceKey({ kind: 'verified', state: 'S', fetchedFrom: 'h.example', fetchedIssuers: true })).toBe(
       'Approver.GuardianFetchedLive'
     )
   })
 
-  it("W02: the holder's card says the host the state's QR named, and its as-of line never says the state's record", () => {
+  it("W02: the holder's card says the host is one the state names, and its as-of line never says the state's record", () => {
     const t = ((key: string, o?: { host?: string; asOf?: string }) =>
       `${key}${o?.host ? `:${o.host}` : ''}${o?.asOf ? `[${o.asOf}]` : ''}`) as never
     const view = stateCardView(
