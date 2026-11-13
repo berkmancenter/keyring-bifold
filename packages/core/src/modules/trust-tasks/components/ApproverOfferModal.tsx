@@ -18,6 +18,9 @@
  * to <asker>?". Send keeps the answer and sends the card; Don't send keeps a no, and nothing goes. The yes already
  * stands either way.
  *
+ * On the asking phone, the same sheet then prompts to add a contact whose yes landed (ApproverAddSheet.tsx, Q4 (a)):
+ * after an open offer and a card question, so one sheet shows at a time.
+ *
  * Self-contained: mounted once at the root beside ContinuityCheckModal. With the trusted-approvers switch off it shows
  * nothing and brings nothing back; with state-verified approvers off it asks nothing about a card.
  */
@@ -48,6 +51,7 @@ import {
   shareGuardianCard,
   type CardQuestion,
 } from '../guardianEvidence'
+import { ApproverAddBody, useApproverToAdd } from './ApproverAddSheet'
 import { DemoPill } from './DemoPill'
 import { releaseWarn } from '../module/releaseLog'
 import { ownerLockKind, type OwnerLockKind } from '../module/ownerConfirm'
@@ -106,6 +110,7 @@ const ApproverOfferModal: React.FC = () => {
   // either switch off: cardToShare says so), no switch.
   const [withCard, setWithCard] = useState<{ card: ShareableCard; send: boolean }>()
   const offerId = prompt?.connectionId
+  const { pending: toAdd, refresh: refreshToAdd } = useApproverToAdd(on, linked)
   useEffect(() => {
     setWithCard(undefined)
     if (!agent || !on || !offerId) return
@@ -211,7 +216,9 @@ const ApproverOfferModal: React.FC = () => {
 
   // An offer comes first; a card question shows when no offer is open, and only with state-verified approvers on.
   const asking = !prompt && question && isStateVerifiedApproversEnabled() ? question : undefined
-  if (!on || (!prompt && !asking)) return null
+  // Then, on the asking phone, a contact's yes to add (Q4 (a)).
+  const adding = !prompt && !asking ? toAdd : undefined
+  if (!on || (!prompt && !asking && !adding)) return null
 
   const words = {
     asker: prompt?.asker || t('Approver.UnnamedContact'),
@@ -242,6 +249,7 @@ const ApproverOfferModal: React.FC = () => {
             contentContainerStyle={styles.container}
             testID={testIdWithKey(ApproverOfferIds.sheet)}
           >
+            {adding ? <ApproverAddBody pending={adding} lockKind={lockKind} onDone={refreshToAdd} /> : null}
             {asking ? (
               <>
                 <ThemedText

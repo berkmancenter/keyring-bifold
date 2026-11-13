@@ -182,6 +182,11 @@
       "src/modules/trust-tasks/screens/MyAgent.ids.ts",
       "src/modules/trust-tasks/screens/RequestCard.tsx"
     ],
+    "ApproverAdd": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddFailed": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddLock": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddNotNow": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
+    "ApproverAddYes": ["src/modules/trust-tasks/components/ApproverAddSheet.tsx"],
     "ApproverAlreadyApproves": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverApproved": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverAsk": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
@@ -2342,6 +2347,21 @@
     },
     {
       "src/modules/sedi/identity/StateOfficeCodes.tsx": "text"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.add"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.failed"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.lock"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.notNow"
+    },
+    {
+      "src/modules/trust-tasks/components/ApproverAddSheet.tsx": "ApproverAddIds.title"
     },
     {
       "src/modules/trust-tasks/components/ApproverOfferModal.tsx": "ApproverOfferIds.body"
