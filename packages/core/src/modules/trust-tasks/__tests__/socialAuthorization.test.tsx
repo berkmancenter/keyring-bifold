@@ -16,6 +16,7 @@ import { trustTaskPayloadValidator } from '@bifold/trust-tasks'
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import { testIdWithKey } from '../../../utils/testable'
 import { K0_TEST_GUARDIAN_CARD } from '../../sedi/guardian/k0TestCard'
+import { K1_ROOT_AID } from '../../sedi/guardian/stateRoots'
 import { HOLDER_IDENTITY } from '../../sedi/holder/controller'
 import { TestController, revoke, testState } from '../../sedi/__tests__/fixtures/keriTestKit'
 import * as approverRole from '../approverRole'
@@ -237,6 +238,18 @@ describe("Jordan's phone: the authorization goes with a card issued to it, and o
     expect(lastType()).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
     expect(jordan.of(HOLDER_IDENTITY)).toHaveLength(0)
     expect(jordan.of(SOCIAL_AUTHORIZATION)).toHaveLength(0)
+  })
+
+  test("a K0 card whose CREDENTIALS mention K1's AID still goes as 0.1, its payload exactly the card's", async () => {
+    const jordan = phone()
+    const mentions = { ...K0_TEST_GUARDIAN_CARD, creds: [...K0_TEST_GUARDIAN_CARD.creds, `{"note":"${K1_ROOT_AID}"}`] }
+    await holdGuardianEvidence(jordan.agent, mentions)
+    expect(await sendGuardianEvidence(jordan.agent, CONN, SAM_AGENT, JORDAN)).toBe('sent')
+    expect(lastType()).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
+    const { sentAt, ...rest } = lastPayload()
+    expect(typeof sentAt).toBe('string')
+    expect(rest).toEqual({ agent: SAM_AGENT, approver: JORDAN, ...mentions })
+    expect(Object.keys(lastPayload())).toEqual(OLD_MEMBERS)
   })
 
   test("K0 card on a phone that HAS its own holder: still no authorization (the card isn't issued to it)", async () => {
