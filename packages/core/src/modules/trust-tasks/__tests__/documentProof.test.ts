@@ -158,4 +158,19 @@ describe('digestBytesEqual', () => {
     expect(digestBytesEqual(z, '')).toBe(false)
     expect(digestBytesEqual('zWrong', z)).toBe(false)
   })
+
+  test('is false when both sides decode to no bytes, even spelled alike', () => {
+    // Control: a valid pair still matches, so the rows below fail on the guard, not on a broken decoder.
+    expect(digestBytesEqual(u, paddedU)).toBe(true)
+    expect(digestBytesEqual('u', 'u')).toBe(false)
+    expect(digestBytesEqual('U', 'U==')).toBe(false)
+    expect(digestBytesEqual('uA', 'uB')).toBe(false)
+    expect(digestBytesEqual('uA', 'uA')).toBe(false)
+    expect(digestBytesEqual('z', 'z')).toBe(false)
+  })
+
+  test('is false for base64url one character past a whole group, which no encoder writes', () => {
+    // Five characters carry three whole bytes and six stray bits; dropping the stray character would make these equal.
+    expect(digestBytesEqual('uAAAAA', 'uAAAAB')).toBe(false)
+  })
 })

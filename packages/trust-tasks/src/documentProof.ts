@@ -72,9 +72,13 @@ export function taskDigestMultibase(document: Record<string, unknown>): string {
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
 
-/** base64url (RFC 4648 §5), padded or not, to bytes; throws on any other character. Platform-neutral (no Buffer). */
+/**
+ * base64url (RFC 4648 §5), padded or not, to bytes; throws on any other character, and on a length no encoding
+ * produces (one character left over carries no whole byte). Platform-neutral (no Buffer).
+ */
 function decodeBase64Url(input: string): Uint8Array {
   const text = input.replace(/=+$/, '')
+  if (text.length % 4 === 1) throw new Error('not base64url')
   const out: number[] = []
   let bits = 0
   let acc = 0
@@ -98,8 +102,13 @@ function decodeBase64Url(input: string): Uint8Array {
  * and the rest credo knows) goes through credo.
  */
 function decodeMultibaseDigest(value: string): Uint8Array {
-  if (value.startsWith('u') || value.startsWith('U')) return decodeBase64Url(value.slice(1))
-  return MultiBaseEncoder.decode(value).data
+  const bytes =
+    value.startsWith('u') || value.startsWith('U')
+      ? decodeBase64Url(value.slice(1))
+      : MultiBaseEncoder.decode(value).data
+  // An empty digest is no digest: two of them must not compare equal.
+  if (bytes.length === 0) throw new Error('empty digest')
+  return bytes
 }
 
 /**
