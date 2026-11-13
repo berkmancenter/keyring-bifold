@@ -162,6 +162,11 @@ export interface GuardianEvidencePayload {
   tels: { ripText: string; updateTexts: string[] }[]
   /** Each credential's proof: ACDC text followed by its state disclosure. */
   creds: string[]
+  /**
+   * Optional: the host the card came with (a state office's QR; stateRoots K1_WEBS_HOST 'fromCard'), so the person's
+   * phone fetches the state's identifiers from that host only. A bare hostname; the receiving phone refuses any other.
+   */
+  stateHost?: string
   sentAt: string
 }
 
@@ -202,6 +207,9 @@ export const GUARDIAN_EVIDENCE_SPEC = {
         },
       },
       creds: { type: 'array', minItems: 1, maxItems: EVIDENCE_MAX_ITEMS, items: evidenceText },
+      // Optional (not in `required`): the host the card came with. A phone on an older build refuses a payload that
+      // carries it (additionalProperties false), so both phones need this build for a card that came with a host.
+      stateHost: { type: 'string', minLength: 1, maxLength: 253, pattern: '^[a-z0-9.:-]+$' },
       sentAt: { type: 'string', format: 'date-time' },
     },
   },

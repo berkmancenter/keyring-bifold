@@ -62,6 +62,8 @@ import ApproverWaitNote from './ApproverWaitNote'
 import { DemoPill } from '../components/DemoPill'
 import { demoStateHost } from '../../sedi/webs/demoStateHost'
 
+import { StateOfficeEntry } from '../../sedi/identity/StateOfficeCodes'
+
 import { Mark, StatusPill, Zone } from './approver/ApproverZones'
 
 export const TrustedApproversIds = {
@@ -362,6 +364,8 @@ const VtaTrustedApprovers: React.FC = () => {
             variant for our own earlier live result reused because the host just failed, never "just now". */}
         {t(guardianSourceKey(standing) ?? 'Approver.GuardianFetchedLive', {
           host: standing.fetchedFrom,
+          // For "the host <name>'s card names" (K1 'fromCard'); the other lines do not use it.
+          name: nameOf(did),
           ...(standing.fetchedAt ? { time: localClock(standing.fetchedAt) } : {}),
           interpolation: { escapeValue: false },
         })}
@@ -770,6 +774,9 @@ const VtaTrustedApprovers: React.FC = () => {
             )
           })}
         </View>
+        {/* This phone's codes for a state office (K1): draws nothing unless the SEDI switches are on and an office is
+            on this build; the screen it opens checks the same again. */}
+        <StateOfficeEntry />
       </ScrollView>
     </SafeAreaView>
   )

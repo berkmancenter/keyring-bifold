@@ -33,7 +33,14 @@ import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
 import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
 import { K0_REVOKED_OMITTED_CARD } from '../sedi/guardian/k0RevokedOmittedCard'
-import { K0_TEST_WARD, isDemoStateRoot, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
+import {
+  K0_TEST_WARD,
+  hostAllowedForRoot,
+  isDemoStateRoot,
+  k1Root,
+  trustedStateRoots,
+  type StateRoot,
+} from '../sedi/guardian/stateRoots'
 import {
   ourRootKelResolver,
   parseWebsDid,
@@ -42,7 +49,7 @@ import {
   type RootKelResolver,
   type WebsFetch,
 } from '../sedi/webs'
-import { websDidToFetch } from '../sedi/webs/demoStateHost'
+import { demoStateHostProblem, websDidToFetch } from '../sedi/webs/demoStateHost'
 import { resetLiveResolutions, resolveRootKelReusing, type LiveRootKel } from '../sedi/webs/lastLive'
 
 import {
@@ -110,6 +117,12 @@ export type GuardianVerdict =
        * when only the root's history was fetched and the issuers' came from the card: the screen then says so.
        */
       fetchedIssuers?: true
+      /**
+       * Set only when the root was fetched from the host the card itself came with (K1 in 'fromCard' mode, stateRoots
+       * hostFromCard): the holder's line says "the host the state's QR named", the person's "the host <name>'s card
+       * names", never "the state's record".
+       */
+      hostFromCard?: true
     }
   | { ok: false; reason: string; detail: string; checkedAt: string }
 
@@ -117,6 +130,8 @@ export type GuardianVerdict =
 export interface GuardianOnAsk {
   approver: string
   evidence: GuardianEvidence
+  /** The host the card came with (payload `stateHost`), for a root fetched from the card's host; else absent. */
+  stateHost?: string
   receivedAt: string
   verdict: GuardianVerdict
 }
@@ -132,7 +147,15 @@ export interface GuardianOnAsk {
  * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
  */
 export type GuardianStanding =
-  | { kind: 'verified'; state: string; demo?: true; fetchedFrom?: string; fetchedAt?: string; fetchedIssuers?: true }
+  | {
+      kind: 'verified'
+      state: string
+      demo?: true
+      fetchedFrom?: string
+      fetchedAt?: string
+      fetchedIssuers?: true
+      hostFromCard?: true
+    }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
 
@@ -236,12 +259,43 @@ const resolverFor = (deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver
  * now, each with the did:webs to fetch: a real root's own; a demo root's with the Developer "Demo state host" in place
  * of its host, or none when no host is in effect (sedi/webs/demoStateHost, read at each call).
  */
-function websRootsFor(evidence: GuardianEvidence, roots: StateRoot[]): (StateRoot & { webs: string })[] {
+function websRootsFor(
+  evidence: GuardianEvidence,
+  roots: StateRoot[],
+  stateHost?: string
+): (StateRoot & { webs: string })[] {
   const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
   return roots.flatMap((r) => {
-    const webs = said.includes(r.aid) ? websDidToFetch(r) : undefined
+    if (!said.includes(r.aid)) return []
+    const webs = r.hostFromCard ? websFromCardHost(r, stateHost) : websDidToFetch(r)
     return webs ? [{ ...r, webs }] : []
   })
+}
+
+/**
+ * Why a host a card came with may not be fetched for `root`, or null when it may: a bare public hostname (the Developer
+ * "Demo state host" field's own rules: no path, no address, no local name), and one the root allows
+ * (stateRoots hostAllowedForRoot). A refused host refuses the check; it is never quietly replaced by the card's copy.
+ */
+export function cardStateHostProblem(root: Pick<StateRoot, 'aid'>, host: string): string | null {
+  const problem = demoStateHostProblem(host)
+  if (problem) return problem
+  return hostAllowedForRoot(root.aid, host.toLowerCase()) ? null : 'not a host this state names'
+}
+
+/** A 'fromCard' root's did:webs with the card's host in place of its placeholder host; none without a usable host. */
+function websFromCardHost(root: StateRoot, stateHost?: string): string | undefined {
+  if (!root.webs || !stateHost || cardStateHostProblem(root, stateHost) !== null) return undefined
+  const parsed = parseWebsDid(root.webs)
+  if (!parsed.ok || parsed.value.aid !== root.aid) return undefined
+  return ['did:webs', stateHost.toLowerCase().replace(':', '%3A'), ...parsed.value.path, parsed.value.aid].join(':')
+}
+
+/** A 'fromCard' root this card names, given a host that is refused: the check must refuse rather than read the copy. */
+function refusedCardHost(evidence: GuardianEvidence, roots: StateRoot[], stateHost?: string): StateRoot | undefined {
+  if (stateHost === undefined) return undefined
+  const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
+  return roots.find((r) => r.hostFromCard && said.includes(r.aid) && cardStateHostProblem(r, stateHost) !== null)
 }
 
 /**
@@ -288,11 +342,21 @@ export async function checkGuardianEvidenceResolving(
   ward: string | null,
   now: Date,
   onThrow: (message: string) => void,
-  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves?: WebsResolves } = {}
+  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves?: WebsResolves; stateHost?: string } = {}
 ): Promise<GuardianVerdict> {
   const checkedAt = now.toISOString()
   try {
-    const roots = websRootsFor(evidence, trustedStateRoots())
+    // A host the card came with that may not be fetched (a path, an address, a local name) refuses the check: it is
+    // never read past, and never replaced by the card's own copy.
+    const badHost = refusedCardHost(evidence, trustedStateRoots(), deps.stateHost)
+    if (badHost)
+      return {
+        ok: false,
+        reason: 'stateHostRefused',
+        detail: `${badHost.name}: the card's host ${deps.stateHost} is ${cardStateHostProblem(badHost, deps.stateHost as string)}`,
+        checkedAt,
+      }
+    const roots = websRootsFor(evidence, trustedStateRoots(), deps.stateHost)
     if (!ward || roots.length === 0) return checkWith(evidence, ward, now, onThrow, [])
     const resolves = deps.resolves ?? new Map()
     const resolvedKels: Uint8Array[] = []
@@ -376,9 +440,11 @@ export async function checkGuardianEvidenceResolving(
     const host = verdict.ok === true ? fetchedFrom.get(verdict.root) : undefined
     if (!host || verdict.ok !== true) return verdict
     const at = reusedFrom.get(verdict.root)
+    const fromCard = roots.find((r) => r.aid === verdict.root)?.hostFromCard === true
     return {
       ...verdict,
       fetchedFrom: host,
+      ...(fromCard ? { hostFromCard: true as const } : {}),
       ...(at ? { fetchedAt: at, reused: true as const } : {}),
       ...(issuersFetched.has(verdict.root) ? { fetchedIssuers: true as const } : {}),
     }
@@ -408,11 +474,36 @@ async function keepOne(agent: Pick<Agent, 'genericRecords'>, recordType: string,
  */
 export async function holdGuardianEvidence(
   agent: Pick<Agent, 'genericRecords'>,
-  evidence: GuardianEvidence
+  evidence: GuardianEvidence,
+  options: { stateHost?: string } = {}
 ): Promise<'held' | 'tooLarge'> {
   if (evidenceBytes(evidence) > GUARDIAN_EVIDENCE_MAX_BYTES) return 'tooLarge'
-  await keepOne(agent, GUARDIAN_EVIDENCE_HELD, { ...evidenceOf(evidence), heldAt: new Date().toISOString() })
+  // The host the card came with (a state office's QR, K1 'fromCard'), kept with it; any other card replaces it, so a
+  // card held from the Developer settings never carries a host it did not come with.
+  await keepOne(agent, GUARDIAN_EVIDENCE_HELD, {
+    ...evidenceOf(evidence),
+    ...(options.stateHost ? { stateHost: options.stateHost } : {}),
+    heldAt: new Date().toISOString(),
+  })
   return 'held'
+}
+
+/** The host the held card came with (K1 'fromCard'), if it came with one. */
+export async function heldGuardianStateHost(agent: Pick<Agent, 'genericRecords'>): Promise<string | undefined> {
+  return (await heldGuardianCard(agent))?.stateHost
+}
+
+/** The held card and the host it came with (K1 'fromCard'), in one read of its record. */
+export async function heldGuardianCard(
+  agent: Pick<Agent, 'genericRecords'>
+): Promise<{ evidence: GuardianEvidence; stateHost?: string } | undefined> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
+  const content = record?.content as unknown as (GuardianEvidence & { stateHost?: unknown }) | undefined
+  if (!content?.guardianSaid) return undefined
+  return {
+    evidence: evidenceOf(content),
+    ...(typeof content.stateHost === 'string' ? { stateHost: content.stateHost } : {}),
+  }
 }
 
 /** The card this phone holds to send, if any. */
@@ -459,10 +550,17 @@ export async function sendGuardianEvidence(
   if (!connection.did || !connection.theirDid) return 'noRelationship'
 
   const id = utils.uuid()
+  // The host goes ONLY with a K1 card: a phone on an older build refuses a payload carrying it, so a K0 card's payload
+  // stays exactly what earlier builds send and accept.
+  const k1 = k1Root()
+  const isK1Card = !!k1 && JSON.stringify([held.kels, held.creds]).includes(k1.aid)
+  const stateHost = isK1Card ? await heldGuardianStateHost(agent) : undefined
   const payload: GuardianEvidencePayload = {
     agent: agentDid,
     approver: approverDid,
     ...held,
+    // The host the card came with (K1 'fromCard'), so the person's phone fetches the state from the same one.
+    ...(stateHost ? { stateHost } : {}),
     sentAt: new Date().toISOString(),
   }
   const document: Record<string, unknown> = {
@@ -775,12 +873,19 @@ export async function handleGuardianEvidence(
     return dropped(agent, context.connectionId, 'it names no offer this phone sent on this connection')
 
   const evidence = evidenceOf(payload)
-  const verdict = await checkGuardianEvidenceResolving(evidence, await stateWardOf(agent), new Date(), (m) =>
-    warn(agent, m)
+  // The host the card came with, and only that: never this phone's Developer field, never a host from elsewhere.
+  const stateHost = typeof payload.stateHost === 'string' ? payload.stateHost : undefined
+  const verdict = await checkGuardianEvidenceResolving(
+    evidence,
+    await stateWardOf(agent),
+    new Date(),
+    (m) => warn(agent, m),
+    stateHost ? { stateHost } : {}
   )
   const guardian: GuardianOnAsk = {
     approver: payload.approver,
     evidence,
+    ...(stateHost ? { stateHost } : {}),
     receivedAt: new Date().toISOString(),
     verdict,
   }
@@ -861,8 +966,15 @@ async function verdictNow(
   const now = new Date()
   // A card naming a root that publishes at a did:webs is checked against what that root serves now, so it is never
   // memoised: the inputs below do not include the fetched history.
-  if (websRootsFor(guardian.evidence, trustedStateRoots()).length > 0)
-    return checkGuardianEvidenceResolving(guardian.evidence, ward, now, (m) => warn(agent, m), deps)
+  const stateHost = guardian.stateHost
+  if (
+    websRootsFor(guardian.evidence, trustedStateRoots(), stateHost).length > 0 ||
+    refusedCardHost(guardian.evidence, trustedStateRoots(), stateHost)
+  )
+    return checkGuardianEvidenceResolving(guardian.evidence, ward, now, (m) => warn(agent, m), {
+      ...deps,
+      ...(stateHost ? { stateHost } : {}),
+    })
   const inputs = checkInputs(guardian.evidence, ward)
   const last = lastChecks.get(recordId)
   if (last && last.inputs === inputs && stillCurrent(last.verdict, now)) return last.verdict
@@ -885,15 +997,20 @@ export function guardianSourceKey(
   | 'Approver.GuardianFetchedLiveAt'
   | 'Approver.GuardianFetchedRootLive'
   | 'Approver.GuardianFetchedRootLiveAt'
+  | 'Approver.GuardianFetchedFromCardHost'
+  | 'Approver.GuardianFetchedFromCardHostAt'
   | null {
   if (!standing.fetchedFrom) return null
+  // The host the approver's card names is said to be that: never "the state's record", whatever else was fetched.
+  if (standing.hostFromCard)
+    return standing.fetchedAt ? 'Approver.GuardianFetchedFromCardHostAt' : 'Approver.GuardianFetchedFromCardHost'
   if (standing.fetchedIssuers)
     return standing.fetchedAt ? 'Approver.GuardianFetchedLiveAt' : 'Approver.GuardianFetchedLive'
   return standing.fetchedAt ? 'Approver.GuardianFetchedRootLiveAt' : 'Approver.GuardianFetchedRootLive'
 }
 
 /** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
-function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
+function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence, stateHost?: string): GuardianStanding {
   if (verdict.ok === true)
     return {
       kind: 'verified',
@@ -902,9 +1019,10 @@ function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): Guard
       ...(verdict.fetchedFrom ? { fetchedFrom: verdict.fetchedFrom } : {}),
       ...(verdict.fetchedAt ? { fetchedAt: verdict.fetchedAt } : {}),
       ...(verdict.fetchedIssuers ? { fetchedIssuers: true as const } : {}),
+      ...(verdict.hostFromCard ? { hostFromCard: true as const } : {}),
     }
   if (verdict.reason === 'stateNotResolved')
-    return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
+    return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots(), stateHost)[0]?.name ?? '' }
   return { kind: 'unverified', outcome: verdict.reason }
 }
 
@@ -919,7 +1037,8 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
       a.fetchedFrom === b.fetchedFrom &&
       a.fetchedAt === b.fetchedAt &&
       // The screen reads it (which "fetched live" line), so a verdict differing only in it is written back.
-      a.fetchedIssuers === b.fetchedIssuers
+      a.fetchedIssuers === b.fetchedIssuers &&
+      a.hostFromCard === b.hostFromCard
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**
@@ -953,7 +1072,7 @@ export async function guardianStandings(
         .update(record)
         .catch((e: unknown) => warn(agent, `could not keep a new verdict: ${(e as Error)?.message ?? e}`))
     }
-    standings[beside] = standingOf(verdict, guardian.evidence)
+    standings[beside] = standingOf(verdict, guardian.evidence, guardian.stateHost)
   }
   return standings
 }
