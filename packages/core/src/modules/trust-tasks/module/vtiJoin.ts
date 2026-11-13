@@ -12,6 +12,7 @@
  * @module trust-tasks/module/vtiJoin
  */
 
+import { closeEndedHiddenApplications } from './vtiVetting'
 import { didPrefix } from './didPrefix'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import type { Agent } from '@credo-ts/core'
@@ -599,5 +600,7 @@ export async function leaveCommunity(
   await deps.communityStore
     .saveDeparture?.({ communityDid, personaDid: persona.did, disposition, at: new Date().toISOString() })
     .catch(() => undefined)
+  // After the departure is kept: it is what tells the sweep this identity left. Not waited for.
+  void closeEndedHiddenApplications(deps.agent)
   return { disposition, alreadyGone }
 }

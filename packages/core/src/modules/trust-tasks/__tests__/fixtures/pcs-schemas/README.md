@@ -51,6 +51,19 @@ not have.
 | `vetting-shared-hidden-vetting.schema.json`       | `specs/vetting/_shared/0.1/hidden-vetting.schema.json`      |
 | `framework-0.2.schema.json`                       | `specs/_framework/0.2/framework.schema.json`                |
 
+**Checked by hand, 2026-11-05.** The drift test above skips wherever no
+registry clone is present, CI included, so it is recorded here when it was last
+compared. All eight files in the table were byte-identical (`git show <commit>:<path>
+| cmp`) to registry commit `15b91d1f5ce15ead321636ab27e6e433c9d45796`, the one
+`PROVENANCE.sha` names. The delete payload schema was also compared with
+vta-service's own bundle at tag `vta-service-v0.69.1` (commit
+`3139e00ec202351dc253d89b5b4f9885d7ae071e`,
+`vti-specs-vta/trust-tasks/vta/pcs/applications/delete/0.1.bundle.json`): its
+`$id`, `type`, `required`, `additionalProperties`, `properties` and response
+definition are the same, and only the form of the `ext` reference differs (a
+relative path here, `#/$defs/Ext` inlined there). Re-check, and update this note,
+whenever these files or `PROVENANCE.sha` change.
+
 The flat names exist because the registry's cross-file `$ref`s are relative
 paths. The test registers each file under its own `$id` _and_ under the URL its
 siblings actually reach it by — which is not the same thing here: `pcs-engine`

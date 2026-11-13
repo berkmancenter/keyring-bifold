@@ -28,7 +28,10 @@ import {
   VerifyAttestationPayload,
   parametersToSend,
   pcsErrorCode,
+  pcsRefusalCode,
 } from '../module/pcsVtaPayloads'
+import { VtaNoAnswer } from '../module/VtaClient'
+import { VtiRefusal } from '../module/vtiAgent'
 
 const SCHEMA_DIR = join(__dirname, 'fixtures', 'pcs-schemas')
 
@@ -224,5 +227,25 @@ describe('the vendored schemas still match the registry', () => {
       'vetting-shared-hidden-vetting.schema.json': 'specs/vetting/_shared/0.1/hidden-vetting.schema.json',
       'framework-0.2.schema.json': 'specs/_framework/0.2/framework.schema.json',
     })
+  })
+})
+
+describe('a refusal is read however the client reports it (pcsRefusalCode)', () => {
+  it('reads the VtiRefusal the client throws, which carries no document', () => {
+    expect(pcsRefusalCode(new VtiRefusal('vta/pcs/applications/delete:notFound', 'gone'))).toBe(
+      'vta/pcs/applications/delete:notFound'
+    )
+  })
+
+  it('reads a trust-task-error document, on an error or bare', () => {
+    const code = 'vta/pcs/prove:noUsableAttestation'
+    expect(pcsRefusalCode(Object.assign(new Error('x'), { document: { payload: { code } } }))).toBe(code)
+    expect(pcsRefusalCode({ payload: { code } })).toBe(code)
+  })
+
+  it("never reads a task nobody answered as the agent's no", () => {
+    expect(pcsRefusalCode(new VtaNoAnswer('https://trusttasks.org/spec/vta/pcs/attest/0.1', 90000))).toBeUndefined()
+    expect(pcsRefusalCode(Object.assign(new Error('x'), { code: 'keyring/hidden-vetter:noAnswer' }))).toBeUndefined()
+    expect(pcsRefusalCode(undefined)).toBeUndefined()
   })
 })

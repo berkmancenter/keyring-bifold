@@ -35,7 +35,7 @@ import {
   PCS_ERROR,
   PCS_PROBE_APPLICATION_ID,
   PCS_VTA_TASK,
-  pcsErrorCode,
+  pcsRefusalCode,
   type ApplicationsCreatePayload,
   type PcsApplication,
   type ProvePayload,
@@ -2859,7 +2859,7 @@ export class VtaClient {
       // not credible, but it would still prove the task is implemented.
       return true
     } catch (error) {
-      const code = pcsErrorCode((error as { document?: unknown })?.document ?? error)
+      const code = pcsRefusalCode(error)
       if (code?.endsWith(':notFound') || code === 'notFound') return true
       if (code === PCS_ERROR.unsupportedType || code?.endsWith(':unsupportedType')) return false
       // `permissionDenied` is NOT evidence either way, however tempting it is.

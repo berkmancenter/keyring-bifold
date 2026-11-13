@@ -42,6 +42,7 @@ import { refusedAsNotOnAcl } from './VtaClient'
 import { KeyCopyUnavailable } from './EphemeralKeyManagementService'
 import { GenericRecordsTspPeerRevisionStore } from './vtiTsp'
 import {
+  closeEndedHiddenApplications,
   closeExpiredParkedRequests,
   GenericRecordsVettingStore,
   isVettingRequest,
@@ -112,6 +113,8 @@ export async function keepForPersona(
       // A removal ends what was gathered to join, too: joining again is a new
       // identity, and a new application (IN-104).
       if (outcome === 'removed') await vetting.forgetApplication(about).catch(() => undefined)
+      // Not waited for: the agent's answer doesn't hold up this message's acknowledgement.
+      if (outcome === 'removed') void closeEndedHiddenApplications(agent)
       if (outcome === 'removed' || outcome === 'acknowledged')
         DeviceEventEmitter.emit(VTI_PERSONA_DELIVERIES_EVENT, {
           communityDid: about,
@@ -164,6 +167,8 @@ export async function keepForPersona(
       // (vtc/members/vmc/0.1), from the community the card came from, not the one this identity was made for.
       const joined = new Set(got.filter((c) => c.kind === 'membership' && !onItsOwn.has(c)).map((c) => c.communityDid))
       for (const communityDid of joined) void reciprocateIfOwed(agent, community, target, communityDid)
+      // A join went through, so a private application behind it is over.
+      if (got.some((c) => c.kind === 'membership')) void closeEndedHiddenApplications(agent)
       const byCommunity = new Map<string, VtiReceivedCredential['kind'][]>()
       for (const c of got) {
         const about = c.kind === 'vetting-statement' ? target.communityDid : c.communityDid
@@ -291,6 +296,8 @@ export function startPersonaInbox(agent: Agent, options: PersonaInboxOptions): (
   })
   // A parked request's ticket can expire with the vetter never back at the desk.
   void closeExpiredParkedRequests(new GenericRecordsVettingStore(agent)).catch(() => undefined)
+  // What couldn't be closed at the agent last time, and any join decided since.
+  void closeEndedHiddenApplications(agent)
 
   const tick = async (): Promise<void> => {
     if (stopped) return

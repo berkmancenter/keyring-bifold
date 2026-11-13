@@ -18,7 +18,8 @@ import {
   startHiddenApplication,
   takeHiddenAttestation,
 } from '../module/hiddenVetting'
-import { parseAclEntries } from '../module/VtaClient'
+import { VtaNoAnswer, parseAclEntries } from '../module/VtaClient'
+import { VtiRefusal } from '../module/vtiAgent'
 import { HIDDEN_VETTING_SUITE, type HiddenAttestation, type PublishedConfig } from '../module/pcsVtaPayloads'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
@@ -518,3 +519,43 @@ describe('forgetting an application', () => {
 
 // The seam's own tests live in hiddenVettingAdapter.test.ts: the contract is
 // screens/hiddenVettingSeam.ts's, and this module no longer declares one.
+
+describe("the agent's refusals as the client throws them (a VtiRefusal, no document)", () => {
+  it('says an application the agent no longer holds is gone', async () => {
+    const { agent } = fakeAgent()
+    await start(agent, fakeClient())
+    const client = fakeClient({
+      showPcsApplication: async () => {
+        throw new VtiRefusal('vta/pcs/applications/show:notFound', 'no such application')
+      },
+    })
+    expect(await refreshHiddenApplication(agent, client, COMMUNITY)).toBe('gone')
+  })
+
+  it('does not call an application gone when the agent did not answer', async () => {
+    const { agent } = fakeAgent()
+    await start(agent, fakeClient())
+    const client = fakeClient({
+      showPcsApplication: async () => {
+        throw new VtaNoAnswer('https://trusttasks.org/spec/vta/pcs/applications/show/0.1', 30000)
+      },
+    })
+    await expect(refreshHiddenApplication(agent, client, COMMUNITY)).rejects.toBeInstanceOf(VtaNoAnswer)
+  })
+
+  it('reads too few attestations as progress at submission', async () => {
+    const { agent } = fakeAgent()
+    await start(agent, fakeClient())
+    const answer = await hiddenSubmissionExtensions(
+      agent,
+      fakeClient({
+        provePcs: async () => {
+          throw new VtiRefusal('vta/pcs/prove:noUsableAttestation', 'not enough')
+        },
+      }) as never,
+      COMMUNITY,
+      'challenge-from-the-community'
+    )
+    expect(answer).toBe(NOT_ENOUGH_YET)
+  })
+})

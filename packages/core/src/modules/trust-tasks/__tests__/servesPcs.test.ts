@@ -156,3 +156,29 @@ describe('the probe, only when discovery cannot answer', () => {
     expect(await client.servesPcs()).toBeUndefined()
   })
 })
+
+describe("the probe reads the client's own refusals", () => {
+  // The client throws a VtiRefusal, with no document; the tests above throw the document shape.
+  const refused = (code: string) => new VtiRefusal(code, code)
+
+  it('reads a notFound VtiRefusal on the probe as yes', async () => {
+    const { client } = clientWith(async (uri) => {
+      if (uri === DISCOVERY_TASK_03) throw refused('unsupportedType')
+      throw refused('vta/pcs/applications/show:notFound')
+    })
+    expect(await client.servesPcs()).toBe(true)
+  })
+
+  it('reads an unsupportedType VtiRefusal on the probe as no, and permissionDenied still either way', async () => {
+    expect(
+      await clientWith(async () => {
+        throw refused('unsupportedType')
+      }).client.servesPcs()
+    ).toBe(false)
+    expect(
+      await clientWith(async () => {
+        throw refused('permissionDenied')
+      }).client.servesPcs()
+    ).toBeUndefined()
+  })
+})

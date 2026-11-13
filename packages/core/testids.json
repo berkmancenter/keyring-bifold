@@ -1703,6 +1703,10 @@
     "VettingVouchStuck": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingVouchTokens": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingWithdrawButton": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirm": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirmCard": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawConfirmWords": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
+    "VettingWithdrawStay": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VettingYouVetFor": ["src/modules/trust-tasks/screens/VtiVetting.ids.ts"],
     "VrcFlowKeepOpen": ["src/screens/Chat.tsx"],
     "VtaClaim": ["src/modules/trust-tasks/screens/VtaClaim.ids.ts"],
@@ -2721,6 +2725,18 @@
     },
     {
       "src/modules/trust-tasks/screens/SuggestedAccessLabel.tsx": "testIdStem"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirm"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirmCard"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawConfirmWords"
+    },
+    {
+      "src/modules/trust-tasks/screens/VettingWithdrawConfirm.tsx": "VtiVettingIds.withdrawStay"
     },
     {
       "src/modules/trust-tasks/screens/VtaAgentHome.tsx": "VtaAgentHomeIds.addedCard"
