@@ -38,6 +38,7 @@ import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../guardian/k0RevokedTestCard'
 import * as stateRoots from '../guardian/stateRoots'
 import * as controller from '../holder/controller'
 import { GUARDIAN_CARD_TYPE, checkGuardianCard, receiveGuardianCard } from '../holder/receiveGuardianCard'
+import type { DesignationCheck, HostDesignation } from '../webs/designatedAliases'
 import { setDemoStateHost, websDidToFetch } from '../webs/demoStateHost'
 import { resetLiveResolutions } from '../webs/lastLive'
 
@@ -118,8 +119,10 @@ function state(down = false) {
 }
 
 /** The state's answer on whether it names a host (sedi/webs designatedAliases), as a row chooses it. */
-const named = (result: 'designated' | 'notDesignated' | 'unreachable' | 'badFile' = 'designated', why = result) =>
-  jest.fn(async () => ({ result, why }))
+const named = (result: HostDesignation, why: string) =>
+  jest.fn(async (): Promise<DesignationCheck> => ({ result, why }))
+/** The state names the host: the pair checkDesignation gives for a listed host. */
+const listed = () => named('designated', 'listed')
 
 const phone = () => {
   const genericRecords = fakeRecords()
@@ -212,7 +215,7 @@ describe("receiving a card from the office's link", () => {
     const r = await receiveGuardianCard(p.agent, CARD_URL, {
       fetchCard,
       fetch: fetch as never,
-      checkDesignation: named(),
+      checkDesignation: listed(),
     })
     expect(r).toMatchObject({
       kind: 'kept',
@@ -234,7 +237,7 @@ describe("receiving a card from the office's link", () => {
     const r = await checkGuardianCard(phone().agent, CARD_URL, {
       fetchCard: office(),
       fetch: fetch as never,
-      checkDesignation: named(),
+      checkDesignation: listed(),
     })
     expect(r).toMatchObject({ kind: 'checked', fetchedFrom: 'example.org' })
     expect(fetch.asked.some((u) => u.includes('typed.example.net'))).toBe(false)
@@ -267,7 +270,7 @@ describe("receiving a card from the office's link", () => {
     expect(fetchCard).not.toHaveBeenCalled()
     const other = `https://state.example.net/cards/${ID}.json`
     const fetch = state()
-    await checkGuardianCard(phone().agent, other, { fetchCard, fetch: fetch as never, checkDesignation: named() })
+    await checkGuardianCard(phone().agent, other, { fetchCard, fetch: fetch as never, checkDesignation: listed() })
     expect(fetchCard.asked).toEqual([other])
     expect(fetch.asked.length).toBeGreaterThan(0)
     expect(fetch.asked.every((u) => u.startsWith('https://state.example.net/'))).toBe(true)
@@ -311,7 +314,7 @@ describe("receiving a card from the office's link", () => {
       await receiveGuardianCard(p.agent, CARD_URL, {
         fetchCard: office(),
         fetch: fetch as never,
-        checkDesignation: named(),
+        checkDesignation: listed(),
       })
     ).toEqual({
       kind: 'notForThisPhone',
@@ -325,7 +328,7 @@ describe("receiving a card from the office's link", () => {
     const r = await receiveGuardianCard(p.agent, CARD_URL, {
       fetchCard: office(cardFile(K0_REVOKED_TEST_GUARDIAN_CARD)),
       fetch: state() as never,
-      checkDesignation: named(),
+      checkDesignation: listed(),
     })
     expect(r).toMatchObject({ kind: 'refused', reason: 'revoked' })
     expect(heldRecord(p)).toBeUndefined()
@@ -336,7 +339,7 @@ describe("receiving a card from the office's link", () => {
     const r = await receiveGuardianCard(p.agent, CARD_URL, {
       fetchCard: office(),
       fetch: state(true) as never,
-      checkDesignation: named(),
+      checkDesignation: listed(),
     })
     expect(r).toMatchObject({ kind: 'refused', reason: 'stateNotResolved' })
     expect(heldRecord(p)).toBeUndefined()
@@ -376,9 +379,9 @@ describe("the person's phone checks the card with the host it came with, and onl
       checkDesignation,
       ...(stateHost !== undefined ? { stateHost } : {}),
     })
-  let checkDesignation = named()
+  let checkDesignation = listed()
   beforeEach(() => {
-    checkDesignation = named()
+    checkDesignation = listed()
   })
 
   it('P01: the payload host: fetched there and labelled as the card host (hostFromCard), the field ignored', async () => {
@@ -531,13 +534,19 @@ describe("the card's host goes to the person's phone only with a K1 card", () =>
 
 describe('a host is fetched only if the state names it (its designated aliases, #1059)', () => {
   it('D01: at receipt, a link host the state does not name: hostNotNamed, nothing kept, no KEL fetched', async () => {
-    for (const result of ['notDesignated', 'badFile'] as const) {
+    for (const [result, why] of [
+      ['notDesignated', 'hostNotListed'],
+      ['notDesignated', 'notPublished'],
+      ['notDesignated', 'statusNotCurrent'],
+      ['notDesignated', 'badInput'],
+      ['badFile', 'stateNotVerified'],
+    ] as const) {
       const p = phone()
       const fetch = state()
       const r = await receiveGuardianCard(p.agent, CARD_URL, {
         fetchCard: office(),
         fetch: fetch as never,
-        checkDesignation: named(result),
+        checkDesignation: named(result, why),
       })
       expect(r).toEqual({ kind: 'hostNotNamed' })
       expect(fetch).not.toHaveBeenCalled()
@@ -587,7 +596,7 @@ describe('a host is fetched only if the state names it (its designated aliases, 
   )
 
   it('D05: designated: fetched live there, and named as a host the state names (control for D03)', async () => {
-    const designation = named()
+    const designation = listed()
     const v = await check(designation)
     expect(v).toMatchObject({ ok: true, fetchedFrom: 'example.org', hostFromCard: true })
     expect(v.ok === true && v.hostWithheld).toBeFalsy()
