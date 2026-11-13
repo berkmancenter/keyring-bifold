@@ -8,6 +8,12 @@
  * written on the agent without that confirmation. Cancelled at Face ID: nothing changes and the prompt stays. Not
  * now: hidden until the app starts again; Who approves still offers Add meanwhile. Written: the offer closes as written.
  *
+ * Known gap, shared with Who approves (ac's review, 11-13; a setTrustedApprovers backlog item): the whole trusted set
+ * is replaced from the rules read here, BEFORE Face ID. setTrustedApprovers checks the agent's version only after Face
+ * ID, so a change made on the agent during the Face ID window (an approver removed on another device) is overwritten
+ * by this snapshot, and the check below sees only that this contact is in, not that nobody else moved. The fix belongs
+ * in setTrustedApprovers (take the change, or the version this view was read at), not here.
+ *
  * Shown by ApproverOfferModal (one sheet at the root), after an open offer and a card question, only with trusted
  * approvers on and this phone linked to its agent (the rules live there).
  *
@@ -123,7 +129,7 @@ export const ApproverAddBody: React.FC<{ pending: ApproverToAdd; lockKind: Owner
     try {
       const state = await vtaAgent.trustedApprovers(agent)
       const rules = nextTrustedRules(state.view, ask)
-      // Face ID is asked inside, before anything is written.
+      // Face ID is asked inside, before anything is written; the set written is this read's (see the module's known gap).
       const written = await vtaAgent.setTrustedApprovers(agent, rules.approvers, rules.keys)
       if (!written.view.approvers.includes(ask.acceptedAs)) throw new Error('the rules came back without them')
       await closeRoleOffer(agent, ask.connectionId, true)

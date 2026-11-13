@@ -12,6 +12,9 @@
  * kept no for this contact shows it off. Accept keeps the switch's answer (cardConsents, guardianEvidence.ts) once Face
  * ID is confirmed and before the yes is sent, so the yes then sends the card or doesn't, and asks nothing more. No and
  * Not now keep nothing. If keeping the answer fails, the yes still goes and the card falls back to the question below.
+ * If the yes then fails to send, the kept answer has no reader: respondToRoleOffer sends before it records the offer
+ * as answered, so `approvingFor` never lists it and no card line shows, and the card is sent only after a yes is both
+ * sent and kept. On a retry the switch shows the kept answer.
  *
  * After a yes, if this phone holds a state Guardian card and its person was never asked about this contact (a yes from
  * a build before the switch, or one whose answer was not kept), the same sheet asks once: "Also send your Guardian card
@@ -214,9 +217,11 @@ const ApproverOfferModal: React.FC = () => {
     setPrompt(firstShown())
   }, [prompt])
 
-  // An offer comes first; a card question shows when no offer is open, and only with state-verified approvers on.
+  // One sheet at a time, ranked by who is waiting: an open offer first (someone else is blocked on this phone's answer),
+  // then a card question (a follow-up to a yes already given), then a yes to add (nobody waits on it). Each mode needs
+  // the ones above it empty, so no two show at once. The card question only with state-verified approvers on.
   const asking = !prompt && question && isStateVerifiedApproversEnabled() ? question : undefined
-  // Then, on the asking phone, a contact's yes to add (Q4 (a)).
+  // On the asking phone, a contact's yes to add (Q4 (a)).
   const adding = !prompt && !asking ? toAdd : undefined
   if (!on || (!prompt && !asking && !adding)) return null
 
