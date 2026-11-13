@@ -21,6 +21,7 @@ import {
 import {
   GUARDIAN_EVIDENCE_HELD,
   checkGuardianEvidenceResolving,
+  cardToShare,
   handleGuardianEvidence,
   heldGuardianStateHost,
   holdGuardianEvidence,
@@ -626,5 +627,38 @@ describe("on the person's phone, the host is read from 0.2 only", () => {
     const { consume, guardian } = await arrive(GUARDIAN_EVIDENCE_TYPE_URI)
     expect((consume.mock.calls[0] as unknown[])[1]).toMatchObject({ spec: GUARDIAN_EVIDENCE_SPEC })
     expect(guardian?.stateHost).toBeUndefined()
+  })
+})
+
+describe("the sender's line after a K1 (0.2) send", () => {
+  const LANGS = ['en/en', 'fr/fr', 'pt-br/pt-br'] as const
+  const line = (lang: (typeof LANGS)[number]) =>
+    (
+      JSON.parse(readFileSync(join(__dirname, '..', '..', '..', 'localization', `${lang}.json`), 'utf8')) as {
+        Approver: Record<string, string>
+      }
+    ).Approver
+
+  it('N01: a K1 card is marked k1 for its line; a K0 card is not (it keeps the old line)', async () => {
+    const p = phone()
+    await holdGuardianEvidence(p.agent, K0_TEST_GUARDIAN_CARD)
+    expect(await cardToShare(p.agent)).toMatchObject({ k1: true })
+    stateRoots.k1SettingsForTests.reset()
+    expect((await cardToShare(p.agent))?.k1).toBeUndefined()
+  })
+
+  it('N02: the line never claims receipt, in any language: it says it was sent, and what an older Keyring does', () => {
+    expect(line('en/en').CardSentToK1).toBe(
+      "Sent to {{asker}}. If their Keyring is older than this one, it won't show the card."
+    )
+    const claims: Record<(typeof LANGS)[number], RegExp> = {
+      'en/en': /receiv|deliver|arriv|got it|has it|reached/i,
+      'fr/fr': /reçu|livr|arriv|parvenu/i,
+      'pt-br/pt-br': /receb|entreg|cheg/i,
+    }
+    for (const lang of LANGS) {
+      expect(line(lang).CardSentToK1).toMatch(/\{\{asker\}\}/)
+      expect(line(lang).CardSentToK1).not.toMatch(claims[lang])
+    }
   })
 })

@@ -3844,7 +3844,8 @@
     "GuardianFetchedFromCardHostAt": "Fetched live from {{host}}, a host the state names, at {{time}}; {{host}} can't be reached right now.",
     "GuardianHostNotNamed": "The state doesn't name {{host}}, so this card was checked against its own copy.",
     "GuardianHostUnchecked": "Couldn't check that the state names {{host}}, so this card was checked against its own copy.",
-    "NeedsNewerKeyring": "{{name}}'s phone needs the newer Keyring to receive this card."
+    "NeedsNewerKeyring": "{{name}}'s phone needs the newer Keyring to receive this card.",
+    "CardSentToK1": "Sent to {{asker}}. If their Keyring is older than this one, it won't show the card."
   },
   "StateCard": {
     "Kind": "Guardian",

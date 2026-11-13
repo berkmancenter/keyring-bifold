@@ -3718,7 +3718,8 @@
     "GuardianFetchedFromCardHostAt": "Obtido ao vivo de {{host}}, um host que o estado indica, às {{time}}; {{host}} não pode ser alcançado agora.",
     "GuardianHostNotNamed": "O estado não indica {{host}}, então este cartão foi verificado com a própria cópia.",
     "GuardianHostUnchecked": "Não foi possível verificar se o estado indica {{host}}, então este cartão foi verificado com a própria cópia.",
-    "NeedsNewerKeyring": "O telefone de {{name}} precisa do Keyring mais novo para receber este cartão."
+    "NeedsNewerKeyring": "O telefone de {{name}} precisa do Keyring mais novo para receber este cartão.",
+    "CardSentToK1": "Enviado para {{asker}}. Se o Keyring dessa pessoa for mais antigo que este, o cartão não vai aparecer."
   },
   "StateCard": {
     "Kind": "Responsável",
