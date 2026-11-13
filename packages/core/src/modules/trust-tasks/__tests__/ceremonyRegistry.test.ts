@@ -253,6 +253,9 @@ describe('guardian-evidence versions on arrival (0.1 for a K0 card, 0.2 for a K1
   const V1 = 'https://keyring.appliedtechnologylab.org/spec/approver/guardian-evidence/0.1'
   const V2 = 'https://keyring.appliedtechnologylab.org/spec/approver/guardian-evidence/0.2'
   const V3 = 'https://keyring.appliedtechnologylab.org/spec/approver/guardian-evidence/0.3'
+  /** The fake agent's logger, typed: makeFakeAgent hands its agent back as `never`. */
+  const infoOf = (fake: ReturnType<typeof makeFakeAgent>) =>
+    (fake.agent as unknown as { config: { logger: { info: jest.Mock } } }).config.logger.info
   const doc = (type: string) => ({
     id: 'doc-ge',
     type,
@@ -278,7 +281,7 @@ describe('guardian-evidence versions on arrival (0.1 for a K0 card, 0.2 for a K1
       theirDid: 'did:peer:4zzz',
     })
     expect(fake.sentMessages).toHaveLength(0)
-    expect(fake.agent.config.logger.info).toHaveBeenCalledWith(expect.stringContaining(V3))
+    expect(infoOf(fake)).toHaveBeenCalledWith(expect.stringContaining(V3))
   })
 
   test('OLD-PHONE PIN (278.18): a 0.1-only reader given a guardian-evidence/0.2 document refuses it by its TYPE (unhandled, retained), never as a schema failure, and answers nothing', async () => {
@@ -296,9 +299,7 @@ describe('guardian-evidence versions on arrival (0.1 for a K0 card, 0.2 for a K1
     })
     // Refused by type: the unhandled-type line names the URI; no payload was validated, so no schema refusal, and the
     // sender is told nothing (the reason a sender can only ever say "may need updating", never "needs").
-    expect(fake.agent.config.logger.info).toHaveBeenCalledWith(
-      expect.stringContaining(`unhandled trust-task type ${V2}`)
-    )
+    expect(infoOf(fake)).toHaveBeenCalledWith(expect.stringContaining(`unhandled trust-task type ${V2}`))
     expect(fake.sentMessages).toHaveLength(0)
   })
 })
