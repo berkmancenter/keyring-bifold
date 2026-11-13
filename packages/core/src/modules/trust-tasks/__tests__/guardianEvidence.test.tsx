@@ -1606,7 +1606,9 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
     }
     const switchOf = (tree: ReturnType<typeof render>) => tree.queryByTestId(testIdWithKey(ApproverOfferIds.cardSwitch))
     const yesSent = () =>
-      sent.filter((d) => d.type.includes('role-offer') && (d.payload as { decision?: string }).decision === 'accepted')
+      sent.filter(
+        (d) => String(d.type).includes('role-offer') && (d.payload as { decision?: string }).decision === 'accepted'
+      )
 
     test('on by default, naming the state: Accept keeps a yes and sends the card with the yes, and asks nothing more', async () => {
       const jordan = await jordanWithCard()
