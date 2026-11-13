@@ -4,7 +4,9 @@
  * rows render through the mock `t` that returns the key, so they could not see it; these render real i18next.
  *
  * The scan below is a net, not a proof: it reads `t('Key')` and `t(cond ? 'A' : 'B')` calls with no second argument,
- * so a key built at run time, or one passed through a variable, escapes it.
+ * so a key built at run time, or one passed through a variable, escapes it. Its root is all of core's src, not only
+ * the modules. The rows render the tree's strings, never its props: a placeholder in an accessibilityLabel is left to
+ * the scan.
  */
 import { render } from '@testing-library/react-native'
 import fs from 'fs'
@@ -90,8 +92,22 @@ describe.each(Object.keys(LOCALES))('the request card, in %s', (lng) => {
   })
 })
 
-describe('every t() call in the modules that leaves a {{…}} unfilled', () => {
-  const MODULES = path.resolve(__dirname, '../..')
+describe("every t() call in core's src that leaves a {{…}} unfilled", () => {
+  const SRC = path.resolve(__dirname, '../../..')
+  /**
+   * Read raw on purpose: dateWords() takes these as format templates and localDay's own formatter fills them. Exact
+   * file and keys, so a new one-argument call elsewhere in that file is still caught.
+   */
+  const TEMPLATES: Record<string, string[]> = {
+    [path.join('utils', 'localDay.ts')]: [
+      'Chat.Dates.ThisYear',
+      'Chat.Dates.OtherYear',
+      'Chat.Dates.DayMonth',
+      'Chat.Dates.DateTime',
+      'Chat.Dates.Time12',
+      'Chat.Dates.Time24',
+    ],
+  }
   const lookup = (key: string): unknown =>
     key
       .split('.')
@@ -136,16 +152,28 @@ describe('every t() call in the modules that leaves a {{…}} unfilled', () => {
     })
   }
 
-  it('finds none', () => {
-    const unfilled = sources(MODULES).flatMap((file) =>
+  /** Every one-argument call whose English has a placeholder, as { file (relative to src), line, key }. */
+  const unfilledCalls = () =>
+    sources(SRC).flatMap((file) =>
       oneArgCalls(fs.readFileSync(file, 'utf8')).flatMap(({ line, arg }) =>
         [...arg.matchAll(/'([A-Za-z][\w.]+)'/g)]
           .map((k) => k[1])
           .filter((key) => /\{\{/.test(String(lookup(key) ?? '')))
-          .map((key) => `${path.relative(MODULES, file)}:${line} ${key}`)
+          .map((key) => ({ file: path.relative(SRC, file), line, key }))
       )
     )
+
+  it('finds none outside the date templates', () => {
+    const unfilled = unfilledCalls()
+      .filter(({ file, key }) => !TEMPLATES[file]?.includes(key))
+      .map(({ file, line, key }) => `${file}:${line} ${key}`)
     expect(unfilled).toEqual([])
+  })
+
+  it('control: the scan reaches beyond the modules, and every date template it lets pass is still there', () => {
+    const found = unfilledCalls()
+    for (const [file, keys] of Object.entries(TEMPLATES))
+      expect(found.filter((c) => c.file === file).map((c) => c.key)).toEqual(keys)
   })
 
   it('control: the scan sees a one-argument call with a placeholder, a ternary one, and lets a filled one pass', () => {
