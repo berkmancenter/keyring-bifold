@@ -760,10 +760,14 @@ function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true } {
 }
 
 /** The card this phone could share, and the state it is from: none with either switch off or no card held. */
-/** Whether a card is K1's (a state office's): it names K1's root. Such a card goes as guardian-evidence/0.2. */
+/**
+ * Whether a card is K1's (a state office's), for the wire version only: K1's root AID present among the KELs the card
+ * carries. That is presence in a carried KEL, not proof of issuance (the check decides that). Credentials are not read:
+ * a K0 card whose credentials mention K1's AID still goes as 0.1. Such a card goes as guardian-evidence/0.2.
+ */
 export function isK1Card(evidence: GuardianEvidence): boolean {
   const k1 = k1Root()
-  return !!k1 && JSON.stringify([evidence.kels, evidence.creds]).includes(k1.aid)
+  return !!k1 && evidence.kels.some((kel) => kel.includes(k1.aid))
 }
 
 /**

@@ -480,6 +480,33 @@ describe("the card's host goes to the person's phone only with a K1 card", () =>
     expect((sent[0].payload as { stateHost?: string }).stateHost).toBe('example.org')
   })
 
+  it("X03: a K0 card whose CREDENTIALS mention K1's AID still goes as 0.1, byte-identical (only a carried KEL counts)", async () => {
+    // K1 is somewhere else (its own root), so the card's KELs never carry it; one credential text mentions it.
+    stateRoots.k1SettingsForTests.reset()
+    const k1 = stateRoots.K1_ROOT_AID
+    const last = K0_TEST_GUARDIAN_CARD.creds.length - 1
+    const card = {
+      ...K0_TEST_GUARDIAN_CARD,
+      creds: K0_TEST_GUARDIAN_CARD.creds.map((cred, i) => (i === last ? `${cred}${k1}` : cred)),
+    }
+    expect(card.kels.some((kel) => kel.includes(k1))).toBe(false)
+    expect(card.creds.some((cred) => cred.includes(k1))).toBe(true)
+    const j = jordan()
+    await holdGuardianEvidence(j.agent, card, { stateHost: 'example.org' })
+    expect(await sendGuardianEvidence(j.agent, 'c1', 'did:webvh:a.example', 'did:peer:2.b')).toBe('sent')
+    expect(sent[0].type).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
+    expect(Object.keys(sent[0].payload as object).sort()).toEqual([
+      'agent',
+      'approver',
+      'creds',
+      'guardianSaid',
+      'holder',
+      'kels',
+      'sentAt',
+      'tels',
+    ])
+  })
+
   it('X02: a K0 card goes as 0.1 with NO stateHost, exactly what 278.18 sends, even if a host were kept with it', async () => {
     // A K0 card: K1 is somewhere else, so the card does not name K1's root.
     stateRoots.k1SettingsForTests.reset()
