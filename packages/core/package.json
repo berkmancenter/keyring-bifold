@@ -280,7 +280,7 @@
     "@noble/ciphers": "^2.0.0",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
-    "@openvtc/trust-tasks": "^0.27.8",
+    "@openvtc/trust-tasks": "^0.28.1",
     "@openwallet-foundation/askar-react-native": "0.6.0",
     "@openwallet-foundation/askar-shared": "0.6.0",
     "@types/base-64": "^1.0.2",
