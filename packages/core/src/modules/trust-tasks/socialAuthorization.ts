@@ -1,7 +1,7 @@
 /**
  * The Social Authorization (S2, trusted-approver plan stage 2): the guardian's phone, holding a Guardian card the
  * state issued to ITS OWN holder AID (sedi/holder/controller), issues the person it cares for (the card's own ward) an
- * authorization chained to that card, and sends it with the card (guardian-evidence/0.1's optional `social`). The
+ * authorization chained to that card, and sends it with the card (guardian-evidence/0.2, its optional `social` naming it). The
  * person's phone checks it (sedi/guardian verifySocialAuthorization) under the Guardian card's own live verdict, so a
  * card the state revokes takes the authorization with it.
  *
@@ -47,7 +47,7 @@ export const SOCIAL_AUTHORIZATION = 'keyring.sedi-social-authorization'
 /** How long an authorization runs, at most: the Guardian card's own expiry cuts it shorter. */
 export const SOCIAL_AUTHORIZATION_DAYS = 30
 
-/** What travels with the card (guardian-evidence/0.1 `social`): the S2, the guardian's KEL, its registry. */
+/** What goes with the card (in guardian-evidence/0.2's lists, named by its `social`): the S2, its registry, the guardian's KEL. */
 export interface SocialMaterial {
   said: string
   /** The guardian's own KEL (CESR text): its holder AID, with the events that anchor the registry. */
@@ -240,9 +240,60 @@ export async function revokeSocialAuthorization(
   return 'revoked'
 }
 
-/** The bytes the cap reads for the `social` member. */
-export const socialBytes = (social: SocialMaterial | undefined): number =>
-  social ? te.encode(JSON.stringify(social)).length : 0
+/**
+ * The card as it goes with its authorization (guardian-evidence/0.2, whose `social` member names only its SAID): the
+ * S2 proof, its registry and the guardian's own KEL appended to the card's own lists. Any copy of the holder's KEL the
+ * card carried is replaced by the one sent with the authorization (the newest): two KELs for one prefix are refused.
+ */
+export function withSocial(card: GuardianEvidence, social: SocialMaterial): GuardianEvidence {
+  return {
+    guardianSaid: card.guardianSaid,
+    holder: card.holder,
+    kels: [...card.kels.filter((k) => prefixOf(k) !== card.holder), social.kel],
+    tels: [...card.tels, social.tel],
+    creds: [...card.creds, social.cred],
+  }
+}
+
+const sadOf = (proof: string): Sad | undefined => {
+  try {
+    return JSON.parse(proof.slice(0, proof.lastIndexOf('}') + 1)) as Sad
+  } catch {
+    return undefined
+  }
+}
+
+const ripSaidOf = (ripText: string): string | undefined => {
+  try {
+    return (JSON.parse(ripText) as { d?: string }).d
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The reverse, on the person's phone: the card's own evidence, and the authorization named `said` taken out of it (its
+ * proof by its SAID, its registry by the proof's `rd`, its issuer's KEL by the proof's issuer). The card is always
+ * returned without them, so its own check never reads (or fetches) the guardian's KEL. `material` is undefined when
+ * any of the three is not there: the authorization is then refused as incomplete, never checked from part of it.
+ */
+export function splitSocial(
+  evidence: GuardianEvidence,
+  said: string
+): { card: GuardianEvidence; material?: SocialMaterial } {
+  const cred = evidence.creds.find((c) => sadOf(c)?.d === said)
+  const sad = cred ? sadOf(cred) : undefined
+  const tel = sad?.rd ? evidence.tels.find((t) => ripSaidOf(t.ripText) === sad.rd) : undefined
+  const kel = sad?.i ? evidence.kels.find((k) => prefixOf(k) === sad.i) : undefined
+  const card: GuardianEvidence = {
+    guardianSaid: evidence.guardianSaid,
+    holder: evidence.holder,
+    kels: evidence.kels.filter((k) => k !== kel),
+    tels: evidence.tels.filter((t) => t !== tel),
+    creds: evidence.creds.filter((c) => c !== cred),
+  }
+  return cred && tel && kel ? { card, material: { said, kel, tel, cred } } : { card }
+}
 
 /**
  * What the person's phone keeps about an authorization. `ok: true` only from verifySocialAuthorization's valid

@@ -19,7 +19,12 @@ import { K0_TEST_GUARDIAN_CARD } from '../../sedi/guardian/k0TestCard'
 import { HOLDER_IDENTITY } from '../../sedi/holder/controller'
 import { TestController, revoke, testState } from '../../sedi/__tests__/fixtures/keriTestKit'
 import * as approverRole from '../approverRole'
-import { GUARDIAN_EVIDENCE_SPEC, GUARDIAN_EVIDENCE_TYPE_URI, type GuardianEvidencePayload } from '../approverRoleSpec'
+import {
+  GUARDIAN_EVIDENCE_TYPE_URI,
+  GUARDIAN_EVIDENCE_V2_SPEC,
+  GUARDIAN_EVIDENCE_V2_TYPE_URI,
+  type GuardianEvidencePayload,
+} from '../approverRoleSpec'
 import {
   approverCardStandings,
   handleGuardianEvidence,
@@ -40,6 +45,8 @@ import {
   checkSocialAuthorization,
   revokeSocialAuthorization,
   socialMaterialFor,
+  splitSocial,
+  withSocial,
 } from '../socialAuthorization'
 import {
   blindedState,
@@ -160,10 +167,10 @@ async function jordanWithCard(state = testState(), opts: { ward?: TestController
 
 const context = { connectionId: CONN, recipientDid: 'did:peer:me', senderDid: 'did:peer:them' } as never
 const schemaTakes = (payload: unknown) =>
-  trustTaskPayloadValidator.validate(GUARDIAN_EVIDENCE_SPEC.payloadSchema, payload) === true
+  trustTaskPayloadValidator.validate(GUARDIAN_EVIDENCE_V2_SPEC.payloadSchema, payload) === true
 
 /** Sam's phone, its ward set, Jordan's yes written on the agent, and the payload Jordan's phone sent arriving. */
-async function samReceives(payload: GuardianEvidencePayload, ward: string) {
+async function samReceives(payload: GuardianEvidencePayload, ward: string, type = lastType()) {
   const sam = phone()
   await setStateWard(sam.agent, ward)
   ;(sam.agent as { genericRecords: { save: (r: unknown) => Promise<void> } }).genericRecords.save({
@@ -183,7 +190,7 @@ async function samReceives(payload: GuardianEvidencePayload, ward: string) {
   })
   const document = {
     id: 'doc-1',
-    type: GUARDIAN_EVIDENCE_TYPE_URI,
+    type,
     threadId: 'doc-1',
     issuer: 'did:peer:them',
     recipient: 'did:peer:me',
@@ -195,6 +202,14 @@ async function samReceives(payload: GuardianEvidencePayload, ward: string) {
 }
 
 const lastPayload = () => sent[sent.length - 1].payload as GuardianEvidencePayload
+const lastType = () => (sent[sent.length - 1]?.type as string | undefined) ?? GUARDIAN_EVIDENCE_TYPE_URI
+/** The authorization the last send carried, taken out of its lists as the person's phone does. */
+const lastSocial = () => splitSocial({ ...lastPayload() } as GuardianEvidence, lastPayload().social!.said).material!
+/** A payload with the authorization (and its parts) left out: what a send without one carries. */
+const withoutSocial = (payload: GuardianEvidencePayload) => {
+  const { social: _s, ...rest } = payload
+  return { ...rest, ...splitSocial({ ...payload } as GuardianEvidence, payload.social!.said).card }
+}
 
 const allOn = () => {
   setTrustedApproversEnabled(true)
@@ -219,6 +234,7 @@ describe("Jordan's phone: the authorization goes with a card issued to it, and o
     await holdGuardianEvidence(jordan.agent, K0_TEST_GUARDIAN_CARD)
     expect(await sendGuardianEvidence(jordan.agent, CONN, SAM_AGENT, JORDAN)).toBe('sent')
     expect(Object.keys(lastPayload())).toEqual(OLD_MEMBERS)
+    expect(lastType()).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
     expect(jordan.of(HOLDER_IDENTITY)).toHaveLength(0)
     expect(jordan.of(SOCIAL_AUTHORIZATION)).toHaveLength(0)
   })
@@ -228,6 +244,7 @@ describe("Jordan's phone: the authorization goes with a card issued to it, and o
     await holdGuardianEvidence(jordan.agent, K0_TEST_GUARDIAN_CARD)
     expect(await sendGuardianEvidence(jordan.agent, CONN, SAM_AGENT, JORDAN)).toBe('sent')
     expect(Object.keys(lastPayload())).toEqual(OLD_MEMBERS)
+    expect(lastType()).toBe(GUARDIAN_EVIDENCE_TYPE_URI)
     expect(holder.anchored).toHaveLength(0)
   })
 
@@ -236,7 +253,14 @@ describe("Jordan's phone: the authorization goes with a card issued to it, and o
     expect(await sendGuardianEvidence(jordan.agent, CONN, SAM_AGENT, JORDAN)).toBe('sent')
     const payload = lastPayload()
     expect(Object.keys(payload)).toEqual([...OLD_MEMBERS, 'social'])
+    expect(lastType()).toBe(GUARDIAN_EVIDENCE_V2_TYPE_URI)
+    expect(payload.social).toEqual({ said: expect.any(String) })
     expect(schemaTakes(payload)).toBe(true)
+    // Its proof, its registry and the guardian's KEL ride in the card's own lists, after the card's.
+    expect(payload.creds).toHaveLength(4)
+    expect(payload.tels).toHaveLength(4)
+    expect(payload.kels).toHaveLength(4)
+    expect(payload.kels[3]).toBe(holder.kel)
     expect(holder.anchored).toHaveLength(1)
     const [rip, issued] = holder.anchored[0]
     expect(rip).toMatchObject({ s: '0' })
@@ -286,6 +310,7 @@ describe("Jordan's phone: the authorization goes with a card issued to it, and o
     jest.spyOn(holder.api, 'appendInteraction').mockRejectedValueOnce(new Error('key store busy'))
     expect(await sendGuardianEvidence(jordan.agent, CONN, SAM_AGENT, JORDAN)).toBe('sent')
     expect(Object.keys(lastPayload())).toEqual(OLD_MEMBERS)
+    expect(lastPayload().creds).toHaveLength(3)
     expect(jordan.warn.mock.calls.map(String).join()).toMatch(/no authorization sent with the card/)
   })
 })
@@ -308,8 +333,11 @@ describe("Sam's phone: the authorization checked under the card's own verdict", 
 
   test('an older payload (no authorization): the card shows as before, with no authorization entry', async () => {
     const { payload, sam } = await sent1()
-    const { social: _omit, ...old } = payload
-    const phoneOfSam = await samReceives(old as GuardianEvidencePayload, sam.aid)
+    const phoneOfSam = await samReceives(
+      withoutSocial(payload) as GuardianEvidencePayload,
+      sam.aid,
+      GUARDIAN_EVIDENCE_TYPE_URI
+    )
     const { cards, social } = await approverCardStandings(phoneOfSam.agent)
     expect(cards[JORDAN]).toMatchObject({ kind: 'verified' })
     expect(social).toEqual({})
@@ -327,9 +355,12 @@ describe("Sam's phone: the authorization checked under the card's own verdict", 
     const setup = await jordanWithCard()
     mockRoots = [{ aid: setup.state.root.aid, name: 'Test State', demo: true }]
     await sendGuardianEvidence(setup.jordan.agent, CONN, SAM_AGENT, JORDAN)
-    const social = lastPayload().social!
+    const material = lastSocial()
     revoke(setup.g)
-    const revoked = { ...lastPayload(), ...setup.state.evidenceOf(setup.g), social }
+    const revoked = {
+      ...lastPayload(),
+      ...withSocial(setup.state.evidenceOf(setup.g) as GuardianEvidence, material),
+    }
     const phoneOfSam = await samReceives(revoked, setup.sam.aid)
     const standings = await approverCardStandings(phoneOfSam.agent)
     expect(standings.cards[JORDAN]).toMatchObject({ kind: 'unverified', outcome: 'revoked' })
@@ -353,26 +384,46 @@ describe("Sam's phone: the authorization checked under the card's own verdict", 
     expect(standings.social[JORDAN]).toEqual({ kind: 'refused', outcome: 'revoked' })
   })
 
-  test('an authorization standing on another card (or edited) is refused, the card still checks out', async () => {
+  test('naming an authorization the lists do not carry: refused as incomplete, never checked from part of it', async () => {
     const { payload, sam } = await sent1()
-    const edited = { ...payload, social: { ...payload.social!, said: payload.guardianSaid } }
+    const edited = { ...payload, social: { said: 'E' + 'A'.repeat(43) } }
     const phoneOfSam = await samReceives(edited, sam.aid)
     const standings = await approverCardStandings(phoneOfSam.agent)
     expect(standings.cards[JORDAN]).toMatchObject({ kind: 'verified' })
-    expect(standings.social[JORDAN]).toEqual({ kind: 'refused', outcome: 'notThisAuthorization' })
+    expect(standings.social[JORDAN]).toEqual({ kind: 'refused', outcome: 'socialIncomplete' })
+  })
+
+  test('`social` naming the CARD itself fails closed: the card loses its own credential, nothing is admitted', async () => {
+    const { payload, sam } = await sent1()
+    const phoneOfSam = await samReceives({ ...payload, social: { said: payload.guardianSaid } }, sam.aid)
+    const standings = await approverCardStandings(phoneOfSam.agent)
+    expect(standings.cards[JORDAN]).toMatchObject({ kind: 'unverified' })
+    expect(standings.social[JORDAN]).toMatchObject({ kind: 'refused' })
+  })
+
+  test('the authorization edited after issuing (its credential swapped for another): refused, the card checks out', async () => {
+    const { payload, sam } = await sent1()
+    const m = splitSocial({ ...payload } as GuardianEvidence, payload.social!.said)
+    const tampered = m.material!.cred.split(sam.aid).join(new TestController().aid)
+    const lists = withSocial(m.card, { ...m.material!, cred: tampered })
+    const phoneOfSam = await samReceives({ ...payload, ...lists }, sam.aid)
+    const standings = await approverCardStandings(phoneOfSam.agent)
+    expect(standings.cards[JORDAN]).toMatchObject({ kind: 'verified' })
+    expect(standings.social[JORDAN]).toMatchObject({ kind: 'refused' })
+    expect(standings.social[JORDAN]).not.toMatchObject({ underCard: true })
   })
 
   test('the card refused LIVE while its own copy is fine: the authorization is refused under it, never admitted', async () => {
     const { payload, sam } = await sent1()
-    const evidence = { ...payload } as GuardianEvidence
+    const { card: evidence, material } = splitSocial({ ...payload } as GuardianEvidence, payload.social!.said)
     // Control: under a card that checks out, it does.
     const ok = { ok: true as const, root: mockRoots[0].aid, state: 'Test State', checkedAt: '' }
-    expect(checkSocialAuthorization(evidence, payload.social!, sam.aid, ok, new Date(), jest.fn())).toMatchObject({
+    expect(checkSocialAuthorization(evidence, material!, sam.aid, ok, new Date(), jest.fn())).toMatchObject({
       ok: true,
     })
     // The state's published record shows the card revoked; the copy it carries does not.
     const live = { ok: false as const, reason: 'revokedInIssuerRecord', detail: 'published', checkedAt: '' }
-    expect(checkSocialAuthorization(evidence, payload.social!, sam.aid, live, new Date(), jest.fn())).toMatchObject({
+    expect(checkSocialAuthorization(evidence, material!, sam.aid, live, new Date(), jest.fn())).toMatchObject({
       ok: false,
       reason: 'revokedInIssuerRecord',
       underCard: true,
@@ -473,11 +524,11 @@ describe('Who approves: one honest line for the authorization', () => {
     mockRoots = [{ aid: setup.state.root.aid, name: 'Test State', demo: true }]
     await sendGuardianEvidence(setup.jordan.agent, CONN, SAM_AGENT, JORDAN)
     const payload = lastPayload()
-    const { social: _s, ...old } = payload
-    const edited = { ...payload, social: { ...payload.social!, said: payload.guardianSaid } }
+    const edited = { ...payload, social: { said: 'E' + 'A'.repeat(43) } }
     return samReceives(
-      (opts.strip ? old : opts.edited ? edited : payload) as GuardianEvidencePayload,
-      opts.otherWard ? new TestController().aid : setup.sam.aid
+      (opts.strip ? withoutSocial(payload) : opts.edited ? edited : payload) as GuardianEvidencePayload,
+      opts.otherWard ? new TestController().aid : setup.sam.aid,
+      opts.strip ? GUARDIAN_EVIDENCE_TYPE_URI : GUARDIAN_EVIDENCE_V2_TYPE_URI
     )
   }
 

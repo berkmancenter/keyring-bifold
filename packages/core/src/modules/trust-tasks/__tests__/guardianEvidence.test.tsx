@@ -406,7 +406,8 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
   ])('%s: a release trusts no root even with the setting on (control: all on, the K0 root)', (_, off) => {
     asBuild(false)
     setTrustTestStateEnabled(true)
-    expect(stateRoots.trustedStateRoots()).toEqual([stateRoots.K0_TEST_ROOT])
+    // All on: the K0 root, and K1 (the state office's root, trusted with both switches on, no setting needed).
+    expect(stateRoots.trustedStateRoots()).toEqual([stateRoots.K0_TEST_ROOT, stateRoots.k1Root()])
     off()
     expect(stateRoots.trustedStateRoots()).toEqual([])
   })
