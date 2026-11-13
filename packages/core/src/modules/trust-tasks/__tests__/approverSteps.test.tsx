@@ -4,11 +4,13 @@
  * can't know yet is "not yet", never "done", and a card check that failed is never "no card".
  */
 import { act, render } from '@testing-library/react-native'
+import i18next from 'i18next'
 import React from 'react'
 
 import { useAgent } from '@bifold/react-hooks'
 
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
+import en from '../../../localization/en/en.json'
 import { testIdWithKey } from '../../../utils/testable'
 import * as approverRole from '../approverRole'
 import * as guardianEvidence from '../guardianEvidence'
@@ -165,5 +167,35 @@ describe('on the contact page', () => {
     expect(tree.getByTestId(id(ApproverStepsIds.step('added')))).toBeTruthy()
     expect(tree.queryByTestId(id(ApproverStepsIds.step('card')))).toBeNull()
     expect(cards).not.toHaveBeenCalled()
+  })
+})
+
+describe('in real words (the mock t above returns keys, so a missing name would never show)', () => {
+  const i18n = i18next.createInstance()
+  beforeAll(async () => {
+    await i18n.init({ lng: 'en', resources: { en: { translation: en } }, interpolation: { escapeValue: false } })
+  })
+
+  test('every step, in every state, names the contact and leaves no {{…}} (control: a key with a placeholder is filled)', () => {
+    const real = (key: string, options?: Record<string, unknown>) => i18n.t(key, options) as string
+    const cards: Array<Pick<Parameters<typeof approverSteps>[1], 'card' | 'cardRead'>> = [
+      { cardRead: false },
+      { cardRead: true },
+      { cardRead: true, card: { kind: 'verified', state: 'Example State' } as GuardianStanding },
+      { cardRead: true, card: { kind: 'unreachable', state: 'Example State' } as GuardianStanding },
+      { cardRead: true, card: { kind: 'unverified', outcome: 'revokedInStateRecord' } as GuardianStanding },
+      { cardRead: true, card: { kind: 'unverified', outcome: 'noWard' } as GuardianStanding },
+    ]
+    const texts = [ask(), ACCEPTED, WRITTEN].flatMap((a) =>
+      cards.flatMap((card) =>
+        approverSteps(real, { ask: a, name: 'Jordan', listed: false, showCard: true, ...card }).flatMap((step) => [
+          step.title,
+          step.sub ?? '',
+        ])
+      )
+    )
+    expect(texts.filter((text) => /\{\{|\}\}/.test(text))).toEqual([])
+    expect(texts).toContain('Only if Jordan has one')
+    expect(en.Approver.StepCardIfAny).toMatch(/\{\{name\}\}/)
   })
 })

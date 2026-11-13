@@ -81,7 +81,7 @@ export function approverSteps(
   if (!card)
     cardStep = cardRead
       ? { key: 'card', state: 'done', title: t('Approver.StepCardNone'), sub: t('Approver.StepCardNotNeeded') }
-      : { key: 'card', state: 'wait', title: t('Approver.StepCard'), sub: t('Approver.StepCardIfAny') }
+      : { key: 'card', state: 'wait', title: t('Approver.StepCard'), sub: t('Approver.StepCardIfAny', n) }
   else if (card.kind === 'verified')
     cardStep = { key: 'card', state: 'done', title: t('Approver.StepCard'), sub: card.state }
   else if (card.kind === 'unreachable')
