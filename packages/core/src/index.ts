@@ -296,6 +296,8 @@ export {
   holdK0RevokedTestCard,
   becomeK0TestWard,
   setUpSediDemo,
+  setUpSediDemoAsGuardian,
+  setUpSediDemoAsPerson,
   turnOffSediDemo,
   sediDemoHiddenByKill,
   SEDI_KERI_REMOTE_OFF,
