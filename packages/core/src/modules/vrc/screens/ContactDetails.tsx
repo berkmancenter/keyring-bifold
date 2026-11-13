@@ -481,15 +481,26 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
           </View>
         </View>
 
-        {/* Safety (mock GVGac4je… frame 1): confirming a call or message is really this contact, then asking them to
-            approve for me. Each row is shown only with its own switch on; the heading only when one of them is. */}
-        {isConfirmItsYouEnabled() || isTrustedApproversEnabled() ? (
+        {/* Approver (mock E1, Alberto's pick 11-13): making this contact my approver, and where that stands, in its own
+            section, apart from Safety: it never needs Confirm it's you. Shown only with the trusted-approvers switch on
+            (here AND inside the row). */}
+        {isTrustedApproversEnabled() ? (
+          <View style={styles.section} testID={testIdWithKey('ContactApprover')}>
+            <ThemedText style={styles.sectionLabel} accessibilityRole="header">
+              {t('Approver.AskTitle')}
+            </ThemedText>
+            <ApproverAskRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
+          </View>
+        ) : null}
+
+        {/* Safety (mock GVGac4je… frame 1): confirming a call or message is really this contact. Shown only with the
+            Confirm it's you switch on. */}
+        {isConfirmItsYouEnabled() ? (
           <View style={styles.section} testID={testIdWithKey('ContactSafety')}>
             <ThemedText style={styles.sectionLabel} accessibilityRole="header">
               {t('ConfirmItsYou.SafetyTitle')}
             </ThemedText>
             <ConfirmItsYouRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
-            <ApproverAskRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
           </View>
         ) : null}
 

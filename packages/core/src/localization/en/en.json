@@ -3720,6 +3720,8 @@
     "AskTitle": "Approver",
     "Ask": "Ask {{name}} to be my approver",
     "AskCaption": "{{name}} sees exactly what you choose, and can say no to being your approver.",
+    "Make": "Make {{name}} my approver",
+    "MakeCaption": "{{name}} says yes before your agent does the things you choose, like joining a community.",
     "Waiting": "Waiting for {{name}}",
     "AskAgain": "Ask again",
     "Change": "Add to what {{name}} approves",

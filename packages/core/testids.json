@@ -459,6 +459,7 @@
     "ConnectionLoading": ["src/screens/Connection.tsx"],
     "Contact": ["src/components/listItems/ContactListItem.tsx"],
     "ContactAddedToYourWallet": ["src/screens/CredentialOfferAccept.tsx"],
+    "ContactApprover": ["src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactAvatarImage": ["src/modules/vrc/components/ContactCard.tsx", "src/modules/vrc/screens/ContactDetails.tsx"],
     "ContactCard": ["src/modules/vrc/components/ContactCard.tsx", "src/modules/vrc/screens/ListContacts.tsx"],
     "ContactHardwareChecking": ["src/modules/vrc/components/ContactCard.tsx"],

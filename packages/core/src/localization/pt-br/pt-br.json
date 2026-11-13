@@ -3594,6 +3594,8 @@
     "AskTitle": "Aprovador",
     "Ask": "Pedir a {{name}} para ser meu aprovador",
     "AskCaption": "{{name}} vê exatamente o que você escolhe e pode recusar ser seu aprovador.",
+    "Make": "Tornar {{name}} meu aprovador",
+    "MakeCaption": "{{name}} diz sim antes de seu agente fazer o que você escolher, como entrar numa comunidade.",
     "Waiting": "Aguardando {{name}}",
     "AskAgain": "Pedir de novo",
     "Change": "Acrescentar ao que {{name}} aprova",

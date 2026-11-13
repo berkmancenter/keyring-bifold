@@ -88,12 +88,13 @@ describe("the contact's row", () => {
       fireEvent.press(tree.getByTestId(id(key)))
     })
 
-  test('Ask shows the choice first and sends nothing; Send offers every action by default, naming the linked agent, then says it waits', async () => {
+  test('"Make Jordan my approver" shows the choice first and sends nothing; Send offers joining a community and changing who approves by default (Q5, 11-13), naming the linked agent, then says it waits', async () => {
     linked(SAM_AGENT)
     const read = jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(undefined)
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
-    expect(tree.getByText('Approver.Ask')).toBeTruthy()
+    expect(tree.getByText('Approver.Make')).toBeTruthy()
+    expect(tree.getByText('Approver.MakeCaption')).toBeTruthy()
 
     await press(tree, ApproverAskRowIds.ask)
     expect(offer).not.toHaveBeenCalled()
@@ -103,24 +104,25 @@ describe("the contact's row", () => {
     await press(tree, ApproverAskRowIds.send)
     expect(offer).toHaveBeenCalledTimes(1)
     expect(offer.mock.calls[0].slice(0, 3)).toEqual([AGENT, CONN, SAM_AGENT])
-    expect([...offer.mock.calls[0][3]].sort()).toEqual([...ROLE_ACTIONS].sort())
+    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'joinCommunity'])
     expect(tree.getByTestId(id(ApproverAskRowIds.status)).props.children).toBe('Approver.Waiting')
     expect(tree.getByTestId(id(ApproverAskRowIds.asked)).props.children).toHaveLength(ROLE_ACTIONS.length)
     expect(tree.queryByTestId(id(ApproverAskRowIds.ask))).toBeNull()
   })
 
-  test('only the chosen actions are offered, and changing who approves always is (control: the default above offers all)', async () => {
+  test('only the chosen actions are offered, and changing who approves always is (control: the default above)', async () => {
     linked(SAM_AGENT)
     jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(undefined)
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
     await press(tree, ApproverAskRowIds.ask)
+    // Tick sharing a card, untick joining a community.
     await press(tree, ApproverAskRowIds.pick('shareCredential'))
-    await press(tree, ApproverAskRowIds.pick('addDevice'))
+    await press(tree, ApproverAskRowIds.pick('joinCommunity'))
     // Pressing the locked row changes nothing.
     await press(tree, ApproverAskRowIds.pick('changeApprovers'))
     await press(tree, ApproverAskRowIds.send)
-    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'joinCommunity'])
+    expect([...offer.mock.calls[0][3]].sort()).toEqual(['changeApprovers', 'shareCredential'])
   })
 
   test('with only the locked action left, Send is off and nothing goes (control: one chosen, it goes)', async () => {
@@ -129,8 +131,8 @@ describe("the contact's row", () => {
     const offer = jest.spyOn(approverRole, 'offerApproverRole').mockResolvedValue('sent')
     const tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
     await press(tree, ApproverAskRowIds.ask)
-    for (const action of ['joinCommunity', 'shareCredential', 'addDevice'] as const)
-      await press(tree, ApproverAskRowIds.pick(action))
+    // The default ticks joining a community; untick it and only the locked one is left.
+    await press(tree, ApproverAskRowIds.pick('joinCommunity'))
     expect(tree.getByText('Approver.PickOne')).toBeTruthy()
     await press(tree, ApproverAskRowIds.send)
     expect(offer).not.toHaveBeenCalled()

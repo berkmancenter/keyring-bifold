@@ -52,7 +52,6 @@ import {
   writtenAsOf,
   writtenActionsOf,
 } from '../approverRole'
-import { ROLE_ACTIONS } from '../approverRoleSpec'
 import { releaseWarn } from '../module/releaseLog'
 import { TRUSTED_TASKS } from '../module/trustedApprovers'
 import type { TrustedApproversView } from '../module/trustedApprovers'
@@ -78,6 +77,11 @@ export const ApproverAskRowIds = {
 
 /** Always offered, never switched off here. */
 const LOCKED: RoleAction = 'changeApprovers'
+/**
+ * Ticked when the choice opens (Alberto's pick, Q5 of mock E2, 2026-11-13): joining a community, and changing who
+ * approves (always). The others are there to tick.
+ */
+export const DEFAULT_PICK: readonly RoleAction[] = ['joinCommunity', LOCKED]
 /** The order the choice shows them in (the mock's). */
 const PICK_ORDER: RoleAction[] = ['joinCommunity', 'shareCredential', 'addDevice', 'changeApprovers']
 const conditional = (action: RoleAction) => TRUSTED_TASKS.find((t) => t.key === action)?.conditional ?? false
@@ -104,7 +108,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   /** The agent's own rules, as last read; null while unread, not read, or when the read failed (then it withholds). */
   const [held, setHeld] = useState<TrustedApproversView | null>(null)
   const [picking, setPicking] = useState(false)
-  const [chosen, setChosen] = useState<RoleAction[]>([...ROLE_ACTIONS])
+  const [chosen, setChosen] = useState<RoleAction[]>([...DEFAULT_PICK])
   const on = isTrustedApproversEnabled()
 
   const load = useCallback(async () => {
@@ -297,7 +301,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
           onPress={() => {
             setSaid(undefined)
             setAlready(false)
-            setChosen(ask?.actions?.length ? [...ask.actions] : [...ROLE_ACTIONS])
+            setChosen(ask?.actions?.length ? [...ask.actions] : [...DEFAULT_PICK])
             setPicking(true)
           }}
           disabled={busy}
@@ -321,33 +325,28 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         </>
       )
   } else {
-    // Mock frame 1a.
+    // Mock E1 (11-13): one button and one line, on the contact's own Approver section.
     body = (
       <View style={styles.card}>
         {steppedDown}
-        <ThemedText variant="bold">{t('Approver.AskHeading')}</ThemedText>
-        <ThemedText>{t('Approver.AskBody', words)}</ThemedText>
         <Button
-          title={t('Approver.Ask', words)}
-          buttonType={ButtonType.Secondary}
+          title={t('Approver.Make', words)}
+          buttonType={ButtonType.Primary}
           onPress={() => {
             setSaid(undefined)
-            setChosen([...ROLE_ACTIONS])
+            setChosen([...DEFAULT_PICK])
             setPicking(true)
           }}
           disabled={busy}
           testID={testIdWithKey(ApproverAskRowIds.ask)}
         />
-        <ThemedText style={styles.muted}>{t('Approver.AskCaption', words)}</ThemedText>
+        <ThemedText style={styles.muted}>{t('Approver.MakeCaption', words)}</ThemedText>
       </View>
     )
   }
 
   return (
     <View style={styles.row} testID={testIdWithKey(ApproverAskRowIds.row)}>
-      <ThemedText variant="bold" accessibilityRole="header">
-        {t('Approver.AskTitle')}
-      </ThemedText>
       {body}
       {already ? (
         <ThemedText style={styles.muted} testID={testIdWithKey(ApproverAskRowIds.already)}>

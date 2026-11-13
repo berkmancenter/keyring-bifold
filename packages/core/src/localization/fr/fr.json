@@ -3678,6 +3678,8 @@
     "AskTitle": "Approbateur",
     "Ask": "Demander à {{name}} d’être mon approbateur",
     "AskCaption": "{{name}} voit exactement ce que vous choisissez et peut refuser d’être votre approbateur.",
+    "Make": "Faire de {{name}} mon approbateur",
+    "MakeCaption": "{{name}} dit oui avant que votre agent fasse ce que vous choisissez, comme rejoindre une communauté.",
     "Waiting": "En attente de {{name}}",
     "AskAgain": "Redemander",
     "Change": "Ajouter à ce que {{name}} approuve",
