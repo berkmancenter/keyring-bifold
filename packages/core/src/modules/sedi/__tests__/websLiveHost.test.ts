@@ -16,7 +16,10 @@
  * `https://<host>/cards/…`, or `https://<host>/<bucket>/cards/…` below a prefix. Test names show only the first 6
  * characters of an id, as the publish script's log does: an id is private by URL.
  *
- * Three parts, kept apart on purpose:
+ * DEMO_STATE_ALIASES (comma-separated AIDs, normally the state root alone) names AIDs whose
+ * `<AID>/designated-aliases.json` to check: the root's designation of the hosts it may be fetched from.
+ *
+ * Four parts, kept apart on purpose:
  * - "the phone accepts it": each AID resolves through the app's own resolver (resolveWebs), so a host that passes is one
  *   the phones accept; any refusal fails with the resolver's own reason.
  * - "the plan's headers": the host's own rules, which the resolver does not check: no redirect, `Cache-Control:
@@ -25,6 +28,8 @@
  * - "the cards": the same headers for each card file, plus the shape the plan gives them: the card within the phone's
  *   size cap and tagged with its type, the status one of issued or revoked, the page static and not indexed. Whether
  *   the card's evidence verifies is the card fetch's own check, not this one.
+ * - "the designated aliases": the same headers, and the file's shape: within 64 KiB, an ACDC SAID, its proof text and
+ *   its registry's events. Whether the ACDC is the root's and names this host is the phone's own check, not this one.
  */
 import { readFileSync } from 'fs'
 import { join } from 'path'
@@ -50,8 +55,15 @@ const CARDS = (process.env.DEMO_STATE_CARDS ?? '')
   .map((c) => c.trim())
   .filter(Boolean)
 
+const ALIASES = (process.env.DEMO_STATE_ALIASES ?? '')
+  .split(',')
+  .map((a) => a.trim())
+  .filter(Boolean)
+const ALIASES_MAX_BYTES = 64 * 1024
+
 const didFor = (aid: string) => ['did:webs', HOST.replace(':', '%3A'), ...PATH, aid].join(':')
-const urlFor = (aid: string, name: 'did.json' | 'keri.cesr') => ['https://' + HOST, ...PATH, aid, name].join('/')
+const urlFor = (aid: string, name: 'did.json' | 'keri.cesr' | 'designated-aliases.json') =>
+  ['https://' + HOST, ...PATH, aid, name].join('/')
 const CARD_FILES = { json: 'application/json', 'status.json': 'application/json', html: 'text/html' } as const
 type CardFile = keyof typeof CARD_FILES
 const cardUrlFor = (id: string, file: CardFile) =>
@@ -134,6 +146,32 @@ live(`the demo state's host, live (${HOST || 'DEMO_STATE_HOST not set'})`, () =>
             script: /<script\b/i.test(text),
           }).toEqual({ noindex: true, script: false })
         }
+      },
+      30_000
+    )
+  })
+
+  const aliases = ALIASES.length ? describe : describe.skip
+  aliases('the designated aliases', () => {
+    it.each(ALIASES)(
+      '%s/designated-aliases.json: 200, no redirect, no-store, application/json, its shape',
+      async (aid) => {
+        const { seen, body } = await served(urlFor(aid, 'designated-aliases.json'))
+        expect(seen).toEqual({ status: 200, location: null, noStore: true, type: 'application/json' })
+        expect(body.length).toBeLessThanOrEqual(ALIASES_MAX_BYTES)
+
+        const file = JSON.parse(new TextDecoder().decode(body)) as {
+          said?: unknown
+          proof?: unknown
+          tel?: { ripText?: unknown; updateTexts?: unknown }
+        }
+        const str = (v: unknown) => typeof v === 'string' && v.length > 0
+        expect({
+          said: typeof file.said === 'string' && /^E[A-Za-z0-9_-]{43}$/.test(file.said),
+          proof: str(file.proof),
+          ripText: str(file.tel?.ripText),
+          updateTexts: Array.isArray(file.tel?.updateTexts) && file.tel.updateTexts.every(str),
+        }).toEqual({ said: true, proof: true, ripText: true, updateTexts: true })
       },
       30_000
     )
