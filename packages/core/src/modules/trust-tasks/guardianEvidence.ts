@@ -653,6 +653,9 @@ export async function sendGuardianEvidence(
   const k1Card = isK1Card(held)
   const stateHost = k1Card ? await heldGuardianStateHost(agent) : undefined
   // 0.2 for a K1 card or a card carrying its authorization; 0.1 (unchanged) otherwise, so a K0 card is what it was.
+  // `carried` cannot widen this to a K0 card: socialMaterialFor returns undefined unless the card's holder is this
+  // phone's own holder AID (holder === evidence.holder) AND the Guardian credential is issued to it (a.i === holder),
+  // which a K0 card, issued to the kit's own holder, never is. So a K0 card never carries an authorization.
   const v2 = k1Card || !!carried
   const payload: GuardianEvidencePayload = {
     agent: agentDid,
