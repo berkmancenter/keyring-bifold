@@ -52,11 +52,15 @@ import {
   writtenAsOf,
   writtenActionsOf,
 } from '../approverRole'
+import { guardianStandings, type GuardianStanding } from '../guardianEvidence'
 import { releaseWarn } from '../module/releaseLog'
+import { isStateVerifiedApproversEnabled } from '../module/stateVerifiedApproversFlag'
 import { TRUSTED_TASKS } from '../module/trustedApprovers'
 import type { TrustedApproversView } from '../module/trustedApprovers'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent } from '../module/vtaAgent'
+
+import ApproverSteps from './approver/ApproverSteps'
 
 export const ApproverAskRowIds = {
   row: 'ApproverAsk',
@@ -109,6 +113,8 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   const [held, setHeld] = useState<TrustedApproversView | null>(null)
   const [picking, setPicking] = useState(false)
   const [chosen, setChosen] = useState<RoleAction[]>([...DEFAULT_PICK])
+  /** Their state card, from this open's check (guardianStandings); `read` once that check answered. */
+  const [card, setCard] = useState<{ read: boolean; standing?: GuardianStanding }>({ read: false })
   const on = isTrustedApproversEnabled()
 
   const load = useCallback(async () => {
@@ -116,7 +122,16 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
     const record = await roleOfferAskOn(agent, connectionId).catch(() => undefined)
     setAsk(record)
     // The agent is read only when the record names a DID the contact approves as: otherwise nothing could match.
-    if (approverDidsOf(record).length === 0) return setHeld(null)
+    const dids = approverDidsOf(record)
+    if (dids.length === 0) {
+      setCard({ read: false })
+      return setHeld(null)
+    }
+    // Their card, checked as Who approves checks it on open: a failed check is "not read", never "no card".
+    if (isStateVerifiedApproversEnabled())
+      void guardianStandings(agent)
+        .then((cards) => setCard({ read: true, standing: dids.map((did) => cards[did]).find(Boolean) }))
+        .catch(() => setCard({ read: false }))
     setHeld(
       await vtaAgent
         .trustedApprovers(agent)
@@ -208,6 +223,18 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   const toggle = (action: RoleAction) =>
     setChosen((now) => (now.includes(action) ? now.filter((a) => a !== action) : [...now, action]))
 
+  // Where it stands, on the contact itself (mock E3/E5): shown once there is an ask, with the card step only with
+  // state-verified approvers on.
+  const steps = ask ? (
+    <ApproverSteps
+      ask={ask}
+      name={name}
+      listed={listed}
+      card={card.standing}
+      cardRead={card.read}
+      showCard={isStateVerifiedApproversEnabled()}
+    />
+  ) : null
   let body: React.ReactNode
   if (picking) {
     // Mock frame 1b: what needs the contact's yes.
@@ -278,6 +305,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         <ThemedText variant="bold" testID={testIdWithKey(ApproverAskRowIds.status)}>
           {t('Approver.Waiting', words)}
         </ThemedText>
+        {steps}
         <ThemedText>{t('Approver.WaitingBody', words)}</ThemedText>
         {actionLines(ask.actions)}
         <ThemedText style={styles.muted}>{t('Approver.WaitingNo', words)}</ThemedText>
@@ -314,11 +342,13 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
     body =
       state === 'accepted' && !listed ? (
         <>
+          {steps}
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.SaidYes', words)}</ThemedText>
           {change}
         </>
       ) : (
         <>
+          {steps}
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.IsApprover', words)}</ThemedText>
           {steppedDown}
           {ask?.steppedDown ? null : change}

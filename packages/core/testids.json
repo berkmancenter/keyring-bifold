@@ -210,6 +210,7 @@
     "ApproverPickCancel": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverPickSend": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
     "ApproverSteppedDown": ["src/modules/trust-tasks/screens/ApproverAskRow.tsx"],
+    "ApproverSteps": ["src/modules/trust-tasks/screens/approver/ApproverSteps.tsx"],
     "ApproverWait": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitCode": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
     "ApproverWaitOpen": ["src/modules/trust-tasks/screens/ApproverWaitNote.tsx"],
@@ -3854,6 +3855,12 @@
     },
     {
       "src/modules/trust-tasks/screens/VtiVetting.tsx": "requestTestKey(r.requestDocumentId)"
+    },
+    {
+      "src/modules/trust-tasks/screens/approver/ApproverSteps.tsx": "ApproverStepsIds.step(step.key)"
+    },
+    {
+      "src/modules/trust-tasks/screens/approver/ApproverSteps.tsx": "ApproverStepsIds.steps"
     },
     {
       "src/modules/trust-tasks/screens/approver/ApproverZones.tsx": "`${testID}_${kind}`"
