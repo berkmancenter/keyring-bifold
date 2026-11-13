@@ -71,9 +71,7 @@ describe('verifyDocumentProof', () => {
   const fakeAgent = {
     dids: {
       resolveDidDocument: async () => ({
-        verificationMethod: [
-          { id: verificationMethodId, type: 'Multikey', controller, publicKeyMultibase: multikey },
-        ],
+        verificationMethod: [{ id: verificationMethodId, type: 'Multikey', controller, publicKeyMultibase: multikey }],
       }),
     },
   } as never

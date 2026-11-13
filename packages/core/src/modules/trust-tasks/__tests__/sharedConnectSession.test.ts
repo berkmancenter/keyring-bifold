@@ -298,7 +298,9 @@ describe('the scanner session', () => {
       await session.handle(inviter.issue)
       expect(sent.some((d) => String(d.type).endsWith('#response') && String(d.type).includes('issue'))).toBe(false)
       expect(sent[sent.length - 1].type).toContain('/trust-task-error/')
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('could not be stored: Error: unsupported context'))
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining('could not be stored: Error: unsupported context')
+      )
       await expect(session.finished).resolves.toBe('refused')
     })
   })
