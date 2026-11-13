@@ -163,6 +163,17 @@ export interface GuardianEvidencePayload {
   /** Each credential's proof: ACDC text followed by its state disclosure. */
   creds: string[]
   sentAt: string
+  /**
+   * Optional, and present ONLY with a card the state issued to the sending phone's own holder AID (a K0 card never
+   * carries it, so its payload is what older builds accept): the Social Authorization (S2) that holder issued the
+   * card's ward, with the holder's KEL and the S2's registry (trust-tasks/socialAuthorization).
+   */
+  social?: {
+    said: string
+    kel: string
+    tel: { ripText: string; updateTexts: string[] }
+    cred: string
+  }
 }
 
 const AID_PATTERN = '^[A-Za-z0-9_-]{44}$'
@@ -203,6 +214,25 @@ export const GUARDIAN_EVIDENCE_SPEC = {
       },
       creds: { type: 'array', minItems: 1, maxItems: EVIDENCE_MAX_ITEMS, items: evidenceText },
       sentAt: { type: 'string', format: 'date-time' },
+      social: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['said', 'kel', 'tel', 'cred'],
+        properties: {
+          said: { type: 'string', pattern: AID_PATTERN },
+          kel: evidenceText,
+          tel: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['ripText', 'updateTexts'],
+            properties: {
+              ripText: evidenceText,
+              updateTexts: { type: 'array', maxItems: EVIDENCE_MAX_ITEMS, items: evidenceText },
+            },
+          },
+          cred: evidenceText,
+        },
+      },
     },
   },
 } as const
