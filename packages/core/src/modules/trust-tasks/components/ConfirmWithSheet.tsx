@@ -59,14 +59,17 @@ const ConfirmWithSheet: React.FC<Props> = ({ connectionId, name, visible, onClos
   return (
     <SafeAreaModal visible transparent animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.overlay} edges={['top']}>
+        {/* A tap above the sheet closes it, for sighted use only: a screen reader skips it and starts at the title, and
+            closes with the ✕ (or the reader's own escape gesture, onRequestClose). */}
         <Pressable
           style={styles.backdrop}
           onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel={t('ConfirmItsYou.Close')}
+          accessible={false}
+          importantForAccessibility="no"
+          accessibilityElementsHidden
           testID={testIdWithKey(ConfirmWithSheetIds.backdrop)}
         />
-        <SafeAreaView style={styles.safeAreaView} edges={['bottom']}>
+        <SafeAreaView style={styles.safeAreaView} edges={['bottom']} accessibilityViewIsModal>
           <ScrollView
             bounces={false}
             keyboardShouldPersistTaps="handled"

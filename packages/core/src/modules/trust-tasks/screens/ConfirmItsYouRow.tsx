@@ -18,7 +18,8 @@
  * mock D1, 2026-11-13: "way too verbose and long"). In the sheet the last answer is one line, what a confirmation
  * proves sits behind an (i), and Earlier stays on the contact page. Two things are never cut: the red "not them" card,
  * whole, and "don't act on it" while a request waits or after no answer. Waiting shows no note box, so a second
- * request never goes on top of one still open.
+ * request never goes on top of one still open. After "not them" the box stays under the red card, as the sheet on
+ * 278.18 had it (opened to write a note): the person may want to ask again, and the card above says what to do.
  *
  * Shown only while the "Confirm it's you" switch is on (confirmItsYouFlag.ts: the switch AND no remote off), read at
  * every render by THIS component, so switching it off (or a remote off) takes either form away on the next render, and
@@ -100,16 +101,14 @@ interface Props {
    * the chat's sheet, one line, the note and Send.
    */
   variant?: 'row' | 'button' | 'sheet'
-  /** Open with the note form showing (the chat's sheet, which the person opened to write one). */
-  startComposing?: boolean
 }
 
-const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name, variant = 'row', startComposing = false }) => {
+const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name, variant = 'row' }) => {
   const { t } = useTranslation()
   const { agent } = useAgent()
   const { ColorPalette, Inputs } = useTheme()
   const [asks, setAsks] = useState<ConfirmAsk[]>([])
-  const [composing, setComposing] = useState(startComposing)
+  const [composing, setComposing] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<string | undefined>()
