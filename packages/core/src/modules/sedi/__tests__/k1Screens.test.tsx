@@ -13,7 +13,9 @@ import React from 'react'
 import { BasicAppContext } from '../../../../__tests__/helpers/app'
 import en from '../../../localization/en/en.json'
 import { testIdWithKey } from '../../../utils/testable'
+import * as guardianEvidence from '../../trust-tasks/guardianEvidence'
 import { guardianSourceKey } from '../../trust-tasks/guardianEvidence'
+import { setSediDemoSide } from '../../trust-tasks/module/sediDemoSide'
 import { SEDI_KERI_REMOTE_OFF } from '../../trust-tasks/module/sediKeriRemoteOff'
 import { setStateVerifiedApproversEnabled } from '../../trust-tasks/module/stateVerifiedApproversFlag'
 import { setTrustedApproversEnabled } from '../../trust-tasks/module/trustedApproversFlag'
@@ -56,6 +58,7 @@ afterEach(() => {
   setStateVerifiedApproversEnabled(false)
   SEDI_KERI_REMOTE_OFF.off = false
   stateRoots.k1SettingsForTests.reset()
+  setSediDemoSide(null)
 })
 
 describe('the keyring://guardian-card link', () => {
@@ -102,6 +105,65 @@ describe('the Guardian card screen', () => {
     expect(kept).toHaveBeenCalledTimes(1)
     expect(kept.mock.calls[0][1]).toBe('https://example.org/cards/AbCdEfGhIjKlMnOpQrStUv.json')
     expect(tree.getByTestId(id(GuardianCardReceiveIds.kept))).toBeTruthy()
+  })
+
+  it.each([
+    [['Sam'], true],
+    [[], false],
+  ] as const)(
+    'S03: after Keep, the card is offered to the people approved for; sent to %j: the "Sent to" line shown %s',
+    async (names, shown) => {
+      jest.spyOn(receive, 'checkGuardianCard').mockResolvedValue({
+        kind: 'checked',
+        evidence: K0_TEST_GUARDIAN_CARD,
+        state: 'State of Utah',
+        ward: 'w',
+      })
+      jest.spyOn(receive, 'receiveGuardianCard').mockResolvedValue({ kind: 'kept', state: 'State of Utah', ward: 'w' })
+      const offer = jest.spyOn(receive, 'offerKeptCard').mockResolvedValue([...names])
+      const tree = render(
+        <BasicAppContext>
+          <GuardianCardReceive />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      await userEvent.setup().press(tree.getByTestId(id(GuardianCardReceiveIds.keep)))
+      await act(async () => undefined)
+      expect(offer).toHaveBeenCalledTimes(1)
+      expect(!!tree.queryByText('GuardianCard.SentTo')).toBe(shown)
+    }
+  )
+
+  it('S05: offerKeptCard names only the people the card was SENT to, and never throws (control: a throw reads none)', async () => {
+    const after = jest.spyOn(guardianEvidence, 'guardianCardAfterKeep').mockResolvedValue([
+      { connectionId: 'c1', asker: 'Sam', result: 'sent' },
+      { connectionId: 'c2', asker: 'Amy', result: 'asked' },
+      { connectionId: 'c3', asker: 'Bo', result: 'failed' },
+      { connectionId: 'c4', asker: 'Cy', result: 'declined' },
+    ])
+    expect(await receive.offerKeptCard({})).toEqual(['Sam'])
+    after.mockRejectedValueOnce(new Error('boom'))
+    expect(await receive.offerKeptCard({})).toEqual([])
+  })
+
+  it('S04: a card NOT kept (too large) is offered to no one', async () => {
+    jest.spyOn(receive, 'checkGuardianCard').mockResolvedValue({
+      kind: 'checked',
+      evidence: K0_TEST_GUARDIAN_CARD,
+      state: 'State of Utah',
+      ward: 'w',
+    })
+    jest.spyOn(receive, 'receiveGuardianCard').mockResolvedValue({ kind: 'tooLarge' })
+    const offer = jest.spyOn(receive, 'offerKeptCard').mockResolvedValue(['Sam'])
+    const tree = render(
+      <BasicAppContext>
+        <GuardianCardReceive />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    await userEvent.setup().press(tree.getByTestId(id(GuardianCardReceiveIds.keep)))
+    await act(async () => undefined)
+    expect(offer).not.toHaveBeenCalled()
   })
 
   it.each(OFF)('S02: %s: the screen itself says it is off, and checks and keeps nothing', async (_, off) => {
@@ -154,6 +216,27 @@ describe('the codes screen and its entry', () => {
     expect(tree.queryByTestId(id(StateOfficeCodesIds.showHolder))).toBeNull()
     expect(make).not.toHaveBeenCalled()
   })
+
+  it.each([
+    ['guardian', true, false],
+    ['ward', false, true],
+    [null, true, true],
+  ] as const)(
+    'C04: demo side %s: the guardian code offered %s, the ward code offered %s (none set: both, as before)',
+    (side, holder, ward) => {
+      setSediDemoSide(side)
+      const tree = render(
+        <BasicAppContext>
+          <StateOfficeCodes />
+        </BasicAppContext>
+      )
+      expect(!!tree.queryByTestId(id(StateOfficeCodesIds.showHolder))).toBe(holder)
+      expect(!!tree.queryByTestId(id(StateOfficeCodesIds.showWard))).toBe(ward)
+      // The whole group goes, its heading too (the test's t gives the key or the English).
+      expect(!!tree.queryByText(new RegExp(`StateOffice.HolderTitle|${en.StateOffice.HolderTitle}`))).toBe(holder)
+      expect(!!tree.queryByText(new RegExp(`StateOffice.WardTitle|${en.StateOffice.WardTitle}`))).toBe(ward)
+    }
+  )
 
   it('C03: no state office on this build (no K1 root): the entry and the screen are off too', () => {
     stateRoots.k1SettingsForTests.set({ aid: '' })
