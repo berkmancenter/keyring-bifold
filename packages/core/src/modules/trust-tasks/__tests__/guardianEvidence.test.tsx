@@ -41,6 +41,7 @@ import {
   cardConsentOn,
   cardQuestions,
   guardianCardAfterYes,
+  guardianCardAfterKeep,
   setCardConsent,
   shareGuardianCard,
   checkGuardianEvidence,
@@ -1777,6 +1778,80 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       setStateVerifiedApproversEnabled(true)
       const on = await show(jordan)
       expect(on.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN)))).toBeTruthy()
+    })
+  })
+
+  describe('a card kept AFTER the yes (a state office pick-up, K1 test 11-14): offered by the same rule', () => {
+    const ceremonyMock = () => jest.requireMock('../ceremony') as { sendTrustTaskDocument: jest.Mock }
+    /** Jordan said yes to `who` with no card held (so nothing went and nothing was asked), then keeps a card. */
+    const yesThenKeep = async (who: Array<[string, string]> = [[CONN, 'Sam']]) => {
+      const jordan = phone()
+      jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([stateRoots.K0_TEST_ROOT])
+      for (const [connectionId, asker] of who) await yesTo(jordan, connectionId, asker)
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toBeUndefined()
+      await holdGuardianEvidence(jordan.agent, card('G-ok'))
+      return jordan
+    }
+
+    test("never asked: nothing goes, and the question is put now, naming the kept card's state", async () => {
+      const jordan = await yesThenKeep()
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN, asker: 'Sam', state: 'Example State' })
+    })
+
+    test('an earlier yes to sending the card: this card goes now, for the agent and as the yes (control: before the keep, none went)', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'sent' }])
+      expect(cards()).toHaveLength(1)
+      expect(cards()[0].payload).toMatchObject({
+        agent: SAM_AGENT,
+        approver: JORDAN,
+        guardianSaid: card('G-ok').guardianSaid,
+      })
+      expect(cardQuestions.first()).toBeUndefined()
+    })
+
+    test('an earlier no: nothing goes and nothing is asked', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'no')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([
+        { connectionId: CONN, asker: 'Sam', result: 'declined' },
+      ])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toBeUndefined()
+    })
+
+    test("one person's send failing never stops the next, and is logged (control: both yes, both sent)", async () => {
+      const jordan = await yesThenKeep([
+        [CONN, 'Sam'],
+        [CONN2, 'Amy'],
+      ])
+      await setCardConsent(jordan.agent, CONN, 'yes')
+      await setCardConsent(jordan.agent, CONN2, 'yes')
+      ceremonyMock().sendTrustTaskDocument.mockImplementationOnce(async () => {
+        throw new Error('mediator down')
+      })
+      const results = await guardianCardAfterKeep(jordan.agent)
+      expect(results.map((r) => r.result).sort()).toEqual(['failed', 'sent'])
+      expect(cards()).toHaveLength(1)
+      expect(jordan.warn).toHaveBeenCalledWith(expect.stringContaining('the kept card was not sent on'))
+      sent.length = 0
+      expect((await guardianCardAfterKeep(jordan.agent)).map((r) => r.result)).toEqual(['sent', 'sent'])
+    })
+
+    test('no one approved for, or either switch off: nothing at all (control: one yes, an answer)', async () => {
+      const nobody = phone()
+      await holdGuardianEvidence(nobody.agent, card('G-ok'))
+      expect(await guardianCardAfterKeep(nobody.agent)).toEqual([])
+      const jordan = await yesThenKeep()
+      setStateVerifiedApproversEnabled(false)
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([])
+      setStateVerifiedApproversEnabled(true)
+      expect(await guardianCardAfterKeep(jordan.agent)).toHaveLength(1)
+      expect(cards()).toHaveLength(0)
     })
   })
 })

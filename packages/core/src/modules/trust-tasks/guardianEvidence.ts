@@ -870,6 +870,38 @@ export async function shareGuardianCard(
   return sendGuardianEvidence(agent, connectionId, yes.agentDid, yes.answeredAs)
 }
 
+/** What {@link guardianCardAfterKeep} did for one person: the after-a-yes result, or 'failed' when it threw. */
+export type CardAfterKeepResult = CardAfterYesResult | 'failed'
+
+/**
+ * A card was just kept on this phone (a state office's pick-up, sedi/holder/receiveGuardianCard): offer it to each
+ * person this phone already approves for, by exactly the rule after a yes ({@link guardianCardAfterYes}). Their
+ * earlier yes to sending the card sends this one now; a no sends nothing; never asked puts the question
+ * ("Also send your Guardian card from <state> to <name>?"), naming this card's state. So a card picked up AFTER the
+ * yes reaches the person with no step on People I approve for (K1 test, 11-14), and never without an answer.
+ *
+ * One person's send failing never stops the next: it reads 'failed' and is logged. Either switch off: nothing at
+ * all. One entry per person, with their name, for the screen to say who it went to.
+ */
+export async function guardianCardAfterKeep(
+  agent: Agent
+): Promise<Array<{ connectionId: string; asker: string; result: CardAfterKeepResult }>> {
+  const results: Array<{ connectionId: string; asker: string; result: CardAfterKeepResult }> = []
+  if (!isOn()) return results
+  for (const yes of await approvingFor(agent)) {
+    if (!yes.answeredAs) continue
+    let result: CardAfterKeepResult
+    try {
+      result = await guardianCardAfterYes(agent, yes, yes.answeredAs)
+    } catch (e) {
+      warn(agent, `the kept card was not sent on ${yes.connectionId}: ${(e as Error)?.message ?? e}`)
+      result = 'failed'
+    }
+    results.push({ connectionId: yes.connectionId, asker: yes.asker, result })
+  }
+  return results
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Developer actions for a tester build: the K0 test card and the K0 test ward
 
