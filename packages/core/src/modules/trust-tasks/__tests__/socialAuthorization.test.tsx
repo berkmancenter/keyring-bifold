@@ -378,8 +378,8 @@ describe("Sam's phone: the authorization checked under the card's own verdict", 
       content: { aid: sam.aid, keyId: 'k-own', createdAt: '2026-11-13T21:00:00.000Z' },
     })
     const arrived = await samReceives(payload, other, lastType(), phoneOfSam)
-    const kept = (await arrived.agent.genericRecords.findAllByQuery({ recordType: approverRole.ROLE_OFFER_ASK }))[0]
-      .content as unknown as approverRole.RoleOfferAsk
+    const kept = arrived.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK)
+      ?.content as unknown as approverRole.RoleOfferAsk
     expect(kept.guardian?.verdict).toMatchObject({ ok: true })
     expect(kept.guardian?.social?.verdict).toMatchObject({ ok: true })
     const { cards, social } = await approverCardStandings(arrived.agent)
