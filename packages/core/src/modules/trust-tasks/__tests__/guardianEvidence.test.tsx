@@ -61,6 +61,7 @@ import {
   type GuardianStanding,
   type GuardianVerdict,
   phoneWardsOf,
+  unsetStateWard,
   wardToCheck,
 } from '../guardianEvidence'
 import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
@@ -457,12 +458,37 @@ describe("on the person's phone: the card names this phone's OWN ward code (K1 t
     expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true })
   })
 
-  test('with either switch off, the own code is not read (control: on, it is)', async () => {
+  test.each([
+    ['trusted approvers', setTrustedApproversEnabled],
+    ['state-verified approvers', setStateVerifiedApproversEnabled],
+  ])('with %s off, the own code is not read (control: both on, it is)', async (_name, setOn) => {
     const sam = phone()
     ownCode(sam, SAM)
     expect(await phoneWardsOf(sam.agent)).toEqual({ set: null, own: SAM })
-    setStateVerifiedApproversEnabled(false)
+    setOn(false)
     expect(await phoneWardsOf(sam.agent)).toEqual({ set: null, own: null })
+  })
+
+  test("the guardian's setup (unsetStateWard writes an EMPTY ward): a card naming this phone's own code verifies, any other reads noWard", async () => {
+    const own = phone()
+    await setStateWard(own.agent, OTHER)
+    await unsetStateWard(own.agent)
+    // The real write: an empty ward kept, not no record.
+    expect(own.rows.filter((r) => r.tags.recordType === 'keyring.sedi-state-ward').map((r) => r.content.ward)).toEqual([
+      '',
+    ])
+    ownCode(own, SAM)
+    own.ask()
+    await handleGuardianEvidence(own.agent, own.service, documentOf(card('G-ok')), context)
+    expect(own.askRecord().guardian?.verdict).toMatchObject({ ok: true })
+    // Control: the same setup, its own code another one: refused as no ward set.
+    const other = phone()
+    await setStateWard(other.agent, OTHER)
+    await unsetStateWard(other.agent)
+    ownCode(other, OTHER)
+    other.ask()
+    await handleGuardianEvidence(other.agent, other.service, documentOf(card('G-ok')), context)
+    expect(other.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'noWard' })
   })
 
   test('wardToCheck chooses only between the two wards of this phone, by the card it is given', () => {

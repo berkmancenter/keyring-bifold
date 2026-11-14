@@ -980,7 +980,9 @@ export function wardToCheck(
 /**
  * Set no ward on this phone (Developer setup "as the guardian": the guardian's phone is not the person the card
  * names). The ward record is overwritten with an empty ward, never deleted; stateWardOf then reads null, so no card
- * received here verifies.
+ * received here verifies against a SET ward. A card naming this phone's OWN ward code still does (wardToCheck): such
+ * a card names this very phone, so it is not shown as naming someone else (decided 11-14 with #1072). A phone has an
+ * own ward code only once its codes screen has shown it.
  */
 export async function unsetStateWard(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
   const [existing] = (await agent.genericRecords.findAllByQuery({ recordType: STATE_WARD })) ?? []
