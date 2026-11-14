@@ -212,11 +212,15 @@ describe('after answering: "contact", never "call" (Alberto, 278.19)', () => {
   const LOCALES = { en, fr, 'pt-BR': ptBr } as unknown as Record<string, { ConfirmItsYou: Record<string, string> }>
   const CALL = { en: /\bcall/i, fr: /\bappel/i, 'pt-BR': /\bligue|\bligar/i } as Record<string, RegExp>
   test.each(Object.keys(LOCALES).flatMap((lng) => ['SentItsMeAfter', 'SentNotMeAfter'].map((key) => [lng, key])))(
-    '%s %s names who asked and says contact, not call',
+    '%s %s says contact {{asker}}, not call',
     (lng, key) => {
       const line = LOCALES[lng].ConfirmItsYou[key]
       expect(line).toContain('{{asker}}')
       expect(line).not.toMatch(CALL[lng])
+      // And what it must say, by literal: contact.
+      expect(line).toContain(
+        { en: 'contact {{asker}}', fr: 'contactez {{asker}}', 'pt-BR': 'entre em contato com {{asker}}' }[lng]
+      )
       // The control: the same pattern does catch the word it guards against in that language.
       expect({ en: 'call them', fr: 'appelez-les', 'pt-BR': 'ligue para' }[lng]).toMatch(CALL[lng])
     }
