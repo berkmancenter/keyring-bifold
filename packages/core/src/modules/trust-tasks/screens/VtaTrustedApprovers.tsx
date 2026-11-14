@@ -12,10 +12,16 @@
  * later entry point, or the remote off (TRUSTED_APPROVERS_REMOTE_OFF) must not leave a working screen behind. Read again
  * on each focus, so a switch-off while it is open takes effect the next time it shows.
  *
+ * Design B (Alberto, 11-14): the list is one row per person (name, one line, a pill); a row opens that person's page,
+ * which is this same screen under a second route (Screens.VtaApproverPerson, with { kind, id }) showing their detail and
+ * what can be done. An action that ends the matter there (added, set aside, forgotten, removed, stepped down) goes back.
+ *
  * @module trust-tasks/screens/VtaTrustedApprovers
  */
 import { useAgent } from '@bifold/react-hooks'
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
+import type { StackNavigationProp } from '@react-navigation/stack'
+import { EventEmitter } from 'events'
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native'
@@ -25,6 +31,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
+import { Screens, type MyAgentStackParams } from '../../../types/navigators'
 import { testIdWithKey } from '../../../utils/testable'
 import {
   acceptedRoleOffers,
@@ -93,6 +100,12 @@ export const TrustedApproversIds = {
   tabTheirs: 'TrustedApproversTabTheirs',
   more: 'TrustedApproversMore',
   approvingFor: 'TrustedApproversApprovingFor',
+  // Design B (11-14): a row per person on the list, and the person's own page.
+  row: (kind: string, id: string) => `TrustedApproverRow_${kind}_${id}`,
+  saidYes: (connectionId: string) => `TrustedApproverSaidYes_${connectionId}`,
+  person: 'TrustedApproverPerson',
+  personGone: 'TrustedApproverPersonGone',
+  approvingPerson: (connectionId: string) => `TrustedApproverApproving_${connectionId}`,
   steppedDown: (did: string) => `TrustedApproverSteppedDown_${did}`,
   stepDown: (connectionId: string) => `TrustedApproverStepDown_${connectionId}`,
   stepDownConfirm: (connectionId: string) => `TrustedApproverStepDownConfirm_${connectionId}`,
@@ -134,8 +147,22 @@ const REVOKED = ['revoked', 'revokedInIssuerRecord', 'revokedInStateRecord']
 const isRevoked = (standing: GuardianStanding | undefined) =>
   standing?.kind === 'unverified' && REVOKED.includes(standing.outcome)
 
+type PersonParams = MyAgentStackParams[Screens.VtaApproverPerson]
+type PersonKind = PersonParams['kind']
+
+/**
+ * Who was just added, from a person's page to the list under it: each route is its own mount, and the list says where
+ * the practice request is. Nothing is kept: with no list mounted, nobody hears it.
+ */
+const whoApprovesEvents = new EventEmitter()
+
 const VtaTrustedApprovers: React.FC = () => {
   const { t } = useTranslation()
+  const navigation = useNavigation<StackNavigationProp<MyAgentStackParams>>()
+  // Opened on one person (Screens.VtaApproverPerson), or the list (Screens.VtaTrustedApprovers, no params).
+  const params = useRoute()?.params as Partial<PersonParams> | undefined
+  const person: PersonParams | undefined = params?.kind && params.id ? { kind: params.kind, id: params.id } : undefined
+  const onPersonPage = person !== undefined
   const { agent } = useAgent()
   const { ColorPalette } = useTheme()
   const [state, setState] = useState<TrustedApproversState | undefined>()
@@ -169,6 +196,8 @@ const VtaTrustedApprovers: React.FC = () => {
   const [justAdded, setJustAdded] = useState<string | undefined>()
   /** When "Check again" last ran on this open, so a state still unreachable says it was tried again, and when. */
   const [triedAgainAt, setTriedAgainAt] = useState<string | undefined>()
+  /** Whether what this phone keeps has been read once: until then a person's page loads, never "nothing to show". */
+  const [keptRead, setKeptRead] = useState(false)
 
   const wordsFor = useCallback((e: unknown) => deviceErrorWords(e, t), [t])
 
@@ -212,6 +241,7 @@ const VtaTrustedApprovers: React.FC = () => {
     setTestStates(tests)
     setNames(known)
     setMine(approving)
+    setKeptRead(true)
   }, [agent])
 
   const load = useCallback(
@@ -236,6 +266,22 @@ const VtaTrustedApprovers: React.FC = () => {
       if (now) void load()
     }, [load])
   )
+
+  useEffect(() => {
+    const added = (name: string) => setJustAdded(name)
+    whoApprovesEvents.on('added', added)
+    return () => {
+      whoApprovesEvents.off('added', added)
+    }
+  }, [])
+
+  /**
+   * Off a person's page, once what was done there is done: back to the list, which reads everything again on focus.
+   * Only while the page is still the one showing: one already left (back pressed during Face ID) pops nothing else.
+   */
+  const leave = () => {
+    if (onPersonPage && navigation.isFocused()) navigation.goBack()
+  }
 
   useEffect(() => {
     const refresh = () => void loadKept()
@@ -283,8 +329,10 @@ const VtaTrustedApprovers: React.FC = () => {
     const written = await write(ask.connectionId, nextTrustedRules(fresh.view, ask))
     if (!written || !ask.acceptedAs || !written.view.approvers.includes(ask.acceptedAs)) return
     await closeRoleOffer(agent, ask.connectionId, true).catch(() => undefined)
-    setJustAdded(names[ask.acceptedAs] ?? t('Approver.UnnamedContact'))
+    // Heard here and by the list under this page (whoApprovesEvents), which says where the practice request is.
+    whoApprovesEvents.emit('added', names[ask.acceptedAs] ?? t('Approver.UnnamedContact'))
     await loadKept()
+    leave()
   }
 
   /**
@@ -319,6 +367,7 @@ const VtaTrustedApprovers: React.FC = () => {
     if (!agent) return
     await setAsideRoleOffer(agent, ask.connectionId).catch(() => undefined)
     await loadKept()
+    leave()
   }
 
   /** "Forget" on a set-aside yes: closed, not written. To add them later, they are asked again. */
@@ -326,6 +375,7 @@ const VtaTrustedApprovers: React.FC = () => {
     if (!agent) return
     await closeRoleOffer(agent, ask.connectionId, false).catch(() => undefined)
     await loadKept()
+    leave()
   }
 
   const onStepDown = async (prompt: RoleOfferPrompt) => {
@@ -336,6 +386,7 @@ const VtaTrustedApprovers: React.FC = () => {
       await stepDownAsApprover(agent, prompt.connectionId)
       setConfirming(undefined)
       await loadKept()
+      leave()
     } catch (e) {
       releaseWarn(`[VTI] step down not sent (${(e as Error)?.name ?? 'error'}: ${(e as Error)?.message ?? e})`)
       setStepDownError(
@@ -371,12 +422,12 @@ const VtaTrustedApprovers: React.FC = () => {
     const written = await write(did, withoutApprover(state.view, did))
     if (!written || written.view.approvers.includes(did)) return
     await approverRemoved(agent, did).catch(() => undefined)
+    leave()
   }
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: ColorPalette.brand.primaryBackground },
     content: { padding: 20, gap: 16 },
-    card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: 16, gap: 10 },
     header: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
     name: { flexShrink: 1 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -409,6 +460,20 @@ const VtaTrustedApprovers: React.FC = () => {
     tabOn: { backgroundColor: ColorPalette.brand.primary },
     tabOnText: { color: ColorPalette.grayscale.white },
     more: { gap: 10, marginTop: 8 },
+    personRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      minHeight: 48,
+      backgroundColor: ColorPalette.brand.secondaryBackground,
+      borderRadius: 8,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+    personRowText: { flex: 1, gap: 2 },
+    pageRoot: { gap: 16 },
+    page: { gap: 12 },
+    bar: { gap: 10, marginTop: 8 },
   })
 
   const view = state?.view
@@ -736,6 +801,247 @@ const VtaTrustedApprovers: React.FC = () => {
       </SafeAreaView>
     )
 
+  const errorLine = error ? (
+    <ThemedText style={styles.error} testID={testIdWithKey(TrustedApproversIds.error)}>
+      {error}
+    </ThemedText>
+  ) : null
+  const stepDownErrorLine = stepDownError ? (
+    <ThemedText style={styles.error} testID={testIdWithKey(TrustedApproversIds.stepDownError)}>
+      {stepDownError}
+    </ThemedText>
+  ) : null
+  // The practice request lives on Developer › Demos (B7 step 3); right after an add, this says where it is. It runs
+  // nothing from here.
+  const justAddedLine = justAdded ? (
+    <ThemedText variant="bold" testID={testIdWithKey(EnforcementCheckIds.checkPrompt)}>
+      {t('Approver.CheckAfterAdd', { name: justAdded, interpolation: { escapeValue: false } })}
+    </ThemedText>
+  ) : null
+  const loadingLine = (
+    <View style={styles.row}>
+      <ActivityIndicator color={ColorPalette.brand.primary} />
+      <ThemedText style={styles.muted}>{t('Approver.Loading')}</ThemedText>
+    </View>
+  )
+  const askName = (ask: RoleOfferAsk) => names[ask.acceptedAs as string] ?? t('Approver.UnnamedContact')
+  const askerOf = (prompt: RoleOfferPrompt) => ({
+    asker: prompt.asker || t('Approver.UnnamedContact'),
+    interpolation: { escapeValue: false },
+  })
+
+  /** One person on the list: their name, one line, a pill, and the way to their page (design B). */
+  const personRow = (kind: PersonKind, rowId: string, name: string, sub: string, chip: React.ReactNode) => (
+    <Pressable
+      key={`${kind}_${rowId}`}
+      onPress={() => navigation.navigate(Screens.VtaApproverPerson, { kind, id: rowId })}
+      accessibilityRole="button"
+      accessibilityLabel={name}
+      testID={testIdWithKey(TrustedApproversIds.row(kind, rowId))}
+      style={styles.personRow}
+    >
+      <View style={styles.personRowText}>
+        <ThemedText variant="bold">{name}</ThemedText>
+        <ThemedText style={styles.muted}>{sub}</ThemedText>
+      </View>
+      {chip}
+      <Icon name="chevron-right" size={24} color={ColorPalette.grayscale.mediumGrey} />
+    </Pressable>
+  )
+
+  /**
+   * A person's page: the header (their name and pill) above what is shown for them, inside their own container. The
+   * container's testID comes keyed (testIdWithKey at each call), so the testids scan sees each one used.
+   */
+  const personPage = (testID: string, name: string, pill: React.ReactNode, children: React.ReactNode) => (
+    <View style={styles.page} testID={testID}>
+      <View style={styles.header}>
+        <ThemedText variant="headingThree" style={styles.name} accessibilityRole="header">
+          {name}
+        </ThemedText>
+        {pill}
+      </View>
+      {children}
+    </View>
+  )
+
+  const approverPage = (did: string) =>
+    personPage(
+      testIdWithKey(TrustedApproversIds.approver(did)),
+      nameOf(did),
+      pillFor(did),
+      <>
+        {checkedBox(did, nameOf(did))}
+        {stateBox(did)}
+        {steppedDown.includes(did) ? (
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.steppedDown(did))}>
+            {t('Approver.SteppedDownRemove', { name: nameOf(did), interpolation: { escapeValue: false } })}
+          </ThemedText>
+        ) : null}
+        {view ? needsBox(did, nameOf(did), view.keys, { added: true }) : null}
+        <View style={styles.bar}>
+          <Button
+            title={t('Approver.Remove', { name: nameOf(did), interpolation: { escapeValue: false } })}
+            // A revoked card leaves the agent waiting for them until removed (B6): Remove turns solid red.
+            buttonType={isRevoked(standingFor(did)) ? ButtonType.Critical : ButtonType.Secondary}
+            onPress={() => void onRemove(did)}
+            disabled={busy !== undefined}
+            testID={testIdWithKey(TrustedApproversIds.remove(did))}
+          >
+            {busy === did ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
+          </Button>
+          <ThemedText style={styles.muted}>{t('Approver.RemoveNeedsYes')}</ThemedText>
+        </View>
+      </>
+    )
+
+  /** A yes waiting to be added ('yes'), or one "Not now" set aside ('setAside'): what was checked, and Add. */
+  const askPage = (kind: 'yes' | 'setAside', ask: RoleOfferAsk) => {
+    const name = askName(ask)
+    const words = { name, interpolation: { escapeValue: false } }
+    const isAside = kind === 'setAside'
+    return personPage(
+      isAside
+        ? testIdWithKey(TrustedApproversIds.setAsideRow(ask.connectionId))
+        : testIdWithKey(TrustedApproversIds.accepted(ask.connectionId)),
+      name,
+      pillFor(ask.acceptedAs),
+      <>
+        <ThemedText style={styles.muted}>{isAside ? t('Approver.SetAsideNote') : t('Approver.Accepted')}</ThemedText>
+        {checkedBox(ask.acceptedAs, name)}
+        {stateBox(ask.acceptedAs)}
+        {needsBox(ask.acceptedAs ?? ask.connectionId, name, ask.actions, { added: false })}
+        {isAside ? null : <ThemedText style={styles.muted}>{t('Approver.PersonNothingUntilAdded', words)}</ThemedText>}
+        <View style={styles.bar}>
+          <Button
+            title={t('Approver.Add', words)}
+            buttonType={ButtonType.Primary}
+            onPress={() => void onAdd(ask)}
+            disabled={!view || busy !== undefined}
+            testID={testIdWithKey(
+              isAside ? TrustedApproversIds.setAsideAdd(ask.connectionId) : TrustedApproversIds.add(ask.connectionId)
+            )}
+          >
+            {busy === ask.connectionId ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
+          </Button>
+          {isAside ? (
+            <>
+              <Button
+                title={t('Approver.Forget')}
+                buttonType={ButtonType.Secondary}
+                onPress={() => void onForget(ask)}
+                disabled={busy !== undefined}
+                testID={testIdWithKey(TrustedApproversIds.setAsideForget(ask.connectionId))}
+              />
+              <ThemedText style={styles.muted}>{t('Approver.ForgetNote', words)}</ThemedText>
+            </>
+          ) : (
+            <Button
+              title={t('Approver.NotNow')}
+              buttonType={ButtonType.Tertiary}
+              onPress={() => void onNotNow(ask)}
+              disabled={busy !== undefined}
+              testID={testIdWithKey(TrustedApproversIds.notNow(ask.connectionId))}
+            />
+          )}
+        </View>
+      </>
+    )
+  }
+
+  /** Someone this phone approves for: since when, what, the card line, and Step down (asked first). */
+  const approvingPage = (prompt: RoleOfferPrompt) => {
+    const asker = askerOf(prompt)
+    return personPage(
+      testIdWithKey(TrustedApproversIds.approvingPerson(prompt.connectionId)),
+      asker.asker,
+      null,
+      <>
+        <ThemedText style={styles.muted}>
+          {t('Approver.IApproveForSince', { date: localDate(prompt.receivedAt) })}
+        </ThemedText>
+        <ThemedText style={styles.muted}>{t('Approver.YouApprove')}</ThemedText>
+        <ThemedText>{actionList(prompt.actions)}</ThemedText>
+        {cardLine(prompt, asker)}
+        {stepDownErrorLine}
+        <View style={styles.bar}>
+          {confirming === prompt.connectionId ? (
+            <>
+              <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
+              <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
+              <Button
+                title={t('Approver.StepDown')}
+                buttonType={ButtonType.Secondary}
+                onPress={() => void onStepDown(prompt)}
+                disabled={busy !== undefined}
+                testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
+              >
+                {busy === prompt.connectionId ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
+              </Button>
+              <Button
+                title={t('Global.Cancel')}
+                buttonType={ButtonType.Tertiary}
+                onPress={() => setConfirming(undefined)}
+                disabled={busy !== undefined}
+                testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
+              />
+            </>
+          ) : (
+            <Button
+              title={t('Approver.StepDown')}
+              buttonType={ButtonType.Tertiary}
+              onPress={() => {
+                setStepDownError(undefined)
+                setConfirming(prompt.connectionId)
+              }}
+              disabled={busy !== undefined}
+              testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
+            />
+          )}
+        </View>
+      </>
+    )
+  }
+
+  /**
+   * What the person page shows, found again on each render from what is loaded: nothing found (removed, forgotten,
+   * stepped down) says so. A yes or a set-aside yes whose approver is now on the agent (just added, here or
+   * elsewhere) shows as that approver.
+   */
+  const personContent = (p: PersonParams) => {
+    if (p.kind === 'approving') {
+      const prompt = mine.find((m) => m.connectionId === p.id)
+      if (prompt) return approvingPage(prompt)
+      if (!keptRead) return loadingLine
+    } else if (p.kind === 'approver') {
+      if (view?.approvers.includes(p.id)) return approverPage(p.id)
+      if (!view && !error) return loadingLine
+    } else {
+      const ask = (p.kind === 'yes' ? accepted : aside).find((a) => a.connectionId === p.id)
+      if (ask?.acceptedAs && view?.approvers.includes(ask.acceptedAs)) return approverPage(ask.acceptedAs)
+      if (ask) return askPage(p.kind, ask)
+      if (!keptRead) return loadingLine
+    }
+    return (
+      <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.personGone)}>
+        {t('Approver.PersonGone')}
+      </ThemedText>
+    )
+  }
+
+  if (person)
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
+        <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey(TrustedApproversIds.screen)}>
+          <View style={styles.pageRoot} testID={testIdWithKey(TrustedApproversIds.person)}>
+            {errorLine}
+            {personContent(person)}
+            {justAddedLine}
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    )
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.content} testID={testIdWithKey(TrustedApproversIds.screen)}>
@@ -762,95 +1068,45 @@ const VtaTrustedApprovers: React.FC = () => {
             </Pressable>
           ))}
         </View>
-        {error ? (
-          <ThemedText style={styles.error} testID={testIdWithKey(TrustedApproversIds.error)}>
-            {error}
-          </ThemedText>
-        ) : null}
+        {errorLine}
         {tab === 'mine' ? (
           <>
             <ThemedText style={styles.muted}>{t('Approver.Intro')}</ThemedText>
 
+            {/* Design B (11-14): one row per person; their detail and what can be done are on their own page. */}
             {waiting.map((ask) => {
-              const name = names[ask.acceptedAs as string] ?? t('Approver.UnnamedContact')
-              return (
-                <View
-                  key={ask.connectionId}
-                  style={styles.card}
-                  testID={testIdWithKey(TrustedApproversIds.accepted(ask.connectionId))}
-                >
-                  <View style={styles.header}>
-                    <ThemedText variant="bold" style={styles.name}>
-                      {name}
-                    </ThemedText>
-                    {pillFor(ask.acceptedAs)}
-                  </View>
-                  <ThemedText style={styles.muted}>{t('Approver.Accepted')}</ThemedText>
-                  {checkedBox(ask.acceptedAs, name)}
-                  {stateBox(ask.acceptedAs)}
-                  {needsBox(ask.acceptedAs ?? ask.connectionId, name, ask.actions, { added: false })}
-                  <Button
-                    title={t('Approver.Add', { name, interpolation: { escapeValue: false } })}
-                    buttonType={ButtonType.Primary}
-                    onPress={() => void onAdd(ask)}
-                    disabled={!view || busy !== undefined}
-                    testID={testIdWithKey(TrustedApproversIds.add(ask.connectionId))}
-                  >
-                    {busy === ask.connectionId ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
-                  </Button>
-                  <Button
-                    title={t('Approver.NotNow')}
-                    buttonType={ButtonType.Tertiary}
-                    onPress={() => void onNotNow(ask)}
-                    disabled={busy !== undefined}
-                    testID={testIdWithKey(TrustedApproversIds.notNow(ask.connectionId))}
-                  />
-                </View>
+              const name = askName(ask)
+              return personRow(
+                'yes',
+                ask.connectionId,
+                name,
+                t('Approver.RowSaidYes', { name, interpolation: { escapeValue: false } }),
+                <StatusPill
+                  tone="unknown"
+                  words={t('Approver.Accepted')}
+                  testID={TrustedApproversIds.saidYes(ask.connectionId)}
+                />
               )
             })}
 
-            {!view && !error ? (
-              <View style={styles.row}>
-                <ActivityIndicator color={ColorPalette.brand.primary} />
-                <ThemedText style={styles.muted}>{t('Approver.Loading')}</ThemedText>
-              </View>
-            ) : null}
+            {!view && !error ? loadingLine : null}
             {view && view.approvers.length === 0 ? (
               <ThemedText testID={testIdWithKey(TrustedApproversIds.none)}>{t('Approver.None')}</ThemedText>
             ) : null}
-            {view?.approvers.map((did) => (
-              <View key={did} style={styles.card} testID={testIdWithKey(TrustedApproversIds.approver(did))}>
-                <View style={styles.header}>
-                  <ThemedText variant="bold" style={styles.name}>
-                    {nameOf(did)}
-                  </ThemedText>
-                  {pillFor(did)}
-                </View>
-                {checkedBox(did, nameOf(did))}
-                {stateBox(did)}
-                {steppedDown.includes(did) ? (
-                  <ThemedText testID={testIdWithKey(TrustedApproversIds.steppedDown(did))}>
-                    {t('Approver.SteppedDownRemove', { name: nameOf(did), interpolation: { escapeValue: false } })}
-                  </ThemedText>
-                ) : null}
-                {needsBox(did, nameOf(did), view.keys, { added: true })}
-                <Button
-                  title={t('Approver.Remove', { name: nameOf(did), interpolation: { escapeValue: false } })}
-                  // A revoked card leaves the agent waiting for them until removed (B6): Remove turns solid red.
-                  buttonType={isRevoked(standingFor(did)) ? ButtonType.Critical : ButtonType.Secondary}
-                  onPress={() => void onRemove(did)}
-                  disabled={busy !== undefined}
-                  testID={testIdWithKey(TrustedApproversIds.remove(did))}
-                >
-                  {busy === did ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
-                </Button>
-              </View>
-            ))}
-            {view && view.approvers.length > 0 ? (
-              <ThemedText style={styles.muted}>{t('Approver.RemoveNeedsYes')}</ThemedText>
-            ) : null}
+            {view?.approvers.map((did) =>
+              personRow(
+                'approver',
+                did,
+                nameOf(did),
+                steppedDown.includes(did)
+                  ? t('Approver.RowSteppedDown', { name: nameOf(did), interpolation: { escapeValue: false } })
+                  : t('Approver.RowApproves', { count: view.keys.length }),
+                pillFor(did)
+              )
+            )}
             {/* "Set aside (n)", at the end of My approvers (cf's D2): the yeses "Not now" kept. Closed, one row; open,
-            each person with what was checked, what they would approve, Add and Forget. Nothing is sent to them. */}
+            a row per person, each opening their page (what was checked, what they would approve, Add and Forget).
+            Nothing is sent to them. */}
             {aside.length > 0 ? (
               <View style={styles.aside} testID={testIdWithKey(TrustedApproversIds.setAside)}>
                 <Pressable
@@ -874,59 +1130,27 @@ const VtaTrustedApprovers: React.FC = () => {
                   />
                 </Pressable>
                 {asideOpen
-                  ? aside.map((ask) => {
-                      const name = names[ask.acceptedAs as string] ?? t('Approver.UnnamedContact')
-                      const words = { name, interpolation: { escapeValue: false } }
-                      return (
-                        <View
-                          key={ask.connectionId}
-                          style={styles.card}
-                          testID={testIdWithKey(TrustedApproversIds.setAsideRow(ask.connectionId))}
-                        >
-                          <View style={styles.header}>
-                            <ThemedText variant="bold" style={styles.name}>
-                              {name}
-                            </ThemedText>
-                            {pillFor(ask.acceptedAs)}
-                          </View>
-                          {checkedBox(ask.acceptedAs, name)}
-                          {needsBox(ask.acceptedAs ?? ask.connectionId, name, ask.actions, { added: false })}
-                          <Button
-                            title={t('Approver.Add', words)}
-                            buttonType={ButtonType.Primary}
-                            onPress={() => void onAdd(ask)}
-                            disabled={!view || busy !== undefined}
-                            testID={testIdWithKey(TrustedApproversIds.setAsideAdd(ask.connectionId))}
-                          >
-                            {busy === ask.connectionId ? (
-                              <ActivityIndicator color={ColorPalette.brand.primary} />
-                            ) : undefined}
-                          </Button>
-                          <Button
-                            title={t('Approver.Forget')}
-                            buttonType={ButtonType.Secondary}
-                            onPress={() => void onForget(ask)}
-                            disabled={busy !== undefined}
-                            testID={testIdWithKey(TrustedApproversIds.setAsideForget(ask.connectionId))}
-                          />
-                          <ThemedText style={styles.muted}>{t('Approver.ForgetNote', words)}</ThemedText>
-                        </View>
+                  ? aside.map((ask) =>
+                      personRow(
+                        'setAside',
+                        ask.connectionId,
+                        askName(ask),
+                        t('Approver.SetAsideSub'),
+                        pillFor(ask.acceptedAs)
                       )
-                    })
+                    )
                   : null}
               </View>
             ) : null}
-            {/* The practice request lives on Developer › Demos (B7 step 3); right after an add, this says where it is. It
-            runs nothing from here. */}
-            {justAdded ? (
-              <ThemedText variant="bold" testID={testIdWithKey(EnforcementCheckIds.checkPrompt)}>
-                {t('Approver.CheckAfterAdd', { name: justAdded, interpolation: { escapeValue: false } })}
-              </ThemedText>
-            ) : null}
+            <ThemedText style={styles.muted}>{t('Approver.RowAddHint')}</ThemedText>
+            {justAddedLine}
             {view?.heldElsewhere.length ? (
               <ThemedText style={styles.muted}>
                 {t('Approver.HeldElsewhere', { actions: actionList(view.heldElsewhere) })}
               </ThemedText>
+            ) : null}
+            {view && view.approvers.length > 0 ? (
+              <ThemedText style={styles.muted}>{t('Approver.RemoveNeedsYes')}</ThemedText>
             ) : null}
             {/* More: the held-request note and this phone's codes for a state office, off the main list. */}
             <View style={styles.more} testID={testIdWithKey(TrustedApproversIds.more)}>
@@ -947,63 +1171,16 @@ const VtaTrustedApprovers: React.FC = () => {
             ) : (
               <ThemedText style={styles.muted}>{t('Approver.IApproveForIntro')}</ThemedText>
             )}
-            {stepDownError ? (
-              <ThemedText style={styles.error} testID={testIdWithKey(TrustedApproversIds.stepDownError)}>
-                {stepDownError}
-              </ThemedText>
-            ) : null}
-            {mine.map((prompt) => {
-              const asker = {
-                asker: prompt.asker || t('Approver.UnnamedContact'),
-                interpolation: { escapeValue: false },
-              }
-              return (
-                <View key={prompt.connectionId} style={styles.card}>
-                  <ThemedText variant="bold">{asker.asker}</ThemedText>
-                  <ThemedText style={styles.muted}>
-                    {t('Approver.IApproveForSince', { date: localDate(prompt.receivedAt) })}
-                  </ThemedText>
-                  <ThemedText style={styles.muted}>{t('Approver.YouApprove')}</ThemedText>
-                  <ThemedText>{actionList(prompt.actions)}</ThemedText>
-                  {cardLine(prompt, asker)}
-                  {confirming === prompt.connectionId ? (
-                    <>
-                      <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
-                      <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
-                      <Button
-                        title={t('Approver.StepDown')}
-                        buttonType={ButtonType.Secondary}
-                        onPress={() => void onStepDown(prompt)}
-                        disabled={busy !== undefined}
-                        testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
-                      >
-                        {busy === prompt.connectionId ? (
-                          <ActivityIndicator color={ColorPalette.brand.primary} />
-                        ) : undefined}
-                      </Button>
-                      <Button
-                        title={t('Global.Cancel')}
-                        buttonType={ButtonType.Tertiary}
-                        onPress={() => setConfirming(undefined)}
-                        disabled={busy !== undefined}
-                        testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
-                      />
-                    </>
-                  ) : (
-                    <Button
-                      title={t('Approver.StepDown')}
-                      buttonType={ButtonType.Tertiary}
-                      onPress={() => {
-                        setStepDownError(undefined)
-                        setConfirming(prompt.connectionId)
-                      }}
-                      disabled={busy !== undefined}
-                      testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
-                    />
-                  )}
-                </View>
+            {stepDownErrorLine}
+            {mine.map((prompt) =>
+              personRow(
+                'approving',
+                prompt.connectionId,
+                askerOf(prompt).asker,
+                t('Approver.RowApproving', { count: prompt.actions.length, date: localDate(prompt.receivedAt) }),
+                null
               )
-            })}
+            )}
           </View>
         )}
       </ScrollView>

@@ -5,7 +5,7 @@
  * a revoked card. What each box says is decided by guardianEvidence (tested in guardianEvidence.test.tsx); here, which
  * box shows for which standing, and that none of it shows with the switches off.
  */
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render, within } from '@testing-library/react-native'
 import React from 'react'
 
@@ -44,14 +44,23 @@ const state = (): TrustedApproversState =>
     version: 1,
   }) as unknown as TrustedApproversState
 
-const show = async (standing?: GuardianStanding, demoState?: string) => {
-  cardsAre(standing ? { [JORDAN]: standing } : {})
-  demos.mockResolvedValue(demoState ? { [JORDAN]: demoState } : {})
-  const tree = render(
+/**
+ * Who approves opened on one person's page (design B, 11-14): the same screen under the person route, where a person's
+ * boxes and buttons now are.
+ */
+const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) => {
+  ;(useRoute as jest.Mock).mockReturnValue({ params: { kind, id: personId } })
+  return (
     <BasicAppContext>
       <VtaTrustedApprovers />
     </BasicAppContext>
   )
+}
+
+const show = async (standing?: GuardianStanding, demoState?: string) => {
+  cardsAre(standing ? { [JORDAN]: standing } : {})
+  demos.mockResolvedValue(demoState ? { [JORDAN]: demoState } : {})
+  const tree = render(personPage('approver', JORDAN))
   await act(async () => undefined)
   return tree
 }
@@ -440,11 +449,7 @@ describe("Who approves: why a card didn't check out, in plain words (Alberto's h
       social: { [JORDAN]: { kind: 'refused', outcome: 'notThisCard' } },
     })
     demos.mockResolvedValue({})
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expect(tree.getByTestId(id(Ids.socialRefused(JORDAN)))).toBeTruthy()
     expect(tree.getByText('Approver.Reason.damaged Approver.ReasonDo.damaged')).toBeTruthy()
@@ -453,11 +458,7 @@ describe("Who approves: why a card didn't check out, in plain words (Alberto's h
       cards: { [JORDAN]: VERIFIED_DEMO },
       social: { [JORDAN]: { kind: 'authorized', state: UTAH } },
     })
-    const ok = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const ok = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expect(ok.queryByTestId(id(Ids.socialRefused(JORDAN)))).toBeNull()
     expect(ok.queryByText(/Approver\.Reason\./)).toBeNull()

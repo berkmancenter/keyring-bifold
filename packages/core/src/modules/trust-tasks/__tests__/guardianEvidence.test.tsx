@@ -6,7 +6,7 @@
  *
  * The K0 Guardian credential expires 2030-11-10; these rows read the real clock.
  */
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
@@ -241,6 +241,19 @@ const allOn = () => {
   TRUSTED_APPROVERS_REMOTE_OFF.off = false
   STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = false
   SEDI_KERI_REMOTE_OFF.off = false
+}
+
+/**
+ * Who approves opened on one person's page (design B, 11-14): the same screen under the person route, where a person's
+ * boxes and buttons now are.
+ */
+const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) => {
+  ;(useRoute as jest.Mock).mockReturnValue({ params: { kind, id: personId } })
+  return (
+    <BasicAppContext>
+      <VtaTrustedApprovers />
+    </BasicAppContext>
+  )
 }
 
 beforeEach(() => {
@@ -1349,11 +1362,7 @@ describe('Who approves: the state card line', () => {
       view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
       version: 2,
     } as TrustedApproversState)
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     return tree
   }
@@ -1433,11 +1442,7 @@ describe('Who approves: the state card line', () => {
     const tree = await showFor(await writtenWith(card('G-ok')))
     expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
     STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true
-    tree.rerender(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    tree.rerender(personPage('approver', JORDAN))
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
     expect(tree.getByTestId(id(TrustedApproversIds.approver(JORDAN)))).toBeTruthy()
   })
@@ -1641,11 +1646,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
         version: 2,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       return tree
     }
@@ -1747,16 +1748,9 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         view: { approvers: [], keys: [], heldElsewhere: [] },
         version: 1,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      // Their own page (design B, 11-14), opened from the people-I-approve-for tab.
+      const tree = render(personPage('approving', CONN))
       await act(async () => undefined)
-      // The people I approve for are on their own tab (B-lite, 11-14).
-      await act(async () => {
-        fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.tabTheirs)))
-      })
       return tree
     }
 
@@ -2204,11 +2198,7 @@ describe('a root read from its did:webs', () => {
       version: 2,
     } as TrustedApproversState)
     const screen = async () => {
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       return tree
     }
@@ -2282,11 +2272,7 @@ describe('a root read from its did:webs', () => {
       view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
       version: 2,
     } as TrustedApproversState)
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianDemoCopy(JORDAN))).props.children).toBe(
       'Approver.GuardianTestCopy'
@@ -2455,11 +2441,7 @@ describe('a root read from its did:webs', () => {
     } as TrustedApproversState)
     resetGuardianCheckMemo()
     global.fetch = host() as never
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN))).props.children).toBe(
       'Approver.GuardianRevokedState'
@@ -2539,11 +2521,7 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     global.fetch = host() as never
     const screen = async () => {
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       return tree
     }
@@ -2592,11 +2570,7 @@ describe('a root read from its did:webs', () => {
         view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
         version: 2,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       expect(tree.getByTestId(id(TrustedApproversIds.guardianUnreachable(JORDAN))).props.children).toBe(
         'Approver.GuardianStateUnreachable'
@@ -2733,11 +2707,7 @@ describe('a root read from its did:webs', () => {
         version: 2,
       } as TrustedApproversState)
       const screen = async () => {
-        const tree = render(
-          <BasicAppContext>
-            <VtaTrustedApprovers />
-          </BasicAppContext>
-        )
+        const tree = render(personPage('approver', JORDAN))
         await act(async () => undefined)
         return tree
       }

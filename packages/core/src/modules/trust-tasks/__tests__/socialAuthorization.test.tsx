@@ -6,7 +6,7 @@
  * The holder's key is a test key (sedi/__tests__/fixtures/keriTestKit) standing in for the phone's KMS through the
  * controller's own interface. Every store here throws on delete: nothing in this flow deletes a record.
  */
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useRoute } from '@react-navigation/native'
 import { act, render } from '@testing-library/react-native'
 import React from 'react'
 
@@ -223,6 +223,19 @@ const allOn = () => {
   TRUSTED_APPROVERS_REMOTE_OFF.off = false
   STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = false
   SEDI_KERI_REMOTE_OFF.off = false
+}
+
+/**
+ * Who approves opened on one person's page (design B, 11-14): the same screen under the person route, where a person's
+ * boxes and buttons now are.
+ */
+const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) => {
+  ;(useRoute as jest.Mock).mockReturnValue({ params: { kind, id: personId } })
+  return (
+    <BasicAppContext>
+      <VtaTrustedApprovers />
+    </BasicAppContext>
+  )
 }
 
 beforeEach(() => {
@@ -547,11 +560,7 @@ describe('Who approves: one honest line for the authorization', () => {
       view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
       version: 2,
     } as TrustedApproversState)
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     return tree
   }
