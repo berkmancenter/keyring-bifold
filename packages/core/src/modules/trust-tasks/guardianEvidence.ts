@@ -723,13 +723,31 @@ export async function cardConsentOn(
   return answer === 'yes' || answer === 'no' ? answer : undefined
 }
 
-/** Keep this phone's answer for the contact on `connectionId` (changed in place; saved the first time). */
+/**
+ * The state root the answer for `connectionId` was given for (the root of the card held when it was answered), if
+ * one was recorded. An answer from before roots were recorded has none.
+ */
+export async function cardConsentRootOn(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string
+): Promise<string | undefined> {
+  const [record] =
+    (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
+  const root = (record?.content as { root?: unknown } | undefined)?.root
+  return typeof root === 'string' && root.length > 0 ? root : undefined
+}
+
+/**
+ * Keep this phone's answer for the contact on `connectionId` (changed in place; saved the first time), with the state
+ * root of the card it was given for, when known: the question names the state, so the answer is kept for that state.
+ */
 export async function setCardConsent(
   agent: Pick<Agent, 'genericRecords'>,
   connectionId: string,
-  answer: CardConsent
+  answer: CardConsent,
+  root?: string
 ): Promise<void> {
-  const content = { connectionId, answer, answeredAt: new Date().toISOString() }
+  const content = { connectionId, answer, answeredAt: new Date().toISOString(), ...(root ? { root } : {}) }
   const [existing] =
     (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
   if (existing) {
@@ -792,6 +810,11 @@ export const guardianCardEvents = new EventEmitter()
  * The state this phone's own list names for the card's root, and that entry's demo mark, if the root is on the list;
  * never the card's word.
  */
+/** The root on this phone's list the card chains to (its AID found among the card's KELs), if it is on the list. */
+function rootAidOf(evidence: GuardianEvidence): string | undefined {
+  return trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))?.aid
+}
+
 function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true; test?: true } {
   const root = trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))
   if (!root) return {}
@@ -861,7 +884,8 @@ export async function shareGuardianCard(
   send: boolean
 ): Promise<CardAfterYesResult> {
   if (!isOn()) return 'off'
-  await setCardConsent(agent, connectionId, send ? 'yes' : 'no')
+  const held = await heldGuardianEvidence(agent)
+  await setCardConsent(agent, connectionId, send ? 'yes' : 'no', held ? rootAidOf(held) : undefined)
   cardQuestions.take(connectionId)
   guardianCardEvents.emit('question', { connectionId })
   if (!send) return 'declined'
@@ -870,15 +894,34 @@ export async function shareGuardianCard(
   return sendGuardianEvidence(agent, connectionId, yes.agentDid, yes.answeredAs)
 }
 
+/** A yes kept for this contact, given for a card from a state other than the held card's (or with no state kept). */
+async function yesForAnotherState(agent: Agent, connectionId: string): Promise<boolean> {
+  if ((await cardConsentOn(agent, connectionId)) !== 'yes') return false
+  const held = await heldGuardianEvidence(agent)
+  if (!held) return false
+  const root = rootAidOf(held)
+  return !root || (await cardConsentRootOn(agent, connectionId)) !== root
+}
+
+/** Put "Also send your Guardian card from <state> to <name>?" for the held card's state; nothing goes yet. */
+async function askAgain(agent: Agent, prompt: Pick<RoleOfferPrompt, 'connectionId' | 'asker'>): Promise<'asked'> {
+  const held = await heldGuardianEvidence(agent)
+  cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...(held ? stateOf(held) : {}) })
+  guardianCardEvents.emit('question', { connectionId: prompt.connectionId })
+  return 'asked'
+}
+
 /** What {@link guardianCardAfterKeep} did for one person: the after-a-yes result, or 'failed' when it threw. */
 export type CardAfterKeepResult = CardAfterYesResult | 'failed'
 
 /**
  * A card was just kept on this phone (a state office's pick-up, sedi/holder/receiveGuardianCard): offer it to each
- * person this phone already approves for, by exactly the rule after a yes ({@link guardianCardAfterYes}). Their
- * earlier yes to sending the card sends this one now; a no sends nothing; never asked puts the question
- * ("Also send your Guardian card from <state> to <name>?"), naming this card's state. So a card picked up AFTER the
- * yes reaches the person with no step on People I approve for (K1 test, 11-14), and never without an answer.
+ * person this phone already approves for, by the rule after a yes ({@link guardianCardAfterYes}), with one more
+ * condition. Their earlier yes sends this card only if it was given for a card from the SAME state (its root, kept
+ * with the answer): the question names the state, so a yes for one state never sends another's. A yes for another
+ * state, or one kept before roots were, puts the question again, naming this card's state. A no sends nothing and is
+ * not asked again; never asked puts the question. So a card picked up AFTER the yes reaches the person with no step
+ * on People I approve for (K1 test, 11-14), and never without an answer for its state.
  *
  * One person's send failing never stops the next: it reads 'failed' and is logged. Either switch off: nothing at
  * all. One entry per person, with their name, for the screen to say who it went to.
@@ -892,7 +935,9 @@ export async function guardianCardAfterKeep(
     if (!yes.answeredAs) continue
     let result: CardAfterKeepResult
     try {
-      result = await guardianCardAfterYes(agent, yes, yes.answeredAs)
+      result = (await yesForAnotherState(agent, yes.connectionId))
+        ? await askAgain(agent, yes)
+        : await guardianCardAfterYes(agent, yes, yes.answeredAs)
     } catch (e) {
       warn(agent, `the kept card was not sent on ${yes.connectionId}: ${(e as Error)?.message ?? e}`)
       result = 'failed'

@@ -42,6 +42,7 @@ import {
   cardQuestions,
   guardianCardAfterYes,
   guardianCardAfterKeep,
+  cardConsentRootOn,
   setCardConsent,
   shareGuardianCard,
   checkGuardianEvidence,
@@ -1782,6 +1783,8 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
   })
 
   describe('a card kept AFTER the yes (a state office pick-up, K1 test 11-14): offered by the same rule', () => {
+    // The root a yes was given for, kept with it: the K0 card's (literal, so the rows can't compare a value with itself).
+    const K0_ROOT = 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6'
     const ceremonyMock = () => jest.requireMock('../ceremony') as { sendTrustTaskDocument: jest.Mock }
     /** Jordan said yes to `who` with no card held (so nothing went and nothing was asked), then keeps a card. */
     const yesThenKeep = async (who: Array<[string, string]> = [[CONN, 'Sam']]) => {
@@ -1803,7 +1806,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
 
     test('an earlier yes to sending the card: this card goes now, for the agent and as the yes (control: before the keep, none went)', async () => {
       const jordan = await yesThenKeep()
-      await setCardConsent(jordan.agent, CONN, 'yes')
+      await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT)
       expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'sent' }])
       expect(cards()).toHaveLength(1)
       expect(cards()[0].payload).toMatchObject({
@@ -1829,8 +1832,8 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         [CONN, 'Sam'],
         [CONN2, 'Amy'],
       ])
-      await setCardConsent(jordan.agent, CONN, 'yes')
-      await setCardConsent(jordan.agent, CONN2, 'yes')
+      await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT)
+      await setCardConsent(jordan.agent, CONN2, 'yes', K0_ROOT)
       ceremonyMock().sendTrustTaskDocument.mockImplementationOnce(async () => {
         throw new Error('mediator down')
       })
@@ -1852,6 +1855,39 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       setStateVerifiedApproversEnabled(true)
       expect(await guardianCardAfterKeep(jordan.agent)).toHaveLength(1)
       expect(cards()).toHaveLength(0)
+    })
+
+    test('the fixture: K0 card G-ok chains to the K0 root these rows name', () => {
+      expect(stateRoots.K0_TEST_ROOT.aid).toBe(K0_ROOT)
+    })
+
+    test("a yes given for ANOTHER state never sends this one: the question again, naming this card's state (control: same state, sent)", async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes', 'EOtherStateRootAidxxxxxxxxxxxxxxxxxxxxxxxxxx')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN, asker: 'Sam', state: 'Example State' })
+      // Answering it records this state; the next keep of a card from it sends.
+      expect(await shareGuardianCard(jordan.agent, CONN, true)).toBe('sent')
+      expect(await cardConsentRootOn(jordan.agent, CONN)).toBe(K0_ROOT)
+      sent.length = 0
+      expect((await guardianCardAfterKeep(jordan.agent)).map((r) => r.result)).toEqual(['sent'])
+    })
+
+    test('a yes kept before states were recorded is asked again, never sent on its own', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+    })
+
+    test('"Send my card" keeps the state of the card held when answering (control: no card held, none kept)', async () => {
+      const none = phone()
+      await setCardConsent(none.agent, CONN, 'yes')
+      expect(await cardConsentRootOn(none.agent, CONN)).toBeUndefined()
+      const jordan = await yesThenKeep()
+      await shareGuardianCard(jordan.agent, CONN, true)
+      expect(await cardConsentRootOn(jordan.agent, CONN)).toBe(K0_ROOT)
     })
   })
 })
