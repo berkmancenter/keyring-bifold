@@ -816,7 +816,9 @@ function rootAidOf(evidence: GuardianEvidence): string | undefined {
 }
 
 function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true; test?: true } {
-  const root = trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))
+  // The same match as rootAidOf: one rule decides whether a card counts as a known state's.
+  const aid = rootAidOf(evidence)
+  const root = aid ? trustedStateRoots().find((known) => known.aid === aid) : undefined
   if (!root) return {}
   return {
     state: root.name,
@@ -853,7 +855,9 @@ export type CardAfterYesResult = EvidenceSendResult | 'declined' | 'asked' | 'no
 
 /**
  * After a yes to approve for the contact on `prompt.connectionId`: send the card this phone holds only if its person
- * already said yes to sending it to this contact. Said no: nothing goes, and nothing is asked again. Never asked:
+ * already said yes to sending it to this contact, for a card from the same state (the question names the state; a
+ * yes for another state's card, or one kept before states were, puts the question again for this card's state).
+ * Said no: nothing goes, and nothing is asked again. Never asked:
  * nothing goes, and the question is put to the person ({@link cardQuestions}). Either switch off: nothing is asked
  * and nothing goes. The approval itself is never touched here.
  */
@@ -866,6 +870,9 @@ export async function guardianCardAfterYes(
   const held = await heldGuardianEvidence(agent)
   if (!held) return 'none'
   const consent = await cardConsentOn(agent, prompt.connectionId)
+  // A yes counts only for the state it was given for (the question names it): for another state's card, or a yes
+  // kept before states were, the question is put again, naming the held card's state.
+  if (consent === 'yes' && (await yesForAnotherState(agent, prompt.connectionId))) return askAgain(agent, prompt)
   if (consent === 'yes') return sendGuardianEvidence(agent, prompt.connectionId, prompt.agentDid, approverDid)
   if (consent === 'no') return 'declined'
   cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...stateOf(held) })
@@ -916,11 +923,10 @@ export type CardAfterKeepResult = CardAfterYesResult | 'failed'
 
 /**
  * A card was just kept on this phone (a state office's pick-up, sedi/holder/receiveGuardianCard): offer it to each
- * person this phone already approves for, by the rule after a yes ({@link guardianCardAfterYes}), with one more
- * condition. Their earlier yes sends this card only if it was given for a card from the SAME state (its root, kept
- * with the answer): the question names the state, so a yes for one state never sends another's. A yes for another
- * state, or one kept before roots were, puts the question again, naming this card's state. A no sends nothing and is
- * not asked again; never asked puts the question. So a card picked up AFTER the yes reaches the person with no step
+ * person this phone already approves for, by exactly the rule after a yes ({@link guardianCardAfterYes}): their
+ * earlier yes sends this card only if it was given for a card from the SAME state (its root, kept with the answer),
+ * else the question is put again naming this card's state; a no sends nothing and is not asked again; never asked
+ * puts the question. So a card picked up AFTER the yes reaches the person with no step
  * on People I approve for (K1 test, 11-14), and never without an answer for its state.
  *
  * One person's send failing never stops the next: it reads 'failed' and is logged. Either switch off: nothing at
@@ -935,9 +941,7 @@ export async function guardianCardAfterKeep(
     if (!yes.answeredAs) continue
     let result: CardAfterKeepResult
     try {
-      result = (await yesForAnotherState(agent, yes.connectionId))
-        ? await askAgain(agent, yes)
-        : await guardianCardAfterYes(agent, yes, yes.answeredAs)
+      result = await guardianCardAfterYes(agent, yes, yes.answeredAs)
     } catch (e) {
       warn(agent, `the kept card was not sent on ${yes.connectionId}: ${(e as Error)?.message ?? e}`)
       result = 'failed'
