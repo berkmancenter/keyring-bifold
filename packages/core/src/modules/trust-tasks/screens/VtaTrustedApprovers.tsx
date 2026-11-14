@@ -269,7 +269,18 @@ const VtaTrustedApprovers: React.FC = () => {
 
   const onAdd = async (ask: RoleOfferAsk) => {
     if (!agent || !state) return
-    const written = await write(ask.connectionId, nextTrustedRules(state.view, ask))
+    // The set as the agent holds it NOW, not as this screen loaded it: the write replaces the whole set, and a set-aside
+    // yes is added later by design, so a snapshot could put back an approver removed meanwhile. What remains is the
+    // window of the Face ID prompt inside setTrustedApprovers (its version check comes after it), a known gap.
+    let fresh: TrustedApproversState
+    try {
+      fresh = await vtaAgent.trustedApprovers(agent)
+    } catch (e) {
+      setError(wordsFor(e))
+      return
+    }
+    setState(fresh)
+    const written = await write(ask.connectionId, nextTrustedRules(fresh.view, ask))
     if (!written || !ask.acceptedAs || !written.view.approvers.includes(ask.acceptedAs)) return
     await closeRoleOffer(agent, ask.connectionId, true).catch(() => undefined)
     setJustAdded(names[ask.acceptedAs] ?? t('Approver.UnnamedContact'))

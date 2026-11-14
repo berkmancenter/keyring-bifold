@@ -729,7 +729,8 @@ export async function handleRoleStepDown(
     // A yes not yet written is simply taken back.
     record.content = {
       ...ask,
-      // A set-aside yes too: it is no longer theirs to give.
+      // A set-aside yes too: it is no longer theirs to give. Spelled out on purpose, not isYesNotAdded: that also asks
+      // for acceptedAs, and a step-down must close the yes even where none was recorded.
       ...(ask.state === 'accepted' || ask.state === 'setAside' ? { state: 'closed' } : {}),
       steppedDown: payload.steppedDownAt,
     }

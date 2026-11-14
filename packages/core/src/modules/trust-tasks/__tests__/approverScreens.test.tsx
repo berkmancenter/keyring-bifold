@@ -893,6 +893,46 @@ describe('Who approves', () => {
       expect(close).toHaveBeenCalledWith(AGENT, CONN, true)
     })
 
+    test('Add reads the set the agent holds NOW: an approver removed since the screen loaded is not put back', async () => {
+      kept([], { [JORDAN]: 'Jordan' }, [ASIDE])
+      // Loaded with Amy; Amy removed (elsewhere) before Add: the second read says so.
+      jest
+        .spyOn(vtaAgent, 'trustedApprovers')
+        .mockResolvedValueOnce(held([AMY], ['shareCredential']))
+        .mockResolvedValue(held([], []))
+      const write = jest
+        .spyOn(vtaAgent, 'setTrustedApprovers')
+        .mockResolvedValue(held([JORDAN], ['shareCredential', 'addDevice']))
+      jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
+      const tree = await show(<VtaTrustedApprovers />)
+      expect(tree.getByTestId(id(TrustedApproversIds.approver(AMY)))).toBeTruthy()
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(id(TrustedApproversIds.setAsideOpen)))
+      })
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(id(TrustedApproversIds.setAsideAdd(CONN))))
+      })
+      expect(write).toHaveBeenCalledWith(AGENT, [JORDAN], ['shareCredential', 'addDevice'])
+    })
+
+    test('a fresh read that fails writes nothing and says why (control: the row above writes)', async () => {
+      kept([], { [JORDAN]: 'Jordan' }, [ASIDE])
+      jest
+        .spyOn(vtaAgent, 'trustedApprovers')
+        .mockResolvedValueOnce(held([], []))
+        .mockRejectedValue(new DeviceActionRefused('failed', 'no'))
+      const write = jest.spyOn(vtaAgent, 'setTrustedApprovers')
+      const tree = await show(<VtaTrustedApprovers />)
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(id(TrustedApproversIds.setAsideOpen)))
+      })
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(id(TrustedApproversIds.setAsideAdd(CONN))))
+      })
+      expect(write).not.toHaveBeenCalled()
+      expect(tree.getByTestId(id(TrustedApproversIds.error))).toBeTruthy()
+    })
+
     test('Forget, right there, closes it unwritten and writes nothing on the agent', async () => {
       kept([], { [JORDAN]: 'Jordan' }, [ASIDE])
       jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(held([], []))
