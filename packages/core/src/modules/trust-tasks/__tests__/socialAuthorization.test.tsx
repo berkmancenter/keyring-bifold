@@ -238,6 +238,24 @@ const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personI
   )
 }
 
+/** Each kind's page shows its person under this id; the page of someone it cannot find shows none of them. */
+const pageIdOf = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) =>
+  ({
+    approver: TrustedApproversIds.approver,
+    yes: TrustedApproversIds.accepted,
+    setAside: TrustedApproversIds.setAsideRow,
+    approving: TrustedApproversIds.approvingPerson,
+  })[kind](personId)
+/**
+ * The page really is that person's (7d, #1078): many rows check that something is ABSENT from it, and a page that
+ * found nobody (a wrong kind or id) would pass every one of them for nothing.
+ */
+const expectPage = (
+  tree: { getByTestId: (testId: string) => unknown },
+  kind: 'approver' | 'yes' | 'setAside' | 'approving',
+  personId: string
+) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
+
 beforeEach(() => {
   sent.length = 0
   mockHolder = null
@@ -562,6 +580,7 @@ describe('Who approves: one honest line for the authorization', () => {
     } as TrustedApproversState)
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
     return tree
   }
   const received = async (opts: { strip?: boolean; otherWard?: boolean; edited?: boolean } = {}) => {

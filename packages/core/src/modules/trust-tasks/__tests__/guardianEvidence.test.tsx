@@ -256,6 +256,24 @@ const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personI
   )
 }
 
+/** Each kind's page shows its person under this id; the page of someone it cannot find shows none of them. */
+const pageIdOf = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) =>
+  ({
+    approver: TrustedApproversIds.approver,
+    yes: TrustedApproversIds.accepted,
+    setAside: TrustedApproversIds.setAsideRow,
+    approving: TrustedApproversIds.approvingPerson,
+  })[kind](personId)
+/**
+ * The page really is that person's (7d, #1078): many rows check that something is ABSENT from it, and a page that
+ * found nobody (a wrong kind or id) would pass every one of them for nothing.
+ */
+const expectPage = (
+  tree: { getByTestId: (testId: string) => unknown },
+  kind: 'approver' | 'yes' | 'setAside' | 'approving',
+  personId: string
+) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
+
 beforeEach(() => {
   jest.restoreAllMocks()
   sent.length = 0
@@ -1364,6 +1382,7 @@ describe('Who approves: the state card line', () => {
     } as TrustedApproversState)
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
     return tree
   }
   const writtenWith = async (evidence: GuardianEvidence | null) => {
@@ -1648,6 +1667,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       } as TrustedApproversState)
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
       return tree
     }
     const declined = await run(false)
@@ -1751,6 +1771,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       // Their own page (design B, 11-14), opened from the people-I-approve-for tab.
       const tree = render(personPage('approving', CONN))
       await act(async () => undefined)
+      expectPage(tree, 'approving', CONN)
       return tree
     }
 
@@ -2200,6 +2221,7 @@ describe('a root read from its did:webs', () => {
     const screen = async () => {
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
       return tree
     }
     const copy = await screen()
@@ -2274,6 +2296,7 @@ describe('a root read from its did:webs', () => {
     } as TrustedApproversState)
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianDemoCopy(JORDAN))).props.children).toBe(
       'Approver.GuardianTestCopy'
     )
@@ -2443,6 +2466,7 @@ describe('a root read from its did:webs', () => {
     global.fetch = host() as never
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN))).props.children).toBe(
       'Approver.GuardianRevokedState'
     )
@@ -2523,6 +2547,7 @@ describe('a root read from its did:webs', () => {
     const screen = async () => {
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
       return tree
     }
     const live = await screen()
@@ -2572,6 +2597,7 @@ describe('a root read from its did:webs', () => {
       } as TrustedApproversState)
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
       expect(tree.getByTestId(id(TrustedApproversIds.guardianUnreachable(JORDAN))).props.children).toBe(
         'Approver.GuardianStateUnreachable'
       )
@@ -2709,6 +2735,7 @@ describe('a root read from its did:webs', () => {
       const screen = async () => {
         const tree = render(personPage('approver', JORDAN))
         await act(async () => undefined)
+        expectPage(tree, 'approver', JORDAN)
         return tree
       }
       const realFetch = global.fetch

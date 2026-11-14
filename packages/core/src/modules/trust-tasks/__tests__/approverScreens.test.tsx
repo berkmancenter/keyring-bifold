@@ -61,10 +61,29 @@ const personPage = (kind: PersonKind, personId: string) => {
   ;(useRoute as jest.Mock).mockReturnValue({ params: { kind, id: personId } })
   return <VtaTrustedApprovers />
 }
+
+/** Each kind's page shows its person under this id; the page of someone it cannot find shows none of them. */
+const pageIdOf = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) =>
+  ({
+    approver: TrustedApproversIds.approver,
+    yes: TrustedApproversIds.accepted,
+    setAside: TrustedApproversIds.setAsideRow,
+    approving: TrustedApproversIds.approvingPerson,
+  })[kind](personId)
+/**
+ * The page really is that person's (7d, #1078): many rows check that something is ABSENT from it, and a page that
+ * found nobody (a wrong kind or id) would pass every one of them for nothing.
+ */
+const expectPage = (
+  tree: { getByTestId: (testId: string) => unknown },
+  kind: 'approver' | 'yes' | 'setAside' | 'approving',
+  personId: string
+) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
 /** From the list on screen to one person's page, as a tap on their row would: the same screen, what it loaded kept. */
 const openPerson = async (tree: ReturnType<typeof render>, kind: PersonKind, personId: string) => {
   tree.rerender(<BasicAppContext>{personPage(kind, personId)}</BasicAppContext>)
   await act(async () => undefined)
+  expectPage(tree, kind, personId)
 }
 /** And back to the list (the person route left). */
 const backToList = async (tree: ReturnType<typeof render>) => {
@@ -753,6 +772,7 @@ describe('Who approves', () => {
       .mockResolvedValue(held([JORDAN], ['shareCredential'], ['addDevice']))
     const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
     })
@@ -767,6 +787,7 @@ describe('Who approves', () => {
     jest.spyOn(vtaAgent, 'setTrustedApprovers').mockRejectedValue(new DeviceActionRefused('failed', 'no'))
     const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
     })
@@ -782,6 +803,7 @@ describe('Who approves', () => {
     jest.spyOn(vtaAgent, 'setTrustedApprovers').mockRejectedValue(new DeviceActionRefused('awaitingApproval'))
     const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
     })
@@ -797,6 +819,7 @@ describe('Who approves', () => {
     const write = jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([], [], ['addDevice']))
     const close = jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
     })
@@ -1017,6 +1040,7 @@ describe('Who approves', () => {
     jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([AMY, JORDAN], ['shareCredential']))
     const removed = jest.spyOn(approverRole, 'approverRemoved').mockResolvedValue(undefined)
     const tree = await show(personPage('approver', JORDAN))
+    expectPage(tree, 'approver', JORDAN)
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.remove(JORDAN))))
     })
@@ -1100,6 +1124,7 @@ describe('Who approves', () => {
         expect(tree.queryByTestId(id(key))).toBeNull()
       tree.unmount()
       const page = await show(personPage('approver', AMY))
+      expectPage(page, 'approver', AMY)
       expect(page.getByTestId(id(TrustedApproversIds.person))).toBeTruthy()
       expect(page.getByTestId(id(TrustedApproversIds.needsBox(AMY)))).toBeTruthy()
       expect(page.getByTestId(id(TrustedApproversIds.noCard(AMY)))).toBeTruthy()
@@ -1173,6 +1198,7 @@ describe('Who approves', () => {
           TrustedApproversIds.stepDown('c-sam'),
         ]
         const tree = await show(personPage(kind, personId))
+        expectPage(tree, kind, personId)
         expect(tree.getByTestId(id(TrustedApproversIds.person))).toBeTruthy()
         expect(tree.getByTestId(id(TrustedApproversIds.screen))).toBeTruthy()
         for (const key of all)
@@ -1198,6 +1224,7 @@ describe('Who approves', () => {
         other.unmount()
       }
       const here = await show(personPage('approver', AMY))
+      expectPage(here, 'approver', AMY)
       expect(here.queryByTestId(id(TrustedApproversIds.personGone))).toBeNull()
       expect(here.getByTestId(id(TrustedApproversIds.approver(AMY)))).toBeTruthy()
     })
@@ -1219,6 +1246,7 @@ describe('Who approves', () => {
       jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([AMY, JORDAN], ['shareCredential']))
       jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
       const tree = await show(personPage('yes', CONN))
+      expectPage(tree, 'yes', CONN)
       await act(async () => {
         fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
       })
@@ -1227,6 +1255,7 @@ describe('Who approves', () => {
       goBack().mockClear()
       jest.spyOn(vtaAgent, 'setTrustedApprovers').mockRejectedValue(new DeviceActionRefused('failed', 'no'))
       const refused = await show(personPage('yes', CONN))
+      expectPage(refused, 'yes', CONN)
       await act(async () => {
         fireEvent.press(refused.getByTestId(id(TrustedApproversIds.add(CONN))))
       })
@@ -1245,6 +1274,7 @@ describe('Who approves', () => {
       const tapOn = async (kind: PersonKind, personId: string, keys: string[]) => {
         goBack().mockClear()
         const tree = await show(personPage(kind, personId))
+        expectPage(tree, kind, personId)
         for (const key of keys)
           await act(async () => {
             fireEvent.press(tree.getByTestId(id(key)))
@@ -1391,6 +1421,7 @@ describe('the practice request: checking the agent waits for them (a live probe,
     jest.spyOn(vtaAgent, 'setTrustedApprovers').mockResolvedValue(held([JORDAN]))
     jest.spyOn(approverRole, 'closeRoleOffer').mockResolvedValue(undefined)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     expect(tree.queryByTestId(id(EnforcementCheckIds.checkPrompt))).toBeNull()
     await act(async () => {
       fireEvent.press(tree.getByTestId(id(TrustedApproversIds.add(CONN))))
@@ -1472,6 +1503,7 @@ describe('People I approve for: stepping down', () => {
       version: 2,
     } as TrustedApproversState)
     const tree = await show(personPage('approver', JORDAN))
+    expectPage(tree, 'approver', JORDAN)
     expect(tree.getByTestId(id(TrustedApproversIds.steppedDown(JORDAN)))).toBeTruthy()
     await openPerson(tree, 'approver', AMY)
     expect(tree.queryByTestId(id(TrustedApproversIds.steppedDown(AMY)))).toBeNull()
@@ -1489,6 +1521,7 @@ describe('People I approve for: stepping down', () => {
       version: 0,
     } as TrustedApproversState)
     const tree = await show(personPage('yes', CONN))
+    expectPage(tree, 'yes', CONN)
     expect(tree.getByTestId(id(TrustedApproversIds.add(CONN)))).toBeTruthy()
     await backToList(tree)
     await press(tree, TrustedApproversIds.tabTheirs)

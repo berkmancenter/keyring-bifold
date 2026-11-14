@@ -57,11 +57,31 @@ const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personI
   )
 }
 
+/** Each kind's page shows its person under this id; the page of someone it cannot find shows none of them. */
+const pageIdOf = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) =>
+  ({
+    approver: Ids.approver,
+    yes: Ids.accepted,
+    setAside: Ids.setAsideRow,
+    approving: Ids.approvingPerson,
+  })[kind](personId)
+/**
+ * The page really is that person's (7d, #1078): many rows check that something is ABSENT from it, and a page that
+ * found nobody (a wrong kind or id) would pass every one of them for nothing.
+ */
+const expectPage = (
+  tree: { getByTestId: (testId: string) => unknown },
+  kind: 'approver' | 'yes' | 'setAside' | 'approving',
+  personId: string
+) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
+
 const show = async (standing?: GuardianStanding, demoState?: string) => {
   cardsAre(standing ? { [JORDAN]: standing } : {})
   demos.mockResolvedValue(demoState ? { [JORDAN]: demoState } : {})
   const tree = render(personPage('approver', JORDAN))
   await act(async () => undefined)
+  // Switched off, the screen is only the switched-off line, which those rows assert themselves.
+  if (!tree.queryByTestId(testIdWithKey(Ids.off))) expectPage(tree, 'approver', JORDAN)
   return tree
 }
 type Tree = Awaited<ReturnType<typeof show>>
@@ -451,6 +471,7 @@ describe("Who approves: why a card didn't check out, in plain words (Alberto's h
     demos.mockResolvedValue({})
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
     expect(tree.getByTestId(id(Ids.socialRefused(JORDAN)))).toBeTruthy()
     expect(tree.getByText('Approver.Reason.damaged Approver.ReasonDo.damaged')).toBeTruthy()
     tree.unmount()
@@ -460,6 +481,7 @@ describe("Who approves: why a card didn't check out, in plain words (Alberto's h
     })
     const ok = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(ok, 'approver', JORDAN)
     expect(ok.queryByTestId(id(Ids.socialRefused(JORDAN)))).toBeNull()
     expect(ok.queryByText(/Approver\.Reason\./)).toBeNull()
   })
