@@ -237,6 +237,17 @@ describe("the contact's row", () => {
     expect(tree.getByTestId(id(ApproverAskRowIds.ask))).toBeTruthy()
   })
 
+  test('a yes set aside with "Not now" still reads as said yes, with Change (control: closed by Forget, Ask again)', async () => {
+    linked(SAM_AGENT)
+    jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(ask({ state: 'setAside', acceptedAs: JORDAN }))
+    let tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
+    expect(tree.getByTestId(id(ApproverAskRowIds.status)).props.children).toBe('Approver.SaidYes')
+    expect(tree.getByTestId(id(ApproverAskRowIds.change))).toBeTruthy()
+    jest.spyOn(approverRole, 'roleOfferAskOn').mockResolvedValue(ask({ state: 'closed', acceptedAs: JORDAN }))
+    tree = await show(<ApproverAskRow connectionId={CONN} name="Jordan" />)
+    expect(tree.getByTestId(id(ApproverAskRowIds.ask))).toBeTruthy()
+  })
+
   test("after a yes, what they approve can be changed: the picker opens on today's actions and Send makes a fresh offer (control: an open offer has no Change)", async () => {
     linked(SAM_AGENT)
     jest

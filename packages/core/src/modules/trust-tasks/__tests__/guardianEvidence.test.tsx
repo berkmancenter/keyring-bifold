@@ -827,6 +827,17 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     expect(Object.keys(await guardianStandings(sam.agent))).toEqual([JORDAN])
   })
 
+  test('a yes set aside with "Not now" still shows its card beside it (control: forgotten, closed, it does not)', async () => {
+    const sam = phone()
+    await setStateWard(sam.agent, SAM_WARD)
+    sam.ask({ state: 'setAside' })
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
+    expect(Object.keys(await guardianStandings(sam.agent))).toEqual([JORDAN])
+    const record = sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK) as Row
+    record.content = { ...record.content, state: 'closed' }
+    expect(await guardianStandings(sam.agent)).toEqual({})
+  })
+
   test('a valid card sent as one DID is never shown beside another (control: sent as the yes, it is)', async () => {
     const sam = await arrives(card('G-ok'), SAM_WARD, { approver: AMY })
     expect(sam.askRecord().guardian?.verdict.ok).toBe(true)

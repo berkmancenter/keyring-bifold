@@ -33,6 +33,7 @@ import {
   approverRoleEvents,
   approvingFor,
   closeRoleOffer,
+  setAsideRoleOffer,
   nextTrustedRules,
   stepDownAsApprover,
   withoutApprover,
@@ -282,9 +283,10 @@ const VtaTrustedApprovers: React.FC = () => {
     }
   }
 
+  // "Not now" sets the yes aside (kept, still addable, or forgotten later), never closes it (Alberto, 278.19).
   const onNotNow = async (ask: RoleOfferAsk) => {
     if (!agent) return
-    await closeRoleOffer(agent, ask.connectionId, false).catch(() => undefined)
+    await setAsideRoleOffer(agent, ask.connectionId).catch(() => undefined)
     await loadKept()
   }
 

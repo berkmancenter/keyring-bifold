@@ -1052,10 +1052,12 @@ export async function handleGuardianEvidence(
   approverRoleEvents.emit('answered', { connectionId: context.connectionId, decision: 'guardianCard' })
 }
 
-/** The DID a kept card is shown beside: the one written on the agent, or a yes not yet written; else none. */
+/** The DID a kept card is shown beside: the one written on the agent, or a yes not yet written (set aside or not). */
 function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undefined {
   if (writtenAsOf(ask) === guardian.approver) return guardian.approver
-  if (ask.state === 'accepted' && ask.acceptedAs === guardian.approver) return guardian.approver
+  // A yes set aside with "Not now" too: the person page shows its card before they add, or forget, it.
+  if ((ask.state === 'accepted' || ask.state === 'setAside') && ask.acceptedAs === guardian.approver)
+    return guardian.approver
   return undefined
 }
 
