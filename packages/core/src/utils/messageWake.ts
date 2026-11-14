@@ -482,6 +482,9 @@ export function appMessageWakeDeps(options: {
     continuityPending: () =>
       continuityPromptStore.all().find((prompt) => !isConnectionExcludedFromNotifications(prompt.connectionId))
         ?.connectionId,
+    // Safe without the switch's gate (confirmPending has it): every 'prompt' emit is behind isConfirmItsYouEnabled()
+    // (handleConfirmRequest and restoreConfirmPrompts both return first while it is off). A new emit site must keep
+    // that, or this listener would end the wait for a feature that is meant to be inert.
     nextConfirmPrompt: () => {
       let cancel = () => undefined as void
       const arrived = new Promise<void>((resolve) => {
@@ -493,12 +496,15 @@ export function appMessageWakeDeps(options: {
       })
       return { arrived, cancel: () => cancel() }
     },
-    // The newest open request (the store lists oldest first), and none while the switch or a remote off says no.
+    // The NEWEST open request, by when it was received (continuity's above deliberately takes the oldest question). Not
+    // by the store's order: a Map keeps insertion order, and a restore at launch inserts in the record store's order,
+    // so a cold start from a tap could open the older asker. None while the switch or a remote off says no.
     confirmPending: () =>
       isConfirmItsYouEnabled()
         ? confirmPromptStore
             .list()
             .filter((prompt) => !isConnectionExcludedFromNotifications(prompt.connectionId))
+            .sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt))
             .pop()?.connectionId
         : undefined,
     newestUnread: async () => {

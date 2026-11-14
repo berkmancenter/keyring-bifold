@@ -340,6 +340,35 @@ describe("a tap for a Confirm it's you request", () => {
     expect(tree.queryByTestId('Chat_bob')).toBeNull()
   })
 
+  it("two open requests restored out of order (a cold start): the NEWER asker's chat opens", async () => {
+    const tree = render(<App />)
+    const agent = agentWith([], [], async () => {
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * MIN).toISOString()
+      const base = {
+        open: true,
+        asker: 'x',
+        note: 'Is this you?',
+        expiresAt: new Date(Date.now() + 10 * MIN).toISOString(),
+        request: { payload: { challenge: 'c'.repeat(43) } },
+      }
+      // The newer first and the older second, as a restore can insert them: the store's own order is the wrong one.
+      confirmItsYou.confirmPromptStore.set({
+        ...base,
+        connectionId: 'sam',
+        receivedAt: at(1),
+      } as confirmItsYou.ConfirmPrompt)
+      confirmItsYou.confirmPromptStore.set({
+        ...base,
+        connectionId: 'tia',
+        receivedAt: at(4),
+      } as confirmItsYou.ConfirmPrompt)
+      confirmItsYou.confirmEvents.emit('prompt', { connectionId: 'tia' })
+    })
+    expect(await settle(tap(agent))).toBe('confirm')
+    expect(await tree.findByTestId('Chat_sam')).toBeTruthy()
+    expect(tree.queryByTestId('Chat_tia')).toBeNull()
+  })
+
   it('with the switch off nothing of it is read: the newest unread chat opens (control: on, above)', async () => {
     setConfirmItsYouEnabled(false)
     const tree = render(<App />)
