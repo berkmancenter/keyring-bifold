@@ -1737,6 +1737,10 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         </BasicAppContext>
       )
       await act(async () => undefined)
+      // The people I approve for are on their own tab (B-lite, 11-14).
+      await act(async () => {
+        fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.tabTheirs)))
+      })
       return tree
     }
 

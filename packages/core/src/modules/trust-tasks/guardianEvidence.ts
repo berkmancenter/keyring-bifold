@@ -52,6 +52,7 @@ import {
   ROLE_OFFER_ASK,
   approverRoleEvents,
   approvingFor,
+  isYesNotAdded,
   proofUnder,
   relationshipOn,
   writtenAsOf,
@@ -1087,8 +1088,7 @@ export async function handleGuardianEvidence(
 function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undefined {
   if (writtenAsOf(ask) === guardian.approver) return guardian.approver
   // A yes set aside with "Not now" too: the person page shows its card before they add, or forget, it.
-  if ((ask.state === 'accepted' || ask.state === 'setAside') && ask.acceptedAs === guardian.approver)
-    return guardian.approver
+  if (isYesNotAdded(ask) && ask.acceptedAs === guardian.approver) return guardian.approver
   return undefined
 }
 
