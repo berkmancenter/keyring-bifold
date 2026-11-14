@@ -88,7 +88,9 @@ const i18nArgs = () => {
 const opened = async (entry: ConfirmChatEntry, onChanged?: () => void) => {
   const tree = await show(entry, onChanged)
   const line =
-    tree.queryByTestId(id(ConfirmChatCardIds.earlier)) ?? tree.queryByTestId(id(ConfirmChatCardIds.theirLine))
+    tree.queryByTestId(id(ConfirmChatCardIds.mineLine)) ??
+    tree.queryByTestId(id(ConfirmChatCardIds.earlier)) ??
+    tree.queryByTestId(id(ConfirmChatCardIds.theirLine))
   if (line)
     await act(async () => {
       fireEvent.press(line)
@@ -337,20 +339,20 @@ describe('settled cards fold to one line (Alberto, 278.19)', () => {
   ]
   test.each(SETTLED_MINE)('mine, %s: one line; a tap opens the whole card; Hide folds it back', async (_l, settled) => {
     const tree = await show({ side: 'mine', ask: settled, newest: true })
-    expect(tree.getByTestId(id(ConfirmChatCardIds.earlier))).toBeTruthy()
+    expect(tree.getByTestId(id(ConfirmChatCardIds.mineLine))).toBeTruthy()
     expect(tree.queryByTestId(id(ConfirmChatCardIds.mine))).toBeNull()
-    await press(tree, ConfirmChatCardIds.earlier)
+    await press(tree, ConfirmChatCardIds.mineLine)
     expect(tree.getByTestId(id(ConfirmChatCardIds.mine))).toBeTruthy()
-    expect(tree.queryByTestId(id(ConfirmChatCardIds.earlier))).toBeNull()
+    expect(tree.queryByTestId(id(ConfirmChatCardIds.mineLine))).toBeNull()
     await press(tree, ConfirmChatCardIds.hide)
-    expect(tree.getByTestId(id(ConfirmChatCardIds.earlier))).toBeTruthy()
+    expect(tree.getByTestId(id(ConfirmChatCardIds.mineLine))).toBeTruthy()
     expect(tree.queryByTestId(id(ConfirmChatCardIds.mine))).toBeNull()
   })
 
   test('mine, waiting: the whole card, no line and no Hide (control for the rows above)', async () => {
     const tree = await show({ side: 'mine', ask: ask(), newest: true })
     expect(tree.getByTestId(id(ConfirmChatCardIds.mine))).toBeTruthy()
-    expect(tree.queryByTestId(id(ConfirmChatCardIds.earlier))).toBeNull()
+    expect(tree.queryByTestId(id(ConfirmChatCardIds.mineLine))).toBeNull()
     expect(tree.queryByTestId(id(ConfirmChatCardIds.hide))).toBeNull()
   })
 
@@ -408,9 +410,34 @@ describe('settled cards fold to one line (Alberto, 278.19)', () => {
     tree.rerender(card(confirmed))
     await act(async () => undefined)
     expect(statusOf(tree)).toBe('ConfirmItsYou.ConfirmedTitle')
-    expect(tree.queryByTestId(id(ConfirmChatCardIds.earlier))).toBeNull()
+    expect(tree.queryByTestId(id(ConfirmChatCardIds.mineLine))).toBeNull()
     expect(tree.getByTestId(id(ConfirmChatCardIds.hide))).toBeTruthy()
-    expect((await show(confirmed)).getByTestId(id(ConfirmChatCardIds.earlier))).toBeTruthy()
+    expect((await show(confirmed)).getByTestId(id(ConfirmChatCardIds.mineLine))).toBeTruthy()
+  })
+
+  test.each([
+    ['notMe', 'ConfirmItsYou.NotMe' as const, 'ConfirmItsYou.TheirLineNotMe'],
+    ['itsMe (control)', 'ConfirmItsYou.ItsMe' as const, 'ConfirmItsYou.TheirLineItsMe'],
+  ])(
+    'answered %s here, then Hide at once: the line says what was just sent, before any reload',
+    async (_label, button, line) => {
+      setConfirmChatOwnerCheckForTests(jest.fn())
+      jest.spyOn(confirmItsYou, 'answerConfirmRequest').mockResolvedValue('sent')
+      // No reload ever lands here: the entry stays the open prompt, as on a phone until the record is read again.
+      const tree = await show({ side: 'theirs', prompt: prompt() })
+      await press(tree, button === 'ConfirmItsYou.NotMe' ? ConfirmChatCardIds.notMe : ConfirmChatCardIds.itsMe)
+      await press(tree, ConfirmChatCardIds.hide)
+      expect(tree.getByText(line)).toBeTruthy()
+    }
+  )
+
+  test('an older request folds to `earlier`; the newest, settled, to its own line (never `earlier`)', async () => {
+    const older = await show({ side: 'mine', ask: ask({ state: 'itsMe' }), newest: false })
+    expect(older.getByTestId(id(ConfirmChatCardIds.earlier))).toBeTruthy()
+    expect(older.queryByTestId(id(ConfirmChatCardIds.mineLine))).toBeNull()
+    const newest = await show({ side: 'mine', ask: ask({ state: 'itsMe' }), newest: true })
+    expect(newest.getByTestId(id(ConfirmChatCardIds.mineLine))).toBeTruthy()
+    expect(newest.queryByTestId(id(ConfirmChatCardIds.earlier))).toBeNull()
   })
 
   test('a card that settles on screen stays whole: the answer just given is seen in full, with Hide', async () => {
@@ -430,12 +457,26 @@ describe('when, on both phones', () => {
     const open = await show({ side: 'theirs', prompt: prompt({ receivedAt: '2026-11-14T10:30:00Z' }) })
     expect(open.getByTestId(id(ConfirmChatCardIds.received)).props.children).toBe('ConfirmItsYou.ReceivedAt')
     expect(t.argsOf('ConfirmItsYou.ReceivedAt')).toMatchObject({ received: expect.stringMatching(/\d/) })
-    expect(open.getByTestId(id(ConfirmChatCardIds.expires)).props.children).toBe('ConfirmItsYou.ExpiresIn')
+    expect(open.getByTestId(id(ConfirmChatCardIds.expiresTheirs)).props.children).toBe('ConfirmItsYou.ExpiresIn')
     expect(t.argsOf('ConfirmItsYou.ExpiresIn')).toMatchObject({ count: 15 })
 
     const answered = await opened({ side: 'theirs', prompt: prompt({ open: false, answered: 'itsMe' }) })
     expect(answered.getByTestId(id(ConfirmChatCardIds.received))).toBeTruthy()
-    expect(answered.queryByTestId(id(ConfirmChatCardIds.expires))).toBeNull()
+    expect(answered.queryByTestId(id(ConfirmChatCardIds.expiresTheirs))).toBeNull()
+  })
+
+  test('both waiting in one chat (I asked them, they asked me): each time left has its own id, once', async () => {
+    jest.spyOn(confirmItsYou, 'confirmAsksOn').mockResolvedValue([ask()])
+    confirmItsYou.confirmPromptStore.set(prompt())
+    const Chat = () => <>{useConfirmChatItems(CONN, 'Jordan').map((item) => item.renderEvent())}</>
+    const tree = render(
+      <BasicAppContext>
+        <Chat />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    expect(tree.getAllByTestId(id(ConfirmChatCardIds.expiresMine))).toHaveLength(1)
+    expect(tree.getAllByTestId(id(ConfirmChatCardIds.expiresTheirs))).toHaveLength(1)
   })
 
   test('mine, waiting, says how long is left', async () => {
@@ -445,7 +486,7 @@ describe('when, on both phones', () => {
       ask: ask({ expiresAt: new Date(Date.now() + 4 * MIN + 1000).toISOString() }),
       newest: true,
     })
-    expect(tree.getByTestId(id(ConfirmChatCardIds.expires))).toBeTruthy()
+    expect(tree.getByTestId(id(ConfirmChatCardIds.expiresMine))).toBeTruthy()
     expect(t.argsOf('ConfirmItsYou.ExpiresIn')).toMatchObject({ count: 5 })
   })
 })

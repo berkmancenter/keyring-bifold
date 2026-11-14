@@ -413,10 +413,12 @@
     "ConfirmChatAskAgain": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatCancel": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatEarlier": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
-    "ConfirmChatExpires": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
+    "ConfirmChatExpiresMine": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
+    "ConfirmChatExpiresTheirs": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatHide": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatItsMe": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatMine": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
+    "ConfirmChatMineLine": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatNotMe": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatNote": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
     "ConfirmChatReceived": ["src/modules/trust-tasks/screens/ConfirmChatCard.tsx"],
@@ -2496,7 +2498,10 @@
       "src/modules/trust-tasks/screens/ConfirmChatCard.tsx": "ConfirmChatCardIds.cancel"
     },
     {
-      "src/modules/trust-tasks/screens/ConfirmChatCard.tsx": "ConfirmChatCardIds.expires"
+      "src/modules/trust-tasks/screens/ConfirmChatCard.tsx": "ConfirmChatCardIds.expiresMine"
+    },
+    {
+      "src/modules/trust-tasks/screens/ConfirmChatCard.tsx": "ConfirmChatCardIds.expiresTheirs"
     },
     {
       "src/modules/trust-tasks/screens/ConfirmChatCard.tsx": "ConfirmChatCardIds.hide"

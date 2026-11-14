@@ -17,7 +17,9 @@
  * Settled cards fold to one line (Alberto, 278.19): a request confirmed, not them, unanswered or cancelled, and the
  * contact's request answered or expired, show as one line once the chat is opened again, and a tap on the line opens
  * the whole card as the record (with Hide to fold it back). A card that settles while it is on screen stays open, so an
- * answer arriving, or the one just given, is seen in full. "Not them" folds too, to a red line.
+ * answer arriving, or the one just given, is seen in full: while its row stays mounted. The chat's list virtualises,
+ * so a card scrolled far out of view and back is drawn again, and comes back folded. "Not them" folds too, to a red
+ * line.
  *
  * Shown only while the "Confirm it's you" switch is on and neither its own nor the SEDI/KERI remote off is set
  * (isConfirmItsYouEnabled), read at every render: the card itself is gated, not only the list that holds it.
@@ -62,10 +64,14 @@ export const ConfirmChatCardIds = {
   notMe: 'ConfirmChatNotMe',
   said: 'ConfirmChatSaid',
   steps: 'ConfirmChatSteps',
+  /** The newest request of mine, settled and folded (an older one is `earlier`). */
+  mineLine: 'ConfirmChatMineLine',
   theirLine: 'ConfirmChatTheirLine',
   hide: 'ConfirmChatHide',
   received: 'ConfirmChatReceived',
-  expires: 'ConfirmChatExpires',
+  /** One per side: both cards can be in one chat at once (I asked them, they asked me). */
+  expiresMine: 'ConfirmChatExpiresMine',
+  expiresTheirs: 'ConfirmChatExpiresTheirs',
 } as const
 
 /** What one card shows: a request this phone sent, or the contact's request to this phone. */
@@ -301,7 +307,7 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
     }
     if (!open)
       return folded(
-        ConfirmChatCardIds.earlier,
+        newest ? ConfirmChatCardIds.mineLine : ConfirmChatCardIds.earlier,
         <>
           {kindLine(name, status === 'notMe' ? styles.error : styles.muted)} · {t(EARLIER_KEY[status], at)}
         </>,
@@ -328,7 +334,7 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
             </View>
             <ThemedText variant="bold">{t('ConfirmItsYou.WaitingBody', n)}</ThemedText>
             {quote(t('ConfirmItsYou.YouAsked'), ask.note)}
-            <ThemedText style={styles.muted} testID={testIdWithKey(ConfirmChatCardIds.expires)}>
+            <ThemedText style={styles.muted} testID={testIdWithKey(ConfirmChatCardIds.expiresMine)}>
               {t('ConfirmItsYou.ExpiresIn', { count: minutesLeft(ask.expiresAt) })}
             </ThemedText>
             <Button
@@ -431,8 +437,10 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
   const status: TheirStatus = sentNow ? 'answered' : theirStatusOf(prompt)
   const received = { ...words, received: timeOf(prompt.receivedAt) }
   if (!open) {
-    const decision = prompt.answered
-    const time = timeOf(entry.answeredAt)
+    // The answer just given here first: until the reload lands, the record still reads open (no decision, no time),
+    // and folding then must never fall through to "you confirmed" after a "not me".
+    const decision = sentNow?.decision ?? prompt.answered
+    const time = timeOf(sentNow?.at ?? entry.answeredAt)
     const key =
       status === 'expired'
         ? 'ConfirmItsYou.TheirLineExpired'
@@ -467,7 +475,7 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
         </ThemedText>
         {quote(t('ConfirmItsYou.TheirNote', words), prompt.note)}
         <ThemedText>{t('ConfirmItsYou.AnswerOnlyForYou', words)}</ThemedText>
-        <ThemedText style={styles.muted} testID={testIdWithKey(ConfirmChatCardIds.expires)}>
+        <ThemedText style={styles.muted} testID={testIdWithKey(ConfirmChatCardIds.expiresTheirs)}>
           {t('ConfirmItsYou.ExpiresIn', { count: minutesLeft(prompt.expiresAt) })}
         </ThemedText>
         {said_}
