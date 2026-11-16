@@ -7,7 +7,7 @@
  * controller's own interface. Every store here throws on delete: nothing in this flow deletes a record.
  */
 import { useFocusEffect, useRoute } from '@react-navigation/native'
-import { act, render } from '@testing-library/react-native'
+import { act, fireEvent, render } from '@testing-library/react-native'
 import React from 'react'
 
 import { useAgent } from '@bifold/react-hooks'
@@ -255,6 +255,15 @@ const expectPage = (
   kind: 'approver' | 'yes' | 'setAside' | 'approving',
   personId: string
 ) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
+
+/**
+ * Row E (Alberto, 11-16): an approver's state card shows one line until Details opens what Keyring checked. Rows that
+ * read the checks open it first; with no card, or the state-verified switch off, there is nothing to open.
+ */
+const openDetails = async (tree: { queryByTestId: (testId: string) => unknown }, did: string = JORDAN) => {
+  const toggle = tree.queryByTestId(testIdWithKey(TrustedApproversIds.details(did)))
+  if (toggle) await act(async () => fireEvent.press(toggle as Parameters<typeof fireEvent.press>[0]))
+}
 
 beforeEach(() => {
   sent.length = 0
@@ -581,6 +590,7 @@ describe('Who approves: one honest line for the authorization', () => {
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     return tree
   }
   const received = async (opts: { strip?: boolean; otherWard?: boolean; edited?: boolean } = {}) => {

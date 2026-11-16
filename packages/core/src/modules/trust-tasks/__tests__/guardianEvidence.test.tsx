@@ -274,6 +274,15 @@ const expectPage = (
   personId: string
 ) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
 
+/**
+ * Row E (Alberto, 11-16): an approver's state card shows one line until Details opens what Keyring checked. Rows that
+ * read the checks open it first; with no card, or the state-verified switch off, there is nothing to open.
+ */
+const openDetails = async (tree: { queryByTestId: (testId: string) => unknown }, did: string = JORDAN) => {
+  const toggle = tree.queryByTestId(testIdWithKey(TrustedApproversIds.details(did)))
+  if (toggle) await act(async () => fireEvent.press(toggle as Parameters<typeof fireEvent.press>[0]))
+}
+
 beforeEach(() => {
   jest.restoreAllMocks()
   sent.length = 0
@@ -1383,6 +1392,7 @@ describe('Who approves: the state card line', () => {
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     return tree
   }
   const writtenWith = async (evidence: GuardianEvidence | null) => {
@@ -1668,6 +1678,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const declined = await run(false)
@@ -1779,15 +1790,22 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       const jordan = await jordanWithCard()
       await yesTo(jordan)
       const tree = await show(jordan)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
-        'Approver.CardNotSentTo'
-      )
+      // Row E: a switch, read off; its press sends (cardSend), so it is named for what it does.
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardSend(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: false,
+      })
       await act(async () => {
         fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardSend(CONN))))
       })
       expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
       expect(cards()).toHaveLength(1)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN)))).toBeTruthy()
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: true,
+      })
     })
 
     test('a kept yes reads as sent, and "Stop sending" keeps a no, so a re-offer sends nothing', async () => {
@@ -1796,9 +1814,12 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       await yesTo(jordan)
       sent.length = 0
       const tree = await show(jordan)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
-        'Approver.CardSentTo'
-      )
+      // Row E: a switch, read on; its press stops (cardStop).
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: true,
+      })
       await act(async () => {
         fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))))
       })
@@ -2222,6 +2243,7 @@ describe('a root read from its did:webs', () => {
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const copy = await screen()
@@ -2297,6 +2319,7 @@ describe('a root read from its did:webs', () => {
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianDemoCopy(JORDAN))).props.children).toBe(
       'Approver.GuardianTestCopy'
     )
@@ -2467,6 +2490,7 @@ describe('a root read from its did:webs', () => {
     const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
     expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN))).props.children).toBe(
       'Approver.GuardianRevokedState'
     )
@@ -2548,6 +2572,7 @@ describe('a root read from its did:webs', () => {
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const live = await screen()
@@ -2598,6 +2623,7 @@ describe('a root read from its did:webs', () => {
       const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
       expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       expect(tree.getByTestId(id(TrustedApproversIds.guardianUnreachable(JORDAN))).props.children).toBe(
         'Approver.GuardianStateUnreachable'
       )
@@ -2736,6 +2762,7 @@ describe('a root read from its did:webs', () => {
         const tree = render(personPage('approver', JORDAN))
         await act(async () => undefined)
         expectPage(tree, 'approver', JORDAN)
+        await openDetails(tree)
         return tree
       }
       const realFetch = global.fetch

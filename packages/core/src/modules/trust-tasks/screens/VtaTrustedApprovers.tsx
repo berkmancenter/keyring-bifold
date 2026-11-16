@@ -22,7 +22,7 @@ import { useAgent } from '@bifold/react-hooks'
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native'
 import type { StackNavigationProp } from '@react-navigation/stack'
 import { EventEmitter } from 'events'
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import Icon from 'react-native-vector-icons/MaterialIcons'
@@ -64,6 +64,7 @@ import {
 } from '../guardianEvidence'
 import { releaseWarn } from '../module/releaseLog'
 import { isStateVerifiedApproversEnabled } from '../module/stateVerifiedApproversFlag'
+import { trustedKeyOf } from '../module/trustedApprovers'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent, type TrustedApproversState } from '../module/vtaAgent'
 
@@ -140,7 +141,26 @@ export const TrustedApproversIds = {
   socialAuthorized: (did: string) => `TrustedApproverSocialAuthorized_${did}`,
   socialFromPhone: (did: string) => `TrustedApproverSocialFromPhone_${did}`,
   socialRefused: (did: string) => `TrustedApproverSocialRefused_${did}`,
+  // Row E (Alberto, 11-16): a person's page in sections. The state card shows one line until Details opens the checks;
+  // a held request shows on each approver it waits on (their row and their page), with its code.
+  details: (did: string) => `TrustedApproverDetails_${did}`,
+  guardianWhat: (did: string) => `TrustedApproverGuardianWhat_${did}`,
+  waiting: (did: string) => `TrustedApproverWaiting_${did}`,
+  waitCode: (did: string) => `TrustedApproverWaitCode_${did}`,
+  rowWaiting: (did: string) => `TrustedApproverRowWaiting_${did}`,
+  steppedDownPill: (did: string) => `TrustedApproverSteppedDownPill_${did}`,
 } as const
+
+/** Up to two initials for a person's round mark: the first letter of their first two words. */
+export const initialsOf = (name: string): string =>
+  name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => Array.from(word)[0] ?? '')
+    .join('')
+    .toUpperCase()
 
 /** A card the check found revoked, in any of its three ways (its own revocation, the issuer's or the state's record). */
 const REVOKED = ['revoked', 'revokedInIssuerRecord', 'revokedInStateRecord']
@@ -198,6 +218,11 @@ const VtaTrustedApprovers: React.FC = () => {
   const [triedAgainAt, setTriedAgainAt] = useState<string | undefined>()
   /** Whether what this phone keeps has been read once: until then a person's page loads, never "nothing to show". */
   const [keptRead, setKeptRead] = useState(false)
+  /** On a person's page: whether the state card's full checks show (Details), or its one line. */
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  /** A task the agent holds for consent, and its code: shown on each approver it waits on. */
+  const held = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentFor)
+  const heldCode = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().awaitingConsentCode)
 
   const wordsFor = useCallback((e: unknown) => deviceErrorWords(e, t), [t])
 
@@ -464,9 +489,7 @@ const VtaTrustedApprovers: React.FC = () => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      minHeight: 48,
-      backgroundColor: ColorPalette.brand.secondaryBackground,
-      borderRadius: 8,
+      minHeight: 64,
       paddingVertical: 10,
       paddingHorizontal: 16,
     },
@@ -474,6 +497,63 @@ const VtaTrustedApprovers: React.FC = () => {
     pageRoot: { gap: 16 },
     page: { gap: 12 },
     bar: { gap: 10, marginTop: 8 },
+    // Row E (Alberto, 11-16): a person reads as one card, in sections, with far less text.
+    personCard: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 12, overflow: 'hidden' },
+    avatar: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: ColorPalette.brand.primary,
+    },
+    avatarBig: { width: 64, height: 64, borderRadius: 32 },
+    avatarText: { color: ColorPalette.grayscale.white, fontSize: 16, lineHeight: 20 },
+    avatarTextBig: { fontSize: 24, lineHeight: 30 },
+    pageHead: { alignItems: 'center', gap: 6, paddingTop: 4 },
+    pills: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'center' },
+    center: { textAlign: 'center' },
+    section: { gap: 6 },
+    sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    sectionLabel: { fontSize: 14, fontWeight: '700', color: ColorPalette.grayscale.mediumGrey },
+    sectionCard: {
+      backgroundColor: ColorPalette.brand.secondaryBackground,
+      borderRadius: 12,
+      padding: 14,
+      gap: 10,
+    },
+    chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+    chip: {
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      backgroundColor: ColorPalette.brand.primaryBackground,
+    },
+    chipText: { fontSize: 15 },
+    linkRow: { minHeight: 44, justifyContent: 'center' },
+    link: { color: ColorPalette.brand.primary, fontWeight: '700' },
+    spread: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    code: { fontFamily: 'Menlo', letterSpacing: 2 },
+    rowWait: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderTopWidth: 1,
+      borderTopColor: ColorPalette.grayscale.lightGrey,
+    },
+    switchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
+    track: {
+      width: 52,
+      height: 32,
+      borderRadius: 16,
+      padding: 3,
+      backgroundColor: ColorPalette.grayscale.lightGrey,
+    },
+    trackOn: { backgroundColor: ColorPalette.brand.primary },
+    thumb: { width: 26, height: 26, borderRadius: 13, backgroundColor: ColorPalette.grayscale.white },
+    thumbOn: { alignSelf: 'flex-end' },
   })
 
   const view = state?.view
@@ -561,6 +641,22 @@ const VtaTrustedApprovers: React.FC = () => {
     const named = { name, interpolation: { escapeValue: false } }
     return `${t(keys.what, named)} ${t(keys.todo, named)}`
   }
+
+  /** A revoked card's line, in its own way of being revoked (its own revocation, the issuer's or the state's record). */
+  const revokedLine = (did: string, standing: GuardianStanding) =>
+    standing.kind === 'unverified' && standing.outcome === 'revokedInStateRecord' ? (
+      <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedState(did))}>
+        {t('Approver.GuardianRevokedState')}
+      </ThemedText>
+    ) : standing.kind === 'unverified' && standing.outcome === 'revokedInIssuerRecord' ? (
+      <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedIssuer(did))}>
+        {t('Approver.GuardianRevokedIssuer')}
+      </ThemedText>
+    ) : (
+      <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevoked(did))}>
+        {t('Approver.GuardianRevoked')}
+      </ThemedText>
+    )
 
   const socialLine = (did: string, name: string) => {
     const social = socials[did]
@@ -656,19 +752,7 @@ const VtaTrustedApprovers: React.FC = () => {
           </Mark>
         ) : isRevoked(standing) ? (
           <Mark kind="fail" testID={mark}>
-            {standing.outcome === 'revokedInStateRecord' ? (
-              <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedState(did))}>
-                {t('Approver.GuardianRevokedState')}
-              </ThemedText>
-            ) : standing.outcome === 'revokedInIssuerRecord' ? (
-              <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevokedIssuer(did))}>
-                {t('Approver.GuardianRevokedIssuer')}
-              </ThemedText>
-            ) : (
-              <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianRevoked(did))}>
-                {t('Approver.GuardianRevoked')}
-              </ThemedText>
-            )}
+            {revokedLine(did, standing)}
             <ThemedText style={styles.muted}>{t('Approver.RevokedMeans')}</ThemedText>
           </Mark>
         ) : (
@@ -691,9 +775,9 @@ const VtaTrustedApprovers: React.FC = () => {
    * as before), saying it is a test state and, for a verified card, where it was checked from (the tunnel's host when
    * fetched live, or the copy on this phone). Unreachable: names the Demo state host this phone fetches from.
    */
-  const stateBox = (did: string | undefined) => {
+  const demoStateOf = (did: string | undefined): { state: string; test: boolean } | undefined => {
     const standing = standingFor(did)
-    if (!did || !standing) return null
+    if (!did || !standing) return undefined
     // Verified: the check's own `demo` (from the root list). Unreachable (the card is ours, only the live fetch failed)
     // or revoked (it checked up to the revocation): the root list's entry the card names. Any other refusal (a bad
     // signature, the wrong ward, an untrusted root): no box, since the root it names is only the card's own unchecked
@@ -706,9 +790,16 @@ const VtaTrustedApprovers: React.FC = () => {
         : standing.kind === 'unreachable' || isRevoked(standing)
           ? demoStates[did]
           : undefined
-    if (!state) return null
+    if (!state) return undefined
     // The test mark, as the state itself was read: a verified standing's own, else the list entry the card names.
-    const test = standing.kind === 'verified' ? standing.test === true : testStates[did] === true
+    return { state, test: standing.kind === 'verified' ? standing.test === true : testStates[did] === true }
+  }
+
+  const stateBox = (did: string | undefined) => {
+    const standing = standingFor(did)
+    const demo = demoStateOf(did)
+    if (!did || !standing || !demo) return null
+    const { state, test } = demo
     const words = test
       ? {
           is: 'Approver.TestStateIs',
@@ -742,52 +833,224 @@ const VtaTrustedApprovers: React.FC = () => {
     )
   }
 
-  /** Box 3: what the agent won't do without this person's yes (or would not, once they are added). */
-  const needsBox = (did: string, name: string, keys: readonly string[], opts: { added: boolean }) => (
-    <Zone
-      kind="needs"
-      title={t(opts.added ? 'Approver.NeedsTitle' : 'Approver.NeedsTitleOnceAdded', {
-        name,
-        interpolation: { escapeValue: false },
-      })}
-      testID={TrustedApproversIds.needsBox(did)}
+  /** A person's round mark: their initials, never read out (their name is beside it). */
+  const avatar = (name: string, big = false) => (
+    <View
+      style={[styles.avatar, big && styles.avatarBig]}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
     >
-      {opts.added && isRevoked(standingFor(did)) ? (
-        <ThemedText style={styles.muted}>
-          {t('Approver.RevokedStillWaits', { name, interpolation: { escapeValue: false } })}
-        </ThemedText>
-      ) : null}
-      {keys.map((key) => (
-        <ThemedText key={key}>{`\u00B7 ${t(`Approver.Action.${key}`)}`}</ThemedText>
-      ))}
-    </Zone>
+      <ThemedText variant="bold" style={[styles.avatarText, big && styles.avatarTextBig]}>
+        {initialsOf(name)}
+      </ThemedText>
+    </View>
   )
 
+  /** One labelled section of a person's page (row E): a small heading, then its own card. */
+  const section = (label: string, body: React.ReactNode, opts: { testID?: string; beside?: React.ReactNode } = {}) => (
+    <View style={styles.section} testID={opts.testID}>
+      <View style={styles.sectionHead}>
+        <ThemedText style={styles.sectionLabel} accessibilityRole="header">
+          {label}
+        </ThemedText>
+        {opts.beside}
+      </View>
+      <View style={styles.sectionCard}>{body}</View>
+    </View>
+  )
+
+  /** What someone approves, as tags. */
+  const actionChips = (keys: readonly string[]) => (
+    <View style={styles.chips}>
+      {keys.map((key) => (
+        <View key={key} style={styles.chip}>
+          <ThemedText style={styles.chipText}>{t(`Approver.Action.${key}`)}</ThemedText>
+        </View>
+      ))}
+    </View>
+  )
+
+  /** What the agent won't do without this person's yes (or would not, once they are added): its own section. */
+  const needsBox = (did: string, name: string, keys: readonly string[], opts: { added: boolean }) =>
+    section(
+      t(opts.added ? 'Approver.NeedsTitle' : 'Approver.NeedsTitleOnceAdded', {
+        name,
+        interpolation: { escapeValue: false },
+      }),
+      <>
+        {opts.added && isRevoked(standingFor(did)) ? (
+          <ThemedText style={styles.muted}>
+            {t('Approver.RevokedStillWaits', { name, interpolation: { escapeValue: false } })}
+          </ThemedText>
+        ) : null}
+        {actionChips(keys)}
+      </>,
+      { testID: testIdWithKey(TrustedApproversIds.needsBox(did)) }
+    )
+
   /**
-   * On an approver's phone, for one person: whether this phone's Guardian card goes to them, and the button to change
-   * it. Only with a card held and both switches on (read again at render). Never answered reads as not sent.
+   * The state card's one line (row E), shown until Details opens the full checks (checkedBox and the state's box).
+   * Each line keeps its testID, and the two are never on screen together, so a testID names one element. Check again
+   * stays here: it is something to do, not something to read.
    */
-  const cardLine = (prompt: RoleOfferPrompt, asker: { asker: string; interpolation: { escapeValue: boolean } }) => {
+  const cardSummary = (did: string, standing: GuardianStanding, name: string) => {
+    const mark = TrustedApproversIds.mark(did)
+    if (standing.kind === 'verified')
+      return (
+        <Mark kind="pass" testID={mark}>
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianVerified(did))}>
+            {t('Approver.GuardianHas', { state: standing.state, interpolation: { escapeValue: false } })}
+          </ThemedText>
+        </Mark>
+      )
+    if (standing.kind === 'unreachable')
+      return (
+        <Mark kind="warn" testID={mark}>
+          <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianUnreachable(did))}>
+            {t('Approver.GuardianStateUnreachable')}
+          </ThemedText>
+          <Button
+            title={t('Approver.CheckAgain')}
+            buttonType={ButtonType.Secondary}
+            onPress={() => void onCheckAgain()}
+            disabled={busy !== undefined}
+            testID={testIdWithKey(TrustedApproversIds.checkAgain(did))}
+          >
+            {busy === 'checkAgain' ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
+          </Button>
+        </Mark>
+      )
+    if (isRevoked(standing))
+      return (
+        <Mark kind="fail" testID={mark}>
+          {revokedLine(did, standing)}
+        </Mark>
+      )
+    return (
+      <Mark kind="fail" testID={mark}>
+        <ThemedText testID={testIdWithKey(TrustedApproversIds.guardianUnverified(did))}>
+          {t('Approver.GuardianCouldNotVerify')}
+        </ThemedText>
+        {standing.kind === 'unverified' ? (
+          <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.guardianWhat(did))}>
+            {t(guardianReasonKeys(standing.outcome).what, { name, interpolation: { escapeValue: false } })}
+          </ThemedText>
+        ) : null}
+      </Mark>
+    )
+  }
+
+  /**
+   * The "State card" section (row E): one line and Details, which opens what Keyring checked and the demo state's
+   * box. An approver with no card: the one plain line, nothing to open. None with the state-verified switch off.
+   */
+  const stateCardSection = (did: string | undefined, name: string) => {
+    if (!did || !isStateVerifiedApproversEnabled()) return null
+    const standing = standings[did]
+    if (!standing) return section(t('Approver.SectionStateCard'), checkedBox(did, name))
+    const demo = demoStateOf(did)
+    const toggle = (
+      <Pressable
+        onPress={() => setDetailsOpen((open) => !open)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: detailsOpen }}
+        testID={testIdWithKey(TrustedApproversIds.details(did))}
+        style={styles.linkRow}
+      >
+        <ThemedText style={styles.link}>{t(detailsOpen ? 'Approver.HideDetails' : 'Approver.Details')}</ThemedText>
+      </Pressable>
+    )
+    return section(
+      t('Approver.SectionStateCard'),
+      detailsOpen ? (
+        <>
+          {checkedBox(did, name)}
+          {stateBox(did)}
+          {toggle}
+        </>
+      ) : (
+        <>
+          {cardSummary(did, standing, name)}
+          {toggle}
+        </>
+      ),
+      // Closed, the Demo pill sits by the heading, so a demo card never reads as a real state's.
+      {
+        beside:
+          !detailsOpen && demo ? <DemoPill testID={TrustedApproversIds.guardianDemo(did)} test={demo.test} /> : null,
+      }
+    )
+  }
+
+  /** Whether the task the agent holds waits on this approver: they are on the set, and the set covers it. */
+  const waitsOn = (did: string) => {
+    const key = held ? trustedKeyOf(held) : undefined
+    return !!key && !!view?.approvers.includes(did) && view.keys.includes(key)
+  }
+
+  /** On an approver's page, while a task waits on them: that it is held, its code, and that they may need to open. */
+  const waitingSection = (did: string, name: string) => {
+    if (!waitsOn(did)) return null
+    const named = { name, names: name, interpolation: { escapeValue: false } }
+    return section(
+      t('Approver.SectionWaiting'),
+      <>
+        <View style={styles.spread}>
+          <ThemedText variant="bold" style={{ flex: 1 }}>
+            {t('Approver.PersonHolding', named)}
+          </ThemedText>
+          {heldCode ? (
+            <ThemedText
+              variant="bold"
+              style={styles.code}
+              selectable
+              testID={testIdWithKey(TrustedApproversIds.waitCode(did))}
+            >
+              {heldCode}
+            </ThemedText>
+          ) : null}
+        </View>
+        {heldCode ? <ThemedText style={styles.muted}>{t('Approver.PersonWaitCode', named)}</ThemedText> : null}
+        <ThemedText style={styles.muted}>{t('Approver.WaitMayNeedOpen', named)}</ThemedText>
+      </>,
+      { testID: testIdWithKey(TrustedApproversIds.waiting(did)) }
+    )
+  }
+
+  /**
+   * On an approver's phone, for one person: a switch for whether this phone's Guardian card goes to them (row E, so it
+   * never reads like Step down). Only with a card held and both switches on (read again at render). Never answered
+   * reads as off. The switch's testID says what a press does (send, or stop), as the button's did.
+   */
+  const cardSwitch = (prompt: RoleOfferPrompt, asker: { asker: string; interpolation: { escapeValue: boolean } }) => {
     if (!shareable || !isStateVerifiedApproversEnabled()) return null
     const goes = consents[prompt.connectionId] === 'yes'
-    return (
-      <View>
-        <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.cardStatus(prompt.connectionId))}>
+    return section(
+      t('Approver.SectionYourCard'),
+      <Pressable
+        onPress={() => void onShare(prompt, !goes)}
+        disabled={busy !== undefined}
+        accessibilityRole="switch"
+        accessibilityState={{ checked: goes, disabled: busy !== undefined }}
+        accessibilityLabel={t('Approver.CardSwitch', asker)}
+        testID={testIdWithKey(
+          goes ? TrustedApproversIds.cardStop(prompt.connectionId) : TrustedApproversIds.cardSend(prompt.connectionId)
+        )}
+        style={styles.switchRow}
+      >
+        <View style={{ flex: 1, gap: 2 }}>
+          <ThemedText variant="bold">{t('Approver.CardSwitch', asker)}</ThemedText>
+          <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.cardStatus(prompt.connectionId))}>
+            {t('Approver.CardSwitchNote', asker)}
+          </ThemedText>
           {/* A K1 card goes as guardian-evidence/0.2: a phone on an older build will not show it, and nothing tells
               this phone either way, so the line says what is known and claims no receipt. */}
-          {t(goes ? (shareable.k1 ? 'Approver.CardSentToK1' : 'Approver.CardSentTo') : 'Approver.CardNotSentTo', asker)}
-        </ThemedText>
-        {goes ? <ThemedText style={styles.muted}>{t('Approver.CardStopNote', asker)}</ThemedText> : null}
-        <Button
-          title={goes ? t('Approver.CardStop') : t('Approver.CardSendTo', asker)}
-          buttonType={ButtonType.Tertiary}
-          onPress={() => void onShare(prompt, !goes)}
-          disabled={busy !== undefined}
-          testID={testIdWithKey(
-            goes ? TrustedApproversIds.cardStop(prompt.connectionId) : TrustedApproversIds.cardSend(prompt.connectionId)
-          )}
-        />
-      </View>
+          {goes && shareable.k1 ? <ThemedText style={styles.muted}>{t('Approver.CardK1Note')}</ThemedText> : null}
+        </View>
+        <View style={[styles.track, goes && styles.trackOn]}>
+          <View style={[styles.thumb, goes && styles.thumbOn]} />
+        </View>
+      </Pressable>
     )
   }
   const waiting = accepted.filter((ask) => !view?.approvers.includes(ask.acceptedAs as string))
@@ -830,60 +1093,107 @@ const VtaTrustedApprovers: React.FC = () => {
     interpolation: { escapeValue: false },
   })
 
-  /** One person on the list: their name, one line, a pill, and the way to their page (design B). */
-  const personRow = (kind: PersonKind, rowId: string, name: string, sub: string, chip: React.ReactNode) => (
-    <Pressable
-      key={`${kind}_${rowId}`}
-      onPress={() => navigation.navigate(Screens.VtaApproverPerson, { kind, id: rowId })}
-      accessibilityRole="button"
-      accessibilityLabel={name}
-      testID={testIdWithKey(TrustedApproversIds.row(kind, rowId))}
-      style={styles.personRow}
-    >
-      <View style={styles.personRowText}>
-        <ThemedText variant="bold">{name}</ThemedText>
-        <ThemedText style={styles.muted}>{sub}</ThemedText>
+  /** One person on the list: their initials, name, one line, a pill, the way to their page, and a wait under it. */
+  const personRow = (
+    kind: PersonKind,
+    rowId: string,
+    name: string,
+    sub: string,
+    chip: React.ReactNode,
+    below: React.ReactNode = null
+  ) => (
+    <View key={`${kind}_${rowId}`} style={styles.personCard}>
+      <Pressable
+        onPress={() => navigation.navigate(Screens.VtaApproverPerson, { kind, id: rowId })}
+        accessibilityRole="button"
+        accessibilityLabel={name}
+        testID={testIdWithKey(TrustedApproversIds.row(kind, rowId))}
+        style={styles.personRow}
+      >
+        {avatar(name)}
+        <View style={styles.personRowText}>
+          <ThemedText variant="bold">{name}</ThemedText>
+          <ThemedText style={styles.muted}>{sub}</ThemedText>
+        </View>
+        {chip}
+        <Icon name="chevron-right" size={24} color={ColorPalette.grayscale.mediumGrey} />
+      </Pressable>
+      {below}
+    </View>
+  )
+
+  /** Under an approver's row while a task waits on them: one line and the code. */
+  const rowWaiting = (did: string) =>
+    waitsOn(did) ? (
+      <View style={styles.rowWait} testID={testIdWithKey(TrustedApproversIds.rowWaiting(did))}>
+        <Icon name="schedule" size={18} color={ColorPalette.grayscale.mediumGrey} />
+        <ThemedText style={{ flex: 1 }}>
+          {t('Approver.RowWaiting', { name: nameOf(did), interpolation: { escapeValue: false } })}
+        </ThemedText>
+        {heldCode ? (
+          <ThemedText variant="bold" style={styles.code}>
+            {heldCode}
+          </ThemedText>
+        ) : null}
       </View>
-      {chip}
-      <Icon name="chevron-right" size={24} color={ColorPalette.grayscale.mediumGrey} />
-    </Pressable>
+    ) : null
+
+  /** A stepped-down approver's pill: in place of the card's on their row, beside it on their page. */
+  const steppedDownPill = (did: string) => (
+    <StatusPill tone="bad" words={t('Approver.PillSteppedDown')} testID={TrustedApproversIds.steppedDownPill(did)} />
   )
 
   /**
-   * A person's page: the header (their name and pill) above what is shown for them, inside their own container. The
-   * container's testID comes keyed (testIdWithKey at each call), so the testids scan sees each one used.
+   * A person's page (row E): their initials, name and pills on top, one line under them, then the sections, each in
+   * its own card, inside the person's own container. The container's testID comes keyed (testIdWithKey at each call),
+   * so the testids scan sees each one used.
    */
-  const personPage = (testID: string, name: string, pill: React.ReactNode, children: React.ReactNode) => (
+  const personPage = (
+    testID: string,
+    name: string,
+    pills: React.ReactNode,
+    sub: React.ReactNode,
+    children: React.ReactNode
+  ) => (
     <View style={styles.page} testID={testID}>
-      <View style={styles.header}>
+      <View style={styles.pageHead}>
+        {avatar(name, true)}
         <ThemedText variant="headingThree" style={styles.name} accessibilityRole="header">
           {name}
         </ThemedText>
-        {pill}
+        {pills ? <View style={styles.pills}>{pills}</View> : null}
+        {sub}
       </View>
       {children}
     </View>
   )
 
-  const approverPage = (did: string) =>
-    personPage(
+  const approverPage = (did: string) => {
+    const name = nameOf(did)
+    const stepped = steppedDown.includes(did)
+    return personPage(
       testIdWithKey(TrustedApproversIds.approver(did)),
-      nameOf(did),
-      pillFor(did),
+      name,
       <>
-        {checkedBox(did, nameOf(did))}
-        {stateBox(did)}
-        {steppedDown.includes(did) ? (
-          <ThemedText testID={testIdWithKey(TrustedApproversIds.steppedDown(did))}>
-            {t('Approver.SteppedDownRemove', { name: nameOf(did), interpolation: { escapeValue: false } })}
-          </ThemedText>
-        ) : null}
-        {view ? needsBox(did, nameOf(did), view.keys, { added: true }) : null}
+        {pillFor(did)}
+        {stepped ? steppedDownPill(did) : null}
+      </>,
+      null,
+      <>
+        {stateCardSection(did, name)}
+        {view ? needsBox(did, name, view.keys, { added: true }) : null}
+        {waitingSection(did, name)}
         <View style={styles.bar}>
+          {stepped ? (
+            <ThemedText testID={testIdWithKey(TrustedApproversIds.steppedDown(did))}>
+              {t('Approver.SteppedDownRemove', { name, interpolation: { escapeValue: false } })}
+            </ThemedText>
+          ) : null}
           <Button
-            title={t('Approver.Remove', { name: nameOf(did), interpolation: { escapeValue: false } })}
-            // A revoked card leaves the agent waiting for them until removed (B6): Remove turns solid red.
-            buttonType={isRevoked(standingFor(did)) ? ButtonType.Critical : ButtonType.Secondary}
+            title={t('Approver.Remove', { name, interpolation: { escapeValue: false } })}
+            // A revoked card leaves the agent waiting for them until removed (B6), and so does a step-down: Remove
+            // turns solid red.
+            buttonType={stepped || isRevoked(standingFor(did)) ? ButtonType.Critical : ButtonType.Secondary}
             onPress={() => void onRemove(did)}
             disabled={busy !== undefined}
             testID={testIdWithKey(TrustedApproversIds.remove(did))}
@@ -894,6 +1204,7 @@ const VtaTrustedApprovers: React.FC = () => {
         </View>
       </>
     )
+  }
 
   /** A yes waiting to be added ('yes'), or one "Not now" set aside ('setAside'): what was checked, and Add. */
   const askPage = (kind: 'yes' | 'setAside', ask: RoleOfferAsk) => {
@@ -906,13 +1217,16 @@ const VtaTrustedApprovers: React.FC = () => {
         : testIdWithKey(TrustedApproversIds.accepted(ask.connectionId)),
       name,
       pillFor(ask.acceptedAs),
+      <ThemedText style={[styles.muted, styles.center]}>
+        {isAside ? t('Approver.SetAsideNote') : t('Approver.Accepted')}
+      </ThemedText>,
       <>
-        <ThemedText style={styles.muted}>{isAside ? t('Approver.SetAsideNote') : t('Approver.Accepted')}</ThemedText>
-        {checkedBox(ask.acceptedAs, name)}
-        {stateBox(ask.acceptedAs)}
+        {stateCardSection(ask.acceptedAs, name)}
         {needsBox(ask.acceptedAs ?? ask.connectionId, name, ask.actions, { added: false })}
-        {isAside ? null : <ThemedText style={styles.muted}>{t('Approver.PersonNothingUntilAdded', words)}</ThemedText>}
         <View style={styles.bar}>
+          {isAside ? null : (
+            <ThemedText style={styles.muted}>{t('Approver.PersonNothingUntilAdded', words)}</ThemedText>
+          )}
           <Button
             title={t('Approver.Add', words)}
             buttonType={ButtonType.Primary}
@@ -949,56 +1263,65 @@ const VtaTrustedApprovers: React.FC = () => {
     )
   }
 
-  /** Someone this phone approves for: since when, what, the card line, and Step down (asked first). */
+  /**
+   * Someone this phone approves for (row E): what I approve as tags, my Guardian card as a switch in its own section,
+   * and my role with Step down, a red button asked first. The card and the role never share a section, so stopping
+   * the card never reads as stepping down.
+   */
   const approvingPage = (prompt: RoleOfferPrompt) => {
     const asker = askerOf(prompt)
     return personPage(
       testIdWithKey(TrustedApproversIds.approvingPerson(prompt.connectionId)),
       asker.asker,
       null,
+      <ThemedText style={[styles.muted, styles.center]}>
+        {t('Approver.ApprovingSince', { ...asker, date: localDate(prompt.receivedAt) })}
+      </ThemedText>,
       <>
-        <ThemedText style={styles.muted}>
-          {t('Approver.IApproveForSince', { date: localDate(prompt.receivedAt) })}
-        </ThemedText>
-        <ThemedText style={styles.muted}>{t('Approver.YouApprove')}</ThemedText>
-        <ThemedText>{actionList(prompt.actions)}</ThemedText>
-        {cardLine(prompt, asker)}
-        {stepDownErrorLine}
-        <View style={styles.bar}>
-          {confirming === prompt.connectionId ? (
-            <>
-              <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
-              <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
+        {section(t('Approver.SectionYouApprove'), actionChips(prompt.actions))}
+        {cardSwitch(prompt, asker)}
+        {section(
+          t('Approver.SectionYourRole'),
+          <>
+            <ThemedText style={styles.muted}>{t('Approver.YourRoleNote', asker)}</ThemedText>
+            {stepDownErrorLine}
+            {confirming === prompt.connectionId ? (
+              <>
+                <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
+                <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
+                <Button
+                  title={t('Approver.StepDown')}
+                  buttonType={ButtonType.Critical}
+                  onPress={() => void onStepDown(prompt)}
+                  disabled={busy !== undefined}
+                  testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
+                >
+                  {busy === prompt.connectionId ? (
+                    <ActivityIndicator color={ColorPalette.grayscale.white} />
+                  ) : undefined}
+                </Button>
+                <Button
+                  title={t('Global.Cancel')}
+                  buttonType={ButtonType.Tertiary}
+                  onPress={() => setConfirming(undefined)}
+                  disabled={busy !== undefined}
+                  testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
+                />
+              </>
+            ) : (
               <Button
-                title={t('Approver.StepDown')}
-                buttonType={ButtonType.Secondary}
-                onPress={() => void onStepDown(prompt)}
+                title={t('Approver.StepDownAs', asker)}
+                buttonType={ButtonType.Critical}
+                onPress={() => {
+                  setStepDownError(undefined)
+                  setConfirming(prompt.connectionId)
+                }}
                 disabled={busy !== undefined}
-                testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
-              >
-                {busy === prompt.connectionId ? <ActivityIndicator color={ColorPalette.brand.primary} /> : undefined}
-              </Button>
-              <Button
-                title={t('Global.Cancel')}
-                buttonType={ButtonType.Tertiary}
-                onPress={() => setConfirming(undefined)}
-                disabled={busy !== undefined}
-                testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
+                testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
               />
-            </>
-          ) : (
-            <Button
-              title={t('Approver.StepDown')}
-              buttonType={ButtonType.Tertiary}
-              onPress={() => {
-                setStepDownError(undefined)
-                setConfirming(prompt.connectionId)
-              }}
-              disabled={busy !== undefined}
-              testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
-            />
-          )}
-        </View>
+            )}
+          </>
+        )}
       </>
     )
   }
@@ -1101,7 +1424,8 @@ const VtaTrustedApprovers: React.FC = () => {
                 steppedDown.includes(did)
                   ? t('Approver.RowSteppedDown', { name: nameOf(did), interpolation: { escapeValue: false } })
                   : t('Approver.RowApproves', { count: view.keys.length }),
-                pillFor(did)
+                steppedDown.includes(did) ? steppedDownPill(did) : pillFor(did),
+                rowWaiting(did)
               )
             )}
             {/* "Set aside (n)", at the end of My approvers (cf's D2): the yeses "Not now" kept. Closed, one row; open,
@@ -1157,8 +1481,10 @@ const VtaTrustedApprovers: React.FC = () => {
               <ThemedText variant="bold" accessibilityRole="header">
                 {t('Approver.More')}
               </ThemedText>
-              {/* A held task waits here as anywhere: who it waits on (off with the trusted-approvers switch). */}
-              <ApproverWaitNote />
+              {/* A held task waits here as anywhere: who it waits on (off with the trusted-approvers switch). While a
+              row above shows the wait and its code (row E), the note would say it twice; once it ends, the note says
+              how (approved, or not given). */}
+              {held && view?.approvers.some(waitsOn) ? null : <ApproverWaitNote />}
               {/* This phone's codes for a state office (K1): draws nothing unless the SEDI switches are on and an office is
               on this build; the screen it opens checks the same again. */}
               <StateOfficeEntry />
