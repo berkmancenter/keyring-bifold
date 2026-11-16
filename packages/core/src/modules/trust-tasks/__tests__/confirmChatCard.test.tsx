@@ -614,7 +614,7 @@ describe('row F (Alberto, 11-16): settled cards of mine are one or two lines, th
     expect(older.queryByTestId(id(ConfirmChatCardIds.askAgainLine))).toBeNull()
   })
 
-  test('What to do now says to contact them another way, never to call (Alberto, 11-16), in real English, apostrophe as written', async () => {
+  test('What to do now says to contact them using details they already have, never to call (Alberto, 11-16), in real English, apostrophe as written', async () => {
     const i18n = i18next.createInstance()
     void i18n.init({ lng: 'en', resources: { en: { translation: en } }, initAsync: false })
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -631,9 +631,10 @@ describe('row F (Alberto, 11-16): settled cards of mine are one or two lines, th
     )
     await act(async () => undefined)
     await press(tree, ConfirmChatCardIds.mineLine)
-    expect(tree.getByText("• Contact O'Brien another way")).toBeTruthy()
-    // Control: nothing on the card still says to call a number.
-    expect(tree.queryByText(/number you already have/)).toBeNull()
+    // The safeguard stays (Alberto's pick A): details already had, never ones the request supplied.
+    expect(tree.getByText("• Contact O'Brien using details you already have")).toBeTruthy()
+    // Control: nothing on the card still assumes a phone call.
+    expect(tree.queryByText(/\bCall\b|number you already have/)).toBeNull()
     expect(tree.queryByText(/&#39;/)).toBeNull()
   })
 
