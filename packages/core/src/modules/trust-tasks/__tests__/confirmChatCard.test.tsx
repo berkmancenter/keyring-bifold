@@ -232,7 +232,7 @@ describe('mine (this phone asked)', () => {
     expect(changed).toHaveBeenCalled()
   })
 
-  test('not confirmed is the red alert with what to do now (control: confirmed has no steps)', async () => {
+  test('not confirmed, tapped open: the red alert with what to do now (control: a yes tapped open has no steps)', async () => {
     const bad = await opened({ side: 'mine', ask: ask({ state: 'notMe' }), newest: true })
     expect(statusOf(bad)).toBe('ConfirmItsYou.NotThemTitle')
     expect(bad.getByTestId(id(ConfirmChatCardIds.steps))).toBeTruthy()
