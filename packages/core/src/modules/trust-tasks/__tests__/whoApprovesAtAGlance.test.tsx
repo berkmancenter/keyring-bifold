@@ -116,7 +116,7 @@ beforeEach(() => {
   jest.spyOn(vtaAgent, 'trustedApprovers').mockResolvedValue(state())
   jest.spyOn(approverRole, 'acceptedRoleOffers').mockResolvedValue([])
   jest.spyOn(approverRole, 'approverNames').mockResolvedValue({ [JORDAN]: 'Jordan' })
-  jest.spyOn(approverRole, 'approvingFor').mockResolvedValue([])
+  jest.spyOn(approverRole, 'listeningFor').mockResolvedValue([])
   jest.spyOn(approverRole, 'steppedDownApprovers').mockResolvedValue([])
   jest.spyOn(guardianEvidence, 'cardToShare').mockResolvedValue(undefined)
   jest.spyOn(guardianEvidence, 'cardConsents').mockResolvedValue({})
@@ -638,7 +638,7 @@ describe('row E (Alberto, 11-16): each person is one card, in sections, with far
 
   test('someone I approve for: Step down is a red button named for them, and its confirm is red too', async () => {
     const SAM = 'conn-sam'
-    jest.spyOn(approverRole, 'approvingFor').mockResolvedValue([
+    jest.spyOn(approverRole, 'listeningFor').mockResolvedValue([
       {
         open: false,
         connectionId: SAM,
@@ -666,6 +666,47 @@ describe('row E (Alberto, 11-16): each person is one card, in sections, with far
     expect(tree.UNSAFE_getAllByProps({ testID: id(Ids.stepDownCancel(SAM)) })[0].props.buttonType).toBe(
       ButtonType.Tertiary
     )
+  })
+
+  test('asked to stop (#1081): the card switch reads off and is locked, and Your role says so with no Step down', async () => {
+    const SAM = 'conn-sam'
+    const sam = {
+      open: false,
+      connectionId: SAM,
+      asker: 'Sam',
+      agentDid: 'did:web:sam-agent',
+      actions: ['joinCommunity'],
+      request: {},
+      receivedAt: '2026-11-13T10:00:00.000Z',
+      answered: 'accepted',
+      answeredAs: JORDAN,
+    } as approverRole.RoleOfferPrompt
+    jest.spyOn(guardianEvidence, 'cardToShare').mockResolvedValue({ state: UTAH })
+    jest.spyOn(guardianEvidence, 'cardConsents').mockResolvedValue({ [SAM]: 'yes' })
+    cardsAre({})
+    demos.mockResolvedValue({})
+    const open = async (prompt: approverRole.RoleOfferPrompt) => {
+      jest.spyOn(approverRole, 'listeningFor').mockResolvedValue([prompt])
+      const tree = render(personPage('approving', SAM))
+      await act(async () => undefined)
+      expectPage(tree, 'approving', SAM)
+      return tree
+    }
+    const asked = await open({ ...sam, answered: 'steppedDown', stopAskedAt: '2026-11-16T18:40:00Z' } as never)
+    const locked = asked.getByTestId(id(Ids.cardSend(SAM)))
+    expect(locked.props.accessibilityState).toMatchObject({ checked: false, disabled: true })
+    expect(asked.getByTestId(id(Ids.cardStatus(SAM))).props.children).toBe('Approver.CardStoppedNote')
+    expect(has(asked, Ids.stopAsked(SAM))).toBe(true)
+    expect(has(asked, Ids.stepDown(SAM))).toBe(false)
+    asked.unmount()
+    // Control: active, the kept yes reads on and can be pressed, and Step down is there.
+    const active = await open(sam)
+    expect(active.getByTestId(id(Ids.cardStop(SAM))).props.accessibilityState).toMatchObject({
+      checked: true,
+      disabled: false,
+    })
+    expect(has(active, Ids.stopAsked(SAM))).toBe(false)
+    expect(has(active, Ids.stepDown(SAM))).toBe(true)
   })
 
   test('initials: the first letter of the first two words, upper case', () => {

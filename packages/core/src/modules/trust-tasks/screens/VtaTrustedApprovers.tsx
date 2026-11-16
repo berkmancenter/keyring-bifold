@@ -37,10 +37,11 @@ import {
   acceptedRoleOffers,
   approverNames,
   steppedDownApprovers,
-  approverRemoved,
+  approverRemovedAndTold,
   approverRoleEvents,
-  approvingFor,
   closeRoleOffer,
+  isStopAsked,
+  listeningFor,
   setAsideRoleOffer,
   setAsideRoleOffers,
   nextTrustedRules,
@@ -149,6 +150,8 @@ export const TrustedApproversIds = {
   waitCode: (did: string) => `TrustedApproverWaitCode_${did}`,
   rowWaiting: (did: string) => `TrustedApproverRowWaiting_${did}`,
   steppedDownPill: (did: string) => `TrustedApproverSteppedDownPill_${did}`,
+  // 7d's step-down fix (#1081): a step-down asks to be removed; until the asker removes this phone, it says so.
+  stopAsked: (connectionId: string) => `TrustedApproverStopAsked_${connectionId}`,
 } as const
 
 /** Up to two initials for a person's round mark: the first letter of their first two words. */
@@ -232,7 +235,8 @@ const VtaTrustedApprovers: React.FC = () => {
     const [yeses, known, approving] = await Promise.all([
       acceptedRoleOffers(agent),
       approverNames(agent),
-      approvingFor(agent),
+      // Stop-asked people stay listed: their agent still waits for this phone until they remove it.
+      listeningFor(agent),
     ]).catch(() => [[], {}, []] as [RoleOfferAsk[], Record<string, string>, RoleOfferPrompt[]])
     // Read on its own: a note that cannot be read must not blank the lists above.
     const stepped = await steppedDownApprovers(agent).catch(() => [] as string[])
@@ -446,7 +450,7 @@ const VtaTrustedApprovers: React.FC = () => {
     if (!agent || !state) return
     const written = await write(did, withoutApprover(state.view, did))
     if (!written || written.view.approvers.includes(did)) return
-    await approverRemoved(agent, did).catch(() => undefined)
+    await approverRemovedAndTold(agent, did).catch(() => undefined)
     leave()
   }
 
@@ -554,6 +558,8 @@ const VtaTrustedApprovers: React.FC = () => {
     trackOn: { backgroundColor: ColorPalette.brand.primary },
     thumb: { width: 26, height: 26, borderRadius: 13, backgroundColor: ColorPalette.grayscale.white },
     thumbOn: { alignSelf: 'flex-end' },
+    trackLocked: { opacity: 0.5 },
+    pillStart: { alignSelf: 'flex-start' },
   })
 
   const view = state?.view
@@ -1022,16 +1028,22 @@ const VtaTrustedApprovers: React.FC = () => {
    * never reads like Step down). Only with a card held and both switches on (read again at render). Never answered
    * reads as off. The switch's testID says what a press does (send, or stop), as the button's did.
    */
-  const cardSwitch = (prompt: RoleOfferPrompt, asker: { asker: string; interpolation: { escapeValue: boolean } }) => {
+  const cardSwitch = (
+    prompt: RoleOfferPrompt,
+    asker: { asker: string; interpolation: { escapeValue: boolean } },
+    stopAsked = false
+  ) => {
     if (!shareable || !isStateVerifiedApproversEnabled()) return null
-    const goes = consents[prompt.connectionId] === 'yes'
+    // Asked to stop (#1081): no card goes while the step-down waits, so the switch reads off and can't be turned on.
+    const goes = !stopAsked && consents[prompt.connectionId] === 'yes'
+    const locked = stopAsked || busy !== undefined
     return section(
       t('Approver.SectionYourCard'),
       <Pressable
         onPress={() => void onShare(prompt, !goes)}
-        disabled={busy !== undefined}
+        disabled={locked}
         accessibilityRole="switch"
-        accessibilityState={{ checked: goes, disabled: busy !== undefined }}
+        accessibilityState={{ checked: goes, disabled: locked }}
         accessibilityLabel={t('Approver.CardSwitch', asker)}
         testID={testIdWithKey(
           goes ? TrustedApproversIds.cardStop(prompt.connectionId) : TrustedApproversIds.cardSend(prompt.connectionId)
@@ -1041,13 +1053,13 @@ const VtaTrustedApprovers: React.FC = () => {
         <View style={{ flex: 1, gap: 2 }}>
           <ThemedText variant="bold">{t('Approver.CardSwitch', asker)}</ThemedText>
           <ThemedText style={styles.muted} testID={testIdWithKey(TrustedApproversIds.cardStatus(prompt.connectionId))}>
-            {t('Approver.CardSwitchNote', asker)}
+            {t(stopAsked ? 'Approver.CardStoppedNote' : 'Approver.CardSwitchNote', asker)}
           </ThemedText>
           {/* A K1 card goes as guardian-evidence/0.2: a phone on an older build will not show it, and nothing tells
               this phone either way, so the line says what is known and claims no receipt. */}
           {goes && shareable.k1 ? <ThemedText style={styles.muted}>{t('Approver.CardK1Note')}</ThemedText> : null}
         </View>
-        <View style={[styles.track, goes && styles.trackOn]}>
+        <View style={[styles.track, goes && styles.trackOn, stopAsked && styles.trackLocked]}>
           <View style={[styles.thumb, goes && styles.thumbOn]} />
         </View>
       </Pressable>
@@ -1270,6 +1282,7 @@ const VtaTrustedApprovers: React.FC = () => {
    */
   const approvingPage = (prompt: RoleOfferPrompt) => {
     const asker = askerOf(prompt)
+    const stopAsked = isStopAsked(prompt)
     return personPage(
       testIdWithKey(TrustedApproversIds.approvingPerson(prompt.connectionId)),
       asker.asker,
@@ -1279,48 +1292,62 @@ const VtaTrustedApprovers: React.FC = () => {
       </ThemedText>,
       <>
         {section(t('Approver.SectionYouApprove'), actionChips(prompt.actions))}
-        {cardSwitch(prompt, asker)}
+        {cardSwitch(prompt, asker, stopAsked)}
         {section(
           t('Approver.SectionYourRole'),
-          <>
-            <ThemedText style={styles.muted}>{t('Approver.YourRoleNote', asker)}</ThemedText>
-            {stepDownErrorLine}
-            {confirming === prompt.connectionId ? (
-              <>
-                <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
-                <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
-                <Button
-                  title={t('Approver.StepDown')}
-                  buttonType={ButtonType.Critical}
-                  onPress={() => void onStepDown(prompt)}
-                  disabled={busy !== undefined}
-                  testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
-                >
-                  {busy === prompt.connectionId ? (
-                    <ActivityIndicator color={ColorPalette.grayscale.white} />
-                  ) : undefined}
-                </Button>
-                <Button
-                  title={t('Global.Cancel')}
-                  buttonType={ButtonType.Tertiary}
-                  onPress={() => setConfirming(undefined)}
-                  disabled={busy !== undefined}
-                  testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
+          stopAsked ? (
+            // Asked to stop (#1081): still their approver until they remove this phone; nothing to tap here.
+            <>
+              <View style={styles.pillStart}>
+                <StatusPill
+                  tone="unknown"
+                  words={t('Approver.AskedToStop')}
+                  testID={TrustedApproversIds.stopAsked(prompt.connectionId)}
                 />
-              </>
-            ) : (
-              <Button
-                title={t('Approver.StepDownAs', asker)}
-                buttonType={ButtonType.Critical}
-                onPress={() => {
-                  setStepDownError(undefined)
-                  setConfirming(prompt.connectionId)
-                }}
-                disabled={busy !== undefined}
-                testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
-              />
-            )}
-          </>
+              </View>
+              <ThemedText>{t('Approver.AskedToStopNote', asker)}</ThemedText>
+            </>
+          ) : (
+            <>
+              <ThemedText style={styles.muted}>{t('Approver.YourRoleNote', asker)}</ThemedText>
+              {stepDownErrorLine}
+              {confirming === prompt.connectionId ? (
+                <>
+                  <ThemedText variant="bold">{t('Approver.StepDownConfirmTitle', asker)}</ThemedText>
+                  <ThemedText>{t('Approver.StepDownConfirmBody', asker)}</ThemedText>
+                  <Button
+                    title={t('Approver.StepDown')}
+                    buttonType={ButtonType.Critical}
+                    onPress={() => void onStepDown(prompt)}
+                    disabled={busy !== undefined}
+                    testID={testIdWithKey(TrustedApproversIds.stepDownConfirm(prompt.connectionId))}
+                  >
+                    {busy === prompt.connectionId ? (
+                      <ActivityIndicator color={ColorPalette.grayscale.white} />
+                    ) : undefined}
+                  </Button>
+                  <Button
+                    title={t('Global.Cancel')}
+                    buttonType={ButtonType.Tertiary}
+                    onPress={() => setConfirming(undefined)}
+                    disabled={busy !== undefined}
+                    testID={testIdWithKey(TrustedApproversIds.stepDownCancel(prompt.connectionId))}
+                  />
+                </>
+              ) : (
+                <Button
+                  title={t('Approver.StepDownAs', asker)}
+                  buttonType={ButtonType.Critical}
+                  onPress={() => {
+                    setStepDownError(undefined)
+                    setConfirming(prompt.connectionId)
+                  }}
+                  disabled={busy !== undefined}
+                  testID={testIdWithKey(TrustedApproversIds.stepDown(prompt.connectionId))}
+                />
+              )}
+            </>
+          )
         )}
       </>
     )
@@ -1504,7 +1531,13 @@ const VtaTrustedApprovers: React.FC = () => {
                 prompt.connectionId,
                 askerOf(prompt).asker,
                 t('Approver.RowApproving', { count: prompt.actions.length, date: localDate(prompt.receivedAt) }),
-                null
+                isStopAsked(prompt) ? (
+                  <StatusPill
+                    tone="unknown"
+                    words={t('Approver.AskedToStop')}
+                    testID={TrustedApproversIds.stopAsked(prompt.connectionId)}
+                  />
+                ) : null
               )
             )}
           </View>
