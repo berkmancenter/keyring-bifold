@@ -614,6 +614,29 @@ describe('row F (Alberto, 11-16): settled cards of mine are one or two lines, th
     expect(older.queryByTestId(id(ConfirmChatCardIds.askAgainLine))).toBeNull()
   })
 
+  test('What to do now says to contact them another way, never to call (Alberto, 11-16), in real English, apostrophe as written', async () => {
+    const i18n = i18next.createInstance()
+    void i18n.init({ lng: 'en', resources: { en: { translation: en } }, initAsync: false })
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    jest.spyOn(require('react-i18next'), 'useTranslation').mockReturnValue({ t: i18n.t.bind(i18n), i18n } as never)
+    const entry: ConfirmChatEntry = {
+      side: 'mine',
+      ask: ask({ state: 'notMe', respondedAt: new Date().toISOString() }),
+      newest: true,
+    }
+    const tree = render(
+      <BasicAppContext>
+        <ConfirmChatCard entry={entry} connectionId={CONN} name="O'Brien" />
+      </BasicAppContext>
+    )
+    await act(async () => undefined)
+    await press(tree, ConfirmChatCardIds.mineLine)
+    expect(tree.getByText("• Contact O'Brien another way")).toBeTruthy()
+    // Control: nothing on the card still says to call a number.
+    expect(tree.queryByText(/number you already have/)).toBeNull()
+    expect(tree.queryByText(/&#39;/)).toBeNull()
+  })
+
   test('cancelled: one grey card saying so, with when it was sent', async () => {
     const tree = await show({ side: 'mine', ask: ask({ state: 'cancelled' }), newest: true })
     expect(tree.getByText('ConfirmItsYou.CancelledTitle')).toBeTruthy()
