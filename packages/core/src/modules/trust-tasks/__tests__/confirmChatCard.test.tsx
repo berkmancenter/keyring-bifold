@@ -585,6 +585,24 @@ describe('row F (Alberto, 11-16): settled cards of mine are one or two lines, th
     expect(tree.getByText('ConfirmItsYou.NotThemBody')).toBeTruthy()
   })
 
+  test('"not them", compact: the alert and an assertive live region, and its label says the warning (control: a yes is neither)', async () => {
+    const bad = await show({
+      side: 'mine',
+      ask: ask({ state: 'notMe', respondedAt: new Date().toISOString() }),
+      newest: true,
+    })
+    const wrap = bad.getByTestId(id(ConfirmChatCardIds.compact))
+    expect(wrap.props.accessibilityRole).toBe('alert')
+    expect(wrap.props.accessibilityLiveRegion).toBe('assertive')
+    const label = bad.getByTestId(id(ConfirmChatCardIds.mineLine)).props.accessibilityLabel
+    expect(label).toContain('ConfirmItsYou.NotThemTitle')
+    expect(label).toContain('ConfirmItsYou.CompactNotThemSub')
+    const good = await show({ side: 'mine', ask: confirmed(), newest: true })
+    const calm = good.getByTestId(id(ConfirmChatCardIds.compact))
+    expect(calm.props.accessibilityRole).toBeUndefined()
+    expect(calm.props.accessibilityLiveRegion).toBe('none')
+  })
+
   test('no answer: Ask again right on its line sends the same note (control: an older one has no Ask again)', async () => {
     const send = jest.spyOn(confirmItsYou, 'sendConfirmRequest').mockResolvedValue('sent')
     const late = ask({ expiresAt: new Date(Date.now() - MIN).toISOString() })

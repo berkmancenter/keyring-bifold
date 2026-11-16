@@ -62,6 +62,8 @@ export const ConfirmChatCardIds = {
   askAgain: 'ConfirmChatAskAgain',
   /** Row F: Ask again on the compact no-answer card, without opening it. */
   askAgainLine: 'ConfirmChatAskAgainLine',
+  /** Row F: the compact card's wrapper; for "not them" it is the alert, as the whole card was before. */
+  compact: 'ConfirmChatCompact',
   itsMe: 'ConfirmChatItsMe',
   notMe: 'ConfirmChatNotMe',
   said: 'ConfirmChatSaid',
@@ -358,7 +360,12 @@ const ConfirmChatCard: React.FC<Props> = ({ entry, connectionId, name, onChanged
           ? ColorPalette.semantic.success
           : ColorPalette.grayscale.mediumGrey
       return (
-        <View>
+        // "Not them" keeps the alert on the state seen first, and Android says it as it appears (ac, #1083).
+        <View
+          accessibilityRole={red ? 'alert' : undefined}
+          accessibilityLiveRegion={red ? 'assertive' : 'none'}
+          testID={testIdWithKey(ConfirmChatCardIds.compact)}
+        >
           <Pressable
             style={[styles.compact, red && styles.compactRed, status === 'itsMe' && styles.compactGood]}
             onPress={() => setExpanded(true)}
