@@ -37,6 +37,7 @@ import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { consentPendingOf } from '../../trust-tasks/module/VtaClient'
 import { VtiRefusal } from '../../trust-tasks/module/vtiAgent'
 import { roomRef } from '../roomRef'
+import { ACCEPT_FROM_PREVIEW_MAX_AGE_MS, isAcceptFromPreviewOn } from '../acceptFromPreviewSwitch'
 import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
 import { failureCategory, logRef } from '../roomsLogWords'
 import { takesRepliesOrReactions } from '../recordPermits'
@@ -461,7 +462,8 @@ export class AgentRoomsService implements RoomsService {
   private readonly watches: RoomWatches
   private readonly changedListeners = new Set<(roomId: string) => void>()
   private stopSignals?: () => void
-  private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
+  /** Each offer as last read, and when: an accept goes ahead on one read moments ago (acceptFromPreviewSwitch). */
+  private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord; readAt: number }>()
   private previews = new Map<string, { offerId: string; at: number }>()
   private writes = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
   // Records opened through the agent, by room, key and version: what a file listing and a second read of a post
@@ -1430,7 +1432,7 @@ export class AgentRoomsService implements RoomsService {
           if (rooms.some((h) => holdsAs(h, offer.roomId, community.personaDid))) continue
         } else if (offer.state === 'accepted') continue
         const offerId = offerIdOf(community.did, offer.roomId)
-        this.offers.set(offerId, { community, offer })
+        this.offers.set(offerId, { community, offer, readAt: this.now() })
         if (!hidden.has(offerId)) out.push(this.toRoomOffer(community, offer, offerId))
       }
     }
@@ -1581,8 +1583,13 @@ export class AgentRoomsService implements RoomsService {
       steps.push(`${name} ${at - mark} ms`)
       mark = at
     }
-    const offer = (await this.offersOf(community)).items.find((o) => o.roomId === roomId && o.host === community.did)
-    timed('offers read')
+    // The offer on screen when it was read moments ago, else read again as before: that read waits for the community
+    // session, and waited 21.6 s of a 31 s accept while the session signed in again (YDXH-SH9W, 11-17).
+    const previewed = isAcceptFromPreviewOn() && this.now() - entry.readAt <= ACCEPT_FROM_PREVIEW_MAX_AGE_MS
+    const offer = previewed
+      ? entry.offer
+      : (await this.offersOf(community)).items.find((o) => o.roomId === roomId && o.host === community.did)
+    timed(previewed ? 'offer as previewed' : 'offers read')
     if (!offer) throw new RoomsRefused('acceptOffer', 'notFound', false, `${community.did} no longer lists ${roomId}`)
     this.requireSealedSupport(offer)
     const sealed = isSealed(offer.tier)
