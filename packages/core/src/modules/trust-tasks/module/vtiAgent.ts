@@ -29,7 +29,7 @@ import { purposeForDocumentType } from './proofPurpose'
 import { MEMBER_VMC, type MemberVmcReceipt } from './vtiMemberVmc'
 import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import type { VtiPersona } from './VtiIdentityStore'
-import { ownSessionFor, ownSessionOnceOpen, type OwnSession } from './vtiOwnSessions'
+import { ownSessionFor, ownSessionOnceOpen as heldOnceOpen, type OwnSession } from './vtiOwnSessions'
 import {
   advertisedMediatorDid,
   advertisedTspMediatorDid,
@@ -1987,7 +1987,9 @@ class VtiAgentController {
     if (did === this.state.did) return false
     if (ownSessionFor(did)) return true
     const t0 = Date.now()
-    const open = (await ownSessionOnceOpen(did, maxMs)) !== undefined && did !== this.state.did
+    // Asked again after the wait: the shared session may have signed in as this identity meanwhile, and its own session
+    // used then would be a second socket for the DID.
+    const open = (await heldOnceOpen(did, maxMs)) !== undefined && did !== this.state.did
     const waited = Date.now() - t0
     if (open || waited >= 50)
       releaseWarn(
