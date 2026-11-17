@@ -3,7 +3,8 @@
  * rooms-slow §8b, `vtiAgent.askAs`) instead of switching the shared session to it. Two values a release (an OTA
  * included) sets, and nothing else:
  *
- * - `on`: the release's choice. Off until the mini A/B (rooms-slow §8e) has measured it against today's path.
+ * - `on`: the release's choice. On from 278.25, on Alberto's word ("turn it on now", 11-17), ahead of the mini A/B
+ *   (rooms-slow §8e), which still runs and is recorded on the pull request.
  * - `remoteOff`: the release's kill. Set it to `true` and every ask goes the shared way at the next start, whatever
  *   `on` says, until a release sets it back.
  *
@@ -17,7 +18,7 @@
  * @module trust-tasks/module/sessionsPerIdentitySwitch
  */
 export const SESSIONS_PER_IDENTITY: { on: boolean; remoteOff: boolean } = {
-  on: false,
+  on: true,
   remoteOff: false,
 }
 

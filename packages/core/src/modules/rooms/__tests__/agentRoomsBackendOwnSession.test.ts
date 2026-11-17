@@ -80,7 +80,9 @@ beforeEach(() => {
   }
   Object.assign(SESSIONS_PER_IDENTITY, { on: true, remoteOff: false })
 })
-afterAll(() => Object.assign(SESSIONS_PER_IDENTITY, { on: false, remoteOff: false }))
+// Put back what the release ships, whatever that is, not a value assumed here.
+const SHIPPED = { ...SESSIONS_PER_IDENTITY }
+afterAll(() => Object.assign(SESSIONS_PER_IDENTITY, SHIPPED))
 
 describe('the rooms backend, with its identity’s own session open', () => {
   it('lists over that session, as the identity, with no hold of the shared session', async () => {
