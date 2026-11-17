@@ -197,8 +197,11 @@ export function useRoomPosts(
   // drawn from a listing read since it opened are its own: the listing held then is another room's, when the room
   // changes under the same screen, and its posts are drawn again for a moment.
   const opened = useRef<{ roomId: string; at: number; said: boolean; listing?: Listing }>(undefined)
-  if (opened.current?.roomId !== roomId)
+  if (opened.current?.roomId !== roomId) {
+    // A kept listing is the room's it was taken for: another room under the same screen may take its own.
+    if (opened.current) seeded.current = undefined
     opened.current = { roomId, at: Date.now(), said: false, listing: opened.current ? listing : undefined }
+  }
   /** The posts last drawn, and the listing they were drawn from. */
   const drawnFrom = useRef<{ posts: RoomPost[]; listing: Listing }>(undefined)
   const [failed, setFailed] = useState(false)
@@ -256,7 +259,7 @@ export function useRoomPosts(
     let current = true
     const sentOn = openedAt.current
     askedAt.current = Date.now()
-    if (!listingNow.current && !seeded.current) {
+    if (!seeded.current && (!listingNow.current || listingNow.current === opened.current?.listing)) {
       const kept = keptListing<Listing>(service, roomId)
       if (kept) {
         seeded.current = kept

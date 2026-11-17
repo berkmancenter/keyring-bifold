@@ -171,6 +171,53 @@ describe('a room opened again this run', () => {
     expect(hook.result.current.failed).toBe(true)
   })
 
+  // ac (11-17): the seed was the first room's for the life of the screen, so no other room under it was seeded.
+  it('a second room opened under the same screen shows its own kept listing too', async () => {
+    const TWO = 'did:webvh:r:two'
+    const byRoom: Record<string, Note[]> = { [ROOM]: [note('a', 1)], [TWO]: [note('x', 1), note('y', 2)] }
+    let holding = false
+    let release: () => void = () => undefined
+    const answer = (roomId: string): NoteList => ({
+      notes: byRoom[roomId].map(summaryOf),
+      complete: true,
+      check: CONSISTENT,
+    })
+    const service = {
+      listNotes: jest.fn(async (roomId: string, options: { sinceVersion?: number } = {}) => {
+        if (options.sinceVersion === undefined && holding)
+          return new Promise<NoteList>((resolve) => {
+            release = () => resolve(answer(roomId))
+          })
+        return answer(roomId)
+      }),
+      readNote: jest.fn(async (roomId: string, key: string) => byRoom[roomId].find((n) => n.key === key)!),
+      note: jest.fn(),
+    } as unknown as RoomsService
+    const screen = (roomId: string) =>
+      renderHook<RoomPosts, { roomId: string }>((p) => useRoomPosts(service, p.roomId, ME, true, true), {
+        initialProps: { roomId },
+      })
+    // Both rooms listed once this run.
+    const first = screen(ROOM)
+    await flush()
+    first.rerender({ roomId: TWO })
+    await flush()
+    expect(keys(first.result.current.posts)).toEqual(['y', 'x'])
+    first.unmount()
+
+    holding = true
+    const again = screen(ROOM)
+    await flush()
+    expect(keys(again.result.current.posts)).toEqual(['a'])
+    again.rerender({ roomId: TWO })
+    await flush()
+    // Before the second room's listing answers: its own kept posts, not the first room's.
+    expect(keys(again.result.current.posts)).toEqual(['y', 'x'])
+    await act(async () => release())
+    await flush()
+    expect(keys(again.result.current.posts)).toEqual(['y', 'x'])
+  })
+
   it('keeps nothing across a lock, nor for another service', async () => {
     const r = roomWith([note('a', 1)])
     ;(await open(r.service)).unmount()
