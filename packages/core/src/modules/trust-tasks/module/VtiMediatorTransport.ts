@@ -277,12 +277,19 @@ export async function advertisedMediatorDid(agent: Agent, did: string): Promise<
  * affinidi-messaging-helpers examples/cross_mediator_forwarding.rs): the inner one to the recipient's mediator, `next`
  * = the recipient; the outer one to ours, `next` = the recipient's mediator.
  */
+/**
+ * How long `tspOnlyPeerMediator` waits for the peer's own document: a route hint, not a sign-in. A peer that does not
+ * answer in time is forwarded as before, so a slow resolver never stalls a message (ac on #1106). Credo has usually
+ * resolved the document already, for the authcrypt just before the forward.
+ */
+export const ROUTE_LOOKUP_TIMEOUT_MS = 3_000
+
 export async function tspOnlyPeerMediator(
   agent: Agent,
   peerDid: string,
   ownMediatorDid: string
 ): Promise<VtiMediatorEndpoints | undefined> {
-  const doc = await withinTime(agent.dids.resolveDidDocument(peerDid), RESOLVE_ATTEMPT_TIMEOUT_MS, 'a peer route')
+  const doc = await withinTime(agent.dids.resolveDidDocument(peerDid), ROUTE_LOOKUP_TIMEOUT_MS, 'a peer route')
   const services = (doc.service ?? []) as { type?: unknown; serviceEndpoint?: unknown }[]
   const typesOf = (s: { type?: unknown }) => [s.type].flat().map(String)
   if (services.some((s) => typesOf(s).some((t) => t === 'DIDCommMessaging' || t === 'dm'))) return undefined

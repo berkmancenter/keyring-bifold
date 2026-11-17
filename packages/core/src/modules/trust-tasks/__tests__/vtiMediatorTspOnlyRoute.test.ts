@@ -1,4 +1,9 @@
-import { VtiMediatorSession, type VtiClientIdentity, type VtiMediatorEndpoints } from '../module/VtiMediatorTransport'
+import {
+  ROUTE_LOOKUP_TIMEOUT_MS,
+  VtiMediatorSession,
+  type VtiClientIdentity,
+  type VtiMediatorEndpoints,
+} from '../module/VtiMediatorTransport'
 
 // A community whose only messaging service is TSPTransport → another mediator (the SEDI VTC, 2026-11-17) is
 // reached over DIDComm through that mediator: two forward layers. Every other document keeps the one forward it
@@ -224,5 +229,22 @@ describe('VtiMediatorSession.forward — every other document is forwarded as be
     expectSingleForward(frames[0], SEDI)
     expectSingleForward(frames[1], SEDI)
     expect(resolved.filter((d) => d === SEDI)).toHaveLength(2)
+  })
+
+  test('a peer whose document does not answer: forwarded as before after ROUTE_LOOKUP_TIMEOUT_MS, never held longer', async () => {
+    jest.useFakeTimers()
+    try {
+      const { agent } = makeAgent(DOCS)
+      ;(agent as unknown as { dids: { resolveDidDocument: () => Promise<never> } }).dids.resolveDidDocument = () =>
+        new Promise<never>(() => undefined)
+      const { session, frames } = openSession(agent)
+      const sent = session.forward(SEDI, INNER_JWE)
+      await jest.advanceTimersByTimeAsync(ROUTE_LOOKUP_TIMEOUT_MS + 1)
+      await sent
+      expect(ROUTE_LOOKUP_TIMEOUT_MS).toBeLessThanOrEqual(3_000)
+      expectSingleForward(frames[0], SEDI)
+    } finally {
+      jest.useRealTimers()
+    }
   })
 })
