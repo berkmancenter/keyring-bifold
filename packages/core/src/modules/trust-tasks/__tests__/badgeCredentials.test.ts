@@ -143,11 +143,14 @@ describe('what the Wallet card shows (badgeCardView)', () => {
     expect(badgeIdOf('urn:other:b1')).toBeUndefined()
   })
 
-  it('leaves out an acceptance date it cannot read, rather than showing the text', () => {
-    const vc = badgeCredential()
-    ;(vc.evidence as Record<string, unknown>[])[0].description = 'Accepted sometime last week'
-    expect(badgeCardView(vc).evidence).toEqual([{ note: 'Thanks for the help with the rooms.' }])
-  })
+  it.each(['Accepted sometime last week', 'Accepted yesterday', 'Accepted 2026-13-45T99:00:00Z'])(
+    'leaves out an acceptance date it cannot read (%s), rather than showing the text',
+    (description) => {
+      const vc = badgeCredential()
+      ;(vc.evidence as Record<string, unknown>[])[0].description = description
+      expect(badgeCardView(vc).evidence).toEqual([{ note: 'Thanks for the help with the rooms.' }])
+    }
+  )
 
   it('keeps the later issue of two copies, whichever arrives last', () => {
     const older = badgeCredential({ validFrom: '2026-11-10T09:00:00Z' })
@@ -258,20 +261,24 @@ describe('the Wallet shows a badge as a card of its own', () => {
     ).toEqual(['urn:uuid:renewed'])
   })
 
-  it('takes the copy out when the membership is removed, or the badge has lapsed', async () => {
+  it('takes the copy out when the membership is removed', async () => {
     const p = phone()
     await p.ready
     await p.deliver(badgeCredential())
     await p.sync()
+    expect(p.wallet().filter(isBadgeCredential)).toHaveLength(1)
     await p.store.saveMembership({ ...member, removal: { code: 'adminRemoved' } } as VtiMembership)
     await p.sync()
     expect(p.wallet().filter(isBadgeCredential)).toEqual([])
+  })
 
-    const q = phone()
-    await q.ready
-    await q.deliver(badgeCredential({ validFrom: '2026-10-01T09:00:00Z', validUntil: '2026-10-31T09:00:00Z' }))
-    await q.sync()
-    expect(q.wallet().filter(isBadgeCredential)).toEqual([])
+  it('does not show a badge past its end date', async () => {
+    const p = phone()
+    await p.ready
+    await p.deliver(badgeCredential({ validFrom: '2026-10-01T09:00:00Z', validUntil: '2026-10-31T09:00:00Z' }))
+    expect(await p.store.listHeldCredentials('badge')).toHaveLength(1)
+    await p.sync()
+    expect(p.wallet().filter(isBadgeCredential)).toEqual([])
   })
 
   it('never touches an Open Badge that came some other way', async () => {
