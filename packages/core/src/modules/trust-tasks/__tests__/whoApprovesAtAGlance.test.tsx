@@ -823,6 +823,29 @@ describe('rows I2 and I4 (Alberto, 11-17): in I approve for, each person is a ca
     expect(nav).toHaveBeenCalledWith('Requests')
   })
 
+  test('the switch off (remote off): a request waiting from Riley promotes nothing, shows no code (ac, #1090; control: on, above)', async () => {
+    waitingFrom(RILEY_AGENT)
+    TRUSTED_APPROVERS_REMOTE_OFF.off = true
+    try {
+      ;(useRoute as jest.Mock).mockReturnValue({ params: undefined })
+      jest.spyOn(approverRole, 'listeningFor').mockResolvedValue([SAM, RILEY])
+      standings.mockResolvedValue({ cards: {}, social: {} })
+      demos.mockResolvedValue({})
+      const tree = render(
+        <BasicAppContext>
+          <VtaTrustedApprovers />
+        </BasicAppContext>
+      )
+      await act(async () => undefined)
+      expect(tree.getByTestId(id(Ids.off))).toBeTruthy()
+      expect(tree.queryByTestId(id(Ids.approvingWaiting('c-riley')))).toBeNull()
+      expect(tree.queryByText('382 540')).toBeNull()
+      expect(tree.queryAllByTestId(/TrustedApproverRow_approving_/)).toHaveLength(0)
+    } finally {
+      TRUSTED_APPROVERS_REMOTE_OFF.off = false
+    }
+  })
+
   test.each([
     ['expired', { expiresAt: new Date(Date.now() - 1000).toISOString() }],
     ['already decided', { status: 'approved' }],
