@@ -190,7 +190,7 @@ describe("the guardian's row on a contact's page", () => {
 
   test.each([
     ['waiting', sentOffer(), 'Waiting for Sam', undefined],
-    ['accepted', sentOffer({ state: 'accepted' }), 'Sam took up your offer', 'Your Guardian card: sent'],
+    ['accepted', sentOffer({ state: 'accepted' }), 'Sam accepted your offer', 'Your Guardian card: sent'],
     [
       'not accepted (a lapse, read as a no would be)',
       sentOffer({ sentAt: new Date(Date.now() - OFFER_OPEN_FOR - 1000).toISOString() }),

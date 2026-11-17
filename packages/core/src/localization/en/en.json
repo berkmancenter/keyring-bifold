@@ -3755,7 +3755,7 @@
     "NotAcceptedBody": "Nothing changed on {{name}}'s phone",
     "Unverifiable": "{{name}}'s phone couldn't check your Guardian card",
     "UnverifiableBody": "{{name}} wasn't asked. Check that your card is current and names {{name}}.",
-    "Accepted": "{{name}} took up your offer",
+    "Accepted": "{{name}} accepted your offer",
     "CardSent": "Your Guardian card: sent",
     "OfferAgain": "Offer again",
     "NotSent": "The offer to {{name}} didn't go. Try again.",
