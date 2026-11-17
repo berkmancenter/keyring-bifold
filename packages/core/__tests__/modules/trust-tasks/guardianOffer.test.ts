@@ -10,6 +10,7 @@ import {
   approverRoleEvents,
   handleRoleOfferRequest,
   handleRoleOfferResponse,
+  isBeingAnswered,
   listeningFor,
   offerApproverRole,
   OFFER_OPEN_FOR,
@@ -38,6 +39,7 @@ import {
   GUARDIAN_OFFER_PROMPT,
   GUARDIAN_OFFER_SENT,
   acceptGuardianOffer,
+  currentApproverDid,
   declineGuardianOffer,
   guardianOfferEvents,
   guardianOfferPrompts,
@@ -270,6 +272,8 @@ beforeEach(() => {
   resetGuardianCheckMemo()
   allOn()
   pipeline = new TrustTasksService({ save: async () => undefined } as never)
+  // Jordan's phone still approves as the DID it offered with, unless a row relinks it.
+  jest.spyOn(currentApproverDid, 'read').mockResolvedValue(JORDAN_APPROVES_AS)
 })
 afterAll(() => {
   setTrustedApproversEnabled(false)
@@ -406,6 +410,37 @@ describe("the guardian's phone says yes only within what it offered, while the o
     expect(sentTypes(asked + 1)).toEqual([])
     expect(roleOfferPromptStore.get(JORDAN.connectionId)).toBeDefined()
     expect(guardianOfferStatus((await guardianOffersSent(jordan.agent))[0])).toBe('notAccepted')
+  })
+
+  test.each([
+    [
+      'relinked to another agent since',
+      () => jest.spyOn(currentApproverDid, 'read').mockResolvedValue('did:peer:2.new'),
+    ],
+    ["the DID can't be read now", () => jest.spyOn(currentApproverDid, 'read').mockRejectedValue(new Error('offline'))],
+  ])('%s: the ask is shown, and no yes names the kept DID (control: the end-to-end row)', async (_what, relink) => {
+    const { jordan } = await offered(['joinCommunity'])
+    relink()
+    const sam2 = phone(SAM)
+    const asked = mockSent.length
+    await offerApproverRole(sam2.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity', 'changeApprovers'])
+    await deliver(jordan, mockSent[asked].document)
+    expect(sentTypes(asked + 1)).toEqual([])
+    expect(roleOfferPromptStore.get(JORDAN.connectionId)).toBeDefined()
+    expect(guardianOfferStatus((await guardianOffersSent(jordan.agent))[0])).toBe('waiting')
+  })
+
+  test('while answered on its own, the ask is kept off the offer sheet, and only then', async () => {
+    const { jordan, sam } = await offered(['joinCommunity'])
+    const asked = mockSent.length
+    await acceptGuardianOffer(sam.agent, SAM.connectionId, SAM_AGENT, ['joinCommunity'])
+    const during: boolean[] = []
+    const cleared = () => during.push(isBeingAnswered(JORDAN.connectionId))
+    approverRoleEvents.on('promptCleared', cleared)
+    await deliver(jordan, mockSent[asked].document)
+    approverRoleEvents.off('promptCleared', cleared)
+    expect(during).toEqual([true])
+    expect(isBeingAnswered(JORDAN.connectionId)).toBe(false)
   })
 
   test('with guardian offers switched off after sending, the ask is shown and not answered', async () => {

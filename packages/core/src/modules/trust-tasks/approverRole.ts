@@ -657,6 +657,8 @@ export async function handleRoleOfferRequest(
     .guardianOfferTakenUp(agent, context.connectionId, prompt.actions)
     .catch(() => undefined)
   if (takenUp) {
+    // Kept off the offer sheet while it is answered, so a refresh for another contact cannot show it meanwhile.
+    answeringNow.add(context.connectionId)
     try {
       await respondToRoleOffer(agent, context.connectionId, true, takenUp)
       await guardianOffer().guardianOfferAnswered(agent, context.connectionId)
@@ -666,10 +668,16 @@ export async function handleRoleOfferRequest(
       agent.config?.logger?.warn(
         `${LOG_PREFIX} the yes to an ask that took up my guardian offer was not sent: ${(error as Error)?.message ?? error}`
       )
+    } finally {
+      answeringNow.delete(context.connectionId)
     }
   }
   approverRoleEvents.emit('offer', { connectionId: context.connectionId })
 }
+
+/** Asks this phone is answering yes to on its own (a guardian offer taken up): not shown on the offer sheet meanwhile. */
+const answeringNow = new Set<string>()
+export const isBeingAnswered = (connectionId: string): boolean => answeringNow.has(connectionId)
 
 /** The guardian-offer module, reached lazily: it imports this one, so importing it at the top is a cycle. */
 function guardianOffer(): typeof import('./guardianOffer') {

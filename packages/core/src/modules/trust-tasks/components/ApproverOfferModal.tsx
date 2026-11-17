@@ -27,6 +27,7 @@ import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import {
   approverRoleEvents,
+  isBeingAnswered,
   respondToRoleOffer,
   restoreRoleOfferPrompts,
   roleOfferPromptStore,
@@ -62,7 +63,10 @@ const putOff = new Set<string>()
 /** Tests only. */
 export const resetPutOff = () => putOff.clear()
 
-const firstShown = () => roleOfferPromptStore.list().find((prompt) => prompt.open && !putOff.has(prompt.connectionId))
+const firstShown = () =>
+  roleOfferPromptStore
+    .list()
+    .find((prompt) => prompt.open && !putOff.has(prompt.connectionId) && !isBeingAnswered(prompt.connectionId))
 
 const ApproverOfferModal: React.FC = () => {
   const { agent } = useAgent()

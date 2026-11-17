@@ -133,6 +133,9 @@ export async function offerAsGuardian(
   if (!relationship) return 'noRelationship'
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   if (!connection.did || !connection.theirDid) return 'noRelationship'
+  // Its `v2` is not read: guardian-offer is new in 0.1 and no build takes an older shape of it, so the card goes with
+  // its host and authorization whenever it has them. A guardian-offer 0.2 must decide this again, as guardian-evidence
+  // did (approverRoleSpec.ts).
   const { card } = await cardWithItsExtras(agent, held, connectionId)
   if (evidenceBytes(card) > GUARDIAN_EVIDENCE_MAX_BYTES) {
     warn(agent, `the card is over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes; no offer sent on ${connectionId}`)
@@ -185,12 +188,25 @@ export async function guardianOffersSent(agent: Pick<Agent, 'genericRecords'>): 
 }
 
 /**
+ * The DID this phone approves as now: its manager DID on its own linked agent (vtaAgent.approverDid). A seam, so the
+ * module's tests need no agent session.
+ */
+export const currentApproverDid = {
+  read: (agent: Agent): Promise<string> =>
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    (require('./module/vtaAgent') as typeof import('./module/vtaAgent')).vtaAgent.approverDid(agent),
+}
+
+/**
  * A role offer from the contact on `connectionId` arrived (approverRole.handleRoleOfferRequest): if it takes up this
- * phone's open offer to them, the DID to say yes as. Only within what was offered, and only while the offer is open:
- * anything else is asked about as any role offer is.
+ * phone's open offer to them, the DID to say yes as. Only within what was offered, only while the offer is open, and
+ * only as the DID the guardian said yes as, which must still be this phone's: after a relink (a new phone, a re-setup)
+ * the kept DID is one this phone can no longer answer as, and a yes naming it would leave the person an approver
+ * nobody can be (ac, #1087). Anything else, a DID that cannot be read now included, is asked about as any role offer
+ * is: the guardian's tap then names the current one.
  */
 export async function guardianOfferTakenUp(
-  agent: Pick<Agent, 'genericRecords'>,
+  agent: Agent,
   connectionId: string,
   actions: readonly RoleAction[]
 ): Promise<string | undefined> {
@@ -198,6 +214,11 @@ export async function guardianOfferTakenUp(
   const sent = await sentOn(agent, connectionId)
   if (!sent || guardianOfferStatus(sent) !== 'waiting') return undefined
   if (actions.length === 0 || !actions.every((action) => sent.actions.includes(action))) return undefined
+  const now = await currentApproverDid.read(agent).catch(() => undefined)
+  if (now !== sent.approverDid) {
+    warn(agent, `my approver DID changed since the offer on ${connectionId}; the ask is shown`)
+    return undefined
+  }
   return sent.approverDid
 }
 
@@ -291,6 +312,9 @@ class GuardianOfferPromptStore {
   }
   first(): GuardianOfferPrompt | undefined {
     return [...this.prompts.values()][0]
+  }
+  list(): GuardianOfferPrompt[] {
+    return [...this.prompts.values()]
   }
   clear() {
     this.prompts.clear()

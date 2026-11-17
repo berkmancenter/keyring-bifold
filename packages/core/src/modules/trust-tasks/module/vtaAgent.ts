@@ -2808,6 +2808,16 @@ export class VtaAgentController {
   }
 
   /**
+   * Taking up a guardian's offer to approve for this person (the guardian offer sheet's Accept, guardianOffer.ts): an
+   * owner act, so Face ID, a fingerprint or the passcode first, with `reason` (already in the person's language) on the
+   * prompt. Not confirmed, it throws {@link OwnerNotConfirmed} and nothing is sent. Writing the guardian on the agent
+   * is a separate owner act afterwards, as for any yes ({@link setTrustedApprovers}).
+   */
+  async confirmGuardianOffer(reason: string): Promise<void> {
+    await this.confirmOwner(reason)
+  }
+
+  /**
    * Who approves for this person, read from the agent's approvals row
    * (trustedApprovers.ts). Signs in if it must. Refuses with
    * {@link DeviceActionRefused}.
