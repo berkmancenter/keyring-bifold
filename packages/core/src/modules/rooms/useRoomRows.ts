@@ -48,7 +48,14 @@ import { RUN_STARTED_AT } from '../../utils/runStart'
 import { onSessionOpened } from './agentSession'
 import { toInertText, type InertText } from './inertText'
 import { failureCategory, logRef } from './roomsLogWords'
-import { isRowsAtStartOn, isRowsWallet, keepRowsAtStart, readRowsAtStart, type RowAtStart } from './rowsAtStart'
+import {
+  emptyRowsAtStart,
+  isRowsAtStartOn,
+  isRowsWallet,
+  keepRowsAtStart,
+  readRowsAtStart,
+  type RowAtStart,
+} from './rowsAtStart'
 import { isNote, newestFirst, placeOf, postOf } from './roomPosts'
 import type { Identity, NoteSummary, RoomsService, RoomSummary } from './types'
 
@@ -325,7 +332,14 @@ function showRowsAtStart(service: RoomsService): void {
   if (rowsAtStartLooked) return
   rowsAtStartLooked = true
   const agent = service.runsOn
-  if (!isRowsWallet(agent) || !isRowsAtStartOn()) return
+  if (!isRowsWallet(agent)) return
+  // Off: nothing is shown, and what an earlier run kept is emptied, so the kill undoes the names at rest too.
+  if (!isRowsAtStartOn()) {
+    emptyRowsAtStart(agent).catch((e: unknown) =>
+      log?.(`[Rooms:rows] the last run's rows were not emptied: ${failureCategory(e)}`)
+    )
+    return
+  }
   readRowsAtStart(agent).then(
     (kept) => {
       if (!kept || feed.service !== service || feed.all !== undefined) return

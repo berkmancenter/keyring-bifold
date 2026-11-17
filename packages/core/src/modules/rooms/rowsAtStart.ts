@@ -11,8 +11,9 @@
  * Two values a release (an OTA included) sets, and nothing else, as for `liveDeliverySwitch.ts`:
  * - `on`: the release's choice.
  * - `remoteOff`: the release's kill. Set it to `true` and nothing is read or kept: Messages waits for its first
- *   listing, as before, for everyone at the next start, whatever `on` says, until a release sets it back. What was
- *   kept stays in the wallet, unread.
+ *   listing, as before, for everyone at the next start, whatever `on` says, until a release sets it back. That first
+ *   start also empties what was kept (`emptyRowsAtStart`): the record is written with no rows, so no room's name stays
+ *   in the wallet because of this (ac, 11-18). Emptied in place rather than removed: the record names nothing.
  *
  * KILL RECIPE (no kill PR is kept open): branch from current main, set `remoteOff: true` below (one line), and publish
  * it by OTA. Both are Alberto's.
@@ -110,6 +111,23 @@ export async function readRowsAtStart(agent: RowsWallet): Promise<RowAtStart[] |
 }
 
 let writing: Promise<void> = Promise.resolve()
+
+/**
+ * Writes the kept record with no rows, when there is one with rows: what a start with the switch off does, so the kill
+ * undoes what was kept and not only the showing of it. One write in the same turn as the keeps.
+ */
+export function emptyRowsAtStart(agent: RowsWallet): Promise<void> {
+  writing = writing
+    .catch(() => undefined)
+    .then(async () => {
+      const existing = await agent.genericRecords.findById(ROWS_AT_START_RECORD_ID)
+      const rows = existing?.content?.rows
+      if (!existing || (Array.isArray(rows) && rows.length === 0)) return
+      existing.content = { v: 1, rows: [] }
+      await agent.genericRecords.update(existing)
+    })
+  return writing
+}
 
 /** Keeps `rows` for the next start, one write after another, when the switch is on. */
 export function keepRowsAtStart(agent: RowsWallet, rows: readonly RowAtStart[]): Promise<void> {

@@ -1205,7 +1205,7 @@ describe("the last run's rows at a start", () => {
     ['switched off', { on: false, remoteOff: false }],
     ['turned off remotely', { on: true, remoteOff: true }],
     ['not a boolean (fails closed)', { on: 'true' as unknown as boolean, remoteOff: false }],
-  ])('control: %s, nothing is read or kept', async (_name, values) => {
+  ])('control: %s, nothing is shown or kept, and what was kept is emptied (ac, 11-18)', async (_name, values) => {
     Object.assign(ROOMS_ROWS_AT_START, values)
     const wallet = walletWith(lastRun([keptRow('planning')]))
     const { s, answer } = waitingService([room('garden')], wallet)
@@ -1215,7 +1215,21 @@ describe("the last run's rows at a start", () => {
     expect(list.result.current.rows).toEqual([])
     await answer()
     await step(ROWS_KEEP_DELAY_MS)
-    expect(wallet.genericRecords.findById).not.toHaveBeenCalled()
+    // The kill undoes the names at rest: the record names no room. Nothing new is written after it.
+    expect(wallet.state.record?.content).toEqual({ v: 1, rows: [] })
+    expect(JSON.stringify(wallet.state.record)).not.toContain('planning')
+    expect(wallet.genericRecords.update).toHaveBeenCalledTimes(1)
+    expect(wallet.genericRecords.save).not.toHaveBeenCalled()
+  })
+
+  test('control: switched off with nothing kept, nothing is written at all', async () => {
+    ROOMS_ROWS_AT_START.on = false
+    const wallet = walletWith()
+    const s = serviceWith([room('garden')], { garden: [] })
+    Object.assign(s, { runsOn: wallet })
+    renderHook(() => useRoomRowsPoll(s, true))
+    await flush()
+    await step(ROWS_KEEP_DELAY_MS)
     expect(wallet.genericRecords.save).not.toHaveBeenCalled()
     expect(wallet.genericRecords.update).not.toHaveBeenCalled()
   })
