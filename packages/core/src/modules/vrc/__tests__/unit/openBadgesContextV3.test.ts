@@ -1,5 +1,4 @@
 import { createHash } from 'crypto'
-import jsonld from 'jsonld'
 
 import {
   OPEN_BADGES_CONTEXT_V3_DOCUMENT,
@@ -21,6 +20,11 @@ const agentContext = {
 } as any
 
 const OB = 'https://purl.imsglobal.org/spec/vc/ob/vocab.html#'
+
+// jsonld ships no type declarations; read it with the one call used here typed, so this file adds no
+// line to the tsc-ratchet baseline (the other jsonld suites are listed there).
+const jsonld: { expand(input: unknown, options: { documentLoader: unknown }): Promise<unknown> } =
+  jest.requireActual('jsonld')
 
 describe('the Open Badges 3.0.3 context (bundled, never fetched)', () => {
   let fetchSpy: jest.SpyInstance
