@@ -1679,7 +1679,7 @@ class VtiAgentController {
       // kept beside whatever signed in since.
       if (ticket?.abandoned) {
         await session.stop().catch(() => undefined)
-        letGo()
+        throw new VtiSignInTimedOut(this.signInTurnMs)
       }
       step('socket open')
       // No pause here for the backlog the mediator flushes on live delivery: every message goes through `deliver`
@@ -1687,6 +1687,15 @@ class VtiAgentController {
       // mistaken for a fresh answer — one naming no thread and no time — is not matched by type for
       // `VTI_BACKLOG_GRACE_MS` after this. The fixed 2 s this used to wait for every sign-in (2.002-2.030 s on 35 of
       // 36 sign-ins, 277.12) delayed each one, several in a row at launch.
+      // Everything awaited is read BEFORE the commit below, so a let-go cannot land between this session becoming the
+      // live one and the state saying so (ac, #1095: it stopped the live session and then said connected).
+      const peerRevisions =
+        (await this.peerRevisionStore?.list().catch(() => undefined)) ?? this.state.peerRevisions ?? []
+      if (ticket?.abandoned) {
+        await session.stop().catch(() => undefined)
+        throw new VtiSignInTimedOut(this.signInTurnMs)
+      }
+      // The commit: no await from here to `connected`.
       this.openedAt = this.now()
       this.session = session
       const peerLeg = getPeerLegCarriage()
@@ -1701,7 +1710,7 @@ class VtiAgentController {
         signingInAs: undefined,
         peerLeg: peerLeg === 'tsp' && tspSession ? 'tsp' : 'didcomm',
         tspReady: Boolean(tspSession),
-        peerRevisions: (await this.peerRevisionStore?.list().catch(() => undefined)) ?? this.state.peerRevisions ?? [],
+        peerRevisions,
       })
       step('connected')
     } catch (error) {

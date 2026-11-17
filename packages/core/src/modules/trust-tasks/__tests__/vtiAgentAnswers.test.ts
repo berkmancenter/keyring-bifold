@@ -976,6 +976,36 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
     expect(next).toBe('signed in')
   })
 
+  it('let go after its socket opened, during its last read: never committed, and the sign-in after it keeps the session (ac, #1095)', async () => {
+    let releaseRead = () => undefined as void
+    const slowStore = {
+      list: () => new Promise<[]>((resolve) => (releaseRead = () => resolve([]))),
+    }
+    mockTspVia[C] = 'did:webvh:their-mediator'
+    let ended: string | undefined
+    void outcome(
+      vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(HUNG), peerRevisionStore: slowStore as never })
+    ).then((o) => (ended = o))
+    // The socket opens (no hang), then the last read waits: the limit lets the turn go there.
+    await until(() => mockStopped.includes(HUNG), 1000)
+    // connect keeps a given store for later sign-ins: the next one brings its own, so it does not wait on the slow one.
+    const fast = { list: async () => [] }
+    mockTspVia[C] = 'did:webvh:their-mediator'
+    expect(
+      await outcome(
+        vtiAgent.connect(agent, 'did:peer:lab', { persona: persona(NEXT), peerRevisionStore: fast as never })
+      )
+    ).toBe('signed in')
+    releaseRead()
+    await until(() => ended !== undefined, 500)
+    expect(ended).toBe('VtiSignInTimedOut')
+    // The let-go attempt committed nothing: the later sign-in still owns the state and the session.
+    expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: NEXT })
+    expect(mockSessions.filter((m) => m.did === HUNG)).toHaveLength(1)
+    expect(mockStopped).toContain(HUNG)
+    expect(mockStopped).not.toContain(NEXT)
+  })
+
   it('the let-go sign-in is closed at once, while its socket is still opening (the DID has one mediator slot)', async () => {
     hang()
     // Not released: the socket never opened, and the session is already stopped.
