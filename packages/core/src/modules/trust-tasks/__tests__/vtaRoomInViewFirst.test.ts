@@ -116,6 +116,7 @@ async function drain(h: ReturnType<typeof harness>, n: number) {
 }
 
 const BROWSE = 'https://trusttasks.org/spec/rooms/keys/browse/0.4'
+const EXPORT_KEY = 'https://trusttasks.org/spec/keys/export-secret/0.1'
 const read = (client: VtaClient, inView: boolean, type = BROWSE) =>
   client.task(
     type,
@@ -201,5 +202,38 @@ describe("the open room's reads on the agent's channel", () => {
       'device/list/0.3',
     ])
     await Promise.all([...start, first, second])
+  })
+
+  // ac (11-18): the boundary with a sign-in's key (VTA_KEY_FOR_SIGN_IN_FIRST). An in-view read is asked with
+  // first: false, so keyFirst() never takes it, and among what goes first it never passes a key asked before it.
+  it("control: with the sign-in key's switch on and this one off, an in-view read keeps the order asked", async () => {
+    VTA_KEY_FOR_SIGN_IN_FIRST.on = true
+    VTA_ROOM_IN_VIEW_FIRST.on = false
+    const h = harness()
+    const start = await busyStart(h)
+    const browse = read(h.client, true)
+    expect(await drain(h, 4)).toEqual([
+      'auth/whoami/0.1',
+      'config/show/0.1',
+      'device/list/0.3',
+      'rooms/keys/browse/0.4',
+    ])
+    await Promise.all([...start, browse])
+  })
+
+  it("never passes a sign-in's key asked before it: both go first, the key ahead", async () => {
+    VTA_KEY_FOR_SIGN_IN_FIRST.on = true
+    const h = harness()
+    const start = await busyStart(h)
+    const key = h.client.task(EXPORT_KEY, { keyId: 'k' }, 30_000, {}, undefined, { priority: { first: true } })
+    const browse = read(h.client, true)
+    expect(await drain(h, 5)).toEqual([
+      'auth/whoami/0.1',
+      'keys/export-secret/0.1',
+      'rooms/keys/browse/0.4',
+      'config/show/0.1',
+      'device/list/0.3',
+    ])
+    await Promise.all([...start, key, browse])
   })
 })
