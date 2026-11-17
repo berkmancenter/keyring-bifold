@@ -796,6 +796,7 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     await flush()
     // Why the room did not read, by kind: a row "reading" for a whole report said nothing of why (34VR-Y58H, 11-03).
     expect(lines).toEqual([
+      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 1, 1 reading, \d+ ms in$/),
       expect.stringMatching(/^\[Rooms:rows\] .+ of .+ not read: failed$/),
       expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/),
     ])
@@ -808,6 +809,42 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     expect(notListed).toMatch(/^\[Rooms:rows\] the rooms were not listed \(\d+ ms\); the rows read before stay$/)
     // The cause is the service's own line; this one never repeats the error's words.
     expect(notListed).not.toContain('unreachable')
+  })
+})
+
+// 11-17: a cold start is felt by when Messages first has rows, and no line said it: the listed line comes only once
+// every room's posts are read.
+describe("the first rows of a run, in the app's log", () => {
+  const firstLines = (lines: string[]) => lines.filter((l) => l.startsWith('[Rooms:rows] first rows shown'))
+
+  test('are said once, as soon as the rooms are listed, before any room is read', async () => {
+    const s = serviceWith([room('planning'), room('garden')], { planning: [note('n1', 1)], garden: [] })
+    const lines: string[] = []
+    renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
+    await flush()
+
+    expect(firstLines(lines)).toEqual([
+      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 2, 2 reading, \d+ ms in$/),
+    ])
+    expect(lines.indexOf(firstLines(lines)[0])).toBe(0)
+
+    refreshRoomRows()
+    await flush()
+    expect(firstLines(lines)).toHaveLength(1)
+  })
+
+  test('control: a listing with no rooms says nothing, and the first one with rooms does', async () => {
+    const rooms: RoomSummary[] = []
+    const s = serviceWith(rooms, { planning: [] })
+    const lines: string[] = []
+    renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
+    await flush()
+    expect(firstLines(lines)).toEqual([])
+
+    rooms.push(room('planning'))
+    refreshRoomRows()
+    await flush()
+    expect(firstLines(lines)).toEqual([expect.stringMatching(/first rows shown: 1, 1 reading/)])
   })
 })
 
