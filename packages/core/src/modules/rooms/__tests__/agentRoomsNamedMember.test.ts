@@ -172,6 +172,18 @@ describe('accepting a room this phone holds as another identity', () => {
     expect(s.sent('/rooms/keys/welcome/')[0]).not.toHaveProperty('ext')
   })
 
+  it('control: held as two already, the join itself (key package, Welcome) still names nobody', async () => {
+    const s = setup({ held: { [ROOM]: [OLD, NEW] }, offers: [offer] })
+    await s.service.listMyRooms()
+    const preview = await s.service.previewOffer(offerIdOf(COMMUNITY.did, ROOM))
+    await s.service.acceptOffer(preview.token)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(s.sent('/rooms/keys/key-package/')).toHaveLength(1)
+    expect(s.sent('/rooms/keys/key-package/')[0]).not.toHaveProperty('ext')
+    expect(s.sent('/rooms/keys/welcome/')[0]).not.toHaveProperty('ext')
+    expect(s.sent('/rooms/keys/backfill/')[0]).toMatchObject(named(NEW))
+  })
+
   it('control: a room held as nobody before is backfilled exactly as before', async () => {
     const s = setup({ held: {}, rooms: [OTHER], offers: [offer] })
     await s.service.listMyRooms()
