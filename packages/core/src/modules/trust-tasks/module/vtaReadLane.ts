@@ -122,8 +122,8 @@ const RECORDS_PUT = /^https:\/\/trusttasks\.org\/spec\/rooms\/records\/put\/[\d.
  * agent's own short side session (vtaAgent.fetchKeyCopy), where nothing else is queued and a place means nothing.
  *
  * Two values a release (an OTA included) sets, and nothing else, as for rooms' `liveDeliverySwitch.ts`:
- * - `on`: the release's choice. It shipped off (11-17); on from 11-18, Alberto's yes, relayed by the coordinator, for
- *   a demo where each attendee's first sign-in is a cold one.
+ * - `on`: the release's choice. It shipped off (11-17). On from 11-18, for a demo where each attendee's first sign-in
+ *   is a cold one.
  * - `remoteOff`: the release's kill. Set it to `true` and every task keeps the order asked again, for everyone at the next
  *   start, whatever `on` says, until a release sets it back.
  *
