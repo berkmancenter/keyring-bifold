@@ -796,7 +796,7 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     await flush()
     // Why the room did not read, by kind: a row "reading" for a whole report said nothing of why (34VR-Y58H, 11-03).
     expect(lines).toEqual([
-      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 1, 1 reading, \d+ ms in$/),
+      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 1, 1 reading, \d+ ms into this read$/),
       expect.stringMatching(/^\[Rooms:rows\] .+ of .+ not read: failed$/),
       expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/),
     ])
@@ -824,7 +824,7 @@ describe("the first rows of a run, in the app's log", () => {
     await flush()
 
     expect(firstLines(lines)).toEqual([
-      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 2, 2 reading, \d+ ms in$/),
+      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 2, 2 reading, \d+ ms into this read$/),
     ])
     expect(lines.indexOf(firstLines(lines)[0])).toBe(0)
 

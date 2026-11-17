@@ -154,8 +154,10 @@ const feed: Feed = {
 // The app's log, from the poll: one line per read, so a tester's report says when the rows came and why not.
 let log: ((line: string) => void) | undefined
 /**
- * Whether this run said when Messages first had rows to show: the moment a cold start is felt by, which no line marked
- * (the listed line comes only once every room's posts are read, after the rows are shown: 11-17).
+ * Whether this run said when Messages first had rows to show, which no line marked: the listed line comes only once
+ * every room's posts are read, after the rows are shown (11-17). Its time is into this read, as the listed line's is,
+ * not since launch: what came before the read (sign-ins, the agent's session) is in the lines before it, and the
+ * line's own timestamp against the launch line's gives the whole wait.
  */
 let firstRowsSaid = false
 // Per service, so another agent (and its service) starts with none.
@@ -376,7 +378,9 @@ async function readAll(service: RoomsService): Promise<void> {
       if (!firstRowsSaid && shownNow.length > 0) {
         firstRowsSaid = true
         const reading = shownNow.filter((row) => row.reading).length
-        log?.(`[Rooms:rows] first rows shown: ${shownNow.length}, ${reading} reading, ${Date.now() - began} ms in`)
+        log?.(
+          `[Rooms:rows] first rows shown: ${shownNow.length}, ${reading} reading, ${Date.now() - began} ms into this read`
+        )
       }
     }
     if (feed.service !== service) return
