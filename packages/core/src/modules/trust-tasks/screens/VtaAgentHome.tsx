@@ -328,6 +328,8 @@ const VtaAgentHome: React.FC = () => {
   /** Row V5: the community whose vetting Stop this vetting was asked for, and whether it is stopping. */
   const [stopFor, setStopFor] = useState<string>()
   const [stopping, setStopping] = useState(false)
+  /** Why the last Stop this vetting cleared nothing: it had gone to the community, or what was sent could not be read. */
+  const [stopRefused, setStopRefused] = useState<'sent' | 'unreadable'>()
   const otherWaiting = useOtherAgentsWaiting()
   // The communities' cards read each one's journey; this page reads the same
   // readings, so it leads with a card's next step in the same render as the
@@ -1000,6 +1002,14 @@ const VtaAgentHome: React.FC = () => {
                 </ThemedText>
               </Pressable>
             ) : null}
+            {nextStep.kind === 'vetting' && stopRefused ? (
+              <ThemedText style={styles.stopVettingText} testID={testIdWithKey(VtaAgentHomeIds.stopRefused)}>
+                {t(stopRefused === 'sent' ? 'Vetting.StopAlreadySent' : 'Vetting.StopUnreadable', {
+                  community: communityLabelOf(nextStep.communityDid, t),
+                  interpolation: { escapeValue: false },
+                })}
+              </ThemedText>
+            ) : null}
           </View>
         ) : null}
 
@@ -1137,6 +1147,7 @@ const VtaAgentHome: React.FC = () => {
         onStop={() => {
           if (!agent || !stopFor) return
           setStopping(true)
+          setStopRefused(undefined)
           void stopVetting(
             {
               identityStore: new GenericRecordsIdentityStore(agent),
@@ -1145,10 +1156,14 @@ const VtaAgentHome: React.FC = () => {
             },
             stopFor
           )
-            .catch(() => undefined)
+            // A failure clears nothing; it is said as unreadable, never as stopped.
+            .catch(() => 'unreadable' as const)
+            .then((done) => {
+              // Stopped: the card goes once the holdings are read again (stopVetting announces the change). Refused:
+              // nothing was cleared, and the card says why.
+              if (done !== 'stopped') setStopRefused(done)
+            })
             .finally(() => {
-              // The card goes once the holdings are read again (stopVetting announces the change). A request that had
-              // already gone (`sent`) is the community's card's to withdraw; nothing was cleared.
               setStopping(false)
               setStopFor(undefined)
             })

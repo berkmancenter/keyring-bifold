@@ -21,6 +21,7 @@ import { communityCardKey } from '../screens/CommunityCard'
 import { communityHeadingOf, didPathName } from '../screens/communityName'
 import VtaAgentHome, { forgetAgentHoldings, ownHoldings } from '../screens/VtaAgentHome'
 import { localDate } from '../screens/localTime'
+import * as vtiJoinModule from '../module/vtiJoin'
 
 jest.mock('@bifold/credo-tsp-adapter', () => ({}))
 jest.mock('@react-navigation/native', () => ({
@@ -264,6 +265,23 @@ describe('what your agent holds, card by card', () => {
     expect(tree.getByTestId(testIdWithKey('StopVettingSheet'))).toBeTruthy()
     fireEvent.press(tree.getByTestId(testIdWithKey('StopVettingSheetKeep')))
     expect(tree.queryByTestId(testIdWithKey('StopVettingSheet'))).toBeNull()
+  })
+
+  it.each([
+    ['unreadable', 'Vetting.StopUnreadable'],
+    ['sent', 'Vetting.StopAlreadySent'],
+  ] as const)('row V5: a Stop that comes back %s clears nothing, and the card says why', async (done, words) => {
+    jest.spyOn(vtiJoinModule, 'stopVetting').mockResolvedValue(done)
+    const tree = await renderHome([persona(A), membership(A, linkedAt), persona(B)])
+    fireEvent.press(tree.getByTestId(testIdWithKey('AgentStopVetting')))
+    await act(async () => {
+      jest.advanceTimersByTime(10)
+    })
+    await act(async () => {
+      fireEvent.press(tree.getByTestId(testIdWithKey('StopVettingSheetStop')))
+    })
+    expect(tree.getByTestId(testIdWithKey('AgentStopRefused'))).toHaveTextContent(new RegExp(words))
+    expect(tree.getByTestId(testIdWithKey('AgentContinueVetting'))).toBeTruthy()
   })
 
   it('row V5, control: a vetting whose request went to the community (deferred) has no Stop here', async () => {

@@ -33,14 +33,26 @@ const application = (over: Partial<VettingApplication> = {}): VettingApplication
     ...over,
   }) as VettingApplication
 
-function stores(opts: { app?: VettingApplication; submission?: unknown; membership?: unknown } = {}) {
+function stores(
+  opts: {
+    app?: VettingApplication
+    submission?: unknown
+    membership?: unknown
+    fails?: 'application' | 'submission' | 'membership'
+  } = {}
+) {
+  const read = <T>(what: string, value: T) =>
+    jest.fn(async () => {
+      if (opts.fails === what) throw new Error('Error executing query. Invalid store handle')
+      return value
+    })
   const vettingStore = {
-    getApplication: jest.fn(async () => opts.app),
+    getApplication: read('application', opts.app),
     forgetApplication: jest.fn(async () => undefined),
   }
   const communityStore = {
-    getMembership: jest.fn(async () => opts.membership),
-    getSubmission: jest.fn(async () => opts.submission),
+    getMembership: read('membership', opts.membership),
+    getSubmission: read('submission', opts.submission) as jest.Mock | undefined,
   }
   const identityStore = { forgetPersona: jest.fn(async () => undefined) }
   return { deps: { vettingStore, communityStore, identityStore } as never, vettingStore, communityStore, identityStore }
@@ -61,6 +73,23 @@ describe('stopVetting: forget the vetting and its identity, only while nothing h
     const s = stores(opts)
     expect(await stopVetting(s.deps, COMMUNITY)).toBe('sent')
     expect(s.vettingStore.forgetApplication).not.toHaveBeenCalled()
+    expect(s.identityStore.forgetPersona).not.toHaveBeenCalled()
+  })
+
+  test.each(['application', 'submission', 'membership'] as const)(
+    'the %s cannot be read: unreadable, and nothing is cleared (it fails toward refusing, never as "nothing sent")',
+    async (fails) => {
+      const s = stores({ app: application(), fails })
+      expect(await stopVetting(s.deps, COMMUNITY)).toBe('unreadable')
+      expect(s.vettingStore.forgetApplication).not.toHaveBeenCalled()
+      expect(s.identityStore.forgetPersona).not.toHaveBeenCalled()
+    }
+  )
+
+  test('a store that cannot say what was sent: unreadable, and nothing is cleared', async () => {
+    const s = stores({ app: application() })
+    s.communityStore.getSubmission = undefined
+    expect(await stopVetting(s.deps, COMMUNITY)).toBe('unreadable')
     expect(s.identityStore.forgetPersona).not.toHaveBeenCalled()
   })
 

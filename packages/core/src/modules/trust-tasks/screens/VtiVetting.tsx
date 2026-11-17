@@ -946,9 +946,9 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
         communityDid
       )
       setStopAsked(false)
-      if (done === 'sent')
+      if (done !== 'stopped')
         throw new InWords(
-          t('Vetting.StopAlreadySent', {
+          t(done === 'sent' ? 'Vetting.StopAlreadySent' : 'Vetting.StopUnreadable', {
             community: communityLabelOf(communityDid, t),
             interpolation: { escapeValue: false },
           })

@@ -2478,7 +2478,8 @@
     "CantSignInBody": "Son agent ne répond pas, donc la session de votre vérificateur ne peut pas atteindre ce téléphone.",
     "CantSignInHint": "Recommencer crée une nouvelle identité et demande un nouveau ticket. Prévenez votre vérificateur.",
     "TryAgain": "Réessayer",
-    "StartOver": "Recommencer"
+    "StartOver": "Recommencer",
+    "StopUnreadable": "Impossible de vérifier si quelque chose a été envoyé à {{community}} ; rien n'a été supprimé. Réessayez."
   },
   "Directory": {
     "ViewCard": "Voir la carte",

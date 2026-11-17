@@ -548,12 +548,23 @@ export async function stopVetting(
     }
   },
   communityDid: string
-): Promise<'stopped' | 'sent'> {
-  const [application, submission, membership] = await Promise.all([
-    deps.vettingStore.getApplication(communityDid).catch(() => undefined),
-    deps.communityStore.getSubmission?.(communityDid).catch(() => undefined),
-    deps.communityStore.getMembership(communityDid).catch(() => undefined),
-  ])
+): Promise<'stopped' | 'sent' | 'unreadable'> {
+  // Fails toward refusing (ac, #1097): a false "sent" leaves a tester a vetting to finish or withdraw, a false
+  // "nothing sent" forgets an identity a community knows. So a read that fails, or a store that cannot say what was
+  // sent, is `unreadable`, and nothing is cleared. Never read as "nothing there".
+  if (!deps.communityStore.getSubmission) return 'unreadable'
+  let application: { submission?: unknown } | undefined
+  let submission: unknown
+  let membership: unknown
+  try {
+    ;[application, submission, membership] = await Promise.all([
+      deps.vettingStore.getApplication(communityDid),
+      deps.communityStore.getSubmission(communityDid),
+      deps.communityStore.getMembership(communityDid),
+    ])
+  } catch {
+    return 'unreadable'
+  }
   if (application?.submission || submission) return 'sent'
   await deps.vettingStore.forgetApplication?.(communityDid)
   if (!membership) await deps.identityStore.forgetPersona(communityDid)

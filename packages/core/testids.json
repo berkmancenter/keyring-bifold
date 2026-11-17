@@ -142,6 +142,7 @@
     ],
     "AgentSettingsScreen": ["src/modules/trust-tasks/screens/VtaAgentSettings.ids.ts"],
     "AgentShareIdentity": ["src/modules/trust-tasks/screens/CommunityCard.tsx"],
+    "AgentStopRefused": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentStopVetting": ["src/modules/trust-tasks/screens/VtaAgentHome.ids.ts"],
     "AgentSwitcher": ["src/modules/trust-tasks/screens/AgentChips.tsx"],
     "AgentSwitcherAdd": ["src/modules/trust-tasks/screens/AgentChips.tsx"],
@@ -2913,6 +2914,9 @@
     },
     {
       "src/modules/trust-tasks/screens/VtaAgentHome.tsx": "VtaAgentHomeIds.seat"
+    },
+    {
+      "src/modules/trust-tasks/screens/VtaAgentHome.tsx": "VtaAgentHomeIds.stopRefused"
     },
     {
       "src/modules/trust-tasks/screens/VtaAgentHome.tsx": "VtaAgentHomeIds.stopVetting"

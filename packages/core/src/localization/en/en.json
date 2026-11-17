@@ -2517,7 +2517,8 @@
     "CantSignInBody": "Its agent isn't answering, so your vetter's session can't reach this phone.",
     "CantSignInHint": "Start over makes a new identity and asks for a new ticket. Tell your vetter.",
     "TryAgain": "Try again",
-    "StartOver": "Start over"
+    "StartOver": "Start over",
+    "StopUnreadable": "Couldn't check whether anything went to {{community}}, so nothing was removed. Try again."
   },
   "Directory": {
     "ViewCard": "View card",
