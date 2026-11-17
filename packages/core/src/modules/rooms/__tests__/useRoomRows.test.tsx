@@ -12,6 +12,7 @@ import { act, renderHook } from '@testing-library/react-native'
 import { AppState } from 'react-native'
 
 import { newEventId } from '../../chat/eventId'
+import { RUN_STARTED_AT } from '../../../utils/runStart'
 import { toInertText } from '../inertText'
 import { chatMessageBody } from '../roomPosts'
 import type { Identity, Note, NoteList, NoteSummary, RoomsService, RoomSummary } from '../types'
@@ -796,7 +797,9 @@ describe('a slow agent (X5JN-PEWP: the posts came 30 s after the listing)', () =
     await flush()
     // Why the room did not read, by kind: a row "reading" for a whole report said nothing of why (34VR-Y58H, 11-03).
     expect(lines).toEqual([
-      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 1, 1 reading, \d+ ms into this read$/),
+      expect.stringMatching(
+        /^\[Rooms:rows\] first rows shown: 1, 1 reading, \d+ ms after launch \(\d+ ms into this read\)$/
+      ),
       expect.stringMatching(/^\[Rooms:rows\] .+ of .+ not read: failed$/),
       expect.stringMatching(/^\[Rooms:rows\] 1 rooms listed, 1 not read yet, in \d+ ms$/),
     ])
@@ -824,13 +827,31 @@ describe("the first rows of a run, in the app's log", () => {
     await flush()
 
     expect(firstLines(lines)).toEqual([
-      expect.stringMatching(/^\[Rooms:rows\] first rows shown: 2, 2 reading, \d+ ms into this read$/),
+      expect.stringMatching(
+        /^\[Rooms:rows\] first rows shown: 2, 2 reading, \d+ ms after launch \(\d+ ms into this read\)$/
+      ),
     ])
     expect(lines.indexOf(firstLines(lines)[0])).toBe(0)
 
     refreshRoomRows()
     await flush()
     expect(firstLines(lines)).toHaveLength(1)
+  })
+
+  test('count from launch, so the wait before the read is in the number (ac, 11-17)', async () => {
+    // Seven seconds after launch before the rooms are asked, as a cold start's sign-ins take.
+    const now = jest.spyOn(Date, 'now').mockReturnValue(RUN_STARTED_AT + 7000)
+    try {
+      const s = serviceWith([room('planning')], { planning: [] })
+      const lines: string[] = []
+      renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
+      await flush()
+      expect(firstLines(lines)).toEqual([
+        '[Rooms:rows] first rows shown: 1, 1 reading, 7000 ms after launch (0 ms into this read)',
+      ])
+    } finally {
+      now.mockRestore()
+    }
   })
 
   test('control: a listing with no rooms says nothing, and the first one with rooms does', async () => {
