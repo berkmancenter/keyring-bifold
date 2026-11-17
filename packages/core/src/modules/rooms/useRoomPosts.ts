@@ -192,10 +192,10 @@ export function useRoomPosts(
   // was in no report (11-17). Once per opening, by the room's short ref and a count; never a post's words. Only posts
   // drawn from a listing read since it opened are its own: the listing held then is another room's, when the room
   // changes under the same screen, and its posts are drawn again for a moment.
-  const opened = useRef<{ roomId: string; at: number; said: boolean; listing?: Listing }>()
+  const opened = useRef<{ roomId: string; at: number; said: boolean; listing?: Listing }>(undefined)
   if (opened.current?.roomId !== roomId) opened.current = { roomId, at: Date.now(), said: false, listing }
   /** The posts last drawn, and the listing they were drawn from. */
-  const drawnFrom = useRef<{ posts: RoomPost[]; listing: Listing }>()
+  const drawnFrom = useRef<{ posts: RoomPost[]; listing: Listing }>(undefined)
   const [failed, setFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
