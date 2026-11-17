@@ -328,7 +328,10 @@ export async function peerMediatorRoute(
     reason = 'tspOnly'
   }
   if (!theirs || theirs === ownMediatorDid) return undefined
-  return { mediator: await resolveVtiMediator(agent, theirs), reason }
+  // Bounded too: a route hint, not a sign-in. `resolveVtiMediator` retries patiently (4 x 15 s), and a peer that could
+  // not be routed is looked at again on its next message, so unbounded this held each send for up to a minute (ac).
+  const mediator = await withinTime(resolveVtiMediator(agent, theirs), ROUTE_LOOKUP_TIMEOUT_MS, 'a peer mediator')
+  return { mediator, reason }
 }
 
 export async function resolveVtiMediator(agent: Agent, mediatorDid: string): Promise<VtiMediatorEndpoints> {

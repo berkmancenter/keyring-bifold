@@ -236,6 +236,26 @@ describe('VtiMediatorSession.forward — a did:webs community whose DIDCommMessa
     expectSingleForward(frames[0], peer)
   })
 
+  test("its mediator's document does not answer: forwarded as before after ROUTE_LOOKUP_TIMEOUT_MS, never held longer", async () => {
+    jest.useFakeTimers()
+    try {
+      const { agent } = makeAgent({ ...DOCS, [SEDI]: SEDI_WITH_DIDCOMM })
+      const dids = (agent as unknown as { dids: { resolveDidDocument: (did: string) => Promise<unknown> } }).dids
+      const peerOnly = dids.resolveDidDocument
+      // The community's document answers; storm's mediator's never does.
+      dids.resolveDidDocument = (did: string) => (did === STORM ? new Promise<never>(() => undefined) : peerOnly(did))
+      const { session, frames } = openSession(agent)
+      let done = false
+      const sent = session.forward(SEDI, INNER_JWE).then(() => (done = true))
+      await jest.advanceTimersByTimeAsync(ROUTE_LOOKUP_TIMEOUT_MS + 1)
+      expect(done).toBe(true)
+      await sent
+      expectSingleForward(frames[0], SEDI)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
   test('a did:webvh shaped exactly like SEDI now (DIDCommMessaging → storm): one forward, as first-vtc', async () => {
     const peer = 'did:webvh:QmSame:webvh.storm.ws:same-shape'
     const { agent } = makeAgent({ ...DOCS, [peer]: { ...SEDI_WITH_DIDCOMM, id: peer } })
