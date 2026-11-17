@@ -19,7 +19,7 @@
  */
 export const SESSIONS_PER_IDENTITY: { on: boolean; remoteOff: boolean } = {
   on: true,
-  remoteOff: false,
+  remoteOff: true,
 }
 
 /** Whether an ask may go out on its identity's own session now. */
