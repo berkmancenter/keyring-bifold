@@ -111,6 +111,17 @@ export const VTA_SEND_ACT_TYPES: ReadonlySet<string> = new Set([
 
 const RECORDS_PUT = /^https:\/\/trusttasks\.org\/spec\/rooms\/records\/put\/[\d.]+$/
 
+/**
+ * A key copy a sign-in is waiting for (vtaAgent.fetchKeyCopy, "on use") goes ahead of what is queued, as a member's own
+ * write does: never ahead of a task on the wire, still alone, never resent, never in the read lane, and in order among
+ * whatever else goes first. The session-open sweep's exports keep their place, unless a sign-in joins one still queued:
+ * then it goes first too (VtaClient `Priority.raise`). A cold start's first sign-in waited behind the start's reads and
+ * the sweep's exports for 3-5 of its 12.7 s on a tester's phone (11-16).
+ *
+ * OFF: it ships off (11-17); `on: true`, shipped by OTA alone, turns it on, and false again rolls it back.
+ */
+export const VTA_KEY_FOR_SIGN_IN_FIRST = { on: false }
+
 /** Whether a task is part of a member's own write, which goes ahead of what is queued ({@link VTA_SENDS_FIRST}). */
 export function goesFirst(type: string, payload: Record<string, unknown> | undefined): boolean {
   if (!VTA_SENDS_FIRST) return false
