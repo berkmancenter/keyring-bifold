@@ -32,7 +32,7 @@ describe('useMyBadges', () => {
     // The reads stop: an answer equal to what is shown sets nothing, so nothing renders again to read again.
     const settled = mine.mock.calls.length
     await new Promise((r) => setTimeout(r, 50))
-    expect(mine.mock.calls.length).toBe(settled)
+    expect(mine.mock.calls).toHaveLength(settled)
     expect(settled).toBeLessThanOrEqual(3)
   })
 

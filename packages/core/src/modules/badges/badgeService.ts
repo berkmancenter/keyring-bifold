@@ -5,7 +5,9 @@
  * A community that does not serve badges answers `unsupportedType` (or `unsupportedVersion`): that is `'notServed'`,
  * and the screens show nothing. One that serves them with badges switched off answers `mine/list` empty (VTI-BDG-004).
  * A wall the community does not show this member is `permissionDenied`, or `notFound` for an entry it does not show:
- * that is `'hidden'`, the same answer either way, so nothing tells a member which.
+ * that is `'hidden'`, the same answer either way, so nothing tells a member which. A badge it may not see and one that
+ * is not there are both `'notServed'` from `show`, and a picture refused for any reason is no picture: no read here
+ * tells "there is none" from "you may not see it".
  *
  * Nothing is asked while badges are off (`badgesSwitch`): every call answers as a community that serves none.
  *
@@ -89,7 +91,8 @@ export function createBadgeService(backend: BadgesBackend): BadgeService {
       try {
         return parseShow(await ask('show', communityDid, BADGE_TASK.show, { badgeId }), communityDid) ?? 'notServed'
       } catch (e) {
-        if (notServed(e) || (e instanceof BadgeRefused && e.code === 'notFound')) return 'notServed'
+        // As a wall: a badge that is not there and one this member may not see answer the same.
+        if (notServed(e) || (e instanceof BadgeRefused && WALL_HIDDEN.has(e.code))) return 'notServed'
         throw e
       }
     },
