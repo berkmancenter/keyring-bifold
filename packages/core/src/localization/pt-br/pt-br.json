@@ -3628,12 +3628,7 @@
     "NotAccepted": "{{name}} não aceitou",
     "NotAcceptedBody": "Nada mudou no telefone de {{name}}",
     "Unverifiable": "O telefone de {{name}} não conseguiu verificar seu cartão de tutor",
-    "Group": {
-      "notThisWard": "Ele indica outro tutelado. {{name}} não foi consultado.",
-      "notInForce": "O estado não o lista como vigente. {{name}} não foi consultado.",
-      "notTrusted": "O Keyring de {{name}} não conhece esse estado. {{name}} não foi consultado.",
-      "broken": "Algo nele não pôde ser lido. {{name}} não foi consultado."
-    },
+    "UnverifiableBody": "{{name}} não foi consultado. Verifique se seu cartão está vigente e indica {{name}}.",
     "Accepted": "{{name}} aceitou sua oferta",
     "CardSent": "Seu cartão de tutor: enviado",
     "OfferAgain": "Oferecer de novo",

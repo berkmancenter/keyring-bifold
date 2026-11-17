@@ -6,7 +6,7 @@
  * - The guardian proposes the actions. "Changes who approves" is always among them, as in every ask (ApproverAskRow's
  *   LOCKED): a person can untick the others, never add one.
  * - The person's phone checks the card against its own ward BEFORE anything is shown. A card that fails a check that
- *   waiting will not fix is never shown, and the guardian is told "couldn't check" and in which group. A state that
+ *   waiting will not fix is never shown, and the guardian is told only "couldn't check", never why. A state that
  *   could not be reached is checked again later, unseen.
  * - A yes goes back as an ordinary role offer from the person's phone (their agent, the actions they kept). The
  *   guardian's phone answers yes to it without asking again, within what it offered, as the DID it named when the
@@ -95,8 +95,6 @@ export interface GuardianOfferSent {
   approverDid: string
   sentAt: string
   state: 'open' | 'accepted' | 'unverifiable'
-  /** With `unverifiable`: why, in the group the person's phone said. */
-  group?: UnverifiableGroup
   answeredAt?: string
 }
 
@@ -232,7 +230,7 @@ export async function guardianOfferAnswered(agent: Agent, connectionId: string):
   guardianOfferEvents.emit('sent', { connectionId })
 }
 
-/** The person's phone could not check the card: the offer is kept as "couldn't check", with the group it said. */
+/** The person's phone could not check the card: the offer is kept as "couldn't check". Why is never said. */
 export async function handleGuardianOfferResponse(
   agent: Agent,
   service: TrustTasksService,
@@ -266,7 +264,7 @@ export async function handleGuardianOfferResponse(
   // Refused on an empty challenge too: sameChallenge holds for two empty strings.
   if (!sent.challenge || !sameChallenge(sent.challenge, String(answer?.challenge ?? '')))
     return dropped(agent, what, context.connectionId, 'it does not carry the offer back')
-  record.content = { ...sent, state: 'unverifiable', group: answer.group, answeredAt: new Date().toISOString() }
+  record.content = { ...sent, state: 'unverifiable', answeredAt: new Date().toISOString() }
   await agent.genericRecords.update(record)
   guardianOfferEvents.emit('sent', { connectionId: context.connectionId })
 }
@@ -330,7 +328,7 @@ const NOT_THIS_WARD = new Set(['wardMismatch', 'noWard'])
 const NOT_IN_FORCE = new Set(['revoked', 'expired', 'notIssued', 'statusNotCurrent'])
 const NOT_TRUSTED = new Set(['untrustedRoot', 'stateHostRefused'])
 
-/** The group a refusal is told to the guardian in; never the check's own detail. */
+/** The group a refusal is kept in on this phone; never sent (guardianOfferSpec.ts). */
 export function unverifiableGroupOf(reason: string): UnverifiableGroup {
   if (NOT_THIS_WARD.has(reason)) return 'notThisWard'
   if (NOT_IN_FORCE.has(reason)) return 'notInForce'
@@ -395,7 +393,8 @@ export async function handleGuardianOffer(
 
 /**
  * The card checked now. Valid: shown. Not reached: kept, unseen, for {@link recheckGuardianOffers}. Refused for good:
- * never shown, and the guardian told in which group (if telling fails, it stays refused here all the same).
+ * never shown, and the guardian told only that it couldn't be checked (if telling fails, it stays refused here all
+ * the same). The group stays in this phone's record and log.
  */
 async function checkOffer(agent: Agent, prompt: GuardianOfferPrompt): Promise<GuardianOfferPrompt> {
   const payload = prompt.request.payload as GuardianOfferPayload
@@ -451,7 +450,6 @@ async function tellUnverifiable(agent: Agent, prompt: GuardianOfferPrompt): Prom
   const answer: GuardianOfferResponsePayload = {
     decision: 'unverifiable',
     challenge: prompt.challenge,
-    group: prompt.group as UnverifiableGroup,
     respondedAt: new Date().toISOString(),
   }
   const response = respondWith(prompt.request as never, utils.uuid(), answer as never, () =>

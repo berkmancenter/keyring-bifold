@@ -3712,12 +3712,7 @@
     "NotAccepted": "{{name}} n'a pas accepté",
     "NotAcceptedBody": "Rien n'a changé sur le téléphone de {{name}}",
     "Unverifiable": "Le téléphone de {{name}} n'a pas pu vérifier votre carte de tuteur",
-    "Group": {
-      "notThisWard": "Elle désigne une autre personne protégée. {{name}} n'a pas été sollicité.",
-      "notInForce": "L'État ne la considère pas comme en vigueur. {{name}} n'a pas été sollicité.",
-      "notTrusted": "Son Keyring ne connaît pas cet État. {{name}} n'a pas été sollicité.",
-      "broken": "Une partie n'a pas pu être lue. {{name}} n'a pas été sollicité."
-    },
+    "UnverifiableBody": "{{name}} n'a pas été sollicité. Vérifiez que votre carte est en vigueur et désigne {{name}}.",
     "Accepted": "{{name}} a accepté votre proposition",
     "CardSent": "Votre carte de tuteur : envoyée",
     "OfferAgain": "Proposer à nouveau",

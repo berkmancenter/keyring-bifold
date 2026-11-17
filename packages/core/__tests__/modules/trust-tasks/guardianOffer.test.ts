@@ -455,7 +455,7 @@ describe("the guardian's phone says yes only within what it offered, while the o
   })
 })
 
-describe('a card that does not check is never shown; the guardian is told only in which group', () => {
+describe("a card that does not check is never shown; the guardian is told only that it couldn't be checked", () => {
   test.each([
     ['another ward', 'G-ok' as const, OTHER_WARD, 'notThisWard'],
     ['no ward set here', 'G-ok' as const, null, 'notThisWard'],
@@ -469,19 +469,32 @@ describe('a card that does not check is never shown; the guardian is told only i
     expect(guardianOfferPrompts.get(SAM.connectionId)).toBeUndefined()
     expect(await promptOn(sam)).toMatchObject({ state: 'unverifiable', group })
     expect(sentTypes(offerAt + 1)).toEqual([GUARDIAN_OFFER_RESPONSE_TYPE_URI])
-    // Only the group goes, never the check's detail.
-    expect(Object.keys(mockSent[offerAt + 1].document.payload as object).sort()).toEqual([
-      'challenge',
-      'decision',
-      'group',
-      'respondedAt',
-    ])
-    await deliver(jordan, mockSent[offerAt + 1].document)
+    // Nothing about why goes (Alberto, 11-17, option b): the same three keys whatever failed, and no group anywhere.
+    const told = mockSent[offerAt + 1].document
+    expect(Object.keys(told.payload as object).sort()).toEqual(['challenge', 'decision', 'respondedAt'])
+    expect(JSON.stringify(told)).not.toContain(group)
+    await deliver(jordan, told)
     const [sent] = await guardianOffersSent(jordan.agent)
-    expect([guardianOfferStatus(sent), sent.group]).toEqual(['unverifiable', group])
+    expect(guardianOfferStatus(sent)).toBe('unverifiable')
+    expect(sent).not.toHaveProperty('group')
   })
 
-  test('the groups: never the detail, and anything unknown is "broken"', () => {
+  test('an answer that does carry a group is refused, and changes nothing (control: the rows above, without one)', async () => {
+    const { jordan, sam, offerAt } = await offered(['joinCommunity'], 'G-ok', OTHER_WARD)
+    const told = mockSent[offerAt + 1].document
+    const { proof: _p, ...unsigned } = told
+    const withGroup = await signDocumentProof(
+      sam.agent,
+      { ...unsigned, payload: { ...(told.payload as object), group: 'notThisWard' } },
+      SAM.myRel
+    )
+    await deliver(jordan, withGroup as Record<string, unknown>)
+    const [sent] = await guardianOffersSent(jordan.agent)
+    expect(guardianOfferStatus(sent)).toBe('waiting')
+    expect(sent).not.toHaveProperty('group')
+  })
+
+  test('the groups, kept on the person\'s phone only: anything unknown is "broken"', () => {
     expect(unverifiableGroupOf('wardMismatch')).toBe('notThisWard')
     expect(unverifiableGroupOf('expired')).toBe('notInForce')
     expect(unverifiableGroupOf('untrustedRoot')).toBe('notTrusted')

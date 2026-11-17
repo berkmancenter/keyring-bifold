@@ -10,7 +10,8 @@
  * approving, and to sending the card. "Changes who approves" is always in the offer, as in every ask.
  *
  * What the row says, by guardianOfferStatus: waiting; accepted ("Your Guardian card: sent"); not accepted (a no and a
- * lapse read the same, on purpose); couldn't check, with the group the contact's phone said, never the detail.
+ * lapse read the same, on purpose); couldn't check, the same words whatever failed: the contact's phone never says why
+ * (guardianOfferSpec.ts).
  *
  * @module trust-tasks/screens/GuardianOfferRow
  */
@@ -253,10 +254,10 @@ const GuardianOfferRow: React.FC<Props> = ({ connectionId, name }) => {
       </View>
     )
   } else if (sent && (status === 'notAccepted' || status === 'unverifiable')) {
-    // G6: a no and a lapse read the same; a card not checked says only its group.
+    // G6: a no and a lapse read the same; a card not checked reads the same whatever failed.
     const [title, detail] =
       status === 'unverifiable'
-        ? ['GuardianOffer.Unverifiable', `GuardianOffer.Group.${sent.group ?? 'broken'}`]
+        ? ['GuardianOffer.Unverifiable', 'GuardianOffer.UnverifiableBody']
         : ['GuardianOffer.NotAccepted', 'GuardianOffer.NotAcceptedBody']
     body = (
       <View style={styles.card}>

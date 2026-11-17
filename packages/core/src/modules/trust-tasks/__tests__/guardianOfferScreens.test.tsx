@@ -198,16 +198,10 @@ describe("the guardian's row on a contact's page", () => {
       "Nothing changed on Sam's phone",
     ],
     [
-      "couldn't check: another ward",
-      sentOffer({ state: 'unverifiable', group: 'notThisWard' }),
+      "couldn't check (the same words whatever failed: the reason is never sent)",
+      sentOffer({ state: 'unverifiable' }),
       "Sam's phone couldn't check your Guardian card",
-      "It names a different ward. Sam wasn't asked.",
-    ],
-    [
-      "couldn't check: not in force",
-      sentOffer({ state: 'unverifiable', group: 'notInForce' }),
-      "Sam's phone couldn't check your Guardian card",
-      "The state doesn't list it as in force. Sam wasn't asked.",
+      "Sam wasn't asked. Check that your card is current and names Sam.",
     ],
   ])('%s: the words the guardian reads', async (_what, offer, title, detail) => {
     realEnglish()

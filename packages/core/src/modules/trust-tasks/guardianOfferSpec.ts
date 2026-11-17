@@ -7,8 +7,10 @@
  * guardian's phone answers yes to without asking again, within what it offered (guardianOffer.ts). So the rule is
  * still written by the person's own phone, as today, and the guardian writes nothing to the person's agent.
  *
- * The only answer this type carries is "couldn't check" (the card failed a check that will not come right by waiting):
- * a no is never sent, so the guardian's phone cannot tell a no from a lapse.
+ * The only answer this type carries is "couldn't check" (the card failed a check that will not come right by waiting),
+ * and never why: which check failed would tell the sender whether this phone still names them as guardian, so an offer
+ * could be sent just to find out (Alberto, 2026-11-17, option b). A no is never sent, so the guardian's phone cannot
+ * tell a no from a lapse.
  *
  * Minted under the private authority the other approver types use (approverRoleSpec.ts). Both legs are signed under the
  * sender's relationship DID and verified under the one the relationship established.
@@ -35,7 +37,7 @@ export interface GuardianOfferPayload extends GuardianOfferCard {
 }
 
 /**
- * Why a card could not be checked, in groups the guardian can act on, never the check's own detail:
+ * Why a card could not be checked, kept on the person's phone only (its record and log), never sent:
  * - `notThisWard`: the card names another ward than the one this phone checks against (or none is set here);
  * - `notInForce`: revoked, expired, not issued, or its status is not current;
  * - `notTrusted`: a state this build does not trust, or a host it refused;
@@ -44,11 +46,10 @@ export interface GuardianOfferPayload extends GuardianOfferCard {
 export const UNVERIFIABLE_GROUPS = ['notThisWard', 'notInForce', 'notTrusted', 'broken'] as const
 export type UnverifiableGroup = (typeof UNVERIFIABLE_GROUPS)[number]
 
-/** The one answer: the card could not be checked, and in which group. Carries the offer's challenge back. */
+/** The one answer: the card could not be checked, and nothing about why. Carries the offer's challenge back. */
 export interface GuardianOfferResponsePayload {
   decision: 'unverifiable'
   challenge: string
-  group: UnverifiableGroup
   respondedAt: string
 }
 
@@ -98,14 +99,13 @@ export const GUARDIAN_OFFER_RESPONSE_SPEC = {
   payloadSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     title: 'Approver Guardian Offer — response payload',
-    description: "The person's phone could not check the guardian's card, and says in which group.",
+    description: "The person's phone could not check the guardian's card. It says nothing about why.",
     type: 'object',
     additionalProperties: false,
-    required: ['decision', 'challenge', 'group', 'respondedAt'],
+    required: ['decision', 'challenge', 'respondedAt'],
     properties: {
       decision: { type: 'string', enum: ['unverifiable'] },
       challenge: { type: 'string', pattern: CHALLENGE_PATTERN },
-      group: { type: 'string', enum: [...UNVERIFIABLE_GROUPS] },
       respondedAt: { type: 'string', format: 'date-time' },
     },
   },
