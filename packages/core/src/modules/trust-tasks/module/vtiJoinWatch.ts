@@ -22,6 +22,7 @@ import { DeviceEventEmitter } from 'react-native'
 
 import { COMMUNITY_CHANGED_EVENT, VTI_PERSONA_DELIVERIES_EVENT } from './communityChanged'
 import { didPrefix } from './didPrefix'
+import { isJoinWatchOn } from './joinWatchSwitch'
 import { GenericRecordsCommunityStore, type VtiCommunityStore } from './VtiCommunityStore'
 import { GenericRecordsIdentityStore, type VtiIdentityStore, type VtiPersona } from './VtiIdentityStore'
 import { vtiAgent, VtiNoOwnSession, type JoinRequestStatus } from './vtiAgent'
@@ -30,9 +31,16 @@ import { askForCardIfOwed, readJoinState, type StatusPoll } from './vtiJoin'
 /** How often an open request at a watched community is asked about. */
 export const JOIN_WATCH_EVERY_MS = 5_000
 
-/** The communities whose requests are watched: `did:webs` only. The kill path is this returning false. */
+/**
+ * The longest a community that failed or did not answer is left alone. After each look that fails, the wait before
+ * the next doubles (5 s, 10 s, 20 s, 40 s, then this), and a look that is answered puts it back: many phones watching
+ * one community do not keep asking it at full rate while it is down or slow.
+ */
+export const JOIN_WATCH_REST_MAX_MS = 60_000
+
+/** The communities whose requests are watched: `did:webs` only, and none while the switch is off (joinWatchSwitch). */
 export const watchesJoin = (communityDid: string | undefined): boolean =>
-  typeof communityDid === 'string' && communityDid.startsWith('did:webs:')
+  isJoinWatchOn() && typeof communityDid === 'string' && communityDid.startsWith('did:webs:')
 
 /** One status ask as `persona`, which never signs in; throws `VtiNoOwnSession` when no session of its own is open. */
 export type StatusAs = (
@@ -69,6 +77,8 @@ export function startJoinWatch(agent: Agent, options: JoinWatchOptions = {}): ()
   /** Requests seen approved with no card at an earlier look, and those the card was asked for (once each). */
   const seenApproved = new Set<string>()
   const askedForCard = new Set<string>()
+  /** Per community, after a look that failed: how many in a row, and when it may be looked at again. */
+  const resting = new Map<string, { fails: number; until: number }>()
 
   const arm = async (): Promise<void> => {
     const personas = await identities.listPersonas().catch(() => [] as VtiPersona[])
@@ -80,8 +90,16 @@ export function startJoinWatch(agent: Agent, options: JoinWatchOptions = {}): ()
     if (here.kind !== 'sent' && here.kind !== 'pending') return
     const persona = await identities.getPersona(communityDid)
     if (!persona) return
+    // readJoinState keeps what the phone knew when its poll fails, and says nothing: the failure is kept here, so a
+    // community that did not answer is left alone for longer (`resting`).
+    let failed: unknown
     const status: StatusPoll = (did, requestId, ask = {}) =>
-      statusAs(persona, did, { requestId, ...(ask.resendCredentials ? { resendCredentials: true } : {}) })
+      statusAs(persona, did, { requestId, ...(ask.resendCredentials ? { resendCredentials: true } : {}) }).catch(
+        (e) => {
+          failed = e
+          throw e
+        }
+      )
     const key = `${communityDid} ${here.submission.sentAt}`
     if (here.kind === 'pending' && here.submission.status === 'approved') {
       // Approved, no card held. The community's own delivery gets one look's time first; then asked for once.
@@ -103,18 +121,27 @@ export function startJoinWatch(agent: Agent, options: JoinWatchOptions = {}): ()
     if (now !== before) said(communityDid, `the request is now ${now ?? 'open'}`)
     // Approved at this look: the card gets until the next one to come by itself.
     if (after.kind === 'pending' && after.submission.status === 'approved') seenApproved.add(key)
+    if (failed) throw failed
   }
 
   const tick = async (): Promise<void> => {
-    if (stopped || busy || watched.length === 0) return
+    if (stopped || busy || watched.length === 0 || !isJoinWatchOn()) return
     busy = true
     try {
       for (const communityDid of watched) {
         if (stopped) return
-        await look(communityDid).catch((e) => {
-          // No session of its own yet is the ordinary case right after a launch: nothing to say.
-          if (!(e instanceof VtiNoOwnSession)) said(communityDid, `not looked at: ${(e as Error)?.message ?? e}`)
-        })
+        if ((resting.get(communityDid)?.until ?? 0) > Date.now()) continue
+        await look(communityDid).then(
+          () => void resting.delete(communityDid),
+          (e) => {
+            // No session of its own yet is the ordinary case right after a launch: nothing was asked, nothing to say.
+            if (e instanceof VtiNoOwnSession) return
+            const fails = (resting.get(communityDid)?.fails ?? 0) + 1
+            const rest = Math.min(JOIN_WATCH_EVERY_MS * 2 ** fails, JOIN_WATCH_REST_MAX_MS)
+            resting.set(communityDid, { fails, until: Date.now() + rest - JOIN_WATCH_EVERY_MS / 2 })
+            said(communityDid, `not looked at: ${(e as Error)?.message ?? e}; next look in ${rest / 1000} s`)
+          }
+        )
       }
     } finally {
       busy = false

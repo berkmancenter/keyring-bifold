@@ -4,6 +4,7 @@ import { COMMUNITY_CHANGED_EVENT } from '../module/communityChanged'
 import type { JoinSubmission, VtiCommunityStore, VtiMembership } from '../module/VtiCommunityStore'
 import type { VtiIdentityStore, VtiPersona } from '../module/VtiIdentityStore'
 import { vtiAgent, VtiNoOwnSession, type JoinRequestStatus } from '../module/vtiAgent'
+import { JOIN_WATCH } from '../module/joinWatchSwitch'
 import { JOIN_WATCH_EVERY_MS, startJoinWatch, watchesJoin, type StatusAs } from '../module/vtiJoinWatch'
 
 // An attendee joins the SEDI VTC (a did:webs) and leaves the join page: nothing asked where the request stood until
@@ -76,6 +77,8 @@ afterEach(() => {
   stop = undefined
   jest.useRealTimers()
   jest.clearAllMocks()
+  JOIN_WATCH.on = true
+  JOIN_WATCH.remoteOff = false
 })
 
 describe('which communities are watched', () => {
@@ -207,6 +210,62 @@ describe('approved, and the card did not come', () => {
     stop = startJoinWatch(agent, { ...w, statusAs })
     await looks(6)
     expect(asked).toEqual([])
+  })
+})
+
+describe('the switch', () => {
+  it.each([
+    ['remoteOff', () => (JOIN_WATCH.remoteOff = true)],
+    ['on false', () => (JOIN_WATCH.on = false)],
+  ])('%s: nothing is asked, at a did:webs community either', async (_name, flip) => {
+    flip()
+    const w = world([request(WEBS)])
+    const { statusAs, asked } = asks({ requestId: 'r-1', status: 'approved', credentialsDelivered: false })
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(6)
+    expect(asked).toEqual([])
+    expect(watchesJoin(WEBS)).toBe(false)
+  })
+
+  it('remoteOff set while it runs: the looks stop', async () => {
+    const w = world([request(WEBS)])
+    const { statusAs, asked } = asks({ requestId: 'r-1', status: 'pending' })
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(2)
+    expect(asked).toHaveLength(2)
+    JOIN_WATCH.remoteOff = true
+    await looks(4)
+    expect(asked).toHaveLength(2)
+  })
+})
+
+describe('a community that fails or is slow', () => {
+  it('is asked less and less often (10 s, 20 s, 40 s, then every 60 s), and at full rate again once it answers', async () => {
+    const w = world([request(WEBS)])
+    const down = new Error('no answer')
+    const answers: (JoinRequestStatus | Error)[] = [down]
+    const at: number[] = []
+    const start = Date.now()
+    const statusAs: StatusAs = jest.fn(async () => {
+      at.push(Math.round((Date.now() - start) / 1000))
+      const a = answers[0]
+      if (a instanceof Error) throw a
+      return a
+    })
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(48) // 240 s
+    expect(at).toEqual([5, 15, 35, 75, 135, 195])
+    answers[0] = { requestId: 'r-1', status: 'pending' }
+    await looks(5) // answered at 255 s, then every 5 s
+    expect(at.slice(6)).toEqual([255, 260, 265])
+  })
+
+  it('CONTROL: one that answers is asked every 5 s', async () => {
+    const w = world([request(WEBS)])
+    const { statusAs, asked } = asks({ requestId: 'r-1', status: 'pending' })
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(6)
+    expect(asked).toHaveLength(6)
   })
 })
 
