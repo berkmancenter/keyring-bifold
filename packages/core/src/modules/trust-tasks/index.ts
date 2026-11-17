@@ -67,13 +67,18 @@ export {
   holdK0RevokedTestCard,
   becomeK0TestWard,
   setUpSediDemo,
+  setUpSediDemoAsGuardian,
+  setUpSediDemoAsWard,
+  setUpSediDemoAsPerson,
   turnOffSediDemo,
   sediDemoHiddenByKill,
   type TestStateActionResult,
   type SediDemoSetupResult,
+  type SediDemoSideResult,
   type SediDemoHiddenFeature,
 } from './developerTestState'
 export { SEDI_KERI_REMOTE_OFF } from './module/sediKeriRemoteOff'
+export { setSediDemoSide, sediDemoSide, type SediDemoSide } from './module/sediDemoSide'
 export { setConfirmItsYouEnabled, isConfirmItsYouEnabled, CONFIRM_ITS_YOU_REMOTE_OFF } from './module/confirmItsYouFlag'
 export { setDemoStateHost, demoStateHost, demoStateHostProblem } from '../sedi/webs/demoStateHost'
 
@@ -135,6 +140,7 @@ export type { VtaWhoAmI, VtaContext, VtaMintedDid, VtaSwapTestHook, VtaAclEntry 
 // effect as much as its symbol.
 export { registerHiddenVettingModules } from './hiddenVettingModules'
 export { registerHiddenVetting, hiddenVettingSeam } from './screens/hiddenVettingSeam'
+export { EnforcementCheckCard, EnforcementCheckIds } from './screens/approver/EnforcementCheckCard'
 export type {
   HiddenVettingSeam,
   HiddenVettingCheck,

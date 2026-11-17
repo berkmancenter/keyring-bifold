@@ -11,6 +11,24 @@
  * agent, so without one there is nothing to ask about. A yes is not written here: it waits on My agent, under Who
  * approves, where writing it asks the person to confirm.
  *
+ * "Already approves" (Alberto's 278.16 run, item 3: Phone 1 offered to ask Jordan again though Jordan already
+ * approved). Besides this connection's record, the row reads the agent's own rules (the same read as Who approves,
+ * `vtaAgent.trustedApprovers`), which are what decides who approves. When they list the DID the contact said yes as,
+ * the row says "{{name}} approves for you." even if the record never got marked written (the yes was added but the
+ * record not closed, "Not now" was tapped after it was already on the agent, or it was written another way). And an
+ * offer that would ask for nothing new (they are listed and the agent already holds every chosen action) is not
+ * sent: the row says "{{name}} already approves for you" instead. Each way the agent's answer can be missing, and
+ * what the row does then (always what it did before this read existed, never a false "approves"):
+ * - the record names no DID for the contact (never answered yes): the agent is not read at all, since nothing could
+ *   match; the row is today's ("Ask …");
+ * - the read fails, is refused, or the phone is offline: no answer, so the row and Send are exactly today's;
+ * - the read is slow: today's row shows until it answers (no loading state, nothing hidden), and a Send meanwhile goes
+ *   as today;
+ * - the agent lists none of the contact's DIDs: today's row. A record marked written still says "approves for you":
+ *   the agent's read only ever adds that, never takes it away (removing an approver is Who approves' job);
+ * - with no record at all, this phone cannot tell which listed approver is this contact (the agent lists the DID each
+ *   said yes as, not a relationship DID), so the row is today's.
+ *
  * @module trust-tasks/screens/ApproverAskRow
  */
 import { useAgent } from '@bifold/react-hooks'
@@ -23,7 +41,11 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 import {
+  agentAlreadyCovers,
+  agentListsApprover,
+  approverDidsOf,
   approverRoleEvents,
+  isYesNotAdded,
   offerApproverRole,
   roleOfferAskOn,
   type RoleAction,
@@ -34,6 +56,7 @@ import {
 import { ROLE_ACTIONS } from '../approverRoleSpec'
 import { releaseWarn } from '../module/releaseLog'
 import { TRUSTED_TASKS } from '../module/trustedApprovers'
+import type { TrustedApproversView } from '../module/trustedApprovers'
 import { isTrustedApproversEnabled } from '../module/trustedApproversFlag'
 import { vtaAgent } from '../module/vtaAgent'
 
@@ -51,6 +74,7 @@ export const ApproverAskRowIds = {
   change: 'ApproverChange',
   inForce: 'ApproverInForce',
   inForceActions: 'ApproverInForceActions',
+  already: 'ApproverAlreadyApproves',
 } as const
 
 /** Always offered, never switched off here. */
@@ -76,13 +100,27 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   const [ask, setAsk] = useState<RoleOfferAsk | undefined>()
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<string | undefined>()
+  /** "Already approves for everything you chose": said instead of sending, never an error. */
+  const [already, setAlready] = useState(false)
+  /** The agent's own rules, as last read; null while unread, not read, or when the read failed (then it withholds). */
+  const [held, setHeld] = useState<TrustedApproversView | null>(null)
   const [picking, setPicking] = useState(false)
   const [chosen, setChosen] = useState<RoleAction[]>([...ROLE_ACTIONS])
   const on = isTrustedApproversEnabled()
 
   const load = useCallback(async () => {
     if (!agent || !connectionId) return
-    setAsk(await roleOfferAskOn(agent, connectionId).catch(() => undefined))
+    const record = await roleOfferAskOn(agent, connectionId).catch(() => undefined)
+    setAsk(record)
+    // The agent is read only when the record names a DID the contact approves as: otherwise nothing could match.
+    if (approverDidsOf(record).length === 0) return setHeld(null)
+    setHeld(
+      await vtaAgent
+        .trustedApprovers(agent)
+        .then((state) => state.view)
+        // Unreadable WITHHOLDS: no "already approves", and Send goes as it always did.
+        .catch(() => null)
+    )
   }, [agent, connectionId])
 
   useEffect(() => {
@@ -102,21 +140,40 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   const send = useCallback(
     async (actions: readonly RoleAction[]) => {
       if (!agent || !connectionId || !vtaDid || busy) return
-      setBusy(true)
       setSaid(undefined)
+      setAlready(false)
+      setBusy(true)
       try {
+        // Nothing new to ask? The last read may be stale (the approver removed on another phone or on the agent
+        // directly fires no event here), so it only prompts a FRESH read, and only a fresh read that still covers
+        // every chosen action stops the send. A fresh read that fails withholds: the offer goes as it always did.
+        // After a step-down the agent still lists them, so "already covered" is exactly the case to ask again: their
+        // yes is what lets their phone answer for this agent again (the removal of them included).
+        if (!ask?.steppedDown && agentAlreadyCovers(held, ask, actions)) {
+          const fresh = await vtaAgent
+            .trustedApprovers(agent)
+            .then((state) => state.view)
+            .catch(() => null)
+          setHeld(fresh)
+          if (agentAlreadyCovers(fresh, ask, actions)) {
+            setPicking(false)
+            setAlready(true)
+            return
+          }
+        }
         const result = await offerApproverRole(agent, connectionId, vtaDid, actions)
-        if (result === 'noRelationship') setSaid(t('Approver.NoRelationship', { name }))
+        if (result === 'noRelationship')
+          setSaid(t('Approver.NoRelationship', { name, interpolation: { escapeValue: false } }))
         else setPicking(false)
         await load()
       } catch (error) {
         releaseWarn(`[VTI] approver ask not sent (${(error as Error)?.name ?? 'error'}: ${(error as Error)?.message})`)
-        setSaid(t('Approver.NotSent', { name }))
+        setSaid(t('Approver.NotSent', { name, interpolation: { escapeValue: false } }))
       } finally {
         setBusy(false)
       }
     },
-    [agent, connectionId, vtaDid, busy, load, name, t]
+    [agent, connectionId, vtaDid, busy, load, name, t, held, ask]
   )
 
   if (!on || !vtaDid || !connectionId) return null
@@ -131,9 +188,13 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
   })
   const words = { name, interpolation: { escapeValue: false } }
   const state = ask?.state ?? 'closed'
+  /** The agent's own rules list them (read just now); never true without a read. */
+  const listed = agentListsApprover(held, ask)
+  /** They approve: the record says written, or the agent lists them. The read only adds this, never removes it. */
+  const approves = !!ask?.written || listed
   const steppedDown = ask?.steppedDown ? (
     <ThemedText style={styles.muted} testID={testIdWithKey(ApproverAskRowIds.steppedDown)}>
-      {t(ask.written ? 'Approver.SteppedDownWritten' : 'Approver.SteppedDown', words)}
+      {t(approves ? 'Approver.SteppedDownWritten' : 'Approver.SteppedDown', words)}
     </ThemedText>
   ) : null
   const actionLines = (actions: readonly RoleAction[], key: string = ApproverAskRowIds.asked) => (
@@ -229,7 +290,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         />
       </View>
     )
-  } else if (state === 'accepted' || ask?.written) {
+  } else if (isYesNotAdded(ask) || approves) {
     // After a yes, what they approve can be changed: a fresh offer with the picker set to today's actions. Nothing is
     // deleted, and the rules already written on the agent stay until the new yes is added on Who approves.
     const change = (
@@ -239,6 +300,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
           buttonType={ButtonType.Tertiary}
           onPress={() => {
             setSaid(undefined)
+            setAlready(false)
             setChosen(ask?.actions?.length ? [...ask.actions] : [...ROLE_ACTIONS])
             setPicking(true)
           }}
@@ -248,8 +310,27 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         <ThemedText style={styles.muted}>{t('Approver.ChangeCaption', words)}</ThemedText>
       </>
     )
+    // After a step-down: one tap asks them again for what is written, so a yes puts their phone back to answering.
+    const askAgainAfterStepDown = (
+      <>
+        <Button
+          title={t('Approver.AskAgainAfterStepDown', words)}
+          buttonType={ButtonType.Tertiary}
+          onPress={() => {
+            setSaid(undefined)
+            setAlready(false)
+            const written = ask && writtenActionsOf(ask).length ? writtenActionsOf(ask) : (ask?.actions ?? [])
+            void send([...new Set([...written, LOCKED])])
+          }}
+          disabled={busy}
+          testID={testIdWithKey(ApproverAskRowIds.again)}
+        />
+        <ThemedText style={styles.muted}>{t('Approver.AskAgainAfterStepDownNote', words)}</ThemedText>
+      </>
+    )
+    // A yes not yet written reads "said yes, add them" unless the agent already lists them: then it is in force.
     body =
-      state === 'accepted' ? (
+      isYesNotAdded(ask) && !listed ? (
         <>
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.SaidYes', words)}</ThemedText>
           {change}
@@ -258,7 +339,7 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         <>
           <ThemedText testID={testIdWithKey(ApproverAskRowIds.status)}>{t('Approver.IsApprover', words)}</ThemedText>
           {steppedDown}
-          {ask?.steppedDown ? null : change}
+          {ask?.steppedDown ? askAgainAfterStepDown : change}
         </>
       )
   } else {
@@ -290,6 +371,11 @@ const ApproverAskRow: React.FC<Props> = ({ connectionId, name }) => {
         {t('Approver.AskTitle')}
       </ThemedText>
       {body}
+      {already ? (
+        <ThemedText style={styles.muted} testID={testIdWithKey(ApproverAskRowIds.already)}>
+          {t('Approver.AlreadyApproves', words)}
+        </ThemedText>
+      ) : null}
       {said ? (
         <ThemedText style={styles.error} testID={testIdWithKey(ApproverAskRowIds.error)}>
           {said}

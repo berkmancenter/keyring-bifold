@@ -15,8 +15,10 @@ import {
   CONFIRM_OPEN_FOR,
   CONFIRM_PROMPT,
   answerConfirmRequest,
+  canConfirmWith,
   cancelConfirmRequest,
   confirmAsksOn,
+  confirmEvents,
   confirmPromptStore,
   confirmStatusOf,
   handleConfirmRequest,
@@ -193,6 +195,8 @@ describe('the round trip', () => {
     expect(jordan.store.records.map((r) => [r.tags.recordType, r.content.open, r.content.answered])).toEqual([
       [CONFIRM_PROMPT, false, 'itsMe'],
     ])
+    // Jordan's kept prompt carries the time inside the signed answer, so the chat card shows what Sam's phone shows.
+    expect(jordan.store.records[0].content.answeredAt).toBe(signedAt)
     expect(sam.store.deleteById).not.toHaveBeenCalled()
     expect(jordan.store.deleteById).not.toHaveBeenCalled()
   })
@@ -210,9 +214,144 @@ describe('the round trip', () => {
     expect(answered.confirmedWith).toBeUndefined()
   })
 
+  test("a 'not me' that lands vibrates the phone ONCE; the same answer again, or a confirm, never does (IN-677)", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const { Vibration } = require('react-native')
+    // The RN jest setup already mocks vibrate, so spyOn hands back that mock with earlier tests' calls: clear them.
+    const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => undefined)
+    buzz.mockClear()
+    try {
+      const sam = phone(SAM)
+      const jordan = phone(JORDAN)
+      await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+      await deliver(jordan)
+      await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'notMe', ok, 'r')
+      const answer = last()
+      expect(buzz).not.toHaveBeenCalled()
+      await deliver(sam, answer)
+      expect(buzz).toHaveBeenCalledTimes(1)
+      // The same answer delivered again is dropped (no longer waiting), so it does not vibrate again.
+      await deliver(sam, answer)
+      expect(buzz).toHaveBeenCalledTimes(1)
+
+      // Control: a confirm lands and does not vibrate.
+      buzz.mockClear()
+      const sam2 = phone(SAM)
+      const jordan2 = phone(JORDAN)
+      await sendConfirmRequest(sam2.agent, SAM.connectionId, NOTE)
+      await deliver(jordan2)
+      await answerConfirmRequest(jordan2.agent, JORDAN.connectionId, 'itsMe', ok, 'r')
+      await deliver(sam2)
+      expect(confirmStatusOf((await confirmAsksOn(sam2.agent, SAM.connectionId))[0])).toBe('itsMe')
+      expect(buzz).not.toHaveBeenCalled()
+    } finally {
+      buzz.mockRestore()
+    }
+  })
+
+  test("a phone that cannot vibrate still keeps the 'not me' answer", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const { Vibration } = require('react-native')
+    const buzz = jest.spyOn(Vibration, 'vibrate').mockImplementation(() => {
+      throw new Error('no vibrator')
+    })
+    try {
+      const sam = phone(SAM)
+      const jordan = phone(JORDAN)
+      await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+      await deliver(jordan)
+      await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'notMe', ok, 'r')
+      await deliver(sam)
+      expect(confirmStatusOf((await confirmAsksOn(sam.agent, SAM.connectionId))[0])).toBe('notMe')
+    } finally {
+      buzz.mockRestore()
+    }
+  })
+
+  test('canConfirmWith: yes with a relationship on the connection; no without one, or on another, or if the store throws', async () => {
+    expect(await canConfirmWith(phone(SAM).agent, SAM.connectionId)).toBe(true)
+    expect(await canConfirmWith(phone(SAM).agent, 'some-other-connection')).toBe(false)
+    expect(await canConfirmWith(phone({ ...SAM, theirRel: null } as never).agent, SAM.connectionId)).toBe(false)
+    const broken = phone(SAM)
+    broken.agent.dependencyManager.resolve = () => ({
+      getAll: async () => {
+        throw new Error('store down')
+      },
+    })
+    expect(await canConfirmWith(broken.agent, SAM.connectionId)).toBe(false)
+  })
+
   test('nothing in the flow reaches for an agent or a VTA', () => {
     const source = fs.readFileSync(path.join(__dirname, '../../../src/modules/trust-tasks/confirmItsYou.ts'), 'utf8')
     expect(source).not.toMatch(/vtaAgent|VtaClient|vtiAgent|trustedApprovers/)
+  })
+})
+
+describe('each event fires once what it announces is kept (the open chat redraws on the event)', () => {
+  // The chat's cards (useConfirmChatItems) read the records again on each event, and on nothing else while the chat is
+  // open. An event fired before its write is read as the old state, and the card stays there until the chat is left
+  // and opened again (Alberto, 278.19: "Confirmed" showed only after leaving the chat). Each row reads the record the
+  // way the chat does, at the moment the event fires.
+  const readAt = (name: 'answered' | 'promptCleared' | 'prompt', read: () => Promise<unknown>) => {
+    const reads: Promise<unknown>[] = []
+    const listener = () => reads.push(read())
+    confirmEvents.on(name, listener)
+    return {
+      reads,
+      off: () => confirmEvents.off(name, listener),
+    }
+  }
+  const keptPrompt = (p: Phone) => async () => {
+    const [record] = await p.agent.genericRecords.findAllByQuery({
+      recordType: CONFIRM_PROMPT,
+      connectionId: p.side.connectionId,
+    })
+    return record ? { open: record.content.open, answered: record.content.answered } : undefined
+  }
+
+  test("Jordan answers: at 'promptCleared' the kept request already reads answered, not open", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+    await deliver(jordan)
+    const at = readAt('promptCleared', keptPrompt(jordan))
+    try {
+      expect(await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'itsMe', ok, 'r')).toBe('sent')
+    } finally {
+      at.off()
+    }
+    expect(at.reads).toHaveLength(1)
+    expect(await at.reads[0]).toEqual({ open: false, answered: 'itsMe' })
+  })
+
+  test("the request arrives: at 'prompt' it is already kept, open (control for the read: it sees a record at all)", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+    const at = readAt('prompt', keptPrompt(jordan))
+    try {
+      await deliver(jordan)
+    } finally {
+      at.off()
+    }
+    expect(await at.reads[0]).toEqual({ open: true, answered: undefined })
+  })
+
+  test("Sam's phone takes the answer: at 'answered' the request already reads confirmed", async () => {
+    const sam = phone(SAM)
+    const jordan = phone(JORDAN)
+    await sendConfirmRequest(sam.agent, SAM.connectionId, NOTE)
+    await deliver(jordan)
+    await answerConfirmRequest(jordan.agent, JORDAN.connectionId, 'itsMe', ok, 'r')
+    const at = readAt('answered', async () =>
+      (await confirmAsksOn(sam.agent, SAM.connectionId)).map((ask) => confirmStatusOf(ask))
+    )
+    try {
+      await deliver(sam)
+    } finally {
+      at.off()
+    }
+    expect(await at.reads[0]).toEqual(['itsMe'])
   })
 })
 
@@ -410,6 +549,32 @@ describe('time', () => {
     expect(confirmStatusOf((await confirmAsksOn(sam.agent, SAM.connectionId))[0])).toBe('expired')
     expect(sam.warned.join('\n')).toMatch(/no longer waiting/)
   })
+
+  test.each([
+    ["unreadable ('not-a-date')", 'not-a-date'],
+    ['missing (null)', null],
+  ])(
+    'an expiresAt that is %s reads as past due: no answer on the asking phone, never shown on the asked one',
+    (_name, expiresAt) => {
+      // Asker: a waiting request with no readable time is "no answer", never "waiting" forever.
+      expect(confirmStatusOf({ state: 'waiting', expiresAt: expiresAt as never })).toBe('expired')
+      // Control: one in time still waits.
+      expect(confirmStatusOf({ state: 'waiting', expiresAt: new Date(Date.now() + 60_000).toISOString() })).toBe(
+        'waiting'
+      )
+      // Asked phone: such a prompt is not listed to answer.
+      confirmPromptStore.set({
+        open: true,
+        connectionId: 'c-nan',
+        asker: 'Sam',
+        note: 'n',
+        expiresAt: expiresAt as never,
+        request: {},
+        receivedAt: new Date().toISOString(),
+      })
+      expect(confirmPromptStore.list().map((p) => p.connectionId)).not.toContain('c-nan')
+    }
+  )
 
   test('by default a request is open for 15 minutes', async () => {
     const sam = phone(SAM)

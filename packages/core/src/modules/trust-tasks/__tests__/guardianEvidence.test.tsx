@@ -6,7 +6,7 @@
  *
  * The K0 Guardian credential expires 2030-11-10; these rows read the real clock.
  */
-import { useFocusEffect } from '@react-navigation/native'
+import { useFocusEffect, useRoute } from '@react-navigation/native'
 import { act, fireEvent, render } from '@testing-library/react-native'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
@@ -20,6 +20,8 @@ import { testIdWithKey } from '../../../utils/testable'
 import * as guardianModule from '../../sedi/guardian'
 import * as stateRoots from '../../sedi/guardian/stateRoots'
 import { K0_REVOKED_OMITTED_CARD } from '../../sedi/guardian/k0RevokedOmittedCard'
+import { wardNamedIn } from '../../sedi/guardian/chain'
+import { WARD_IDENTITY, wardCodeOf } from '../../sedi/identity/phoneIdentity'
 import { STATE_CARD_REMOTE_OFF, isStateCardEnabled, setStateCardEnabled } from '../../sedi/holder/stateCardFlag'
 import * as websModule from '../../sedi/webs'
 import * as lastLive from '../../sedi/webs/lastLive'
@@ -39,6 +41,8 @@ import {
   cardConsentOn,
   cardQuestions,
   guardianCardAfterYes,
+  guardianCardAfterKeep,
+  cardConsentRootOn,
   setCardConsent,
   shareGuardianCard,
   checkGuardianEvidence,
@@ -58,6 +62,9 @@ import {
   type GuardianOnAsk,
   type GuardianStanding,
   type GuardianVerdict,
+  phoneWardsOf,
+  unsetStateWard,
+  wardToCheck,
 } from '../guardianEvidence'
 import { SEDI_KERI_REMOTE_OFF } from '../module/sediKeriRemoteOff'
 import {
@@ -107,6 +114,8 @@ const prov = JSON.parse(text('PROVENANCE.json')) as {
 const SAM_WARD = prov.aids.sam
 const OTHER_WARD = prov.aids['other-ward']
 const JORDAN_AID = prov.aids.jordan
+/** The K0 root, the state a yes to sending the K0 card is kept for (literal; asserted against the list below). */
+const K0_ROOT_AID = 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6'
 
 const tel = (stem: string, states: string[]) => ({
   ripText: text(`tel-${stem}-rip.json`),
@@ -234,6 +243,46 @@ const allOn = () => {
   SEDI_KERI_REMOTE_OFF.off = false
 }
 
+/**
+ * Who approves opened on one person's page (design B, 11-14): the same screen under the person route, where a person's
+ * boxes and buttons now are.
+ */
+const personPage = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) => {
+  ;(useRoute as jest.Mock).mockReturnValue({ params: { kind, id: personId } })
+  return (
+    <BasicAppContext>
+      <VtaTrustedApprovers />
+    </BasicAppContext>
+  )
+}
+
+/** Each kind's page shows its person under this id; the page of someone it cannot find shows none of them. */
+const pageIdOf = (kind: 'approver' | 'yes' | 'setAside' | 'approving', personId: string) =>
+  ({
+    approver: TrustedApproversIds.approver,
+    yes: TrustedApproversIds.accepted,
+    setAside: TrustedApproversIds.setAsideRow,
+    approving: TrustedApproversIds.approvingPerson,
+  })[kind](personId)
+/**
+ * The page really is that person's (7d, #1078): many rows check that something is ABSENT from it, and a page that
+ * found nobody (a wrong kind or id) would pass every one of them for nothing.
+ */
+const expectPage = (
+  tree: { getByTestId: (testId: string) => unknown },
+  kind: 'approver' | 'yes' | 'setAside' | 'approving',
+  personId: string
+) => expect(tree.getByTestId(testIdWithKey(pageIdOf(kind, personId)))).toBeTruthy()
+
+/**
+ * Row E (Alberto, 11-16): an approver's state card shows one line until Details opens what Keyring checked. Rows that
+ * read the checks open it first; with no card, or the state-verified switch off, there is nothing to open.
+ */
+const openDetails = async (tree: { queryByTestId: (testId: string) => unknown }, did: string = JORDAN) => {
+  const toggle = tree.queryByTestId(testIdWithKey(TrustedApproversIds.details(did)))
+  if (toggle) await act(async () => fireEvent.press(toggle as Parameters<typeof fireEvent.press>[0]))
+}
+
 beforeEach(() => {
   jest.restoreAllMocks()
   sent.length = 0
@@ -279,11 +328,16 @@ describe("on the person's phone: a card arrives", () => {
   test('a valid K0 card is kept on the ask in place, valid, named by our list', async () => {
     const sam = await arrives(card('G-ok'))
     expect(sam.consume).toHaveBeenCalledTimes(1)
-    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'State of Utah', demo: true })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({
+      ok: true,
+      state: 'Example State',
+      demo: true,
+      test: true,
+    })
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
     expect(sam.raw.genericRecords.deleteById).not.toHaveBeenCalled()
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
@@ -364,6 +418,134 @@ describe("on the person's phone: a card arrives", () => {
   })
 })
 
+describe("on the person's phone: the card names this phone's OWN ward code (K1 test, 11-14)", () => {
+  // Literals, so a guard that reads the wrong field can't pass by comparing a value with itself.
+  const SAM = 'IFDf7z58Wp19EQ-EjCviVU2sgmFnjecWqCEaNsAz8lq6'
+  const OTHER = 'IJpj8_jwPauLZMmIjiglQEvnOC0Lfw9nV-LCEKovbEIk'
+  const G_OK = 'EE77k2PeUVmo7nPAEjvZ-R-8G3UsxLbmaOM__tG3I6PC'
+  /** This phone's own ward code, as phoneIdentity keeps it once the codes screen made it. */
+  const ownCode = (sam: ReturnType<typeof phone>, aid: string) =>
+    sam.rows.push({
+      id: `own-${aid}`,
+      tags: { recordType: WARD_IDENTITY },
+      content: { aid, keyId: 'k-own', createdAt: '2026-11-13T21:00:00.000Z' },
+    })
+  /** Sam's phone with the ward `set` (null: none) and its own code `own` (null: never made), then the card arrives. */
+  async function arrivesWith(set: string | null, own: string | null) {
+    const sam = phone()
+    if (set !== null) await setStateWard(sam.agent, set)
+    if (own !== null) ownCode(sam, own)
+    sam.ask()
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
+    return sam
+  }
+
+  test("the fixture is what these rows assume: K0's G-ok names Sam as its ward", () => {
+    expect([SAM_WARD, OTHER_WARD, prov.creds['G-ok'].said]).toEqual([SAM, OTHER, G_OK])
+    expect(wardNamedIn(card('G-ok').creds, G_OK)).toBe(SAM)
+  })
+
+  test('another ward set ("Set up as the person" after "Use this code"): valid on arrival and on open (control: no own code, wardMismatch)', async () => {
+    const sam = await arrivesWith(OTHER, SAM)
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true, state: 'Example State' })
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
+    })
+    const control = await arrivesWith(OTHER, null)
+    expect(control.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'wardMismatch' })
+  })
+
+  test('no ward set at all: valid with no Developer step (control: no own code, noWard)', async () => {
+    const sam = await arrivesWith(null, SAM)
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true })
+    const control = await arrivesWith(null, null)
+    expect(control.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'noWard' })
+  })
+
+  test('an own code the card does not name changes nothing: the ward set still checks it, and the refusals read as before', async () => {
+    expect((await arrivesWith(SAM, OTHER)).askRecord().guardian?.verdict).toMatchObject({ ok: true })
+    expect((await arrivesWith(null, OTHER)).askRecord().guardian?.verdict).toMatchObject({
+      ok: false,
+      reason: 'noWard',
+    })
+    expect((await arrivesWith(G_OK, OTHER)).askRecord().guardian?.verdict).toMatchObject({
+      ok: false,
+      reason: 'wardMismatch',
+    })
+  })
+
+  test('a check never makes a code: with none made, no key is asked of the key store and none is saved (control: making one does)', async () => {
+    const sam = phone()
+    const createKey = jest.fn(async () => ({
+      keyId: 'k-new',
+      publicJwk: { kty: 'OKP', crv: 'Ed25519', x: 'A'.repeat(43) },
+    }))
+    Object.assign(sam.raw.kms, { createKey })
+    await setStateWard(sam.agent, SAM)
+    sam.ask()
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
+    await guardianStandings(sam.agent)
+    expect(createKey).not.toHaveBeenCalled()
+    expect(sam.rows.filter((r) => r.tags.recordType === WARD_IDENTITY)).toEqual([])
+    // Control: the codes screen's own call does make one, through the same fake.
+    expect(await wardCodeOf(sam.agent)).toEqual(expect.any(String))
+    expect(createKey).toHaveBeenCalledTimes(1)
+  })
+
+  test('the code first made after the card came: the next open checks again and reads valid, written in place', async () => {
+    const sam = await arrivesWith(OTHER, null)
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'wardMismatch' } })
+    ownCode(sam, SAM)
+    expect(await guardianStandings(sam.agent)).toEqual({
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
+    })
+    expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: true })
+  })
+
+  test.each([
+    ['trusted approvers', setTrustedApproversEnabled],
+    ['state-verified approvers', setStateVerifiedApproversEnabled],
+  ])('with %s off, the own code is not read (control: both on, it is)', async (_name, setOn) => {
+    const sam = phone()
+    ownCode(sam, SAM)
+    expect(await phoneWardsOf(sam.agent)).toEqual({ set: null, own: SAM })
+    setOn(false)
+    expect(await phoneWardsOf(sam.agent)).toEqual({ set: null, own: null })
+  })
+
+  test("the guardian's setup (unsetStateWard writes an EMPTY ward): a card naming this phone's own code verifies, any other reads noWard", async () => {
+    const own = phone()
+    await setStateWard(own.agent, OTHER)
+    await unsetStateWard(own.agent)
+    // The real write: an empty ward kept, not no record.
+    expect(own.rows.filter((r) => r.tags.recordType === 'keyring.sedi-state-ward').map((r) => r.content.ward)).toEqual([
+      '',
+    ])
+    ownCode(own, SAM)
+    own.ask()
+    await handleGuardianEvidence(own.agent, own.service, documentOf(card('G-ok')), context)
+    expect(own.askRecord().guardian?.verdict).toMatchObject({ ok: true })
+    // Control: the same setup, its own code another one: refused as no ward set.
+    const other = phone()
+    await setStateWard(other.agent, OTHER)
+    await unsetStateWard(other.agent)
+    ownCode(other, OTHER)
+    other.ask()
+    await handleGuardianEvidence(other.agent, other.service, documentOf(card('G-ok')), context)
+    expect(other.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'noWard' })
+  })
+
+  test('wardToCheck chooses only between the two wards of this phone, by the card it is given', () => {
+    const ok = card('G-ok')
+    expect(wardToCheck({ set: OTHER, own: SAM }, ok)).toBe(SAM)
+    expect(wardToCheck({ set: OTHER, own: OTHER }, ok)).toBe(OTHER)
+    expect(wardToCheck({ set: null, own: OTHER }, ok)).toBeNull()
+    expect(wardToCheck({ set: OTHER, own: null }, ok)).toBe(OTHER)
+    // The card's SAID must be the one named: another credential's ward is never read as this card's.
+    expect(wardToCheck({ set: OTHER, own: SAM }, { ...ok, guardianSaid: prov.creds['G-revoked'].said })).toBe(OTHER)
+  })
+})
+
 describe('tester builds: the Developer setting "Trust the test state (K0)"', () => {
   // jest runs as a Developer build (__DEV__ true); a TestFlight or OTA build is not one. Each row sets it.
   const g = globalThis as { __DEV__?: boolean }
@@ -382,16 +564,16 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
     expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
     asBuild(true)
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
-  test('a release with the setting on verifies the K0 card as "State of Utah" (control: switched off again, it does not)', async () => {
+  test('a release with the setting on verifies the K0 card as "Example State" (control: switched off again, it does not)', async () => {
     asBuild(false)
     setTrustTestStateEnabled(true)
     const sam = await arrives(card('G-ok'))
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     setTrustTestStateEnabled(false)
     expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
@@ -406,7 +588,16 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
   ])('%s: a release trusts no root even with the setting on (control: all on, the K0 root)', (_, off) => {
     asBuild(false)
     setTrustTestStateEnabled(true)
-    expect(stateRoots.trustedStateRoots()).toEqual([stateRoots.K0_TEST_ROOT])
+    // All on: the K0 root, and K1 (the state office's root, trusted with both switches on, no setting needed), pinned by
+    // literals so a wrong AID, name or demo mark on K1's entry fails here; exactly two, so a third root fails too.
+    const all = stateRoots.trustedStateRoots()
+    expect(all).toHaveLength(2)
+    expect(all[0]).toEqual(stateRoots.K0_TEST_ROOT)
+    expect(all[1]).toMatchObject({
+      aid: 'IIOfwtkpq00RMwoUH8346kzNKq877GJXQStI6Dyg66Bs',
+      name: 'State of Utah',
+      demo: true,
+    })
     off()
     expect(stateRoots.trustedStateRoots()).toEqual([])
   })
@@ -418,20 +609,21 @@ describe('tester builds: the Developer setting "Trust the test state (K0)"', () 
     expect(await guardianStandings(other.agent)).toEqual({ [JORDAN]: { kind: 'unverified', outcome: 'untrustedRoot' } })
     const sam = await arrives(card('G-ok'))
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
   test("the name and the demo mark shown are our entry's, never what the card claims (control: the K0 root is named so)", () => {
     asBuild(false)
     setTrustTestStateEnabled(true)
-    expect(stateRoots.K0_TEST_ROOT).toMatchObject({ name: 'State of Utah', demo: true })
+    expect(stateRoots.K0_TEST_ROOT).toMatchObject({ name: 'Example State', demo: true, test: true })
     const claims = { ...card('G-ok'), state: 'Utah', name: 'Utah', demo: false } as unknown as GuardianEvidence
     const verdict = checkGuardianEvidence(claims, SAM_WARD, new Date(), () => undefined)
     expect(verdict).toMatchObject({
       ok: true,
-      state: 'State of Utah',
+      state: 'Example State',
       demo: true,
+      test: true,
       root: stateRoots.K0_TEST_ROOT.aid,
     })
   })
@@ -561,7 +753,7 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
       context
     )
     expect(await guardianStandings(control.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
@@ -580,7 +772,7 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     expect(await stateWardOf(sam.agent)).toBe(SAM_WARD)
   })
 
-  test('a tester build, end to end: Jordan holds the test card, Sam is the test ward, and it verifies as "State of Utah"', async () => {
+  test('a tester build, end to end: Jordan holds the test card, Sam is the test ward, and it verifies as "Example State"', async () => {
     g.__DEV__ = false
     const jordan = phone()
     await holdK0TestGuardianCard(jordan.agent)
@@ -590,7 +782,7 @@ describe('Developer actions: "Hold the test Guardian card (K0)" and "I\'m the te
     sam.ask()
     await handleGuardianEvidence(sam.agent, sam.service, documentOf(held), context)
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 })
@@ -603,8 +795,8 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     setStateCardEnabled(false)
     setConfirmItsYouEnabled(false)
   }
-  // The five switches the one-tap turns on, in order: trusted approvers, state-verified approvers, the test state, the
-  // holder's state card, and Confirm it's you.
+  // The four switches the one-tap turns on, in order: trusted approvers, state-verified approvers, the test state, the
+  // holder's state card; and last Confirm it's you, which it leaves as it is (Alberto, 11-14).
   const states = () => [
     isTrustedApproversEnabled(),
     isStateVerifiedApproversEnabled(),
@@ -625,11 +817,11 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     setConfirmItsYouEnabled(false)
   })
 
-  test('from everything off: all five switches on (the state card and the Confirm switch too), the K0 card held and the K0 ward set (control: before it, all off)', async () => {
+  test("from everything off: the four switches on (the state card too, never Confirm it's you), the K0 card held and the K0 ward set (control: before it, all off)", async () => {
     expect(states()).toEqual([false, false, false, false, false])
     const phoneA = phone()
     expect(await setUpSediDemo(phoneA.agent)).toBe('done')
-    expect(states()).toEqual([true, true, true, true, true])
+    expect(states()).toEqual([true, true, true, true, false])
     expect(sediDemoHiddenByKill()).toEqual([])
     expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
     expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
@@ -652,7 +844,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
       expect(await heldGuardianEvidence(phoneA.agent)).toBeUndefined()
       expect(await stateWardOf(phoneA.agent)).toBeNull()
       expect(await setUpSediDemo(phoneA.agent)).toBe('done')
-      expect(states()).toEqual([true, true, true, true, true])
+      expect(states()).toEqual([true, true, true, true, false])
     }
   )
 
@@ -664,10 +856,10 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     expect(states()).toEqual([false, false, false, false, false])
   })
 
-  test('the undo turns the five switches off (the state card and the Confirm switch too) and deletes nothing: the card and ward stay kept (control: set up, all on)', async () => {
+  test('the undo turns the four switches off (the state card too) and deletes nothing: the card and ward stay kept (control: set up, all on)', async () => {
     const phoneA = phone()
     await setUpSediDemo(phoneA.agent)
-    expect(states()).toEqual([true, true, true, true, true])
+    expect(states()).toEqual([true, true, true, true, false])
     turnOffSediDemo()
     expect(states()).toEqual([false, false, false, false, false])
     expect(phoneA.rows.filter((r) => r.tags.recordType === GUARDIAN_EVIDENCE_HELD)).toHaveLength(1)
@@ -687,7 +879,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     const phoneA = phone()
     expect(await setUpSediDemo(phoneA.agent)).toBe('doneSomeHidden')
     expect(sediDemoHiddenByKill()).toEqual(['stateCard'])
-    expect(states()).toEqual([true, true, true, false, true])
+    expect(states()).toEqual([true, true, true, false, false])
     expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
     STATE_CARD_REMOTE_OFF.off = false
     expect(isStateCardEnabled()).toBe(true)
@@ -698,34 +890,28 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
     expect(states()).toEqual([false, false, false, false, false])
   })
 
-  test("the one-tap turns Confirm it's you on, and the undo turns it off (control: before the tap, it is off)", async () => {
-    expect(isConfirmItsYouEnabled()).toBe(false)
+  test("Confirm it's you is its own switch: the one-tap and the undo leave it on when on, and off when off (Alberto, 11-14)", async () => {
+    setConfirmItsYouEnabled(true)
     expect(await setUpSediDemo(phone().agent)).toBe('done')
     expect(isConfirmItsYouEnabled()).toBe(true)
+    turnOffSediDemo()
+    expect(isConfirmItsYouEnabled()).toBe(true)
+    // Control: off stays off through both.
+    setConfirmItsYouEnabled(false)
+    expect(await setUpSediDemo(phone().agent)).toBe('done')
+    expect(isConfirmItsYouEnabled()).toBe(false)
     turnOffSediDemo()
     expect(isConfirmItsYouEnabled()).toBe(false)
   })
 
-  test("Confirm it's you's own remote off does not stop the setup: doneSomeHidden naming it, the others visible; cleared, it is on", async () => {
+  test("Confirm it's you's own remote off is not the one-tap's to report: done, nothing hidden (control: the state card's is reported)", async () => {
     CONFIRM_ITS_YOU_REMOTE_OFF.off = true
-    expect(await setUpSediDemo(phone().agent)).toBe('doneSomeHidden')
-    expect(sediDemoHiddenByKill()).toEqual(['confirmItsYou'])
-    expect(states()).toEqual([true, true, true, true, false])
-    CONFIRM_ITS_YOU_REMOTE_OFF.off = false
-    expect(isConfirmItsYouEnabled()).toBe(true)
-    expect(sediDemoHiddenByKill()).toEqual([])
-  })
-
-  test('both peripheral remote offs: doneSomeHidden naming both, the approvers demo still set up (control: none set, done)', async () => {
-    STATE_CARD_REMOTE_OFF.off = true
-    CONFIRM_ITS_YOU_REMOTE_OFF.off = true
-    expect(await setUpSediDemo(phone().agent)).toBe('doneSomeHidden')
-    expect(sediDemoHiddenByKill()).toEqual(['stateCard', 'confirmItsYou'])
-    expect(states()).toEqual([true, true, true, false, false])
-    STATE_CARD_REMOTE_OFF.off = false
-    CONFIRM_ITS_YOU_REMOTE_OFF.off = false
-    allSwitchesOff()
     expect(await setUpSediDemo(phone().agent)).toBe('done')
+    expect(sediDemoHiddenByKill()).toEqual([])
+    STATE_CARD_REMOTE_OFF.off = true
+    allSwitchesOff()
+    expect(await setUpSediDemo(phone().agent)).toBe('doneSomeHidden')
+    expect(sediDemoHiddenByKill()).toEqual(['stateCard'])
   })
 
   // Each way the one-tap can stop is its own result (ac, #1033): a card over the size cap is not "a release turned
@@ -744,7 +930,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
       jest.spyOn(evidenceModule, 'keepK0TestGuardianCard').mockResolvedValue('tooLarge')
       const phoneA = phone()
       expect(await setUpSediDemo(phoneA.agent)).toBe('cardNotHeld')
-      expect(states()).toEqual([true, true, true, true, true])
+      expect(states()).toEqual([true, true, true, true, false])
       expect(await heldGuardianEvidence(phoneA.agent)).toBeUndefined()
       expect(await stateWardOf(phoneA.agent)).toBe(SAM_WARD)
     })
@@ -761,7 +947,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
       jest.spyOn(evidenceModule, 'becomeK0TestWard').mockRejectedValue(new Error('storage'))
       const phoneA = phone()
       expect(await setUpSediDemo(phoneA.agent)).toBe('wardNotSet')
-      expect(states()).toEqual([true, true, true, true, true])
+      expect(states()).toEqual([true, true, true, true, false])
       expect(await heldGuardianEvidence(phoneA.agent)).toEqual(card('G-ok'))
       expect(await stateWardOf(phoneA.agent)).toBeNull()
       jest.restoreAllMocks()
@@ -783,7 +969,7 @@ describe('Developer action: "Set up the SEDI demo" in one tap, and "Turn off the
       })
       expect(await setUpSediDemo(phone().agent)).toBe('remoteOff')
       SEDI_KERI_REMOTE_OFF.off = false
-      expect(states()).toEqual([true, true, true, true, true])
+      expect(states()).toEqual([true, true, true, true, false])
       jest.restoreAllMocks()
       allSwitchesOff()
       expect(await setUpSediDemo(phone().agent)).toBe('done')
@@ -812,6 +998,17 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     expect(Object.keys(await guardianStandings(sam.agent))).toEqual([JORDAN])
   })
 
+  test('a yes set aside with "Not now" still shows its card beside it (control: forgotten, closed, it does not)', async () => {
+    const sam = phone()
+    await setStateWard(sam.agent, SAM_WARD)
+    sam.ask({ state: 'setAside' })
+    await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
+    expect(Object.keys(await guardianStandings(sam.agent))).toEqual([JORDAN])
+    const record = sam.rows.find((r) => r.tags.recordType === approverRole.ROLE_OFFER_ASK) as Row
+    record.content = { ...record.content, state: 'closed' }
+    expect(await guardianStandings(sam.agent)).toEqual({})
+  })
+
   test('a valid card sent as one DID is never shown beside another (control: sent as the yes, it is)', async () => {
     const sam = await arrives(card('G-ok'), SAM_WARD, { approver: AMY })
     expect(sam.askRecord().guardian?.verdict.ok).toBe(true)
@@ -824,7 +1021,7 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     sam.ask({ state: 'closed', written: true, writtenAs: JORDAN })
     await handleGuardianEvidence(sam.agent, sam.service, documentOf(card('G-ok')), context)
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
@@ -862,7 +1059,7 @@ describe('shown only beside the DID it was sent as, and checked again on open', 
     expect(sam.askRecord().state).toBe('open')
     expect(sam.askRecord().guardian?.approver).toBe(JORDAN)
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
 
     const other = phone()
@@ -900,11 +1097,11 @@ describe('Who approves on open: the check runs again only when something it read
     const sam = await arrives(card('G-ok'))
     const spy = checks()
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     expect(spy).toHaveBeenCalledTimes(1)
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     expect(spy).toHaveBeenCalledTimes(1)
     resetGuardianCheckMemo()
@@ -925,7 +1122,7 @@ describe('Who approves on open: the check runs again only when something it read
           .spyOn(stateRoots, 'trustedStateRoots')
           .mockReturnValue([K0, { aid: prov.aids['mal-root'], name: 'Another state' }])
       },
-      { kind: 'verified', state: 'State of Utah', demo: true },
+      { kind: 'verified', state: 'Example State', demo: true, test: true },
     ],
     [
       'the name we show for a trusted root',
@@ -939,7 +1136,7 @@ describe('Who approves on open: the check runs again only when something it read
       async () => {
         jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: K0.name }])
       },
-      { kind: 'verified', state: 'State of Utah' },
+      { kind: 'verified', state: 'Example State' },
     ],
     [
       "the card's stored text",
@@ -966,12 +1163,12 @@ describe('Who approves on open: the check runs again only when something it read
     jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: K0.name }])
     const sam = await arrives(card('G-ok'))
     const spy = checks()
-    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'State of Utah' } })
+    expect(await guardianStandings(sam.agent)).toEqual({ [JORDAN]: { kind: 'verified', state: 'Example State' } })
     await guardianStandings(sam.agent)
     expect(spy).toHaveBeenCalledTimes(1)
     jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([K0])
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     expect(spy).toHaveBeenCalledTimes(2)
   })
@@ -980,10 +1177,10 @@ describe('Who approves on open: the check runs again only when something it read
     const sam = await arrives(card('G-ok'))
     await guardianStandings(sam.agent)
     const kept = () => (askRow(sam).content as unknown as approverRole.RoleOfferAsk).guardian?.verdict
-    expect(kept()).toMatchObject({ ok: true, state: 'State of Utah', demo: true })
+    expect(kept()).toMatchObject({ ok: true, state: 'Example State', demo: true, test: true })
     jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([{ aid: K0.aid, name: K0.name }])
     await guardianStandings(sam.agent)
-    expect(kept()).toMatchObject({ ok: true, state: 'State of Utah' })
+    expect(kept()).toMatchObject({ ok: true, state: 'Example State' })
     expect(kept()).not.toHaveProperty('demo')
   })
 
@@ -1049,7 +1246,7 @@ describe('Who approves on open: the check runs again only when something it read
     expect(spy).not.toHaveBeenCalled()
     resetGuardianCheckMemo()
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
   })
 
@@ -1069,7 +1266,7 @@ describe('Who approves on open: the check runs again only when something it read
       throw new Error('boom')
     })
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     expect(spy).not.toHaveBeenCalled()
     await setStateWard(sam.agent, OTHER_WARD)
@@ -1117,7 +1314,7 @@ describe("on the approver's phone: sending the card after a yes", () => {
   test('with a card held and its sending said yes to, the yes goes and then the card, for that agent and as that DID', async () => {
     const jordan = phone()
     expect(await holdGuardianEvidence(jordan.agent, card('G-ok'))).toBe('held')
-    await setCardConsent(jordan.agent, CONN, 'yes')
+    await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT_AID)
     await sayYes(jordan)
     expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer'), GUARDIAN_EVIDENCE_TYPE_URI])
     const payload = sent[1].payload as GuardianEvidencePayload
@@ -1168,7 +1365,7 @@ describe("on the approver's phone: sending the card after a yes", () => {
   test('a card that fails to send leaves the yes standing', async () => {
     const jordan = phone()
     await holdGuardianEvidence(jordan.agent, card('G-ok'))
-    await setCardConsent(jordan.agent, CONN, 'yes')
+    await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT_AID)
     const ceremony = jest.requireMock('../ceremony') as { sendTrustTaskDocument: jest.Mock }
     ceremony.sendTrustTaskDocument
       .mockImplementationOnce(async (_a: unknown, _c: string, doc: Record<string, unknown>) => {
@@ -1192,12 +1389,10 @@ describe('Who approves: the state card line', () => {
       view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
       version: 2,
     } as TrustedApproversState)
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     return tree
   }
   const writtenWith = async (evidence: GuardianEvidence | null) => {
@@ -1218,10 +1413,10 @@ describe('Who approves: the state card line', () => {
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianUnverified(JORDAN)))).toBeNull()
   })
 
-  test('the K0 state shows "State of Utah" with the Demo pill beside it (control: the row below, a root not marked demo)', async () => {
+  test('the K0 state shows "Example State" with the Demo pill beside it (control: the row below, a root not marked demo)', async () => {
     const sam = await writtenWith(card('G-ok'))
     expect(await guardianStandings(sam.agent)).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     const tree = await showFor(sam)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
@@ -1276,11 +1471,7 @@ describe('Who approves: the state card line', () => {
     const tree = await showFor(await writtenWith(card('G-ok')))
     expect(tree.getByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeTruthy()
     STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = true
-    tree.rerender(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    tree.rerender(personPage('approver', JORDAN))
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianVerified(JORDAN)))).toBeNull()
     expect(tree.getByTestId(id(TrustedApproversIds.approver(JORDAN)))).toBeTruthy()
   })
@@ -1339,13 +1530,37 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
     await yesTo(jordan)
     expect(sent.map((d) => d.type)).toEqual([expect.stringContaining('role-offer')])
     expect(cards()).toHaveLength(0)
-    expect(cardQuestions.first()).toEqual({ connectionId: CONN, asker: 'Sam', state: 'State of Utah', demo: true })
+    expect(cardQuestions.first()).toEqual({
+      connectionId: CONN,
+      asker: 'Sam',
+      state: 'Example State',
+      demo: true,
+      test: true,
+    })
     expect(answers(jordan)).toHaveLength(0)
     // Control: the same phone with a kept yes for Sam sends it.
     const control = await jordanWithCard()
-    await setCardConsent(control.agent, CONN, 'yes')
+    await setCardConsent(control.agent, CONN, 'yes', K0_ROOT_AID)
     sent.length = 0
     await yesTo(control)
+    expect(cards()).toHaveLength(1)
+  })
+
+  test("a yes kept for ANOTHER state, or before states were kept: a re-offer puts the question again, naming this card's state, and sends nothing (control: the same state, sent)", async () => {
+    expect(stateRoots.K0_TEST_ROOT.aid).toBe(K0_ROOT_AID)
+    for (const root of ['EOtherStateRootAidxxxxxxxxxxxxxxxxxxxxxxxxxx', undefined]) {
+      const jordan = await jordanWithCard()
+      await setCardConsent(jordan.agent, CONN, 'yes', root)
+      cardQuestions.reset()
+      sent.length = 0
+      await yesTo(jordan)
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN, asker: 'Sam', state: 'Example State' })
+    }
+    const same = await jordanWithCard()
+    await setCardConsent(same.agent, CONN, 'yes', K0_ROOT_AID)
+    sent.length = 0
+    await yesTo(same)
     expect(cards()).toHaveLength(1)
   })
 
@@ -1391,7 +1606,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
 
   test("an answer is per person: a yes for Sam sends nothing to Amy, who is asked (control: Sam's card goes)", async () => {
     const jordan = await jordanWithCard()
-    await setCardConsent(jordan.agent, CONN, 'yes')
+    await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT_AID)
     await yesTo(jordan, CONN2, 'Amy')
     expect(cards()).toHaveLength(0)
     expect(cardQuestions.first()).toMatchObject({ connectionId: CONN2 })
@@ -1407,7 +1622,7 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
     await yesTo(jordan)
     expect(cards()).toHaveLength(0)
     expect(cardQuestions.first()).toBeUndefined()
-    await setCardConsent(jordan.agent, CONN, 'yes')
+    await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT_AID)
     await yesTo(jordan)
     expect(cards()).toHaveLength(1)
   })
@@ -1460,12 +1675,10 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
         version: 2,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const declined = await run(false)
@@ -1566,12 +1779,10 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
         view: { approvers: [], keys: [], heldElsewhere: [] },
         version: 1,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      // Their own page (design B, 11-14), opened from the people-I-approve-for tab.
+      const tree = render(personPage('approving', CONN))
       await act(async () => undefined)
+      expectPage(tree, 'approving', CONN)
       return tree
     }
 
@@ -1579,26 +1790,36 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       const jordan = await jordanWithCard()
       await yesTo(jordan)
       const tree = await show(jordan)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
-        'Approver.CardNotSentTo'
-      )
+      // Row E: a switch, read off; its press sends (cardSend), so it is named for what it does.
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardSend(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: false,
+      })
       await act(async () => {
         fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardSend(CONN))))
       })
       expect(await cardConsentOn(jordan.agent, CONN)).toBe('yes')
       expect(cards()).toHaveLength(1)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN)))).toBeTruthy()
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: true,
+      })
     })
 
     test('a kept yes reads as sent, and "Stop sending" keeps a no, so a re-offer sends nothing', async () => {
       const jordan = await jordanWithCard()
-      await setCardConsent(jordan.agent, CONN, 'yes')
+      await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT_AID)
       await yesTo(jordan)
       sent.length = 0
       const tree = await show(jordan)
-      expect(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN))).props.children).toBe(
-        'Approver.CardSentTo'
-      )
+      // Row E: a switch, read on; its press stops (cardStop).
+      expect(
+        tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))).props.accessibilityState
+      ).toMatchObject({
+        checked: true,
+      })
       await act(async () => {
         fireEvent.press(tree.getByTestId(testIdWithKey(TrustedApproversIds.cardStop(CONN))))
       })
@@ -1623,6 +1844,115 @@ describe('asking Jordan first: the card goes only once Jordan said yes to sendin
       setStateVerifiedApproversEnabled(true)
       const on = await show(jordan)
       expect(on.getByTestId(testIdWithKey(TrustedApproversIds.cardStatus(CONN)))).toBeTruthy()
+    })
+  })
+
+  describe('a card kept AFTER the yes (a state office pick-up, K1 test 11-14): offered by the same rule', () => {
+    // The root a yes was given for, kept with it: the K0 card's (literal, so the rows can't compare a value with itself).
+    const K0_ROOT = 'IMTne_Mkgzgf4iVRanVTxV3RdtL1ggDUKdKOv2OuSBd6'
+    const ceremonyMock = () => jest.requireMock('../ceremony') as { sendTrustTaskDocument: jest.Mock }
+    /** Jordan said yes to `who` with no card held (so nothing went and nothing was asked), then keeps a card. */
+    const yesThenKeep = async (who: Array<[string, string]> = [[CONN, 'Sam']]) => {
+      const jordan = phone()
+      jest.spyOn(stateRoots, 'trustedStateRoots').mockReturnValue([stateRoots.K0_TEST_ROOT])
+      for (const [connectionId, asker] of who) await yesTo(jordan, connectionId, asker)
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toBeUndefined()
+      await holdGuardianEvidence(jordan.agent, card('G-ok'))
+      return jordan
+    }
+
+    test("never asked: nothing goes, and the question is put now, naming the kept card's state", async () => {
+      const jordan = await yesThenKeep()
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN, asker: 'Sam', state: 'Example State' })
+    })
+
+    test('an earlier yes to sending the card: this card goes now, for the agent and as the yes (control: before the keep, none went)', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT)
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'sent' }])
+      expect(cards()).toHaveLength(1)
+      expect(cards()[0].payload).toMatchObject({
+        agent: SAM_AGENT,
+        approver: JORDAN,
+        guardianSaid: card('G-ok').guardianSaid,
+      })
+      expect(cardQuestions.first()).toBeUndefined()
+    })
+
+    test('an earlier no: nothing goes and nothing is asked', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'no')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([
+        { connectionId: CONN, asker: 'Sam', result: 'declined' },
+      ])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toBeUndefined()
+    })
+
+    test("one person's send failing never stops the next, and is logged (control: both yes, both sent)", async () => {
+      const jordan = await yesThenKeep([
+        [CONN, 'Sam'],
+        [CONN2, 'Amy'],
+      ])
+      await setCardConsent(jordan.agent, CONN, 'yes', K0_ROOT)
+      await setCardConsent(jordan.agent, CONN2, 'yes', K0_ROOT)
+      ceremonyMock().sendTrustTaskDocument.mockImplementationOnce(async () => {
+        throw new Error('mediator down')
+      })
+      const results = await guardianCardAfterKeep(jordan.agent)
+      expect(results.map((r) => r.result).sort()).toEqual(['failed', 'sent'])
+      expect(cards()).toHaveLength(1)
+      expect(jordan.warn).toHaveBeenCalledWith(expect.stringContaining('the kept card was not sent on'))
+      sent.length = 0
+      expect((await guardianCardAfterKeep(jordan.agent)).map((r) => r.result)).toEqual(['sent', 'sent'])
+    })
+
+    test('no one approved for, or either switch off: nothing at all (control: one yes, an answer)', async () => {
+      const nobody = phone()
+      await holdGuardianEvidence(nobody.agent, card('G-ok'))
+      expect(await guardianCardAfterKeep(nobody.agent)).toEqual([])
+      const jordan = await yesThenKeep()
+      setStateVerifiedApproversEnabled(false)
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([])
+      setStateVerifiedApproversEnabled(true)
+      expect(await guardianCardAfterKeep(jordan.agent)).toHaveLength(1)
+      expect(cards()).toHaveLength(0)
+    })
+
+    test('the fixture: K0 card G-ok chains to the K0 root these rows name', () => {
+      expect(stateRoots.K0_TEST_ROOT.aid).toBe(K0_ROOT)
+    })
+
+    test("a yes given for ANOTHER state never sends this one: the question again, naming this card's state (control: same state, sent)", async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes', 'EOtherStateRootAidxxxxxxxxxxxxxxxxxxxxxxxxxx')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+      expect(cardQuestions.first()).toMatchObject({ connectionId: CONN, asker: 'Sam', state: 'Example State' })
+      // Answering it records this state; the next keep of a card from it sends.
+      expect(await shareGuardianCard(jordan.agent, CONN, true)).toBe('sent')
+      expect(await cardConsentRootOn(jordan.agent, CONN)).toBe(K0_ROOT)
+      sent.length = 0
+      expect((await guardianCardAfterKeep(jordan.agent)).map((r) => r.result)).toEqual(['sent'])
+    })
+
+    test('a yes kept before states were recorded is asked again, never sent on its own', async () => {
+      const jordan = await yesThenKeep()
+      await setCardConsent(jordan.agent, CONN, 'yes')
+      expect(await guardianCardAfterKeep(jordan.agent)).toEqual([{ connectionId: CONN, asker: 'Sam', result: 'asked' }])
+      expect(cards()).toHaveLength(0)
+    })
+
+    test('"Send my card" keeps the state of the card held when answering (control: no card held, none kept)', async () => {
+      const none = phone()
+      await setCardConsent(none.agent, CONN, 'yes')
+      expect(await cardConsentRootOn(none.agent, CONN)).toBeUndefined()
+      const jordan = await yesThenKeep()
+      await shareGuardianCard(jordan.agent, CONN, true)
+      expect(await cardConsentRootOn(jordan.agent, CONN)).toBe(K0_ROOT)
     })
   })
 })
@@ -1720,8 +2050,9 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
       [JORDAN]: {
         kind: 'verified',
-        state: 'State of Utah',
+        state: 'Example State',
         demo: true,
+        test: true,
         fetchedFrom: 'example.org',
         fetchedIssuers: true,
       },
@@ -1737,15 +2068,17 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
       [JORDAN]: {
         kind: 'verified',
-        state: 'State of Utah',
+        state: 'Example State',
         demo: true,
+        test: true,
         fetchedFrom: 'example.org',
         fetchedIssuers: true,
       },
       [AMY]: {
         kind: 'verified',
-        state: 'State of Utah',
+        state: 'Example State',
         demo: true,
+        test: true,
         fetchedFrom: 'example.org',
         fetchedIssuers: true,
       },
@@ -1756,11 +2089,11 @@ describe('a root read from its did:webs', () => {
   test("D3: the root can't be reached: unreachable, its own kind, never verified from the card's copy (control: the same card with no did:webs is verified)", async () => {
     const sam = await kept()
     expect(await guardianStandings(sam.agent, { fetch: host(true) })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     rootAtWebs()
     expect(await guardianStandings(sam.agent, { fetch: host(true) })).toEqual({
-      [JORDAN]: { kind: 'unreachable', state: 'State of Utah' },
+      [JORDAN]: { kind: 'unreachable', state: 'Example State' },
     })
     expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'stateNotResolved' })
   })
@@ -1773,8 +2106,9 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
       [JORDAN]: {
         kind: 'verified',
-        state: 'State of Utah',
+        state: 'Example State',
         demo: true,
+        test: true,
         fetchedFrom: 'example.org',
         fetchedIssuers: true,
       },
@@ -1837,8 +2171,9 @@ describe('a root read from its did:webs', () => {
     expect(await guardianStandings(sam.agent, { fetch, resolveRootKel: replacement })).toEqual({
       [JORDAN]: {
         kind: 'verified',
-        state: 'State of Utah',
+        state: 'Example State',
         demo: true,
+        test: true,
         fetchedFrom: 'example.org',
         fetchedIssuers: true,
       },
@@ -1853,7 +2188,7 @@ describe('a root read from its did:webs', () => {
     const refusing = async () => ({ ok: false as const, reason: 'unreachable', detail: 'offline' })
     expect((await guardianStandings(sam.agent, { resolveRootKel: refusing }))[JORDAN]).toEqual({
       kind: 'unreachable',
-      state: 'State of Utah',
+      state: 'Example State',
     })
     const tampered = new TextEncoder().encode(
       new TextDecoder('latin1').decode(served('keri.cesr')).replace('"s":"1"', '"s":"3"')
@@ -1874,8 +2209,9 @@ describe('a root read from its did:webs', () => {
       expect(await guardianStandings(sam.agent)).toEqual({
         [JORDAN]: {
           kind: 'verified',
-          state: 'State of Utah',
+          state: 'Example State',
           demo: true,
+          test: true,
           fetchedFrom: 'example.org',
           fetchedIssuers: true,
         },
@@ -1889,7 +2225,7 @@ describe('a root read from its did:webs', () => {
     resetGuardianCheckMemo()
     const ours = host(true)
     expect(await guardianStandings(sam.agent, { fetch: ours })).toEqual({
-      [JORDAN]: { kind: 'unreachable', state: 'State of Utah' },
+      [JORDAN]: { kind: 'unreachable', state: 'Example State' },
     })
     expect(ours.asked.length).toBeGreaterThan(0)
   })
@@ -1904,12 +2240,10 @@ describe('a root read from its did:webs', () => {
       version: 2,
     } as TrustedApproversState)
     const screen = async () => {
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const copy = await screen()
@@ -1954,7 +2288,14 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     websModule.setDemoStateHost(TUNNEL)
     expect(await guardianStandings(sam.agent, { fetch: tunnel })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true, fetchedFrom: TUNNEL, fetchedIssuers: true },
+      [JORDAN]: {
+        kind: 'verified',
+        state: 'Example State',
+        demo: true,
+        test: true,
+        fetchedFrom: TUNNEL,
+        fetchedIssuers: true,
+      },
     })
     expect(asked.length).toBeGreaterThan(0)
     expect(asked.every((u) => u.startsWith(`https://${TUNNEL}/`))).toBe(true)
@@ -1965,7 +2306,7 @@ describe('a root read from its did:webs', () => {
     const sam = await kept()
     const fetch = host()
     expect(await guardianStandings(sam.agent, { fetch })).toEqual({
-      [JORDAN]: { kind: 'verified', state: 'State of Utah', demo: true },
+      [JORDAN]: { kind: 'verified', state: 'Example State', demo: true, test: true },
     })
     expect(fetch.asked).toHaveLength(0)
     ;(useFocusEffect as jest.Mock).mockImplementation((effect: () => void) => require('react').useEffect(effect, []))
@@ -1975,14 +2316,12 @@ describe('a root read from its did:webs', () => {
       view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
       version: 2,
     } as TrustedApproversState)
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianDemoCopy(JORDAN))).props.children).toBe(
-      'Approver.GuardianDemoCopy'
+      'Approver.GuardianTestCopy'
     )
     expect(tree.queryByTestId(id(TrustedApproversIds.guardianFetchedLive(JORDAN)))).toBeNull()
   })
@@ -2017,8 +2356,9 @@ describe('a root read from its did:webs', () => {
     // Control 1: no host in effect, so the card is checked from its own copy (the known bound): verified.
     expect((await guardianStandings(own.agent, { fetch: host() }))[JORDAN]).toEqual({
       kind: 'verified',
-      state: 'State of Utah',
+      state: 'Example State',
       demo: true,
+      test: true,
     })
     rootAtWebs()
     expect((await guardianStandings(own.agent, { fetch: host() }))[JORDAN]).toEqual({
@@ -2030,8 +2370,9 @@ describe('a root read from its did:webs', () => {
     const ok = await kept()
     expect((await guardianStandings(ok.agent, { fetch: host() }))[JORDAN]).toEqual({
       kind: 'verified',
-      state: 'State of Utah',
+      state: 'Example State',
       demo: true,
+      test: true,
       fetchedFrom: 'example.org',
       fetchedIssuers: true,
     })
@@ -2051,7 +2392,7 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     expect((await guardianStandings(sam.agent, { fetch: hostWithout(SUE) }))[JORDAN]).toEqual({
       kind: 'unreachable',
-      state: 'State of Utah',
+      state: 'Example State',
     })
     expect(sam.askRecord().guardian?.verdict).toMatchObject({ ok: false, reason: 'stateNotResolved' })
     expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toMatchObject({ kind: 'verified' })
@@ -2096,8 +2437,9 @@ describe('a root read from its did:webs', () => {
     const fetch = host()
     expect((await guardianStandings(sam.agent, { fetch }))[JORDAN]).toEqual({
       kind: 'verified',
-      state: 'State of Utah',
+      state: 'Example State',
       demo: true,
+      test: true,
     })
     expect(fetch.asked).toEqual([])
   })
@@ -2112,7 +2454,7 @@ describe('a root read from its did:webs', () => {
     resetGuardianCheckMemo()
     expect((await guardianStandings(sam.agent, { fetch: hostWithout(SUE) }))[JORDAN]).toEqual({
       kind: 'unreachable',
-      state: 'State of Utah',
+      state: 'Example State',
     })
   })
 
@@ -2145,12 +2487,10 @@ describe('a root read from its did:webs', () => {
     } as TrustedApproversState)
     resetGuardianCheckMemo()
     global.fetch = host() as never
-    const tree = render(
-      <BasicAppContext>
-        <VtaTrustedApprovers />
-      </BasicAppContext>
-    )
+    const tree = render(personPage('approver', JORDAN))
     await act(async () => undefined)
+    expectPage(tree, 'approver', JORDAN)
+    await openDetails(tree)
     expect(tree.getByTestId(id(TrustedApproversIds.guardianRevokedState(JORDAN))).props.children).toBe(
       'Approver.GuardianRevokedState'
     )
@@ -2229,12 +2569,10 @@ describe('a root read from its did:webs', () => {
     rootAtWebs()
     global.fetch = host() as never
     const screen = async () => {
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       return tree
     }
     const live = await screen()
@@ -2282,12 +2620,10 @@ describe('a root read from its did:webs', () => {
         view: { approvers: [JORDAN], keys: ['joinCommunity'], heldElsewhere: [] },
         version: 2,
       } as TrustedApproversState)
-      const tree = render(
-        <BasicAppContext>
-          <VtaTrustedApprovers />
-        </BasicAppContext>
-      )
+      const tree = render(personPage('approver', JORDAN))
       await act(async () => undefined)
+      expectPage(tree, 'approver', JORDAN)
+      await openDetails(tree)
       expect(tree.getByTestId(id(TrustedApproversIds.guardianUnreachable(JORDAN))).props.children).toBe(
         'Approver.GuardianStateUnreachable'
       )
@@ -2329,8 +2665,9 @@ describe('a root read from its did:webs', () => {
     afterEach(() => jest.useRealTimers())
     const FRESH = {
       kind: 'verified',
-      state: 'State of Utah',
+      state: 'Example State',
       demo: true,
+      test: true,
       fetchedFrom: 'example.org',
       fetchedIssuers: true,
     }
@@ -2358,7 +2695,7 @@ describe('a root read from its did:webs', () => {
       at(5 * 60 * 1000)
       expect((await guardianStandings(sam.agent, { fetch: host(true) }))[JORDAN]).toEqual({
         kind: 'unreachable',
-        state: 'State of Utah',
+        state: 'Example State',
       })
     })
 
@@ -2395,7 +2732,7 @@ describe('a root read from its did:webs', () => {
       at(60 * 1000)
       expect((await guardianStandings(sam.agent, { fetch: host() }))[JORDAN]).toEqual({
         kind: 'unreachable',
-        state: 'State of Utah',
+        state: 'Example State',
       })
     })
 
@@ -2422,12 +2759,10 @@ describe('a root read from its did:webs', () => {
         version: 2,
       } as TrustedApproversState)
       const screen = async () => {
-        const tree = render(
-          <BasicAppContext>
-            <VtaTrustedApprovers />
-          </BasicAppContext>
-        )
+        const tree = render(personPage('approver', JORDAN))
         await act(async () => undefined)
+        expectPage(tree, 'approver', JORDAN)
+        await openDetails(tree)
         return tree
       }
       const realFetch = global.fetch

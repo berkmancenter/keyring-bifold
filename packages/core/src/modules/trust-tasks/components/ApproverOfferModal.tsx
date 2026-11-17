@@ -215,7 +215,9 @@ const ApproverOfferModal: React.FC = () => {
                         interpolation: { escapeValue: false },
                       })}
                 </ThemedText>
-                {asking.state && asking.demo ? <DemoPill testID={ApproverOfferIds.cardAskDemo} /> : null}
+                {asking.state && asking.demo ? (
+                  <DemoPill testID={ApproverOfferIds.cardAskDemo} test={asking.test === true} />
+                ) : null}
                 <ThemedText>
                   {t('Approver.CardAskBody', {
                     asker: asking.asker || t('Approver.UnnamedContact'),
@@ -280,7 +282,10 @@ const ApproverOfferModal: React.FC = () => {
                   testID={testIdWithKey(ApproverOfferIds.notNow)}
                 />
                 <ThemedText style={[styles.muted, styles.centred]} testID={testIdWithKey(ApproverOfferIds.faceId)}>
-                  {t('Approver.AcceptAsksLock', { method: t(`CreateAgent.Lock.${lockKind}`) })}
+                  {t('Approver.AcceptAsksLock', {
+                    method: t(`CreateAgent.Lock.${lockKind}`),
+                    interpolation: { escapeValue: false },
+                  })}
                 </ThemedText>
               </>
             ) : null}

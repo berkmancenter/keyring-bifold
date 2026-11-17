@@ -20,6 +20,7 @@
 
 import { TypedArrayEncoder, utils, type Agent } from '@credo-ts/core'
 import { EventEmitter } from 'events'
+import { Vibration } from 'react-native'
 
 import { RelationshipDidRepository } from '../vrc/repositories/RelationshipDidRepository'
 import { resolveContactDisplayInfo } from '../vrc/utils/rcardDisplayUtils'
@@ -91,13 +92,29 @@ async function relationshipOn(agent: Agent, connectionId: string): Promise<Relat
   return found?.myRelationshipDid && found.counterpartyRelationshipDid ? found : undefined
 }
 
+/**
+ * Whether this phone could ask `connectionId`'s contact to confirm: a relationship with both relationship DIDs exists
+ * on it. What decides whether an entry point is offered at all (the chat's "+"), beside the switch. Never throws: an
+ * unreadable store reads as no.
+ */
+export async function canConfirmWith(agent: Agent, connectionId: string): Promise<boolean> {
+  try {
+    return (await relationshipOn(agent, connectionId)) !== undefined
+  } catch {
+    return false
+  }
+}
+
 const proofUnder = (agent: Agent, controller: string) => ({
   kind: 'verify' as const,
   verify: { verify: (doc: unknown) => verifyDocumentProof(agent, doc as Record<string, unknown>, controller) },
 })
 
-/** Past its time, or a time that cannot be read: either way, not answerable. */
-const pastDue = (expiresAt: string, now: number) => {
+/**
+ * Past its time, or a time that cannot be read: either way, not answerable. The isFinite check is what makes an
+ * unreadable or missing expiresAt (NaN) read as past due: `at <= now` alone is false for NaN.
+ */
+export const pastDue = (expiresAt: string, now = Date.now()) => {
   const at = Date.parse(expiresAt)
   return !Number.isFinite(at) || at <= now
 }
@@ -276,6 +293,22 @@ export async function handleConfirmResponse(
   await agent.genericRecords.update(record)
   agent.config?.logger?.info(`${LOG_PREFIX} answered on connection ${context.connectionId}: ${answer.decision}`)
   confirmEvents.emit('answered', { connectionId: context.connectionId, decision: answer.decision })
+  if (answer.decision === 'notMe') buzzNotThem(agent)
+}
+
+/**
+ * A "No, that wasn't me" just landed: the phone vibrates once, so the person looks before acting, wherever the app is.
+ * Once per answer, never on a render or a re-open: this runs only here, when a waiting request takes its answer, and a
+ * second copy of the same answer is dropped above (no longer waiting). React Native's own Vibration, already in the
+ * shipped app (the PIN screen and the scanner use it; Android declares VIBRATE). A phone that cannot vibrate changes
+ * nothing: the answer is already kept.
+ */
+function buzzNotThem(agent: Agent): void {
+  try {
+    Vibration.vibrate()
+  } catch (error) {
+    agent.config?.logger?.warn(`${LOG_PREFIX} could not vibrate for a not-me answer: ${(error as Error)?.message}`)
+  }
 }
 
 /**
@@ -314,6 +347,8 @@ export interface ConfirmPrompt {
   request: Record<string, unknown>
   receivedAt: string
   answered?: ConfirmDecision
+  /** When this phone's person answered: the time inside the signed answer, so both phones show the same time. */
+  answeredAt?: string
 }
 
 class ConfirmPromptStore {
@@ -467,10 +502,14 @@ export async function answerConfirmRequest(
   await sendTrustTaskDocument(agent, connectionId, signed)
 
   confirmPromptStore.take(connectionId)
-  confirmEvents.emit('promptCleared', { connectionId })
-  await keepPrompt(agent, { ...prompt, open: false, answered: decision }).catch((error: unknown) =>
-    agent.config?.logger?.warn(`${LOG_PREFIX} could not close a request: ${(error as Error)?.message ?? error}`)
+  await keepPrompt(agent, { ...prompt, open: false, answered: decision, answeredAt: answer.respondedAt }).catch(
+    (error: unknown) =>
+      agent.config?.logger?.warn(`${LOG_PREFIX} could not close a request: ${(error as Error)?.message ?? error}`)
   )
+  // Only once the answer is kept: an open chat reads the record again on this event, and nothing else redraws it. Fired
+  // before the write, the chat read the request as still open and kept showing it so until it was left and opened again
+  // (278.19). The store is emptied first, as before, so a second tap finds nothing to answer.
+  confirmEvents.emit('promptCleared', { connectionId })
   agent.config?.logger?.info(`${LOG_PREFIX} answered on connection ${connectionId}: ${decision}`)
   return 'sent'
 }

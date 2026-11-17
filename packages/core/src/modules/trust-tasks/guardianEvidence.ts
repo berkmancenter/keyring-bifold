@@ -3,7 +3,7 @@
  * (trusted-approver plan, stage 2, S1). Jordan says yes to approving for Sam; if Jordan's phone holds a Guardian card,
  * it sends the chain after the yes (approver/guardian-evidence/0.1, signed under its relationship DID). Sam's phone
  * checks it with sedi/guardian's verifyGuardian against the State roots this build trusts (sedi/guardian/stateRoots)
- * and the ward set on this phone, keeps the card and the verdict on the offer's record, and checks it again each
+ * and this phone's ward (its own ward code when the card names it, else the ward set: {@link wardToCheck}), keeps the card and the verdict on the offer's record, and checks it again each
  * time Who approves opens (a card can expire or a root can leave the list).
  *
  * Jordan is asked first (Alberto, 2026-11-11): the card shows Sam Jordan's KERI identifier and the state's record of it,
@@ -30,10 +30,11 @@ import { utils, type Agent } from '@credo-ts/core'
 import { EventEmitter } from 'events'
 
 import { verifyGuardian, type ChainMaterial } from '../sedi/guardian'
+import { wardNamedIn } from '../sedi/guardian/chain'
 import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../sedi/guardian/k0TestCard'
 import { K0_REVOKED_OMITTED_CARD } from '../sedi/guardian/k0RevokedOmittedCard'
-import { K0_TEST_WARD, isDemoStateRoot, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
+import { K0_TEST_WARD, isDemoStateRoot, k1Root, trustedStateRoots, type StateRoot } from '../sedi/guardian/stateRoots'
 import {
   ourRootKelResolver,
   parseWebsDid,
@@ -42,13 +43,16 @@ import {
   type RootKelResolver,
   type WebsFetch,
 } from '../sedi/webs'
-import { websDidToFetch } from '../sedi/webs/demoStateHost'
+import { checkDesignation, type DesignationCheck } from '../sedi/webs/designatedAliases'
+import { demoStateHostProblem, websDidToFetch } from '../sedi/webs/demoStateHost'
 import { resetLiveResolutions, resolveRootKelReusing, type LiveRootKel } from '../sedi/webs/lastLive'
+import { keptWardCodeOf } from '../sedi/identity/phoneIdentity'
 
 import {
   ROLE_OFFER_ASK,
   approverRoleEvents,
   approvingFor,
+  isYesNotAdded,
   proofUnder,
   relationshipOn,
   writtenAsOf,
@@ -59,9 +63,19 @@ import {
   GUARDIAN_EVIDENCE_MAX_BYTES,
   GUARDIAN_EVIDENCE_SPEC,
   GUARDIAN_EVIDENCE_TYPE_URI,
+  GUARDIAN_EVIDENCE_V2_SPEC,
+  GUARDIAN_EVIDENCE_V2_TYPE_URI,
   type GuardianEvidencePayload,
 } from './approverRoleSpec'
 import { signDocumentProof } from './documentProof'
+import {
+  checkSocialAuthorization,
+  socialMaterialFor,
+  splitSocial,
+  withSocial,
+  type SocialMaterial,
+  type SocialVerdict,
+} from './socialAuthorization'
 import { isStateVerifiedApproversEnabled } from './module/stateVerifiedApproversFlag'
 import { isTrustedApproversEnabled } from './module/trustedApproversFlag'
 import { isTrustTestStateEnabled } from './module/trustTestStateFlag'
@@ -94,6 +108,8 @@ export type GuardianVerdict =
       root: string
       state: string
       demo?: true
+      /** That list entry's test mark (the K0 preload): a grey "Test" label in place of "Demo". */
+      test?: true
       checkedAt: string
       expires?: string
       /** The host the root's KEL was actually fetched from on this check (its did:webs), when it was fetched live. */
@@ -110,15 +126,42 @@ export type GuardianVerdict =
        * when only the root's history was fetched and the issuers' came from the card: the screen then says so.
        */
       fetchedIssuers?: true
+      /**
+       * Set only when the root was fetched from the host the card itself came with (K1 in 'fromCard' mode, stateRoots
+       * hostFromCard): the holder's line says "the host the state's QR named", the person's "the host <name>'s card
+       * names", never "the state's record".
+       */
+      hostFromCard?: true
+      /** Set when the card came with a host the state does not name (or it could not be told): see HostWithheld. */
+      hostWithheld?: HostWithheld
     }
-  | { ok: false; reason: string; detail: string; checkedAt: string }
+  | { ok: false; reason: string; detail: string; checkedAt: string; hostWithheld?: HostWithheld }
+
+/**
+ * A host a card came with that was NOT fetched, because the state root does not designate it (sedi/webs
+ * designatedAliases): the card was checked against its own copy instead. `retryable` only for a transient failure to
+ * read the designation (unreachable, timeout), never when the check was switched off or the state said no.
+ */
+export interface HostWithheld {
+  host: string
+  result: Exclude<DesignationCheck['result'], 'designated'>
+  why: string
+  retryable: boolean
+}
 
 /** Kept on the offer's record (RoleOfferAsk.guardian): the card a contact sent, as whom, and the last verdict. */
 export interface GuardianOnAsk {
   approver: string
   evidence: GuardianEvidence
+  /** The host the card came with (payload `stateHost`), for a root fetched from the card's host; else absent. */
+  stateHost?: string
   receivedAt: string
   verdict: GuardianVerdict
+  /**
+   * The Social Authorization the contact sent with the card (0.2's `social`), if any: only with a card issued to their
+   * own phone. `material` is absent when the document named one but did not carry all of it (refused as incomplete).
+   */
+  social?: { material?: SocialMaterial; verdict: SocialVerdict }
 }
 
 /**
@@ -132,7 +175,17 @@ export interface GuardianOnAsk {
  * Kept apart from `unverified` so the screen says "Couldn't reach the state", not that the card failed a check.
  */
 export type GuardianStanding =
-  | { kind: 'verified'; state: string; demo?: true; fetchedFrom?: string; fetchedAt?: string; fetchedIssuers?: true }
+  | {
+      kind: 'verified'
+      state: string
+      demo?: true
+      test?: true
+      fetchedFrom?: string
+      fetchedAt?: string
+      fetchedIssuers?: true
+      hostFromCard?: true
+      hostWithheld?: HostWithheld
+    }
   | { kind: 'unverified'; outcome: string }
   | { kind: 'unreachable'; state: string }
 
@@ -206,6 +259,7 @@ function checkWith(
       root: root.aid,
       state: root.name,
       ...(root.demo ? { demo: true as const } : {}),
+      ...(root.test ? { test: true as const } : {}),
       checkedAt,
       ...(result.expires ? { expires: result.expires } : {}),
     }
@@ -236,12 +290,61 @@ const resolverFor = (deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver
  * now, each with the did:webs to fetch: a real root's own; a demo root's with the Developer "Demo state host" in place
  * of its host, or none when no host is in effect (sedi/webs/demoStateHost, read at each call).
  */
-function websRootsFor(evidence: GuardianEvidence, roots: StateRoot[]): (StateRoot & { webs: string })[] {
+function websRootsFor(
+  evidence: GuardianEvidence,
+  roots: StateRoot[],
+  stateHost?: string
+): (StateRoot & { webs: string })[] {
   const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
   return roots.flatMap((r) => {
-    const webs = said.includes(r.aid) ? websDidToFetch(r) : undefined
+    if (!said.includes(r.aid)) return []
+    const webs = r.hostFromCard ? websFromCardHost(r, stateHost) : websDidToFetch(r)
     return webs ? [{ ...r, webs }] : []
   })
+}
+
+/**
+ * Why a host a card came with is not even a host, or null when it is one: a bare public hostname, by the Developer
+ * "Demo state host" field's own rules (no path, no address, no local name). Such a host refuses the check outright; it
+ * is never read past. Whether the STATE names it is a separate, network question ({@link designationFor}).
+ */
+export function cardStateHostProblem(_root: Pick<StateRoot, 'aid'>, host: string): string | null {
+  return demoStateHostProblem(host)
+}
+
+/** The designation check a Guardian check uses: the real one, or one a row passes in. */
+export type DesignationCheckFn = (rootAid: string, host: string, fetchImpl?: WebsFetch) => Promise<DesignationCheck>
+
+/**
+ * Whether the state root names `host` as one of its own (its designated-aliases file there, checked against its live
+ * KEL there: sedi/webs designatedAliases). Only 'designated' lets the host be fetched; every other answer withholds it,
+ * and the card is checked against its own copy, said so.
+ */
+async function designationFor(
+  root: StateRoot,
+  host: string,
+  deps: { fetch?: WebsFetch; checkDesignation?: DesignationCheckFn }
+): Promise<DesignationCheck> {
+  return (deps.checkDesignation ?? checkDesignation)(root.aid, host.toLowerCase(), deps.fetch)
+}
+
+/** A designation answer that can come out differently if asked again soon: a failure to read, never a "no". */
+const transient = (d: DesignationCheck) =>
+  d.result === 'unreachable' && (d.why === 'unreachable' || d.why === 'timeout')
+
+/** A 'fromCard' root's did:webs with the card's host in place of its placeholder host; none without a usable host. */
+function websFromCardHost(root: StateRoot, stateHost?: string): string | undefined {
+  if (!root.webs || !stateHost || cardStateHostProblem(root, stateHost) !== null) return undefined
+  const parsed = parseWebsDid(root.webs)
+  if (!parsed.ok || parsed.value.aid !== root.aid) return undefined
+  return ['did:webs', stateHost.toLowerCase().replace(':', '%3A'), ...parsed.value.path, parsed.value.aid].join(':')
+}
+
+/** A 'fromCard' root this card names, given a host that is refused: the check must refuse rather than read the copy. */
+function refusedCardHost(evidence: GuardianEvidence, roots: StateRoot[], stateHost?: string): StateRoot | undefined {
+  if (stateHost === undefined) return undefined
+  const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
+  return roots.find((r) => r.hostFromCard && said.includes(r.aid) && cardStateHostProblem(r, stateHost) !== null)
 }
 
 /**
@@ -283,16 +386,71 @@ const intermediateDid = (rootDid: string, aid: string) => rootDid.slice(0, rootD
  * intermediates are not fetched: only the root publishes at a did:webs on our list, so for a real state this still
  * reads the issuers' histories from the card (a real state's units and agents would need their own did:webs).
  */
+export type GuardianCheckDeps = {
+  fetch?: WebsFetch
+  resolveRootKel?: RootKelResolver
+  resolves?: WebsResolves
+  /** The host the card came with (K1 'fromCard'): fetched only if the state names it. */
+  stateHost?: string
+  checkDesignation?: DesignationCheckFn
+}
+
 export async function checkGuardianEvidenceResolving(
   evidence: GuardianEvidence,
   ward: string | null,
   now: Date,
   onThrow: (message: string) => void,
-  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver; resolves?: WebsResolves } = {}
+  deps: GuardianCheckDeps = {}
 ): Promise<GuardianVerdict> {
   const checkedAt = now.toISOString()
   try {
-    const roots = websRootsFor(evidence, trustedStateRoots())
+    // A host the card came with that is not a host at all (a path, an address, a local name) refuses the check: it is
+    // never read past, and never replaced by the card's own copy.
+    const badHost = refusedCardHost(evidence, trustedStateRoots(), deps.stateHost)
+    if (badHost)
+      return {
+        ok: false,
+        reason: 'stateHostRefused',
+        detail: `${badHost.name}: the card's host ${deps.stateHost} is ${cardStateHostProblem(badHost, deps.stateHost as string)}`,
+        checkedAt,
+      }
+    // A host the card came with is fetched only if the state names it; otherwise the copy is checked, and said so.
+    const fromCard = cardHostRoot(evidence, trustedStateRoots())
+    let liveHost = deps.stateHost
+    let withheld: HostWithheld | undefined
+    if (fromCard && deps.stateHost) {
+      const d = await designationFor(fromCard, deps.stateHost, deps)
+      if (d.result !== 'designated') {
+        liveHost = undefined
+        withheld = { host: deps.stateHost, result: d.result, why: d.why, retryable: transient(d) }
+      }
+    }
+    const verdict = await checkResolving(evidence, ward, now, onThrow, { ...deps, stateHost: liveHost })
+    return withheld ? { ...verdict, hostWithheld: withheld } : verdict
+  } catch (e) {
+    const message = `the check stopped on an error: ${(e as Error)?.message ?? String(e)}`
+    onThrow(message)
+    return { ok: false, reason: 'checkFailed', detail: message, checkedAt }
+  }
+}
+
+/** The 'fromCard' root (K1) a card names, if it names one. */
+function cardHostRoot(evidence: GuardianEvidence, roots: StateRoot[]): StateRoot | undefined {
+  const said = JSON.stringify([evidence.kels, evidence.tels, evidence.creds])
+  return roots.find((r) => r.hostFromCard && said.includes(r.aid))
+}
+
+/** The check itself, with the host already decided (a host the state names, or none). */
+async function checkResolving(
+  evidence: GuardianEvidence,
+  ward: string | null,
+  now: Date,
+  onThrow: (message: string) => void,
+  deps: GuardianCheckDeps
+): Promise<GuardianVerdict> {
+  const checkedAt = now.toISOString()
+  try {
+    const roots = websRootsFor(evidence, trustedStateRoots(), deps.stateHost)
     if (!ward || roots.length === 0) return checkWith(evidence, ward, now, onThrow, [])
     const resolves = deps.resolves ?? new Map()
     const resolvedKels: Uint8Array[] = []
@@ -376,9 +534,11 @@ export async function checkGuardianEvidenceResolving(
     const host = verdict.ok === true ? fetchedFrom.get(verdict.root) : undefined
     if (!host || verdict.ok !== true) return verdict
     const at = reusedFrom.get(verdict.root)
+    const fromCard = roots.find((r) => r.aid === verdict.root)?.hostFromCard === true
     return {
       ...verdict,
       fetchedFrom: host,
+      ...(fromCard ? { hostFromCard: true as const } : {}),
       ...(at ? { fetchedAt: at, reused: true as const } : {}),
       ...(issuersFetched.has(verdict.root) ? { fetchedIssuers: true as const } : {}),
     }
@@ -408,11 +568,36 @@ async function keepOne(agent: Pick<Agent, 'genericRecords'>, recordType: string,
  */
 export async function holdGuardianEvidence(
   agent: Pick<Agent, 'genericRecords'>,
-  evidence: GuardianEvidence
+  evidence: GuardianEvidence,
+  options: { stateHost?: string } = {}
 ): Promise<'held' | 'tooLarge'> {
   if (evidenceBytes(evidence) > GUARDIAN_EVIDENCE_MAX_BYTES) return 'tooLarge'
-  await keepOne(agent, GUARDIAN_EVIDENCE_HELD, { ...evidenceOf(evidence), heldAt: new Date().toISOString() })
+  // The host the card came with (a state office's QR, K1 'fromCard'), kept with it; any other card replaces it, so a
+  // card held from the Developer settings never carries a host it did not come with.
+  await keepOne(agent, GUARDIAN_EVIDENCE_HELD, {
+    ...evidenceOf(evidence),
+    ...(options.stateHost ? { stateHost: options.stateHost } : {}),
+    heldAt: new Date().toISOString(),
+  })
   return 'held'
+}
+
+/** The host the held card came with (K1 'fromCard'), if it came with one. */
+export async function heldGuardianStateHost(agent: Pick<Agent, 'genericRecords'>): Promise<string | undefined> {
+  return (await heldGuardianCard(agent))?.stateHost
+}
+
+/** The held card and the host it came with (K1 'fromCard'), in one read of its record. */
+export async function heldGuardianCard(
+  agent: Pick<Agent, 'genericRecords'>
+): Promise<{ evidence: GuardianEvidence; stateHost?: string } | undefined> {
+  const [record] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
+  const content = record?.content as unknown as (GuardianEvidence & { stateHost?: unknown }) | undefined
+  if (!content?.guardianSaid) return undefined
+  return {
+    evidence: evidenceOf(content),
+    ...(typeof content.stateHost === 'string' ? { stateHost: content.stateHost } : {}),
+  }
 }
 
 /** The card this phone holds to send, if any. */
@@ -422,6 +607,16 @@ export async function heldGuardianEvidence(
   const [record] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
   const held = record?.content as unknown as GuardianEvidence | undefined
   return held?.guardianSaid ? evidenceOf(held) : undefined
+}
+
+/**
+ * Hold no card on this phone (Developer setup "as the person": the person's phone holds no card, so no state card
+ * shows there). The held record is overwritten with no card in it, never deleted, exactly as holding another card
+ * replaces it; heldGuardianEvidence then finds none. Cards already sent stay with whoever has them.
+ */
+export async function holdNoGuardianEvidence(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_EVIDENCE_HELD })) ?? []
+  if (existing) await keepOne(agent, GUARDIAN_EVIDENCE_HELD, { noneSince: new Date().toISOString() })
 }
 
 export type EvidenceSendResult = 'sent' | 'off' | 'none' | 'tooLarge' | 'noRelationship'
@@ -448,16 +643,40 @@ export async function sendGuardianEvidence(
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   if (!connection.did || !connection.theirDid) return 'noRelationship'
 
+  // The authorization this phone's holder issues the card's ward (S2): only for a card issued to this phone's own
+  // holder AID, so a K0 card's payload is exactly what older builds accept. A failure to issue one never stops the
+  // card: it goes without it, and the person's phone shows the card as before.
+  const issued = await socialMaterialFor(agent, held).catch((e: unknown) => {
+    warn(agent, `no authorization sent with the card on ${connectionId}: ${(e as Error)?.message ?? e}`)
+    return undefined
+  })
+  const withIt = issued ? withSocial(held, issued) : undefined
+  const carried = withIt && evidenceBytes(withIt) <= GUARDIAN_EVIDENCE_MAX_BYTES ? withIt : undefined
+  if (issued && !carried) warn(agent, `the card and its authorization are over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes`)
+
   const id = utils.uuid()
+  // The host goes ONLY with a K1 card, and only as 0.2: a K0 card stays 0.1, exactly what earlier builds send and
+  // accept. A phone that knows only 0.1 refuses a 0.2 document by its type (and, today, silently: it answers nothing).
+  const k1Card = isK1Card(held)
+  const stateHost = k1Card ? await heldGuardianStateHost(agent) : undefined
+  // 0.2 for a K1 card or a card carrying its authorization; 0.1 (unchanged) otherwise, so a K0 card is what it was.
+  // `carried` cannot widen this to a K0 card: socialMaterialFor returns undefined unless the card's holder is this
+  // phone's own holder AID (holder === evidence.holder) AND the Guardian credential is issued to it (a.i === holder),
+  // which a K0 card, issued to the kit's own holder, never is. So a K0 card never carries an authorization.
+  const v2 = k1Card || !!carried
   const payload: GuardianEvidencePayload = {
     agent: agentDid,
     approver: approverDid,
-    ...held,
+    ...(carried ?? held),
+    // The host the card came with (K1 'fromCard'), so the person's phone fetches the state from the same one.
+    ...(stateHost ? { stateHost } : {}),
     sentAt: new Date().toISOString(),
+    // 0.2's `social` names the authorization; its proof, registry and the guardian's KEL are in the lists above.
+    ...(carried && issued ? { social: { said: issued.said } } : {}),
   }
   const document: Record<string, unknown> = {
     id,
-    type: GUARDIAN_EVIDENCE_TYPE_URI,
+    type: v2 ? GUARDIAN_EVIDENCE_V2_TYPE_URI : GUARDIAN_EVIDENCE_TYPE_URI,
     threadId: id,
     issuer: connection.did,
     recipient: connection.theirDid,
@@ -505,13 +724,31 @@ export async function cardConsentOn(
   return answer === 'yes' || answer === 'no' ? answer : undefined
 }
 
-/** Keep this phone's answer for the contact on `connectionId` (changed in place; saved the first time). */
+/**
+ * The state root the answer for `connectionId` was given for (the root of the card held when it was answered), if
+ * one was recorded. An answer from before roots were recorded has none.
+ */
+export async function cardConsentRootOn(
+  agent: Pick<Agent, 'genericRecords'>,
+  connectionId: string
+): Promise<string | undefined> {
+  const [record] =
+    (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
+  const root = (record?.content as { root?: unknown } | undefined)?.root
+  return typeof root === 'string' && root.length > 0 ? root : undefined
+}
+
+/**
+ * Keep this phone's answer for the contact on `connectionId` (changed in place; saved the first time), with the state
+ * root of the card it was given for, when known: the question names the state, so the answer is kept for that state.
+ */
 export async function setCardConsent(
   agent: Pick<Agent, 'genericRecords'>,
   connectionId: string,
-  answer: CardConsent
+  answer: CardConsent,
+  root?: string
 ): Promise<void> {
-  const content = { connectionId, answer, answeredAt: new Date().toISOString() }
+  const content = { connectionId, answer, answeredAt: new Date().toISOString(), ...(root ? { root } : {}) }
   const [existing] =
     (await agent.genericRecords.findAllByQuery({ recordType: GUARDIAN_CARD_CONSENT, connectionId })) ?? []
   if (existing) {
@@ -544,6 +781,8 @@ export interface CardQuestion {
   state?: string
   /** That list entry's demo mark ("Demo" pill beside the name). */
   demo?: true
+  /** That list entry's test mark: the grey "Test" label in place of "Demo". */
+  test?: true
 }
 
 class CardQuestionStore {
@@ -572,27 +811,54 @@ export const guardianCardEvents = new EventEmitter()
  * The state this phone's own list names for the card's root, and that entry's demo mark, if the root is on the list;
  * never the card's word.
  */
-function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true } {
-  const root = trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))
+/** The root on this phone's list the card chains to (its AID found among the card's KELs), if it is on the list. */
+function rootAidOf(evidence: GuardianEvidence): string | undefined {
+  return trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))?.aid
+}
+
+function stateOf(evidence: GuardianEvidence): { state?: string; demo?: true; test?: true } {
+  // The same match as rootAidOf: one rule decides whether a card counts as a known state's.
+  const aid = rootAidOf(evidence)
+  const root = aid ? trustedStateRoots().find((known) => known.aid === aid) : undefined
   if (!root) return {}
-  return root.demo ? { state: root.name, demo: true } : { state: root.name }
+  return {
+    state: root.name,
+    ...(root.demo ? { demo: true as const } : {}),
+    ...(root.test ? { test: true as const } : {}),
+  }
 }
 
 /** The card this phone could share, and the state it is from: none with either switch off or no card held. */
+/**
+ * Whether a card is K1's (a state office's), for the wire version only: K1's root AID present among the KELs the card
+ * carries. That is presence in a carried KEL, not proof of issuance (the check decides that). Credentials are not read:
+ * a K0 card whose credentials mention K1's AID still goes as 0.1. Such a card goes as guardian-evidence/0.2.
+ */
+export function isK1Card(evidence: GuardianEvidence): boolean {
+  const k1 = k1Root()
+  return !!k1 && evidence.kels.some((kel) => kel.includes(k1.aid))
+}
+
+/**
+ * The card this phone would send, for the screens: its state, its demo mark, and `k1` when it is K1's (sent as 0.2, so
+ * a phone on an older build will not show it; the line says so, and claims nothing about receipt).
+ */
 export async function cardToShare(
   agent: Pick<Agent, 'genericRecords'>
-): Promise<{ state?: string; demo?: true } | undefined> {
+): Promise<{ state?: string; demo?: true; test?: true; k1?: true } | undefined> {
   if (!isOn()) return undefined
   const held = await heldGuardianEvidence(agent)
   if (!held) return undefined
-  return stateOf(held)
+  return { ...stateOf(held), ...(isK1Card(held) ? { k1: true as const } : {}) }
 }
 
 export type CardAfterYesResult = EvidenceSendResult | 'declined' | 'asked' | 'notApproving'
 
 /**
  * After a yes to approve for the contact on `prompt.connectionId`: send the card this phone holds only if its person
- * already said yes to sending it to this contact. Said no: nothing goes, and nothing is asked again. Never asked:
+ * already said yes to sending it to this contact, for a card from the same state (the question names the state; a
+ * yes for another state's card, or one kept before states were, puts the question again for this card's state).
+ * Said no: nothing goes, and nothing is asked again. Never asked:
  * nothing goes, and the question is put to the person ({@link cardQuestions}). Either switch off: nothing is asked
  * and nothing goes. The approval itself is never touched here.
  */
@@ -605,6 +871,9 @@ export async function guardianCardAfterYes(
   const held = await heldGuardianEvidence(agent)
   if (!held) return 'none'
   const consent = await cardConsentOn(agent, prompt.connectionId)
+  // A yes counts only for the state it was given for (the question names it): for another state's card, or a yes
+  // kept before states were, the question is put again, naming the held card's state.
+  if (consent === 'yes' && (await yesForAnotherState(agent, prompt.connectionId))) return askAgain(agent, prompt)
   if (consent === 'yes') return sendGuardianEvidence(agent, prompt.connectionId, prompt.agentDid, approverDid)
   if (consent === 'no') return 'declined'
   cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...stateOf(held) })
@@ -623,13 +892,64 @@ export async function shareGuardianCard(
   send: boolean
 ): Promise<CardAfterYesResult> {
   if (!isOn()) return 'off'
-  await setCardConsent(agent, connectionId, send ? 'yes' : 'no')
+  const held = await heldGuardianEvidence(agent)
+  await setCardConsent(agent, connectionId, send ? 'yes' : 'no', held ? rootAidOf(held) : undefined)
   cardQuestions.take(connectionId)
   guardianCardEvents.emit('question', { connectionId })
   if (!send) return 'declined'
   const yes = (await approvingFor(agent)).find((prompt) => prompt.connectionId === connectionId)
   if (!yes?.answeredAs) return 'notApproving'
   return sendGuardianEvidence(agent, connectionId, yes.agentDid, yes.answeredAs)
+}
+
+/** A yes kept for this contact, given for a card from a state other than the held card's (or with no state kept). */
+async function yesForAnotherState(agent: Agent, connectionId: string): Promise<boolean> {
+  if ((await cardConsentOn(agent, connectionId)) !== 'yes') return false
+  const held = await heldGuardianEvidence(agent)
+  if (!held) return false
+  const root = rootAidOf(held)
+  return !root || (await cardConsentRootOn(agent, connectionId)) !== root
+}
+
+/** Put "Also send your Guardian card from <state> to <name>?" for the held card's state; nothing goes yet. */
+async function askAgain(agent: Agent, prompt: Pick<RoleOfferPrompt, 'connectionId' | 'asker'>): Promise<'asked'> {
+  const held = await heldGuardianEvidence(agent)
+  cardQuestions.set({ connectionId: prompt.connectionId, asker: prompt.asker, ...(held ? stateOf(held) : {}) })
+  guardianCardEvents.emit('question', { connectionId: prompt.connectionId })
+  return 'asked'
+}
+
+/** What {@link guardianCardAfterKeep} did for one person: the after-a-yes result, or 'failed' when it threw. */
+export type CardAfterKeepResult = CardAfterYesResult | 'failed'
+
+/**
+ * A card was just kept on this phone (a state office's pick-up, sedi/holder/receiveGuardianCard): offer it to each
+ * person this phone already approves for, by exactly the rule after a yes ({@link guardianCardAfterYes}): their
+ * earlier yes sends this card only if it was given for a card from the SAME state (its root, kept with the answer),
+ * else the question is put again naming this card's state; a no sends nothing and is not asked again; never asked
+ * puts the question. So a card picked up AFTER the yes reaches the person with no step
+ * on People I approve for (K1 test, 11-14), and never without an answer for its state.
+ *
+ * One person's send failing never stops the next: it reads 'failed' and is logged. Either switch off: nothing at
+ * all. One entry per person, with their name, for the screen to say who it went to.
+ */
+export async function guardianCardAfterKeep(
+  agent: Agent
+): Promise<Array<{ connectionId: string; asker: string; result: CardAfterKeepResult }>> {
+  const results: Array<{ connectionId: string; asker: string; result: CardAfterKeepResult }> = []
+  if (!isOn()) return results
+  for (const yes of await approvingFor(agent)) {
+    if (!yes.answeredAs) continue
+    let result: CardAfterKeepResult
+    try {
+      result = await guardianCardAfterYes(agent, yes, yes.answeredAs)
+    } catch (e) {
+      warn(agent, `the kept card was not sent on ${yes.connectionId}: ${(e as Error)?.message ?? e}`)
+      result = 'failed'
+    }
+    results.push({ connectionId: yes.connectionId, asker: yes.asker, result })
+  }
+  return results
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -712,6 +1032,45 @@ export async function stateWardOf(agent: Pick<Agent, 'genericRecords'>): Promise
   return typeof ward === 'string' && ward.length > 0 ? ward : null
 }
 
+/**
+ * This phone's two wards: the one set ({@link stateWardOf}: K0's by "Set up as the person", or its own code by "Use
+ * this code on this phone") and its own ward code, if it was made (sedi/identity/phoneIdentity).
+ */
+export interface PhoneWards {
+  set: string | null
+  own: string | null
+}
+
+export async function phoneWardsOf(agent: Pick<Agent, 'genericRecords'>): Promise<PhoneWards> {
+  return { set: await stateWardOf(agent), own: await keptWardCodeOf(agent) }
+}
+
+/**
+ * The ward a card is checked against: this phone's own ward code when the card names it, so a state office's card
+ * for this phone checks with no Developer step, whichever ward is set (K1 test, 11-14: "Set up as the person" had set
+ * K0's ward over it). Otherwise the ward set, exactly as before, so a card naming neither is refused as it was
+ * ('noWard' or 'wardMismatch'). Only chooses: the check itself still refuses a card naming any other ward.
+ */
+export function wardToCheck(
+  wards: PhoneWards,
+  evidence: Pick<GuardianEvidence, 'creds' | 'guardianSaid'>
+): string | null {
+  if (wards.own !== null && wardNamedIn(evidence.creds, evidence.guardianSaid) === wards.own) return wards.own
+  return wards.set
+}
+
+/**
+ * Set no ward on this phone (Developer setup "as the guardian": the guardian's phone is not the person the card
+ * names). The ward record is overwritten with an empty ward, never deleted; stateWardOf then reads null, so no card
+ * received here verifies against a SET ward. A card naming this phone's OWN ward code still does (wardToCheck): such
+ * a card names this very phone, so it is not shown as naming someone else (decided 11-14 with #1072). A phone has an
+ * own ward code only once its codes screen has shown it.
+ */
+export async function unsetStateWard(agent: Pick<Agent, 'genericRecords'>): Promise<void> {
+  const [existing] = (await agent.genericRecords.findAllByQuery({ recordType: STATE_WARD })) ?? []
+  if (existing) await keepOne(agent, STATE_WARD, { ward: '', unsetAt: new Date().toISOString() })
+}
+
 const dropped = (agent: Agent, connectionId: string, why: string) =>
   warn(agent, `a guardian card on connection ${connectionId} not taken: ${why}`)
 
@@ -734,8 +1093,12 @@ export async function handleGuardianEvidence(
   const relationship = await relationshipOn(agent, context.connectionId)
   if (!relationship)
     return dropped(agent, context.connectionId, 'no relationship with this contact to check it against')
+  // Either version this build knows, by the document's own type: 0.2 may carry stateHost (and social); 0.1 never does.
+  const v2 = document?.type === GUARDIAN_EVIDENCE_V2_TYPE_URI
+  if (!v2 && document?.type !== GUARDIAN_EVIDENCE_TYPE_URI)
+    return dropped(agent, context.connectionId, `its type ${String(document?.type)} is not one this build knows`)
   const outcome = await service.consume(agent.context, {
-    spec: GUARDIAN_EVIDENCE_SPEC as never,
+    spec: (v2 ? GUARDIAN_EVIDENCE_V2_SPEC : GUARDIAN_EVIDENCE_SPEC) as never,
     document,
     myDid: context.recipientDid,
     senderDid: context.senderDid,
@@ -754,28 +1117,59 @@ export async function handleGuardianEvidence(
   if (!record || !ask || ask.agentDid !== payload.agent)
     return dropped(agent, context.connectionId, 'it names no offer this phone sent on this connection')
 
-  const evidence = evidenceOf(payload)
-  const verdict = await checkGuardianEvidenceResolving(evidence, await stateWardOf(agent), new Date(), (m) =>
-    warn(agent, m)
+  // 0.2's authorization (named by `social`) is taken out of the card's lists first, so the card's own check never
+  // reads, or fetches, the guardian's KEL; 0.1 never carries one.
+  const said = v2 && typeof payload.social?.said === 'string' ? payload.social.said : undefined
+  const split = said ? splitSocial(evidenceOf(payload), said) : undefined
+  const evidence = split ? split.card : evidenceOf(payload)
+  // The host the card came with, and only that: never this phone's Developer field, never a host from elsewhere.
+  const stateHost = v2 && typeof payload.stateHost === 'string' ? payload.stateHost : undefined
+  const ward = wardToCheck(await phoneWardsOf(agent), evidence)
+  const verdict = await checkGuardianEvidenceResolving(
+    evidence,
+    ward,
+    new Date(),
+    (m) => warn(agent, m),
+    stateHost ? { stateHost } : {}
   )
+  // The authorization stands on the card's verdict just computed (the same live fetches), never on its own.
+  const social = said
+    ? split?.material
+      ? {
+          material: split.material,
+          verdict: checkSocialAuthorization(evidence, split.material, ward, verdict, new Date(), (m) => warn(agent, m)),
+        }
+      : {
+          verdict: {
+            ok: false as const,
+            reason: 'socialIncomplete',
+            detail: 'the authorization named was not all there (its proof, registry or the guardian KEL)',
+            checkedAt: new Date().toISOString(),
+          },
+        }
+    : undefined
   const guardian: GuardianOnAsk = {
     approver: payload.approver,
     evidence,
+    ...(stateHost ? { stateHost } : {}),
     receivedAt: new Date().toISOString(),
     verdict,
+    ...(social ? { social } : {}),
   }
   record.content = { ...ask, guardian }
   await agent.genericRecords.update(record)
   agent.config?.logger?.info(
-    `${LOG_PREFIX} guardian card kept on connection ${context.connectionId}: ${verdict.ok ? 'valid' : verdict.reason}`
+    `${LOG_PREFIX} guardian card kept on connection ${context.connectionId}: ${verdict.ok ? 'valid' : verdict.reason}` +
+      (social ? `; authorization ${social.verdict.ok ? 'valid' : social.verdict.reason}` : '')
   )
   approverRoleEvents.emit('answered', { connectionId: context.connectionId, decision: 'guardianCard' })
 }
 
-/** The DID a kept card is shown beside: the one written on the agent, or a yes not yet written; else none. */
+/** The DID a kept card is shown beside: the one written on the agent, or a yes not yet written (set aside or not). */
 function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undefined {
   if (writtenAsOf(ask) === guardian.approver) return guardian.approver
-  if (ask.state === 'accepted' && ask.acceptedAs === guardian.approver) return guardian.approver
+  // A yes set aside with "Not now" too: the person page shows its card before they add, or forget, it.
+  if (isYesNotAdded(ask) && ask.acceptedAs === guardian.approver) return guardian.approver
   return undefined
 }
 
@@ -788,7 +1182,7 @@ function shownBeside(ask: RoleOfferAsk, guardian: GuardianOnAsk): string | undef
  */
 function checkInputs(evidence: GuardianEvidence, ward: string | null): string {
   const roots = trustedStateRoots()
-    .map((root) => JSON.stringify([root.aid, root.name, root.demo === true]))
+    .map((root) => JSON.stringify([root.aid, root.name, root.demo === true, root.test === true]))
     .sort()
   return JSON.stringify([ward, roots, evidenceOf(evidence)])
 }
@@ -841,8 +1235,15 @@ async function verdictNow(
   const now = new Date()
   // A card naming a root that publishes at a did:webs is checked against what that root serves now, so it is never
   // memoised: the inputs below do not include the fetched history.
-  if (websRootsFor(guardian.evidence, trustedStateRoots()).length > 0)
-    return checkGuardianEvidenceResolving(guardian.evidence, ward, now, (m) => warn(agent, m), deps)
+  const stateHost = guardian.stateHost
+  if (
+    websRootsFor(guardian.evidence, trustedStateRoots(), stateHost).length > 0 ||
+    refusedCardHost(guardian.evidence, trustedStateRoots(), stateHost)
+  )
+    return checkGuardianEvidenceResolving(guardian.evidence, ward, now, (m) => warn(agent, m), {
+      ...deps,
+      ...(stateHost ? { stateHost } : {}),
+    })
   const inputs = checkInputs(guardian.evidence, ward)
   const last = lastChecks.get(recordId)
   if (last && last.inputs === inputs && stillCurrent(last.verdict, now)) return last.verdict
@@ -865,26 +1266,34 @@ export function guardianSourceKey(
   | 'Approver.GuardianFetchedLiveAt'
   | 'Approver.GuardianFetchedRootLive'
   | 'Approver.GuardianFetchedRootLiveAt'
+  | 'Approver.GuardianFetchedFromCardHost'
+  | 'Approver.GuardianFetchedFromCardHostAt'
   | null {
   if (!standing.fetchedFrom) return null
+  // The host the approver's card names is said to be that: never "the state's record", whatever else was fetched.
+  if (standing.hostFromCard)
+    return standing.fetchedAt ? 'Approver.GuardianFetchedFromCardHostAt' : 'Approver.GuardianFetchedFromCardHost'
   if (standing.fetchedIssuers)
     return standing.fetchedAt ? 'Approver.GuardianFetchedLiveAt' : 'Approver.GuardianFetchedLive'
   return standing.fetchedAt ? 'Approver.GuardianFetchedRootLiveAt' : 'Approver.GuardianFetchedRootLive'
 }
 
 /** A verdict as Who approves shows it. `stateNotResolved` has its own kind, named by the root on our list. */
-function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence): GuardianStanding {
+function standingOf(verdict: GuardianVerdict, evidence: GuardianEvidence, stateHost?: string): GuardianStanding {
   if (verdict.ok === true)
     return {
       kind: 'verified',
       state: verdict.state,
       ...(verdict.demo ? { demo: true as const } : {}),
+      ...(verdict.test ? { test: true as const } : {}),
       ...(verdict.fetchedFrom ? { fetchedFrom: verdict.fetchedFrom } : {}),
       ...(verdict.fetchedAt ? { fetchedAt: verdict.fetchedAt } : {}),
       ...(verdict.fetchedIssuers ? { fetchedIssuers: true as const } : {}),
+      ...(verdict.hostFromCard ? { hostFromCard: true as const } : {}),
+      ...(verdict.hostWithheld ? { hostWithheld: verdict.hostWithheld } : {}),
     }
   if (verdict.reason === 'stateNotResolved')
-    return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots())[0]?.name ?? '' }
+    return { kind: 'unreachable', state: websRootsFor(evidence, trustedStateRoots(), stateHost)[0]?.name ?? '' }
   return { kind: 'unverified', outcome: verdict.reason }
 }
 
@@ -895,15 +1304,19 @@ const sameVerdict = (a: GuardianVerdict | undefined, b: GuardianVerdict) =>
     ? a.root === b.root &&
       a.state === b.state &&
       a.demo === b.demo &&
+      a.test === b.test &&
       a.expires === b.expires &&
       a.fetchedFrom === b.fetchedFrom &&
       a.fetchedAt === b.fetchedAt &&
       // The screen reads it (which "fetched live" line), so a verdict differing only in it is written back.
-      a.fetchedIssuers === b.fetchedIssuers
+      a.fetchedIssuers === b.fetchedIssuers &&
+      a.hostFromCard === b.hostFromCard &&
+      a.hostWithheld?.result === b.hostWithheld?.result &&
+      a.hostWithheld?.why === b.hostWithheld?.why
     : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail)
 
 /**
- * Who approves, on open: each kept card checked again now (expiry, the roots this build trusts, the ward set now),
+ * Who approves, on open: each kept card checked again now (expiry, the roots this build trusts, this phone's ward now),
  * by the approver DID it is shown beside. The check runs on the JS thread, so it is memoised for this run of the app
  * (see {@link verdictNow}): it runs again only when the ward, the trusted roots or the card's text moved, or a valid
  * verdict's expiry has come, and always on the first open after a restart. Except for a card whose root publishes
@@ -915,25 +1328,123 @@ export async function guardianStandings(
   agent: Agent,
   deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver } = {}
 ): Promise<Record<string, GuardianStanding>> {
-  if (!isOn()) return {}
+  return (await approverCardStandings(agent, deps)).cards
+}
+
+/**
+ * What Who approves shows for an approver's Social Authorization (S2), beside their card: `authorized` only when the
+ * authorization checks out under a card that checks out on this same open; `refused` otherwise, with `underCard` when
+ * it was the card under it that failed (revoked, unreachable, couldn't verify), so the screen never says the
+ * authorization itself is at fault. An approver who sent none has no entry.
+ */
+export type SocialStanding =
+  | { kind: 'authorized'; state: string }
+  | { kind: 'refused'; outcome: string; underCard?: true }
+
+const socialStandingOf = (verdict: SocialVerdict): SocialStanding =>
+  verdict.ok === true
+    ? { kind: 'authorized', state: verdict.state }
+    : { kind: 'refused', outcome: verdict.reason, ...(verdict.underCard ? { underCard: true as const } : {}) }
+
+const sameSocial = (a: SocialVerdict | undefined, b: SocialVerdict) =>
+  !!a &&
+  a.ok === b.ok &&
+  (a.ok === true && b.ok === true
+    ? a.root === b.root && a.state === b.state && a.demo === b.demo && a.test === b.test && a.expires === b.expires
+    : a.ok === false && b.ok === false && a.reason === b.reason && a.detail === b.detail && a.underCard === b.underCard)
+
+/**
+ * {@link guardianStandings}, and beside it each approver's Social Authorization checked on the SAME open, against the
+ * card's verdict just computed (never a stored one): the two can never disagree about whether the card stands.
+ */
+export async function approverCardStandings(
+  agent: Agent,
+  deps: { fetch?: WebsFetch; resolveRootKel?: RootKelResolver } = {}
+): Promise<{ cards: Record<string, GuardianStanding>; social: Record<string, SocialStanding> }> {
+  if (!isOn()) return { cards: {}, social: {} }
   const resolves: WebsResolves = new Map()
   const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
-  const ward = await stateWardOf(agent)
+  const wards = await phoneWardsOf(agent)
   const standings: Record<string, GuardianStanding> = {}
+  const social: Record<string, SocialStanding> = {}
   for (const record of records) {
     const ask = record.content as unknown as RoleOfferAsk
     const guardian = ask?.guardian
     if (!guardian) continue
     const beside = shownBeside(ask, guardian)
     if (!beside) continue
+    const ward = wardToCheck(wards, guardian.evidence)
     const verdict = await verdictNow(agent, record.id, guardian, ward, { ...deps, resolves })
-    if (!sameVerdict(guardian.verdict, verdict)) {
-      record.content = { ...ask, guardian: { ...guardian, verdict } }
+    // Checked again against this open's card verdict; one kept incomplete stays the refusal it was.
+    const socialVerdict = guardian.social
+      ? guardian.social.material
+        ? checkSocialAuthorization(guardian.evidence, guardian.social.material, ward, verdict, new Date(), (m) =>
+            warn(agent, m)
+          )
+        : guardian.social.verdict
+      : undefined
+    const socialMoved = !!guardian.social && !!socialVerdict && !sameSocial(guardian.social.verdict, socialVerdict)
+    if (!sameVerdict(guardian.verdict, verdict) || socialMoved) {
+      const kept: GuardianOnAsk = {
+        ...guardian,
+        verdict,
+        ...(guardian.social && socialVerdict ? { social: { ...guardian.social, verdict: socialVerdict } } : {}),
+      }
+      record.content = { ...ask, guardian: kept }
       await agent.genericRecords
         .update(record)
         .catch((e: unknown) => warn(agent, `could not keep a new verdict: ${(e as Error)?.message ?? e}`))
     }
-    standings[beside] = standingOf(verdict, guardian.evidence)
+    standings[beside] = standingOf(verdict, guardian.evidence, guardian.stateHost)
+    if (socialVerdict) social[beside] = socialStandingOf(socialVerdict)
   }
-  return standings
+  return { cards: standings, social }
+}
+
+/**
+ * Who approves (B, 11-12): for each approver whose kept card carries the key history (KEL) of a root this phone's
+ * list marks demo (isDemoStateRoot), that root's name, by the approver DID it is shown beside, whatever the card's standing (verified,
+ * unreachable, revoked, couldn't verify). The screen draws the state's own box, titled with that name and the Demo
+ * pill, from it. Read from the list's own entry, never from the card's word or inferred from the name; a card whose
+ * root is not on the list, or not demo, has no entry. Empty with either switch off. Runs no check.
+ */
+async function demoRootsBeside(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, StateRoot>> {
+  if (!isOn()) return {}
+  const records = (await agent.genericRecords.findAllByQuery({ recordType: ROLE_OFFER_ASK })) ?? []
+  const roots = trustedStateRoots().filter((root) => isDemoStateRoot(root.aid))
+  const named: Record<string, StateRoot> = {}
+  for (const record of records) {
+    const ask = record.content as unknown as RoleOfferAsk
+    const guardian = ask?.guardian
+    if (!guardian) continue
+    const beside = shownBeside(ask, guardian)
+    if (!beside) continue
+    // Matched on the key histories the card carries (kels) only, never on its credentials or registries: a demo
+    // root's AID named only as a reference inside `creds` or `tels` gives no name. This is PRESENCE in a carried KEL,
+    // not proof the card is anchored at that root; it only labels a box on a Developer-gated demo screen, and the
+    // screen shows it only beside a card that checked up to a revocation or whose live fetch failed, never beside
+    // any other refusal. Making it structural (one helper with websRootsFor) is backlog (ac, 11-12).
+    const kels = JSON.stringify(guardian.evidence.kels)
+    const root = roots.find((r) => kels.includes(r.aid))
+    if (root) named[beside] = root
+  }
+  return named
+}
+
+export async function guardianDemoStates(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, string>> {
+  const roots = await demoRootsBeside(agent)
+  return Object.fromEntries(Object.entries(roots).map(([beside, root]) => [beside, root.name]))
+}
+
+/**
+ * The approvers {@link guardianDemoStates} names whose root the list marks `test` (the K0 preload): their state box
+ * shows the grey "Test" label and the test words in place of "Demo". Read from the list's entry, never the name.
+ */
+export async function guardianTestStates(agent: Pick<Agent, 'genericRecords'>): Promise<Record<string, true>> {
+  const roots = await demoRootsBeside(agent)
+  return Object.fromEntries(
+    Object.entries(roots)
+      .filter(([, root]) => root.test === true)
+      .map(([beside]) => [beside, true as const])
+  )
 }

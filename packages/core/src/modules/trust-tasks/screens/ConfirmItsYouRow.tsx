@@ -4,14 +4,26 @@
  * them. The row then says where the request stands:
  *  - waiting: don't act on the call yet; it can be cancelled here (here only: a late answer is then ignored);
  *  - confirmed, with the contact's phone lock, at the time their signed answer gives;
- *  - not them: a full alert, with what to do now;
+ *  - not them: one solid red card, with what to do now inside it (the phone vibrated once when the answer landed:
+ *    confirmItsYou.ts, never here, so a re-open or a re-render does not vibrate again);
  *  - no answer in time: ask again, which sends a new request.
  * The last few requests stay listed under Earlier.
  *
  * Person to person: no agent is needed, only the relationship this phone already has with the contact.
  *
- * Shown only while the "Confirm it's you" switch is on (confirmItsYouFlag.ts), read at every render, so switching it
- * off (or a remote off) takes the row away on the next render.
+ * Three forms of the same thing, each its own gate: `variant="row"` (the default) is the Safety section's row, with the
+ * request's status; `variant="button"` is the contact page's full-width "Confirm with {{name}}" button, which opens the
+ * same note-and-send form in place and hides while a request waits (the status shows in the Safety row);
+ * `variant="sheet"` is the chat's "Confirm with {{name}}" sheet, cut to one line, the note and Send (Alberto's pick of
+ * mock D1, 2026-11-13: "way too verbose and long"). In the sheet the last answer is one line, what a confirmation
+ * proves sits behind an (i), and Earlier stays on the contact page. Two things are never cut: the red "not them" card,
+ * whole, and "don't act on it" while a request waits or after no answer. Waiting shows no note box, so a second
+ * request never goes on top of one still open. After "not them" the box stays under the red card, as the sheet on
+ * 278.18 had it (opened to write a note): the person may want to ask again, and the card above says what to do.
+ *
+ * Shown only while the "Confirm it's you" switch is on (confirmItsYouFlag.ts: the switch AND no remote off), read at
+ * every render by THIS component, so switching it off (or a remote off) takes either form away on the next render, and
+ * a parent that forgets to guard still shows nothing. Never labelled a demo.
  *
  * @module trust-tasks/screens/ConfirmItsYouRow
  */
@@ -19,6 +31,7 @@ import { useAgent } from '@bifold/react-hooks'
 import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Pressable, StyleSheet, TextInput, View } from 'react-native'
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons'
 
 import Button, { ButtonType } from '../../../components/buttons/Button'
 import { ThemedText } from '../../../components/texts/ThemedText'
@@ -42,6 +55,7 @@ import { releaseWarn } from '../module/releaseLog'
 export const ConfirmItsYouRowIds = {
   row: 'ConfirmItsYou',
   open: 'ConfirmItsYouOpen',
+  button: 'ConfirmItsYouButton',
   note: 'ConfirmItsYouNote',
   counter: 'ConfirmItsYouCounter',
   send: 'ConfirmItsYouSend',
@@ -53,8 +67,16 @@ export const ConfirmItsYouRowIds = {
   cancelRequest: 'ConfirmItsYouCancelRequest',
   askAgain: 'ConfirmItsYouAskAgain',
   steps: 'ConfirmItsYouSteps',
+  alarm: 'ConfirmItsYouAlarm',
   earlier: 'ConfirmItsYouEarlier',
+  // the chat's sheet (variant="sheet")
+  sheet: 'ConfirmItsYouShort',
+  proofToggle: 'ConfirmItsYouProofToggle',
+  proof: 'ConfirmItsYouProof',
 } as const
+
+/** The sheet shows the note counter only this close to the limit: the box itself says nothing until it matters. */
+export const SHEET_COUNTER_FROM = NOTE_MAX - 40
 
 const EARLIER_KEY: Record<ConfirmStatus, string> = {
   waiting: 'ConfirmItsYou.EarlierWaiting',
@@ -73,9 +95,14 @@ interface Props {
   connectionId: string | null
   /** The contact's name, as the page shows it. */
   name: string
+  /**
+   * 'row' (default): the Safety row with the status. 'button': the contact page's full-width start button. 'sheet':
+   * the chat's sheet, one line, the note and Send.
+   */
+  variant?: 'row' | 'button' | 'sheet'
 }
 
-const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
+const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name, variant = 'row' }) => {
   const { t } = useTranslation()
   const { agent } = useAgent()
   const { ColorPalette, Inputs } = useTheme()
@@ -84,6 +111,7 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [said, setSaid] = useState<string | undefined>()
+  const [proofShown, setProofShown] = useState(false)
   // Bumped on a clock while a request waits, so "expires in" counts down and a waiting request turns into "no answer"
   // with no event to wake it.
   const [, setTick] = useState(0)
@@ -130,7 +158,8 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
       setSaid(undefined)
       try {
         const result = await sendConfirmRequest(agent, connectionId, text)
-        if (result === 'noRelationship') setSaid(t('ConfirmItsYou.NoRelationship', { name }))
+        if (result === 'noRelationship')
+          setSaid(t('ConfirmItsYou.NoRelationship', { name, interpolation: { escapeValue: false } }))
         else if (result === 'badNote') setSaid(t('ConfirmItsYou.NoteNeeded'))
         else {
           setComposing(false)
@@ -141,7 +170,7 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
         releaseWarn(
           `[VTI] confirm request not sent (${(error as Error)?.name ?? 'error'}: ${(error as Error)?.message})`
         )
-        setSaid(t('ConfirmItsYou.NotSent', { name }))
+        setSaid(t('ConfirmItsYou.NotSent', { name, interpolation: { escapeValue: false } }))
       } finally {
         setBusy(false)
       }
@@ -172,7 +201,7 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
     alarm: { backgroundColor: ColorPalette.semantic.error, borderRadius: 14, padding: 18, gap: 10 },
     alarmText: { color: ColorPalette.grayscale.white },
     alarmBig: { color: ColorPalette.grayscale.white, fontSize: 24, lineHeight: 30, fontWeight: 'bold' },
-    steps: { borderWidth: 2, borderColor: ColorPalette.semantic.error, borderRadius: 12, padding: 12, gap: 6 },
+    steps: { borderTopWidth: 1, borderTopColor: ColorPalette.grayscale.white, paddingTop: 10, gap: 6 },
     quote: {
       borderWidth: 1,
       borderColor: ColorPalette.grayscale.lightGrey,
@@ -185,6 +214,9 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
     headRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
     error: { color: ColorPalette.semantic.error },
+    sheetLine: { gap: 8 },
+    hintRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    grow: { flex: 1 },
   })
   const n = { name, interpolation: { escapeValue: false } }
   // A lock is named only when the answer named one (namedLock): an absent or unknown lock is never shown as a claim,
@@ -250,29 +282,30 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
           </View>
         )
       case 'notMe':
+        // One solid red card, white words, what to do now inside it: nothing about it reads as grey or as confirmed.
         return (
-          <>
-            <View style={styles.alarm} accessibilityRole="alert">
-              <ThemedText style={styles.alarmBig} testID={testIdWithKey(ConfirmItsYouRowIds.status)}>
-                {t('ConfirmItsYou.NotThemTitle', n)}
-              </ThemedText>
-              <ThemedText style={styles.alarmText} variant="bold">
-                {t('ConfirmItsYou.NotThemBody')}
-              </ThemedText>
-              <ThemedText style={styles.alarmText}>
-                {t(
-                  namedLock(ask.confirmedWith) ? 'ConfirmItsYou.NotThemSigned' : 'ConfirmItsYou.NotThemSignedOnPhone',
-                  at(ask)
-                )}
-              </ThemedText>
-            </View>
+          <View style={styles.alarm} accessibilityRole="alert" testID={testIdWithKey(ConfirmItsYouRowIds.alarm)}>
+            <ThemedText style={styles.alarmBig} testID={testIdWithKey(ConfirmItsYouRowIds.status)}>
+              {t('ConfirmItsYou.NotThemTitle', n)}
+            </ThemedText>
+            <ThemedText style={styles.alarmText} variant="bold">
+              {t('ConfirmItsYou.NotThemBody')}
+            </ThemedText>
+            <ThemedText style={styles.alarmText}>
+              {t(
+                namedLock(ask.confirmedWith) ? 'ConfirmItsYou.NotThemSigned' : 'ConfirmItsYou.NotThemSignedOnPhone',
+                at(ask)
+              )}
+            </ThemedText>
             <View style={styles.steps} testID={testIdWithKey(ConfirmItsYouRowIds.steps)}>
-              <ThemedText variant="bold">{t('ConfirmItsYou.WhatToDo')}</ThemedText>
-              <ThemedText>• {t('ConfirmItsYou.StepHangUp')}</ThemedText>
-              <ThemedText>• {t('ConfirmItsYou.StepCallBack', n)}</ThemedText>
-              <ThemedText>• {t('ConfirmItsYou.StepNoCodes')}</ThemedText>
+              <ThemedText style={styles.alarmText} variant="bold">
+                {t('ConfirmItsYou.WhatToDo')}
+              </ThemedText>
+              <ThemedText style={styles.alarmText}>• {t('ConfirmItsYou.StepHangUp')}</ThemedText>
+              <ThemedText style={styles.alarmText}>• {t('ConfirmItsYou.StepCallBack', n)}</ThemedText>
+              <ThemedText style={styles.alarmText}>• {t('ConfirmItsYou.StepNoCodes')}</ThemedText>
             </View>
-          </>
+          </View>
         )
       case 'expired':
         return (
@@ -313,13 +346,10 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
       style={styles.entry}
       onPress={() => setComposing(true)}
       accessibilityRole="button"
-      accessibilityLabel={t('ConfirmItsYou.Title')}
+      accessibilityLabel={t('ConfirmItsYou.Title', n)}
       testID={testIdWithKey(ConfirmItsYouRowIds.open)}
     >
-      <View style={styles.headRow}>
-        <ThemedText variant="bold">{t('ConfirmItsYou.Title')}</ThemedText>
-        <ThemedText style={styles.muted}>{t('ConfirmItsYou.DemoChip')}</ThemedText>
-      </View>
+      <ThemedText variant="bold">{t('ConfirmItsYou.Title', n)}</ThemedText>
       <ThemedText style={styles.muted}>{t('ConfirmItsYou.Subtitle', n)}</ThemedText>
     </Pressable>
   )
@@ -363,6 +393,119 @@ const ConfirmItsYouRow: React.FC<Props> = ({ connectionId, name }) => {
       />
     </View>
   )
+
+  if (variant === 'sheet') {
+    const info = (
+      <Pressable
+        onPress={() => setProofShown((shown) => !shown)}
+        hitSlop={10}
+        accessibilityRole="button"
+        accessibilityLabel={t('ConfirmItsYou.WhatItProves')}
+        accessibilityState={{ expanded: proofShown }}
+        testID={testIdWithKey(ConfirmItsYouRowIds.proofToggle)}
+      >
+        <Icon name="information-outline" size={22} color={ColorPalette.brand.primary} />
+      </Pressable>
+    )
+    // The sheet opens clean (Alberto, 278.22: "we dont need this please remove it"): no record of the last answer,
+    // which lives on the chat cards and the contact page. Only a request still waiting shows, since it is not history
+    // but what stands now: it says not to act on it yet, and Cancel is there; the box steps aside meanwhile.
+    const waitingLine = () =>
+      newest && newestStatus === 'waiting' ? (
+        <View style={styles.sheetLine}>
+          <View style={styles.headRow}>
+            <ThemedText variant="bold" testID={testIdWithKey(ConfirmItsYouRowIds.status)}>
+              {t('ConfirmItsYou.WaitingTitle', n)}
+            </ThemedText>
+            <ThemedText style={styles.muted}>{t('ConfirmItsYou.SentAt', at(newest))}</ThemedText>
+          </View>
+          <ThemedText>{t('ConfirmItsYou.WaitingBody', n)}</ThemedText>
+          <Button
+            title={t('ConfirmItsYou.CancelRequest')}
+            buttonType={ButtonType.Secondary}
+            onPress={() => void cancelRequest()}
+            disabled={busy}
+            testID={testIdWithKey(ConfirmItsYouRowIds.cancelRequest)}
+          />
+        </View>
+      ) : null
+    return (
+      <View style={styles.row} testID={testIdWithKey(ConfirmItsYouRowIds.sheet)}>
+        {waitingLine()}
+        {newestStatus === 'waiting' ? null : (
+          <>
+            <View style={styles.hintRow}>
+              <ThemedText style={[styles.muted, styles.grow]}>{t('ConfirmItsYou.SheetHint', n)}</ThemedText>
+              {info}
+            </View>
+            {proofShown ? (
+              <View style={styles.card} testID={testIdWithKey(ConfirmItsYouRowIds.proof)}>
+                <ThemedText variant="bold">{t('ConfirmItsYou.WhatItProves')}</ThemedText>
+                <ThemedText>{t('ConfirmItsYou.ProofNote', n)}</ThemedText>
+                <ThemedText>{t('ConfirmItsYou.ProofSigned', n)}</ThemedText>
+                <ThemedText style={styles.muted}>{t('ConfirmItsYou.ConfirmedCaveat', n)}</ThemedText>
+                <ThemedText style={styles.muted}>{t('ConfirmItsYou.EarlierOnContact', n)}</ThemedText>
+              </View>
+            ) : null}
+            <TextInput
+              style={styles.input}
+              value={note}
+              onChangeText={setNote}
+              maxLength={NOTE_MAX}
+              multiline
+              placeholder={t('ConfirmItsYou.SheetPlaceholder', n)}
+              placeholderTextColor={ColorPalette.grayscale.mediumGrey}
+              accessibilityLabel={t('ConfirmItsYou.NoteLabel')}
+              testID={testIdWithKey(ConfirmItsYouRowIds.note)}
+            />
+            {note.length >= SHEET_COUNTER_FROM ? (
+              <ThemedText style={styles.counter} testID={testIdWithKey(ConfirmItsYouRowIds.counter)}>
+                {t('ConfirmItsYou.Counter', { typed: note.length, limit: NOTE_MAX })}
+              </ThemedText>
+            ) : null}
+            <Button
+              title={t('ConfirmItsYou.Send')}
+              buttonType={ButtonType.Primary}
+              onPress={() => void send(note)}
+              disabled={busy}
+              testID={testIdWithKey(ConfirmItsYouRowIds.send)}
+            />
+          </>
+        )}
+        {said ? (
+          <ThemedText style={styles.error} testID={testIdWithKey(ConfirmItsYouRowIds.said)}>
+            {said}
+          </ThemedText>
+        ) : null}
+      </View>
+    )
+  }
+
+  if (variant === 'button') {
+    // The contact page's start button: the same form, opened in place. While a request waits it steps aside, so it
+    // never invites a second request on top of one still open; the Safety row says where that one stands.
+    if (composing)
+      return (
+        <View style={styles.row}>
+          {compose}
+          {said ? (
+            <ThemedText style={styles.error} testID={testIdWithKey(ConfirmItsYouRowIds.said)}>
+              {said}
+            </ThemedText>
+          ) : null}
+        </View>
+      )
+    if (newestStatus === 'waiting') return null
+    return (
+      <Button
+        title={t('ConfirmItsYou.Title', n)}
+        accessibilityLabel={t('ConfirmItsYou.Title', n)}
+        buttonType={ButtonType.Primary}
+        onPress={() => setComposing(true)}
+        testID={testIdWithKey(ConfirmItsYouRowIds.button)}
+      />
+    )
+  }
 
   return (
     <View style={styles.row} testID={testIdWithKey(ConfirmItsYouRowIds.row)}>

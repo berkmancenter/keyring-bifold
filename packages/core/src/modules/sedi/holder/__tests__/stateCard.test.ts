@@ -19,7 +19,7 @@ import { resetGuardianCheckMemo, type GuardianEvidence } from '../../../trust-ta
 import { K0_REVOKED_OMITTED_CARD } from '../../guardian/k0RevokedOmittedCard'
 import { K0_REVOKED_TEST_GUARDIAN_CARD } from '../../guardian/k0RevokedTestCard'
 import { K0_TEST_GUARDIAN_CARD } from '../../guardian/k0TestCard'
-import { K0_TEST_ROOT } from '../../guardian/stateRoots'
+import { K0_TEST_ROOT, k1SettingsForTests } from '../../guardian/stateRoots'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -33,6 +33,7 @@ import {
   stateCardView,
   type HeldCheck,
 } from '../stateCard'
+import { stateCardBrand, STATE_COLOUR, TEST_COLOUR } from '../StateCardPass'
 
 const t = ((key: string, extra?: Record<string, unknown>) => {
   const { interpolation: _, ...given } = extra ?? {}
@@ -48,6 +49,7 @@ const CHECKS_OUT = /^StateCard\.ChecksOut/
 const realDev = (global as { __DEV__?: boolean }).__DEV__
 // The K0 root's own `demo` as this build has it, put back after a row changes it.
 const realDemo = Object.getOwnPropertyDescriptor(K0_TEST_ROOT, 'demo')
+const realTest = Object.getOwnPropertyDescriptor(K0_TEST_ROOT, 'test')
 
 const switches = (sv: boolean, testState = true) => {
   setTrustedApproversEnabled(true)
@@ -67,6 +69,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   global.fetch = realFetch
+  k1SettingsForTests.reset()
   setDemoStateHost(null)
   switches(false, false)
   STATE_VERIFIED_APPROVERS_REMOTE_OFF.off = false
@@ -74,6 +77,8 @@ afterEach(() => {
   ;(global as { __DEV__?: boolean }).__DEV__ = realDev
   delete (K0_TEST_ROOT as { demo?: boolean }).demo
   if (realDemo) Object.defineProperty(K0_TEST_ROOT, 'demo', realDemo)
+  delete (K0_TEST_ROOT as { test?: boolean }).test
+  if (realTest) Object.defineProperty(K0_TEST_ROOT, 'test', realTest)
 })
 
 describe('the state card: what it says', () => {
@@ -95,14 +100,38 @@ describe('the state card: what it says', () => {
     expect(v.validUntil).toEqual({ label: 'StateCard.ValidUntil', value: 'day(2030-11-10)' })
   })
 
-  test('a demo root puts the cream "Demo" pill and the demo line on it', async () => {
+  test('the K0 test root puts the "Test" pill, the test line and the grey face on it, never "Demo"', async () => {
     const v = view(await checked())
-    expect(v.pill).toBe('StateCard.Demo')
-    expect(v.demoNote).toBe('StateCard.DemoNote')
+    expect(v.title).toBe('Example State')
+    expect(v.pill).toBe('StateCard.Test')
+    expect(v.demoNote).toBe('StateCard.TestNote')
+    expect(v.test).toBe(true)
   })
 
-  test('the pill follows the root entry\'s own `demo`, not its name: demo false, no "Demo" (control above: K0 = demo)', async () => {
+  test("the K0 preload is drawn grey; a card that is not a test card keeps the state's blue (Alberto, 2026-11-13)", async () => {
+    const colourOf = (shown: ReturnType<typeof view>) => {
+      const brand = stateCardBrand(shown)
+      return brand.known ? brand.value.color : undefined
+    }
+    const v = view(await checked())
+    expect(colourOf(v)).toBe(TEST_COLOUR)
+    expect(TEST_COLOUR).not.toBe(STATE_COLOUR)
+    // A card from a demo or real root that is not the K0 preload (K1's, the state office's): the state's own colour.
+    expect(colourOf({ ...v, test: undefined })).toBe(STATE_COLOUR)
+  })
+
+  test('the label follows the entry\'s own `test`, not its name: test unset, the cream "Demo" (control above: K0 = test)', async () => {
+    ;(K0_TEST_ROOT as { test?: boolean }).test = undefined
+    const v = view(await checked())
+    expect(v.pill).toBe('StateCard.Demo')
+    expect(v.source).toBe('Approver.GuardianDemoCopy')
+    // Still the K0 test card itself, so it still says so, whatever the entry's mark.
+    expect(v.demoNote).toBe('StateCard.TestNote')
+  })
+
+  test("the pill follows the root entry's own marks, not its name: demo and test unset, no pill (control above: K0 = test)", async () => {
     ;(K0_TEST_ROOT as { demo?: boolean }).demo = false
+    ;(K0_TEST_ROOT as { test?: boolean }).test = undefined
     // Not a demo root, K0 is a real one now: fetched at its own did:webs, so the state answers here.
     const kel = new Uint8Array(
       readFileSync(
@@ -127,8 +156,8 @@ describe('the state card: what it says', () => {
     expect(v.pill).toBeUndefined()
     // A real root: only its own record is fetched, so the line says the issuers' records came from the card.
     expect(v.source).toBe('Approver.GuardianFetchedRootLive{"host":"example.org"}')
-    // Still the K0 test card, so it still says it is a demo card.
-    expect(v.demoNote).toBe('StateCard.DemoNote')
+    // Still the K0 test card, so it still says it is a test card.
+    expect(v.demoNote).toBe('StateCard.TestNote')
   })
 
   test.each([
@@ -140,6 +169,8 @@ describe('the state card: what it says', () => {
       () => {
         ;(global as { __DEV__?: boolean }).__DEV__ = false
         setTrustTestStateEnabled(false)
+        // And no state office on this build: K1 is trusted with both switches on, so "no root" needs it gone too.
+        k1SettingsForTests.set({ aid: '' })
       },
       'noRoots',
     ],
@@ -206,8 +237,8 @@ describe('the state card: what it says', () => {
     expect(v.technical.result).toBe(reason)
   })
 
-  test('a card not the K0 test card, refused: no demo line (control: the K0 card refused keeps it)', async () => {
-    expect(view(refused('revoked')).demoNote).toBe('StateCard.DemoNote')
+  test('a card not the K0 test card, refused: no test line (control: the K0 card refused keeps it)', async () => {
+    expect(view(refused('revoked')).demoNote).toBe('StateCard.TestNote')
     expect(view(refused('revoked'), { ...card, guardianSaid: 'Eother' }).demoNote).toBeUndefined()
   })
 
@@ -316,7 +347,7 @@ describe('the state card: checking, and checked live', () => {
     expect(v.status).toBe(`StateCard.ChecksOut{"asOf":"${STATE_CARD_AS_OF_LIVE}"}`)
     expect(v.asOf).toBe(STATE_CARD_AS_OF_LIVE)
     expect(v.source).toBe('Approver.GuardianFetchedLive{"host":"example.org"}')
-    expect(v.pill).toBe('StateCard.Demo')
+    expect(v.pill).toBe('StateCard.Test')
   })
 
   test('with no demo state host: the copy here, never fetched, and says so (control above: with a host, fetched)', async () => {
@@ -324,7 +355,7 @@ describe('the state card: checking, and checked live', () => {
     const v = view(await check())
     expect(resolveRootKel).not.toHaveBeenCalled()
     expect(v.status).toBe(`StateCard.ChecksOut{"asOf":"${STATE_CARD_AS_OF}"}`)
-    expect(v.source).toBe('Approver.GuardianDemoCopy')
+    expect(v.source).toBe('Approver.GuardianTestCopy')
   })
 
   test('a state that can\'t be reached: its own words and red pill, never "Checks out", never the copy instead', async () => {

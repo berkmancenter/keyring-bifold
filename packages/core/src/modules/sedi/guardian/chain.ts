@@ -199,6 +199,26 @@ export function parseProof(text: string): { ok: true; acdcText: string; blinder:
 }
 
 /** keripy Blinder: blid = Blake3 of the dummied concatenation '#'*44 + uuid + td + ts. */
+/**
+ * The ward the Guardian credential `guardianSaid` names, read WITHOUT checking anything (no SAID, signature, TEL or
+ * root). Only for choosing which of this phone's own wards a card is checked against (trust-tasks/guardianEvidence
+ * wardToCheck); guardianIn then refuses any ward but the one chosen, so a wrong read can only end in a refusal.
+ */
+export function wardNamedIn(creds: readonly string[], guardianSaid: string): string | undefined {
+  for (const text of creds) {
+    const p = parseProof(text)
+    if (!p.ok) continue
+    let sad: Partial<Sad>
+    try {
+      sad = JSON.parse(p.acdcText) as Partial<Sad>
+    } catch {
+      continue
+    }
+    if (sad?.d === guardianSaid) return typeof sad.a?.ward === 'string' ? sad.a.ward : undefined
+  }
+  return undefined
+}
+
 export function blidOf(dig: Digest, { uuid, td, ts }: Pick<Blinder, 'uuid' | 'td' | 'ts'>): string {
   return dig('E', te.encode(DUMMY + uuid + (td || '1AAP') + labelQb64(ts)))
 }
@@ -407,7 +427,11 @@ export function socialIn(ctx: ChainContext, socialSaid: string, expect: { ward: 
   return { ok: true, guardian: s.sad.i, ward: expect.ward, root: gv.root, expires: exp.expires }
 }
 
-/** Re-SAID a modified ACDC. Tests only: builds a well-formed credential that differs in one field. */
+/**
+ * SAID an ACDC v2 from a template: each block's SAID over its most compact form, then the top-level SAID, exactly as
+ * verifyAcdcV2 recomputes them. Tests use it to build a well-formed credential that differs in one field; the
+ * guardian's phone uses it to issue the Social Authorization (./issue.ts).
+ */
 export function saidifyAcdcV2(dig: Digest, sad: Sad): Sad {
   const out = JSON.parse(json(sad)) as Sad
   const fill = (block: Record<string, unknown> & { d: string }) => {

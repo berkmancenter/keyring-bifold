@@ -68,7 +68,7 @@ import * as witnessShare from './witnessShareSpec'
 import * as continuitySpec from '../vrc/contacts/continuitySpec'
 import { handleContinuityRequest, handleContinuityResponse } from '../vrc/contacts/continuity'
 import * as approverRoleSpec from './approverRoleSpec'
-import { handleRoleOfferRequest, handleRoleOfferResponse, handleRoleStepDown } from './approverRole'
+import { handleRoleOfferRequest, handleRoleOfferResponse, handleRoleRemoved, handleRoleStepDown } from './approverRole'
 import * as confirmItsYouSpec from './confirmItsYouSpec'
 import { handleConfirmRequest, handleConfirmResponse } from './confirmItsYou'
 import type { VwcPresentationBundle } from './outcomeEvidence'
@@ -2073,6 +2073,15 @@ function registerBuiltinTrustTasks(): void {
     handleRequest: handleRoleStepDown,
   })
 
+  // Keyring's own type (private authority): the person tells an approver it took them off its agent's approvers, which
+  // ends the approver's listening after a step-down. One way; its handler does nothing while the switch is off.
+  trustTaskRegistry.register({
+    typeUri: approverRoleSpec.REMOVED_TYPE_URI,
+    spec: approverRoleSpec.REMOVED_SPEC as never,
+    orchestration: { requiresDiscovery: false },
+    handleRequest: handleRoleRemoved,
+  })
+
   // Keyring's own type (private authority): one person asks a contact to confirm, with their phone's lock, that a call
   // or message in their name is really them. Its handlers do nothing while the Confirm it's you switch is off.
   trustTaskRegistry.register({
@@ -2087,14 +2096,19 @@ function registerBuiltinTrustTasks(): void {
   // Keyring's own type (private authority): an approver's phone sends its state Guardian card after a yes. One way,
   // nothing answers it; its handler does nothing unless both trusted approvers and state-verified approvers are on.
   // Loaded on arrival, so the Guardian check (sedi/guardian) is not loaded with this module.
-  trustTaskRegistry.register({
-    typeUri: approverRoleSpec.GUARDIAN_EVIDENCE_TYPE_URI,
-    spec: approverRoleSpec.GUARDIAN_EVIDENCE_SPEC as never,
-    orchestration: { requiresDiscovery: false },
-    handleRequest: (...args: Parameters<typeof import('./guardianEvidence').handleGuardianEvidence>) =>
-      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      (require('./guardianEvidence') as typeof import('./guardianEvidence')).handleGuardianEvidence(...args),
-  })
+  // Both versions: 0.1 (a K0 card, as 278.18 sends it) and 0.2 (a K1 card, with its host or Social Authorization).
+  for (const [typeUri, spec] of [
+    [approverRoleSpec.GUARDIAN_EVIDENCE_TYPE_URI, approverRoleSpec.GUARDIAN_EVIDENCE_SPEC],
+    [approverRoleSpec.GUARDIAN_EVIDENCE_V2_TYPE_URI, approverRoleSpec.GUARDIAN_EVIDENCE_V2_SPEC],
+  ] as const)
+    trustTaskRegistry.register({
+      typeUri,
+      spec: spec as never,
+      orchestration: { requiresDiscovery: false },
+      handleRequest: (...args: Parameters<typeof import('./guardianEvidence').handleGuardianEvidence>) =>
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+        (require('./guardianEvidence') as typeof import('./guardianEvidence')).handleGuardianEvidence(...args),
+    })
 }
 
 registerBuiltinTrustTasks()
