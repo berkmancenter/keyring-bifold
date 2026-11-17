@@ -190,6 +190,25 @@ describe('the badge service', () => {
   })
 })
 
+describe('show', () => {
+  it('answers a badge it may not see as one that is not there', async () => {
+    for (const code of ['permissionDenied', 'notFound', 'unsupportedType']) {
+      const { b } = backend(throws(refusal(code)))
+      await expect(createBadgeService(b).show(COMMUNITY, 'bdg_W5k2N8xRb3Qz7TpL')).resolves.toBe('notServed')
+    }
+  })
+
+  it('lets any other refusal through (control)', async () => {
+    const { b } = backend(throws(refusal('rateLimited')))
+    await expect(createBadgeService(b).show(COMMUNITY, 'bdg_W5k2N8xRb3Qz7TpL')).rejects.toMatchObject({
+      code: 'rateLimited',
+    })
+  })
+})
+
+// Two guards, each needing the other: this one pins which task URIs may exist, by LITERAL pattern; the per-method rows
+// above pin which one each method sends, by the constant. Those rows mean something only because this pins the
+// constant's value, so neither may be dropped as redundant.
 describe('what the client may send', () => {
   it('is holder tasks only: never a share, an offer, or an owner’s or administrator’s task', () => {
     for (const type of HOLDER_TASKS) {

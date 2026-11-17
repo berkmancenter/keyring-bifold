@@ -100,5 +100,3 @@ export interface MemberWallState {
   wall?: WallBadge[]
   state: 'loading' | 'shown' | 'hidden' | 'notServed'
 }
-/** The room-post chip's lookup (on hold: the plan's Room posts). */
-export type AuthorBadgesLookup = (communityDid: string, authorDid: string) => WallBadge[] | undefined

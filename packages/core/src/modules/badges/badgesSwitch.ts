@@ -10,7 +10,8 @@
  * Nothing is saved on the phone and nothing a person does changes either value, so a later release can always take it
  * back. It is read at every use, and fails closed: anything but `on` true and `remoteOff` false reads as off.
  *
- * THE KILL IS A RECIPE, NOT A KEPT PULL REQUEST (a kill branch goes stale each time main moves, 11-17): branch from
+ * THE KILL IS A RECIPE, NOT A KEPT PULL REQUEST (11-17): a kept kill PR needs its conflict resolved whenever main
+ * changes this file, and its CI green expires whenever main moves. Branch from
  * current main, set `MEMBER_BADGES.remoteOff` to `true` in this file
  * (packages/core/src/modules/badges/badgesSwitch.ts), nothing else; merge, pin, cut, and Alberto publishes. Tier as this
  * file reads (ota).
