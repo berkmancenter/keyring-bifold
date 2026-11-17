@@ -221,8 +221,10 @@ describe('the words', () => {
     ['fr', fr],
     ['pt-BR', ptBr],
   ])('%s: a badge is never called verified, checked or proven', (_lang, words) => {
-    const all = Object.values((words as Record<string, Record<string, string>>).BadgeCard).join(' ')
+    const all = Object.values((words as unknown as Record<string, Record<string, string>>).BadgeCard).join(' ')
     expect(all).not.toMatch(/verif|vérif|check|vérifi|prouv|prov|comprov|confirm/i)
-    expect(Object.keys((words as Record<string, object>).BadgeCard).sort()).toEqual(Object.keys(en.BadgeCard).sort())
+    expect(Object.keys((words as unknown as Record<string, object>).BadgeCard).sort()).toEqual(
+      Object.keys(en.BadgeCard).sort()
+    )
   })
 })
