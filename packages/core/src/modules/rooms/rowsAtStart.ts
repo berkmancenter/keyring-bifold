@@ -3,8 +3,9 @@
  * shows the member's rooms at once instead of an empty list for the 20-55 s its first listing took on testers' phones
  * (11-17). Each row is shown as reading until that listing replaces them all; a room it does not list is gone with it.
  *
- * What is kept is what a row names: the room, its community, when it was last active and how many posts are unread.
- * Never a post's words (`lastPost` is left out), as Alberto agreed (11-17: room names, not message text). It lives
+ * What is kept is what a row names: the room, its community and when it was last active. Never a post's words
+ * (`lastPost` is left out), as Alberto agreed (11-17: room names, not message text), and no unread count: a row from
+ * the last run shows none, and neither does the tab's badge, until the first listing reads it (his word, 11-18). It lives
  * in the wallet, so it is as private as the wallet, goes with it, and is read only while it is open.
  *
  * Two values a release (an OTA included) sets, and nothing else, as for `liveDeliverySwitch.ts`:
@@ -49,7 +50,6 @@ export interface RowAtStart {
   communityName?: string
   /** ISO 8601. */
   lastActivityAt?: string
-  unread: number
   notJoined?: boolean
 }
 
@@ -85,7 +85,6 @@ function rowOf(raw: unknown): RowAtStart | undefined {
   const r = raw as Record<string, unknown>
   if (!isText(r.key) || !isText(r.roomId) || typeof r.roomName !== 'string' || !isText(r.communityDid)) return undefined
   if (!optionalText(r.nameFrom) || !optionalText(r.communityName) || !optionalText(r.lastActivityAt)) return undefined
-  if (typeof r.unread !== 'number' || !Number.isInteger(r.unread) || r.unread < 0) return undefined
   if (r.notJoined !== undefined && typeof r.notJoined !== 'boolean') return undefined
   if (typeof r.lastActivityAt === 'string' && Number.isNaN(Date.parse(r.lastActivityAt))) return undefined
   return {
@@ -96,7 +95,6 @@ function rowOf(raw: unknown): RowAtStart | undefined {
     communityDid: r.communityDid,
     ...(r.communityName !== undefined ? { communityName: r.communityName as string } : {}),
     ...(r.lastActivityAt !== undefined ? { lastActivityAt: r.lastActivityAt as string } : {}),
-    unread: r.unread,
     ...(r.notJoined !== undefined ? { notJoined: r.notJoined as boolean } : {}),
   }
 }

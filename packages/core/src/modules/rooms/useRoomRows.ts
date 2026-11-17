@@ -300,7 +300,6 @@ const keptRowOf = (row: RoomRow): RowAtStart => ({
   communityDid: row.communityDid,
   ...(row.communityName !== undefined ? { communityName: row.communityName } : {}),
   ...(row.lastActivityAt ? { lastActivityAt: row.lastActivityAt.toISOString() } : {}),
-  unread: row.unread,
   ...(row.notJoined ? { notJoined: true } : {}),
 })
 
@@ -313,7 +312,8 @@ const rowFromKept = (kept: RowAtStart): RoomRow => ({
   communityDid: kept.communityDid,
   ...(kept.communityName !== undefined ? { communityName: toInertText(kept.communityName) } : {}),
   ...(kept.lastActivityAt ? { lastActivityAt: new Date(kept.lastActivityAt) } : {}),
-  unread: kept.unread,
+  // None until the first listing reads the room: a count kept from the last run is not this run's (Alberto, 11-18).
+  unread: 0,
   ...(kept.notJoined ? { notJoined: true } : { reading: true }),
 })
 

@@ -1141,7 +1141,7 @@ describe("the last run's rows at a start", () => {
 
     // Before the listing answers: the last run's rows, by their kept names, each reading.
     expect(order(list.result.current.rows)).toEqual(['planning', 'gone'])
-    expect(list.result.current.rows[0]).toMatchObject({ roomName: 'Name of planning', unread: 2, reading: true })
+    expect(list.result.current.rows[0]).toMatchObject({ roomName: 'Name of planning', reading: true })
     expect(lines).toContainEqual(
       expect.stringMatching(/^\[Rooms:rows\] 2 rows from the last run shown, \d+ ms after launch$/)
     )
@@ -1152,7 +1152,25 @@ describe("the last run's rows at a start", () => {
     expect(order(list.result.current.rows)).toEqual(['garden'])
   })
 
-  test("keeps this run's rows once they settle: names and counts, never a post's words", async () => {
+  // Alberto (11-18): a count kept from the last run is not this run's; none shows until the first listing reads it.
+  test('show no unread count, in the rows or the tab badge, before the first listing answers', async () => {
+    const wallet = walletWith(lastRun([keptRow('planning', { unread: 5 }), keptRow('garden', { unread: 3 })]))
+    const { s, answer } = waitingService([room('planning')], wallet)
+    renderHook(() => useRoomRowsPoll(s, true))
+    const list = renderHook(() => ({ rows: useRoomRows(), unread: useRoomsUnreadCount() }))
+    await flush()
+    expect(order(list.result.current.rows.rows)).toEqual(['planning', 'garden'])
+    expect(list.result.current.rows.rows.map((r) => r.unread)).toEqual([0, 0])
+    expect(list.result.current.unread).toBe(0)
+
+    // Once the listing reads the room, its row is this run's: read, and counted as this run counts it, never the 5 kept.
+    await answer()
+    await flush()
+    expect(list.result.current.rows.rows.map((r) => [r.roomId, !!r.reading])).toEqual([['planning', false]])
+    expect(list.result.current.unread).not.toBe(5)
+  })
+
+  test("keeps this run's rows once they settle: names, never a post's words, nor a count", async () => {
     const wallet = walletWith()
     const s = serviceWith([room('planning')], { planning: [note('n1', 1)] }, { n1: 'the words of a post' })
     Object.assign(s, { runsOn: wallet })
@@ -1168,6 +1186,7 @@ describe("the last run's rows at a start", () => {
     expect(kept).toContain('planning')
     expect(kept).not.toContain('the words of a post')
     expect(kept).not.toContain('lastPost')
+    expect(kept).not.toContain('unread')
   })
 
   test('control: with nothing kept, Messages waits for its first listing, as before', async () => {
@@ -1222,7 +1241,7 @@ describe("the last run's rows at a start", () => {
   })
 
   test('control: a kept record not shaped as rows shows nothing', async () => {
-    const wallet = walletWith({ v: 1, rows: [{ roomId: 'planning' }, 'nonsense', keptRow('bad', { unread: -1 })] })
+    const wallet = walletWith({ v: 1, rows: [{ roomId: 'planning' }, 'nonsense', keptRow('bad', { communityDid: 7 })] })
     const { s } = waitingService([room('garden')], wallet)
     renderHook(() => useRoomRowsPoll(s, true))
     const list = renderHook(() => useRoomRows())
