@@ -9,8 +9,13 @@
  * For a `did:webs` community ONLY (`watchesJoin`): while this phone holds an open request there, or an approved one
  * with no card, it asks where the request stands every `JOIN_WATCH_EVERY_MS`, and asks for the card once per request
  * when a look after the approval still finds none (`askForCardIfOwed`, with its own guards: only after the community
- * itself says `credentialsDelivered: false`). A `did:webvh` community is never looked at from here: its requests are
- * read exactly as before.
+ * itself says `credentialsDelivered: false`). "Once" is per run of the watch: what it has asked is kept in memory
+ * only, so after a restart it may ask once more, behind the same guard. A `did:webvh` community is never looked at
+ * from here: its requests are read exactly as before.
+ *
+ * A community that answers that it holds no such request (`notFound`) is believed, as a screen's own read believes
+ * it: the request is recorded as lost, the person is told they can send again, and the watch asks nothing more for
+ * it. Only that explicit answer does this; no answer, a timeout or any other refusal keeps what the phone knew.
  *
  * Each ask goes over the identity's OWN session (`vtiAgent.status` with `as`), or over the shared session only when
  * it already is that identity: this never signs in and never takes the session from anything. With neither, the look

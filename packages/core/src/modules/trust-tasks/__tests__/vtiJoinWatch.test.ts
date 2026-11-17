@@ -5,6 +5,7 @@ import type { JoinSubmission, VtiCommunityStore, VtiMembership } from '../module
 import type { VtiIdentityStore, VtiPersona } from '../module/VtiIdentityStore'
 import { vtiAgent, VtiNoOwnSession, type JoinRequestStatus } from '../module/vtiAgent'
 import { JOIN_WATCH } from '../module/joinWatchSwitch'
+import { readJoinState } from '../module/vtiJoin'
 import { JOIN_WATCH_EVERY_MS, startJoinWatch, watchesJoin, type StatusAs } from '../module/vtiJoinWatch'
 
 // An attendee joins the SEDI VTC (a did:webs) and leaves the join page: nothing asked where the request stood until
@@ -157,6 +158,31 @@ describe('an open request, with the person elsewhere in the app', () => {
     DeviceEventEmitter.emit(COMMUNITY_CHANGED_EVENT, { communityDid: WEBS, what: 'submission' })
     await looks(1)
     expect(asked).toEqual([{ communityDid: WEBS, requestId: 'r-1' }])
+  })
+})
+
+describe('the community says it holds no such request', () => {
+  it('is believed: the request is recorded as lost, and nothing more is asked for it', async () => {
+    const w = world([request(WEBS)])
+    const { statusAs, asked } = asks(undefined)
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(1)
+    expect(asked).toEqual([{ communityDid: WEBS, requestId: 'r-1' }])
+    expect(w.held.get(WEBS)?.lostAt).toEqual(expect.any(String))
+    expect(await readJoinState(agent, WEBS, { local: true, ...w })).toEqual({ kind: 'none', lost: true })
+    await looks(6)
+    expect(asked).toHaveLength(1)
+  })
+
+  it('CONTROL: no answer is not that: nothing is recorded as lost, and it is asked about again', async () => {
+    const w = world([request(WEBS)])
+    const { statusAs, asked } = asks(new Error('no answer'), { requestId: 'r-1', status: 'pending' })
+    stop = startJoinWatch(agent, { ...w, statusAs })
+    await looks(1)
+    expect(w.held.get(WEBS)?.lostAt).toBeUndefined()
+    expect(await readJoinState(agent, WEBS, { local: true, ...w })).toMatchObject({ kind: 'pending' })
+    await looks(2) // rests one look after the failure, then asks again
+    expect(asked).toHaveLength(2)
   })
 })
 
