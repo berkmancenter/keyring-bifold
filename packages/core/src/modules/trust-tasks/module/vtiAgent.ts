@@ -306,6 +306,12 @@ export const isAgentGone = (error: unknown): boolean => {
   return /in-memory copy of .* could not be fetched: .*\bnotFound\b/.test(message)
 }
 
+/**
+ * AppState, read once as the module loads: react-native's export is a lazy getter, and a sign-in that starts late (a
+ * screen gone, a test file torn down) must not require it then (CI on #1095).
+ */
+const appStateAtLoad = AppState
+
 /** One sign-in's claim on the turn: let go when its time runs out, so what it opens after that is closed. */
 interface SignInTicket {
   abandoned: boolean
@@ -1374,6 +1380,17 @@ class VtiAgentController {
     )
   }
 
+  /** A let-go sign-in's attempt found since that its agent is gone: mark the rest it already started (`gone`). */
+  private markGone(agent: Agent, did: string): void {
+    const rest = this.rests.get(did)
+    if (!rest || rest.gone) return
+    const marked: VtiSignInRest = { ...rest, gone: true }
+    this.rests.set(did, marked)
+    void putKeyed(agent, SIGNIN_REST_RECORD, SIGNIN_REST_KIND, did, marked as unknown as Record<string, unknown>).catch(
+      () => undefined
+    )
+  }
+
   /** For tests: forget every rest, here and as read from the phone. */
   // prettier-ignore
   forgetSignInRestsForTests(): void { // tier-exempt(deletes stored records): its body clears in-memory maps only (rests, restsRead, lastSignedInAt)
@@ -1475,45 +1492,64 @@ class VtiAgentController {
     const ticket: SignInTicket = { abandoned: false }
     const attempt = this.connectNow(agent, mediatorDid, options, ticket)
     // Let go after VTI_SIGNIN_TURN_MS, counted from here, when the turn starts: the next sign-in need not wait on one
-    // that hangs (11-17). The attempt runs on, and closes whatever it opens (`ticket`).
-    // Measured by the wall clock: a timer pauses with the app's JS in the background, so the time away is also checked
-    // when the app comes back to the front (a2, #1022).
+    // that hangs (11-17). Measured by the wall clock: a timer pauses with the app's JS in the background, so the time
+    // away is also checked when the app comes back to the front (a2, #1022).
+    //
+    // Letting go releases the TURN for whoever waits behind; it never rejects this caller from the timer. The attempt
+    // runs on, writes nothing more, and closes whatever it opens (`ticket`), so its caller hears VtiSignInTimedOut if
+    // it ever settles, else its own failure. A rejection fired from the timer would reach a caller that may be long
+    // gone (a screen unmounted, a test file torn down), as an unhandled rejection (CI on #1095).
     const turnStart = this.now()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let expire = () => undefined as void
-    const limit = new Promise<never>((_, reject) => {
-      expire = () => {
-        if (ticket.abandoned) return
-        ticket.abandoned = true
-        // The socket is closed now, half-open or not: stop() closes whatever socket the session holds and makes it final
-        // (a stopped session never reopens), so a socket the OS kept alive does not hold the DID's one mediator slot.
-        // connectNow stops it again if its open was already under way (belt and braces).
-        // Only this attempt's own session object: never by DID, so an identity's own session (vtiOwnSessions, sessions
-        // phase B) that an ask is using is never touched here.
-        void ticket.session?.stop().catch(() => undefined)
-        reject(new VtiSignInTimedOut(this.signInTurnMs))
+    let releaseTurn = () => undefined as void
+    const released = new Promise<void>((resolve) => (releaseTurn = resolve))
+    // The turn others wait on: the attempt settling, or its limit, whichever comes first. It never rejects.
+    const turn: Promise<void> = Promise.race([
+      attempt.then(
+        () => undefined,
+        () => undefined
+      ),
+      released,
+    ])
+    const expire = () => {
+      if (ticket.abandoned) return
+      ticket.abandoned = true
+      // The socket is closed now, half-open or not: stop() closes whatever socket the session holds and makes it final
+      // (a stopped session never reopens), so a socket the OS kept alive does not hold the DID's one mediator slot.
+      // connectNow stops it again if its open was already under way (belt and braces).
+      // Only this attempt's own session object: never by DID, so an identity's own session (vtiOwnSessions, sessions
+      // phase B) that an ask is using is never touched here.
+      void ticket.session?.stop().catch(() => undefined)
+      const timedOut = new VtiSignInTimedOut(this.signInTurnMs)
+      releaseWarn(`vtiAgent: sign-in as ${wantedDid ? didPrefix(wantedDid) : '(new identity)'}: ${timedOut.message}`)
+      if (this.connecting === turn) {
+        this.set({ status: 'failed', signingInAs: undefined, error: timedOut.message })
+        this.connecting = undefined
       }
-      timer = setTimeout(expire, this.signInTurnMs)
-    })
-    const back = AppState.addEventListener('change', (next) => {
-      if (next === 'active' && this.now() - turnStart >= this.signInTurnMs) expire()
-    })
-    attempt.catch(() => undefined)
-    // The turn is the attempt or its limit, whichever ends first: a sign-in queued behind waits on this, never on an
-    // attempt that hangs.
-    const turn = Promise.race([attempt, limit])
+      // Rests as a failure does, from now: the identity is let go whether or not its attempt ever settles.
+      if (wantedDid) this.noteSignIn(agent, wantedDid, false)
+      releaseTurn()
+    }
+    const timer = setTimeout(expire, this.signInTurnMs)
+    // Where the runtime allows it (Node, for tests), a pending limit never keeps the process alive on its own.
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+    let back: { remove(): void } | undefined
+    try {
+      back = appStateAtLoad.addEventListener('change', (next) => {
+        if (next === 'active' && this.now() - turnStart >= this.signInTurnMs) expire()
+      })
+    } catch {
+      // Without the app's state the timer alone lets the turn go.
+    }
     this.connecting = turn
     try {
-      await turn
+      await attempt
     } catch (error) {
-      if (error instanceof VtiSignInTimedOut) {
-        releaseWarn(`vtiAgent: sign-in as ${wantedDid ? didPrefix(wantedDid) : '(new identity)'}: ${error.message}`)
-        this.set({ status: 'failed', signingInAs: undefined, error: error.message })
-      }
-      if (wantedDid) this.noteSignIn(agent, wantedDid, false, isAgentGone(error))
+      // Let go: its failure was noted when it was let go; a gone agent found since still marks the rest.
+      if (wantedDid && !ticket.abandoned) this.noteSignIn(agent, wantedDid, false, isAgentGone(error))
+      else if (wantedDid && isAgentGone(error)) this.markGone(agent, wantedDid)
       throw error
     } finally {
-      if (timer) clearTimeout(timer)
+      clearTimeout(timer)
       back?.remove()
       if (this.connecting === turn) this.connecting = undefined
     }

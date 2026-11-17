@@ -896,6 +896,13 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
       () => 'signed in',
       (e: Error) => e.name
     )) as string
+  /** A sign-in that never opens until released; its outcome is read once it settles. */
+  const hang = () => {
+    mockHangStart.add(HUNG)
+    let ended: string | undefined
+    void outcome(as(HUNG)).then((o) => (ended = o))
+    return { ended: () => ended }
+  }
   beforeEach(() => {
     vtiAgent.forgetSignInRestsForTests()
     vtiAgent.signInTurnMs = 150
@@ -903,38 +910,42 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
     mockStopped.length = 0
     mockStarts = 0
   })
-  afterEach(() => {
+  afterEach(async () => {
+    // A hung attempt is released, so nothing is left running into the next test.
+    for (const did of Object.keys(mockRelease)) mockRelease[did]()
+    await new Promise((r) => setTimeout(r, 10))
+    for (const did of Object.keys(mockRelease)) delete mockRelease[did]
     vtiAgent.signInTurnMs = VTI_SIGNIN_TURN_MS
+    vtiAgent.now = () => Date.now()
     vtiAgent.forgetSignInRestsForTests()
     for (const set of [mockFailStart, mockGoneStart, mockHangStart]) set.clear()
   })
 
-  it('a sign-in that hangs is let go at the limit, and the one queued behind it signs in', async () => {
-    mockHangStart.add(HUNG)
-    const hung = outcome(as(HUNG))
-    const next = outcome(as(NEXT))
-    expect(await hung).toBe('VtiSignInTimedOut')
-    expect(await next).toBe('signed in')
+  it('a sign-in that hangs is let go at the limit: the one queued behind it signs in', async () => {
+    const hung = hang()
+    expect(await outcome(as(NEXT))).toBe('signed in')
     expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: NEXT })
+    // The let-go caller is not rejected from the timer: it hears VtiSignInTimedOut once its attempt settles.
+    expect(hung.ended()).toBeUndefined()
+    mockRelease[HUNG]()
+    await until(() => hung.ended() !== undefined, 500)
+    expect(hung.ended()).toBe('VtiSignInTimedOut')
   })
 
   it('control: a slow but healthy sign-in inside the limit signs in', async () => {
     vtiAgent.signInTurnMs = 2000
-    mockHangStart.add(HUNG)
-    const slow = outcome(as(HUNG))
+    const slow = hang()
     await until(() => !!mockRelease[HUNG])
     await new Promise((r) => setTimeout(r, 100))
     mockRelease[HUNG]()
-    expect(await slow).toBe('signed in')
+    await until(() => slow.ended() !== undefined, 500)
+    expect(slow.ended()).toBe('signed in')
     expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: HUNG })
   })
 
   it('the let-go sign-in opening late is closed, never kept beside the one that signed in since', async () => {
-    mockHangStart.add(HUNG)
-    const hung = outcome(as(HUNG))
-    const next = outcome(as(NEXT))
-    expect(await hung).toBe('VtiSignInTimedOut')
-    expect(await next).toBe('signed in')
+    hang()
+    expect(await outcome(as(NEXT))).toBe('signed in')
     mockRelease[HUNG]()
     await until(() => mockStopped.includes(HUNG))
     expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: NEXT })
@@ -949,46 +960,43 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
       onChange = h
       return { remove: () => undefined }
     }) as never)
-    mockHangStart.add(HUNG)
-    let ended: string | undefined
-    void outcome(as(HUNG)).then((o) => (ended = o))
+    hang()
     await until(() => !!onChange && !!mockRelease[HUNG])
-    // A short trip away: back before the limit, the turn goes on.
+    let next: string | undefined
+    void outcome(as(NEXT)).then((o) => (next = o))
+    // A short trip away: back before the limit, the queued sign-in still waits.
     clock += 5_000
     onChange!('active')
     await new Promise((r) => setTimeout(r, 30))
-    expect(ended).toBeUndefined()
-    // 14 minutes away, as on 11-17: the first look back ends it, though the paused timer has not fired.
+    expect(next).toBeUndefined()
+    // 14 minutes away, as on 11-17: the first look back lets the turn go, though the paused timer has not fired.
     clock += 14 * 60_000
     onChange!('active')
-    await until(() => ended !== undefined, 500)
-    expect(ended).toBe('VtiSignInTimedOut')
-    vtiAgent.now = () => Date.now()
+    await until(() => next !== undefined, 500)
+    expect(next).toBe('signed in')
   })
 
   it('the let-go sign-in is closed at once, while its socket is still opening (the DID has one mediator slot)', async () => {
-    mockHangStart.add(HUNG)
-    expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')
+    hang()
     // Not released: the socket never opened, and the session is already stopped.
-    await until(() => mockStopped.includes(HUNG), 500)
+    await until(() => mockStopped.includes(HUNG), 1000)
   })
 
   it("letting a sign-in go stops only that attempt's session, never another identity's own session (ac, #1095)", async () => {
     const OTHER = 'did:webvh:p:turn-own-other'
     const kept = { sendTo: async () => undefined }
     keepOwnSession(OTHER, kept)
-    mockHangStart.add(HUNG)
-    expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')
-    await until(() => mockStopped.includes(HUNG), 500)
+    hang()
+    await until(() => mockStopped.includes(HUNG), 1000)
     // The other identity's own session is untouched: the let-go stops the attempt's session object, not by DID.
     expect(ownSessionFor(OTHER)).toBe(kept)
     expect(mockStopped).toEqual([HUNG])
     dropAllOwnSessions()
   })
 
-  it('a time-out rests that identity from background sign-ins, as a failure does', async () => {
-    mockHangStart.add(HUNG)
-    expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')
+  it('a let-go identity rests from background sign-ins at once, as a failure does', async () => {
+    hang()
+    await until(() => mockStopped.includes(HUNG), 1000)
     const tries = mockStarts
     expect(await outcome(as(HUNG, { background: true }))).toBe('VtiSignInResting')
     expect(mockStarts).toBe(tries)
@@ -1011,6 +1019,20 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
     const tries = mockStarts
     expect(await outcome(as(DOWN, { listing: true }))).toBe('Error')
     expect(mockStarts).toBe(tries + 1)
+  })
+
+  it('no rejection ever comes from the limit itself: a hung sign-in nobody waits on rejects nothing (CI on #1095)', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (e: unknown) => unhandled.push(e)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      hang()
+      await until(() => mockStopped.includes(HUNG), 1000)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 
