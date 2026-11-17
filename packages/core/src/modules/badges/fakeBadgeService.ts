@@ -31,11 +31,28 @@ export function createFakeBadgeService(
   const accepted: string[] = []
   const declined: string[] = []
   const mine: MyBadges = {
-    held: [{ ...FAKE_BADGES.helper, awardIds: ['awd_1'], earnedAt: ['2026-11-10T12:00:00Z'], hidden: false }],
+    held: [
+      { ...FAKE_BADGES.helper, count: 1, since: '2026-11-10T12:00:00Z', pinned: true, hidden: false },
+      {
+        ...FAKE_BADGES.thanks,
+        count: 3,
+        since: '2026-11-11T09:00:00Z',
+        latestAt: '2026-11-15T09:00:00Z',
+        pinned: false,
+        hidden: false,
+      },
+    ],
     offers: [
-      { ...FAKE_BADGES.organiser, awardId: 'awd_2', offeredAt: '2026-11-16T09:00:00Z', note: 'For the meetup.' },
+      {
+        ...FAKE_BADGES.organiser,
+        awardId: 'awd_2',
+        offeredAt: '2026-11-16T09:00:00Z',
+        note: 'For the meetup.',
+        givenBy: 'Sam',
+      },
     ],
     kudosTotal: 3,
+    visibility: 'members',
   }
   return {
     accepted,
@@ -47,7 +64,8 @@ export function createFakeBadgeService(
     decline: async (_c, awardId) => {
       declined.push(awardId)
     },
-    wall: async () => overrides.wall ?? [{ ...FAKE_BADGES.helper, earnedAt: '2026-11-10T12:00:00Z', pinned: true }],
+    wall: async () =>
+      overrides.wall ?? [{ ...FAKE_BADGES.helper, count: 1, since: '2026-11-10T12:00:00Z', pinned: true }],
     show: async (_c, badgeId) => Object.values(FAKE_BADGES).find((b) => b.badgeId === badgeId) ?? 'notServed',
     image: async () => PIXEL,
   }

@@ -6,6 +6,8 @@
  * holds and is offered, accepts or declines an offer, and reads another member's wall as the community shows it to this
  * member. It never shares a badge outside the community, and a badge is never called verified.
  *
+ * The shapes follow the tasks' own responses (trust-tasks-tf `specs/vtc/badges/{mine/list,wall/show,show}/0.1`).
+ *
  * @module badges/types
  */
 
@@ -20,14 +22,20 @@ export interface BadgeSummary {
   image?: { sha256: string; mediaType: string }
 }
 
-/** A badge the member holds: one per badge, with each award's date (a repeatable badge, or kudos, has several). */
+/** A badge the member holds (`mine/list`): one per badge, however many times it was given. */
 export interface HeldBadge extends BadgeSummary {
-  awardIds: string[]
-  earnedAt: string[]
-  /** Hidden from the member's wall (they chose so in the portal); still theirs. */
+  /** How many times given (kudos, or a repeatable badge); 1 for most. */
+  count: number
+  /** When it was first given. */
+  since: string
+  /** When it was last given. */
+  latestAt?: string
+  /** Pinned beside their name (they chose so in the portal). */
+  pinned: boolean
+  /** Hidden from their wall (they chose so in the portal); still theirs. */
   hidden: boolean
-  /** How many times given: kudos, or a repeatable badge. */
-  count?: number
+  /** Until when the credential the community issued for it stands; none for kudos. */
+  credentialValidUntil?: string
 }
 
 /** An award waiting for the member's answer. `note` is the giver's, seen by the member only. */
@@ -40,21 +48,27 @@ export interface BadgeOffer extends BadgeSummary {
   givenBy?: string
 }
 
-/** The member's own badges in one community (`mine/list`). */
+/**
+ * The member's own badges in one community (`mine/list`). A community with badges switched off answers this empty
+ * (VTI-BDG-004), so a screen shows nothing when `held` and `offers` are both empty and there is no kudos total.
+ */
 export interface MyBadges {
   held: HeldBadge[]
   offers: BadgeOffer[]
   kudosTotal?: number
+  /** Who sees their wall: the community's other members, or nobody. */
+  visibility?: 'members' | 'nobody'
 }
 
 /** A badge on another member's wall (`wall/show`), as the community shows it to this member. */
 export interface WallBadge extends BadgeSummary {
-  earnedAt?: string
-  count?: number
-  pinned?: boolean
+  count: number
+  since?: string
+  latestAt?: string
+  pinned: boolean
 }
 
-/** A community that does not serve badges, or has them switched off: show nothing for it. */
+/** A community that does not serve badges: show nothing for it. */
 export type NotServed = 'notServed'
 /** A wall the community does not show this member (its owner chose `nobody`, or the card is not shown to them). */
 export type WallHidden = 'hidden'
@@ -86,5 +100,5 @@ export interface MemberWallState {
   wall?: WallBadge[]
   state: 'loading' | 'shown' | 'hidden' | 'notServed'
 }
-/** The room-post chip's lookup: the author's wall in the room's community, looked up only while on screen. */
+/** The room-post chip's lookup (on hold: the plan's Room posts). */
 export type AuthorBadgesLookup = (communityDid: string, authorDid: string) => WallBadge[] | undefined
