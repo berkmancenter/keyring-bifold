@@ -126,6 +126,9 @@ const RECORDS_PUT = /^https:\/\/trusttasks\.org\/spec\/rooms\/records\/put\/[\d.
  * - `remoteOff`: the release's kill. Set it to `true` and every task keeps the order asked again, for everyone at the next
  *   start, whatever `on` says, until a release sets it back.
  *
+ * KILL RECIPE (no kill PR is kept open): branch from current main, set `remoteOff: true` below (one line), and publish
+ * it by OTA. Turning it on is the same with `on: true`; both are Alberto's.
+ *
  * Nothing is saved on the phone and nothing a person does changes either value; it is read at each queueing and each
  * raise, never cached. It fails closed: anything but both values as booleans, `on` true and `remoteOff` false, reads as
  * off. Tests flip the entries and must put them back.
