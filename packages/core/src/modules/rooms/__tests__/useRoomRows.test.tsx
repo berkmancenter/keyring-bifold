@@ -13,8 +13,11 @@ import { AppState } from 'react-native'
 
 import { newEventId } from '../../chat/eventId'
 import { RUN_STARTED_AT } from '../../../utils/runStart'
+import { sampleCapabilities } from '../capabilities'
 import { toInertText } from '../inertText'
 import { ROOMS_ROWS_AT_START } from '../rowsAtStart'
+import { ROOMS_OFFERS_ON_MESSAGES } from '../offersOnMessagesSwitch'
+import { OFFERS_REFRESH_FLOOR_MS, useRoomOffersCount } from '../useRoomOffersCount'
 import { chatMessageBody } from '../roomPosts'
 import type { Identity, Note, NoteList, NoteSummary, RoomsService, RoomSummary } from '../types'
 import {
@@ -1261,5 +1264,44 @@ describe("the last run's rows at a start", () => {
     const list = renderHook(() => useRoomRows())
     await flush()
     expect(list.result.current.rows).toEqual([])
+  })
+})
+
+// 11-17: a new invite showed only at the offers poll's next two-minute ask; Messages coming into focus asks again.
+describe('Messages asks for room offers again', () => {
+  const offersService = () =>
+    ({
+      capabilities: jest.fn(async () => sampleCapabilities()),
+      listOffers: jest.fn(async () => []),
+    }) as unknown as RoomsService & { listOffers: jest.Mock }
+  afterEach(() => {
+    ROOMS_OFFERS_ON_MESSAGES.on = true
+  })
+
+  test('when it comes into focus, and when the member tries the rooms again', async () => {
+    const offers = offersService()
+    renderHook(() => useRoomOffersCount(offers, true))
+    await flush()
+    expect(offers.listOffers).toHaveBeenCalledTimes(1)
+    const list = renderHook(() => useRoomRows())
+    await step(OFFERS_REFRESH_FLOOR_MS)
+
+    await act(async () => void focus?.())
+    expect(offers.listOffers).toHaveBeenCalledTimes(2)
+    await step(OFFERS_REFRESH_FLOOR_MS)
+    await act(async () => list.result.current.reload())
+    expect(offers.listOffers).toHaveBeenCalledTimes(3)
+  })
+
+  test('control: switched off, coming into focus asks nothing of the offers', async () => {
+    const offers = offersService()
+    renderHook(() => useRoomOffersCount(offers, true))
+    await flush()
+    renderHook(() => useRoomRows())
+    await step(OFFERS_REFRESH_FLOOR_MS)
+    ROOMS_OFFERS_ON_MESSAGES.on = false
+
+    await act(async () => void focus?.())
+    expect(offers.listOffers).toHaveBeenCalledTimes(1)
   })
 })
