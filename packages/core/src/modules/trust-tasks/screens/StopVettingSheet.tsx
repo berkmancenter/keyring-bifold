@@ -17,6 +17,13 @@ import { ThemedText } from '../../../components/texts/ThemedText'
 import { useTheme } from '../../../contexts/theme'
 import { testIdWithKey } from '../../../utils/testable'
 
+/** What a Stop that did not stop says (stopVetting's outcome): sent, unreadable (nothing removed), or partial. */
+export const STOP_REFUSED_WORDS = {
+  sent: 'Vetting.StopAlreadySent',
+  unreadable: 'Vetting.StopUnreadable',
+  partial: 'Vetting.StopPartial',
+} as const
+
 export const StopVettingSheetIds = {
   sheet: 'StopVettingSheet',
   stop: 'StopVettingSheetStop',

@@ -60,7 +60,7 @@ import { cardJoinOf, communityCardModel, type CommunityCardPrimary } from './com
 import { communityHeadingOf, communityLabelOf } from './communityName'
 import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
-import StopVettingSheet from './StopVettingSheet'
+import StopVettingSheet, { STOP_REFUSED_WORDS } from './StopVettingSheet'
 import { stopVetting } from '../module/vtiJoin'
 import { GenericRecordsVettingStore } from '../module/vtiVetting'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
@@ -329,7 +329,7 @@ const VtaAgentHome: React.FC = () => {
   const [stopFor, setStopFor] = useState<string>()
   const [stopping, setStopping] = useState(false)
   /** Why the last Stop this vetting cleared nothing: it had gone to the community, or what was sent could not be read. */
-  const [stopRefused, setStopRefused] = useState<'sent' | 'unreadable'>()
+  const [stopRefused, setStopRefused] = useState<'sent' | 'unreadable' | 'partial'>()
   const otherWaiting = useOtherAgentsWaiting()
   // The communities' cards read each one's journey; this page reads the same
   // readings, so it leads with a card's next step in the same render as the
@@ -1004,7 +1004,7 @@ const VtaAgentHome: React.FC = () => {
             ) : null}
             {nextStep.kind === 'vetting' && stopRefused ? (
               <ThemedText style={styles.stopVettingText} testID={testIdWithKey(VtaAgentHomeIds.stopRefused)}>
-                {t(stopRefused === 'sent' ? 'Vetting.StopAlreadySent' : 'Vetting.StopUnreadable', {
+                {t(STOP_REFUSED_WORDS[stopRefused], {
                   community: communityLabelOf(nextStep.communityDid, t),
                   interpolation: { escapeValue: false },
                 })}
@@ -1156,8 +1156,9 @@ const VtaAgentHome: React.FC = () => {
             },
             stopFor
           )
-            // A failure clears nothing; it is said as unreadable, never as stopped.
-            .catch(() => 'unreadable' as const)
+            // The reads never throw (they come back `unreadable`), so a throw here is from clearing: said as partial,
+            // never as "nothing was removed".
+            .catch(() => 'partial' as const)
             .then((done) => {
               // Stopped: the card goes once the holdings are read again (stopVetting announces the change). Refused:
               // nothing was cleared, and the card says why.

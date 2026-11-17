@@ -2518,7 +2518,8 @@
     "CantSignInHint": "Start over makes a new identity and asks for a new ticket. Tell your vetter.",
     "TryAgain": "Try again",
     "StartOver": "Start over",
-    "StopUnreadable": "Couldn't check whether anything went to {{community}}, so nothing was removed. Try again."
+    "StopUnreadable": "Couldn't check whether anything went to {{community}}, so nothing was removed. Try again.",
+    "StopPartial": "Part of your vetting for {{community}} may already be removed. Check it before you try again."
   },
   "Directory": {
     "ViewCard": "View card",

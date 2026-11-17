@@ -270,6 +270,7 @@ describe('what your agent holds, card by card', () => {
   it.each([
     ['unreadable', 'Vetting.StopUnreadable'],
     ['sent', 'Vetting.StopAlreadySent'],
+    ['partial', 'Vetting.StopPartial'],
   ] as const)('row V5: a Stop that comes back %s clears nothing, and the card says why', async (done, words) => {
     jest.spyOn(vtiJoinModule, 'stopVetting').mockResolvedValue(done)
     const tree = await renderHome([persona(A), membership(A, linkedAt), persona(B)])

@@ -63,7 +63,7 @@ import {
 } from '../module/vtiVetting'
 import { ensurePersonaFor, stopVetting } from '../module/vtiJoin'
 import { isMissingKeyCopy, PersonaAgentUnreachable } from '../module/vtiPersonaInbox'
-import StopVettingSheet from './StopVettingSheet'
+import StopVettingSheet, { STOP_REFUSED_WORDS } from './StopVettingSheet'
 import { pendingVettingTicket } from '../module/vtiLinks'
 import { requestBiometricConfirmationWithUI } from '../../vrc/vrc-biometric'
 
@@ -948,7 +948,7 @@ const VtiVetting: React.FC<VtiVettingProps> = ({ config }) => {
       setStopAsked(false)
       if (done !== 'stopped')
         throw new InWords(
-          t(done === 'sent' ? 'Vetting.StopAlreadySent' : 'Vetting.StopUnreadable', {
+          t(STOP_REFUSED_WORDS[done], {
             community: communityLabelOf(communityDid, t),
             interpolation: { escapeValue: false },
           })

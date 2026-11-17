@@ -548,7 +548,7 @@ export async function stopVetting(
     }
   },
   communityDid: string
-): Promise<'stopped' | 'sent' | 'unreadable'> {
+): Promise<'stopped' | 'sent' | 'unreadable' | 'partial'> {
   // Fails toward refusing (ac, #1097): a false "sent" leaves a tester a vetting to finish or withdraw, a false
   // "nothing sent" forgets an identity a community knows. So a read that fails, or a store that cannot say what was
   // sent, is `unreadable`, and nothing is cleared. Never read as "nothing there".
@@ -566,8 +566,15 @@ export async function stopVetting(
     return 'unreadable'
   }
   if (application?.submission || submission) return 'sent'
-  await deps.vettingStore.forgetApplication?.(communityDid)
-  if (!membership) await deps.identityStore.forgetPersona(communityDid)
+  // A clearing step that fails may have removed part of it (records go one by one): `partial`, so the person is never
+  // told nothing was removed when something may have been (ac, #1097).
+  try {
+    await deps.vettingStore.forgetApplication?.(communityDid)
+    if (!membership) await deps.identityStore.forgetPersona(communityDid)
+  } catch {
+    emitCommunityChanged(communityDid, 'forgotten')
+    return 'partial'
+  }
   emitCommunityChanged(communityDid, 'forgotten')
   return 'stopped'
 }

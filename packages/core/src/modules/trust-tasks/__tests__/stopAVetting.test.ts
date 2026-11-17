@@ -86,6 +86,18 @@ describe('stopVetting: forget the vetting and its identity, only while nothing h
     }
   )
 
+  test.each([
+    ['the application', 'vettingStore', 'forgetApplication'],
+    ['the identity', 'identityStore', 'forgetPersona'],
+  ] as const)(
+    'clearing %s fails: partial, never "stopped" and never "nothing removed" (part may be gone)',
+    async (_l, store, method) => {
+      const s = stores({ app: application() })
+      ;(s[store] as Record<string, jest.Mock>)[method].mockRejectedValue(new Error('Invalid store handle'))
+      expect(await stopVetting(s.deps, COMMUNITY)).toBe('partial')
+    }
+  )
+
   test('a store that cannot say what was sent: unreadable, and nothing is cleared', async () => {
     const s = stores({ app: application() })
     s.communityStore.getSubmission = undefined

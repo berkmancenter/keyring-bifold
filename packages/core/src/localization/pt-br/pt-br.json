@@ -2392,7 +2392,8 @@
     "CantSignInHint": "Recomeçar cria uma nova identidade e pede um novo tíquete. Avise seu verificador.",
     "TryAgain": "Tentar de novo",
     "StartOver": "Recomeçar",
-    "StopUnreadable": "Não foi possível verificar se algo foi para {{community}}, então nada foi removido. Tente de novo."
+    "StopUnreadable": "Não foi possível verificar se algo foi para {{community}}, então nada foi removido. Tente de novo.",
+    "StopPartial": "Parte da sua verificação para {{community}} pode já ter sido removida. Confira antes de tentar de novo."
   },
   "Directory": {
     "ViewCard": "Ver cartão",

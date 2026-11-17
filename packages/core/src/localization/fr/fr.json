@@ -2479,7 +2479,8 @@
     "CantSignInHint": "Recommencer crée une nouvelle identité et demande un nouveau ticket. Prévenez votre vérificateur.",
     "TryAgain": "Réessayer",
     "StartOver": "Recommencer",
-    "StopUnreadable": "Impossible de vérifier si quelque chose a été envoyé à {{community}} ; rien n'a été supprimé. Réessayez."
+    "StopUnreadable": "Impossible de vérifier si quelque chose a été envoyé à {{community}} ; rien n'a été supprimé. Réessayez.",
+    "StopPartial": "Une partie de votre vérification pour {{community}} a peut-être déjà été supprimée. Vérifiez-la avant de réessayer."
   },
   "Directory": {
     "ViewCard": "Voir la carte",
