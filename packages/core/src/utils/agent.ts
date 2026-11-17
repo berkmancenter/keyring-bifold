@@ -36,6 +36,7 @@ import { EphemeralKeyManagementService } from '../modules/trust-tasks/module/Eph
 import { EPHEMERAL_KMS_BACKEND } from '../modules/trust-tasks/module/vtaKeys'
 import { WalletSecret } from '../types/security'
 import { RetryingWebVhDidResolver } from './RetryingWebVhDidResolver'
+import { WebsDidResolver } from './WebsDidResolver'
 
 interface GetAgentModulesOptions {
   walletSecret: WalletSecret
@@ -162,6 +163,7 @@ export function getAgentModules({
     dids: new DidsModule({
       resolvers: [
         new RetryingWebVhDidResolver(),
+        new WebsDidResolver(),
         new WebDidResolver(),
         new JwkDidResolver(),
         new KeyDidResolver(),
