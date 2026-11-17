@@ -1563,7 +1563,9 @@ export class AgentRoomsService implements RoomsService {
   /**
    * Accepts what the preview showed, step for step as every other surface does (`pnm rooms offers accept`), so
    * any surface finishes what another began: each step answers a repeat with its first answer. The offer is read
-   * again first, since it may have been withdrawn or accepted elsewhere since the preview.
+   * again first, since it may have been withdrawn or accepted elsewhere since the preview, unless it was read at most
+   * ACCEPT_FROM_PREVIEW_MAX_AGE_MS ago and the switch is on (acceptFromPreviewSwitch): then it is accepted as shown,
+   * and a withdrawn one is refused by the community's accept step, after the two cards are stored.
    */
   public async acceptOffer(token: string): Promise<{ roomId: string }> {
     const pending = this.previews.get(token)
