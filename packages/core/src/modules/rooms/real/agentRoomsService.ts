@@ -239,6 +239,9 @@ export interface AgentRoomsOptions {
   sleep?: (ms: number) => Promise<void>
 }
 
+/** How long a room whose listing was refused as `unsupportedVersion` is answered from that refusal: 30 minutes. */
+export const UNSERVED_LISTING_MS = 30 * 60 * 1000
+
 /** The operations this phase implements. */
 export const R1_BUILT: ReadonlySet<RoomsOperation> = new Set<RoomsOperation>([
   'listMyRooms',
@@ -449,6 +452,11 @@ export class AgentRoomsService implements RoomsService {
    * listing before their first read (+0.6–0.9 s on each open, lab sim 10-30).
    */
   private listingInFlight = new Map<string, Promise<NoteList>>()
+  /**
+   * A room whose listing came back `unsupportedVersion`, by room: the browse type asked, when, and the refusal. Asked
+   * again at the same type within {@link UNSERVED_LISTING_MS}, it is answered with that same refusal and nothing is sent.
+   */
+  private unservedListings = new Map<string, { type: string; at: number; refusal: unknown }>()
   /** A record's read being asked now, by room and key: every caller that reads it meanwhile waits for the same one. */
   private readsInFlight = new Map<string, Promise<OpenedRecord>>()
   /** A batch was refused for being a batch (readBatches): this session reads one at a time, as before. */
@@ -679,7 +687,8 @@ export class AgentRoomsService implements RoomsService {
         next.set(custody.roomId, this.fromCustody(custody))
     // A listing asked before an accept or a leave answers its callers, but does not undo what that changed. Its
     // callers may see a room just left once more: the next listing, asked afresh after the leave, drops it. Answering
-    // them from this.rooms instead would show no rooms at all after an accept, which empties it.
+    // them from this.rooms instead would give them a list this read did not make: the cache as the accept or leave
+    // since changed it.
     if (changes === this.roomsChanged) this.rooms = next
     this.keptBack = kept.map((c) => ({
       communityDid: c.did,
@@ -865,13 +874,25 @@ export class AgentRoomsService implements RoomsService {
 
   private async readListing(roomId: string, sinceVersion: number | undefined): Promise<NoteList> {
     const room = await this.requireInRoom(roomId, 'listNotes')
-    const listing = parseBrowse(
-      await this.backend.agentTask(this.browseType(), {
+    const type = this.browseType()
+    // A room on a host too old for what the agent asks it was asked again on every listing and refused the same way
+    // each time, a round trip on the shared agent queue each (5 in 3 minutes on a tester's phone, 11-16). Within a
+    // while, at the same type, it is answered from that refusal. An agent that came to serve another type asks again.
+    const unserved = this.unservedListings.get(roomId)
+    if (unserved && unserved.type === type && this.now() - unserved.at < UNSERVED_LISTING_MS) throw unserved.refusal
+    let answer: unknown
+    try {
+      answer = await this.backend.agentTask(type, {
         roomId,
         host: room.host,
         ...(sinceVersion !== undefined ? { sinceVersion } : {}),
       })
-    )
+    } catch (e) {
+      if (refusalCode(e) === 'unsupportedVersion')
+        this.unservedListings.set(roomId, { type, at: this.now(), refusal: e })
+      throw e
+    }
+    const listing = parseBrowse(answer)
     for (const r of listing.records) {
       // A version only goes up: an answer that arrives late never takes a record back.
       const k = listedKey(roomId, r.key)
@@ -1489,27 +1510,47 @@ export class AgentRoomsService implements RoomsService {
     if (!entry) throw new RoomsPreviewExpired(token)
     const { community } = entry
     const roomId = entry.offer.roomId
+    // How long each step took, said once the room is joined: an accept was felt slow (11-16) and nothing timed it.
+    const steps: string[] = []
+    const started = this.now()
+    let mark = started
+    const timed = (name: string) => {
+      const at = this.now()
+      steps.push(`${name} ${at - mark} ms`)
+      mark = at
+    }
     const offer = (await this.offersOf(community)).items.find((o) => o.roomId === roomId && o.host === community.did)
+    timed('offers read')
     if (!offer) throw new RoomsRefused('acceptOffer', 'notFound', false, `${community.did} no longer lists ${roomId}`)
     this.requireSealedSupport(offer)
     const sealed = isSealed(offer.tier)
     const done = () => {
       this.offers.delete(pending.offerId)
-      this.rooms = new Map() // the next read lists the room
+      // The room joined is known at once from its offer, so the room screen opened next reads it without a listing
+      // of every community first (3-13 s on testers' phones, 11-16): emptying the rooms here sent getRoom to one.
+      // The rooms already listed stay. The next listing replaces them all with what the communities say.
+      const rooms = new Map(this.rooms)
+      rooms.set(roomId, this.joinedFrom(community, offer))
+      this.rooms = rooms
       this.heldInFlight = undefined // nor joins a key list asked before the room was held
-      this.roomsChanged++
+      this.roomsChanged++ // nor does a listing asked before the accept replace the room joined, when it answers
       this.roomsInFlight = undefined
+      this.backend.warn(`rooms: ${logRef(roomId)} accepted in ${this.now() - started} ms (${steps.join(', ')})`)
       return { roomId }
     }
 
     // Joined already: from another surface, or an earlier run whose answer was lost.
-    if (offer.state === 'accepted' && (!sealed || (await this.holds(roomId, community.personaDid)))) return done()
+    if (offer.state === 'accepted' && (!sealed || (await this.holds(roomId, community.personaDid)))) {
+      timed('already joined')
+      return done()
+    }
 
     for (const what of ['membership', 'authority'] as const) {
       await this.agentStep('acceptOffer', `store the ${what} credential`, ROOMS_TASK.vaultReceive, {
         credential: credentialOf(offer.credentials[what], what),
       })
     }
+    timed('credentials stored')
     // The agent's own KeyPackage: the community completes an admission only with one the member's key holder
     // minted, and the agent answers a repeat with the one it already gave.
     let keyPackage: string | undefined
@@ -1521,6 +1562,7 @@ export class AgentRoomsService implements RoomsService {
         })
       )?.keyPackage
       if (!keyPackage) throw new Error('the agent answered without a key package')
+      timed('key package')
     }
 
     let accepted: NonNullable<ReturnType<typeof parseAccept>>
@@ -1529,10 +1571,14 @@ export class AgentRoomsService implements RoomsService {
     } catch (e) {
       // Accepted with this KeyPackage too long ago to be answered again, but joined: that is done.
       if (e instanceof RoomsRefused && e.code === 'alreadyAccepted' && sealed) {
-        if (await this.holds(roomId, community.personaDid).catch(() => false)) return done()
+        if (await this.holds(roomId, community.personaDid).catch(() => false)) {
+          timed('accepted already')
+          return done()
+        }
       }
       throw e
     }
+    timed('accept')
     if (!sealed) return done()
     if (!accepted.welcome)
       throw new RoomsRefused(
@@ -1562,15 +1608,40 @@ export class AgentRoomsService implements RoomsService {
         )
       this.backend.warn(`rooms: ${logRef(roomId)} Welcome: not used, the agent already holds a group for this room`)
     }
-    // The epoch keys the member may read, so the room opens at once. A failure here leaves reads to repair it.
+    timed('Welcome')
+    const joined = done()
+    // The epoch keys the member may read. Asked now and not waited for: the room is shown first, and its reads go to
+    // the agent after this one. That order is not incidental: rooms/keys/backfill is not in vtaReadLane.ts's
+    // VTA_READ_LANE_TYPES, so VtaClient runs it alone and starts nothing behind it until it is answered (mayStart,
+    // pump; backfillRunsAlone.test.ts guards it). A failure here leaves reads to repair it.
     if ((this.served?.types ?? []).includes(ROOMS_TASK.keysBackfill)) {
-      await this.backend
+      const asked = this.now()
+      void this.backend
         .agentTask(ROOMS_TASK.keysBackfill, { roomId, host: offer.host })
+        .then(() => this.backend.warn(`rooms: ${logRef(roomId)} backfill after joining: ${this.now() - asked} ms`))
         .catch((e) =>
           this.backend.warn(`rooms: backfill of ${logRef(roomId)} after joining failed: ${failureCategory(e)}`)
         )
     }
-    return done()
+    return joined
+  }
+
+  /**
+   * A room just joined, from the offer accepted: what its membership will say, until a listing reads it. A sealed room
+   * is joined only once the agent holds it, so it is never `joined: false` here.
+   */
+  private joinedFrom(community: RoomsCommunity, offer: OfferRecord): KnownRoom {
+    const { joined: _joined, ...room } = this.fromMembership(community, {
+      roomId: offer.roomId,
+      host: offer.host,
+      label: offer.label,
+      description: offer.description,
+      tier: offer.tier,
+      actions: offer.actions,
+      validUntil: offer.validUntil,
+      state: 'admitted',
+    })
+    return room
   }
 
   /** An agent task on an operation's path, its refusal reported as the operation's. */
