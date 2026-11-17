@@ -195,11 +195,7 @@ export function createPollService(b: PollsBackend) {
     return name === 'unsupportedVersion' || name === 'unsupportedType'
   }
 
-  /**
-   * A community's polls, at the newest list it serves.
-   *
-   * @versionLadder vtc/elections/list
-   */
+  /** A community's polls ({@link listPolls}), and how long they took, said once. */
   const readPolls = async (community: string, filter: { state?: string } = {}): Promise<PollListItem[]> => {
     // How long a community's polls took, said once per listing: polls were felt slow (11-16) and nothing timed them.
     const started = b.now()
@@ -216,6 +212,11 @@ export function createPollService(b: PollsBackend) {
     }
   }
 
+  /**
+   * A community's polls, at the newest list it serves; `asked` is told of each ask.
+   *
+   * @versionLadder vtc/elections/list
+   */
   const listPolls = async (
     community: string,
     filter: { state?: string },
