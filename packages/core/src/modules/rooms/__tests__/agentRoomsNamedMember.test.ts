@@ -51,6 +51,7 @@ function setup(o: Setup = {}) {
       return { keyPackage: 'kp', expiresAt: '2026-12-01T00:00:00Z', alreadyMinted: false }
     if (type === ROOMS_TASK.keysWelcome) return { epoch: 2 }
     if (type === ROOMS_TASK.keysBackfill) return { roomId: payload.roomId, earliestReadableEpoch: 1 }
+    if (type === ROOMS_TASK.keysProfileRead) return { roomId: payload.roomId, status: 'absent' }
     if (type === ROOMS_TASK.keysAct06) {
       const document = payload.document as Record<string, unknown>
       return { principal: NEW, document: { ...document, proof: { type: 'DataIntegrityProof' } } }
@@ -83,6 +84,8 @@ function setup(o: Setup = {}) {
       ROOMS_TASK.keysBackfill,
       ROOMS_TASK.vaultReceive,
       ROOMS_TASK.keysAct06,
+      ROOMS_TASK.keysProfileRead,
+      ROOMS_TASK.keysSeal02,
     ],
     agentTask,
     communities: async () => [COMMUNITY],
@@ -116,6 +119,13 @@ describe("a room held as two of this phone's identities", () => {
     await s.service.readNote(ROOM, 'note/1').catch(() => undefined)
     expect(s.sent('/rooms/keys/browse/')).toEqual([{ roomId: ROOM, host: COMMUNITY.did, ...named(NEW) }])
     expect(s.sent('/rooms/keys/read/')[0]).toMatchObject(named(NEW))
+  })
+
+  it('names it on the profile read (rooms/keys/profile/read), which 278.24 also had refused', async () => {
+    const s = setup()
+    await s.service.listMyRooms()
+    await s.service.recordFeaturesIn(ROOM)
+    expect(s.sent('/rooms/keys/profile/read/')).toEqual([{ roomId: ROOM, host: COMMUNITY.did, ...named(NEW) }])
   })
 
   it('says so once, by short ref, never naming an identity', async () => {

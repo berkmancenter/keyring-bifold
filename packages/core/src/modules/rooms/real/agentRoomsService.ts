@@ -244,10 +244,10 @@ export const UNSERVED_LISTING_MS = 30 * 60 * 1000
 
 /**
  * The custody tasks that pick the member they act as (vta-service `room_member.rs`, MEMBER_EXT): browse, read, open,
- * file-key, backfill, chain, commit, profile and seal, at any version. Not `read-marker`, `key-package`, `welcome`,
+ * file-key, backfill, chain, commit, profile read and seal, at any version (Keyring sends no profile write). Not `read-marker`, `key-package`, `welcome`,
  * `list`, `watch` or `act` (which names its member as the document's issuer).
  */
-const CUSTODY_TASK = /\/rooms\/keys\/(browse|read|open|file-key|backfill|chain|commit|profile|seal)\/\d/
+const CUSTODY_TASK = /\/rooms\/keys\/((browse|read|open|file-key|backfill|chain|commit|seal)|profile\/read)\/\d/
 
 /** Keyring's and the agent's extension namespace on rooms tasks. */
 const ROOMS_EXT = 'org.openvtc.rooms'
