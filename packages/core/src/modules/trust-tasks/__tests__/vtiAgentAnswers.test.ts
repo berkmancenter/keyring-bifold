@@ -973,6 +973,19 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
     await until(() => mockStopped.includes(HUNG), 500)
   })
 
+  it("letting a sign-in go stops only that attempt's session, never another identity's own session (ac, #1095)", async () => {
+    const OTHER = 'did:webvh:p:turn-own-other'
+    const kept = { sendTo: async () => undefined }
+    keepOwnSession(OTHER, kept)
+    mockHangStart.add(HUNG)
+    expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')
+    await until(() => mockStopped.includes(HUNG), 500)
+    // The other identity's own session is untouched: the let-go stops the attempt's session object, not by DID.
+    expect(ownSessionFor(OTHER)).toBe(kept)
+    expect(mockStopped).toEqual([HUNG])
+    dropAllOwnSessions()
+  })
+
   it('a time-out rests that identity from background sign-ins, as a failure does', async () => {
     mockHangStart.add(HUNG)
     expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')

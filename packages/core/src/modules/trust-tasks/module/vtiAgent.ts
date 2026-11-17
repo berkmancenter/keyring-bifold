@@ -1488,6 +1488,8 @@ class VtiAgentController {
         // The socket is closed now, half-open or not: stop() closes whatever socket the session holds and makes it final
         // (a stopped session never reopens), so a socket the OS kept alive does not hold the DID's one mediator slot.
         // connectNow stops it again if its open was already under way (belt and braces).
+        // Only this attempt's own session object: never by DID, so an identity's own session (vtiOwnSessions, sessions
+        // phase B) that an ask is using is never touched here.
         void ticket.session?.stop().catch(() => undefined)
         reject(new VtiSignInTimedOut(this.signInTurnMs))
       }
