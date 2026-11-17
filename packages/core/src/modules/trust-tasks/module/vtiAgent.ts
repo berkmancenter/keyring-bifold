@@ -22,7 +22,7 @@ import type { Agent } from '@credo-ts/core'
 import { utils } from '@credo-ts/core'
 import type { DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { tsp, TRUST_TASK_V2_ENVELOPE_TYPE } from '@bifold/trust-tasks'
-import { DeviceEventEmitter } from 'react-native'
+import { AppState, DeviceEventEmitter } from 'react-native'
 
 import { signDocumentProof } from '../documentProof'
 import { purposeForDocumentType } from './proofPurpose'
@@ -300,6 +300,8 @@ export const isAgentGone = (error: unknown): boolean => {
 /** One sign-in's claim on the turn: let go when its time runs out, so what it opens after that is closed. */
 interface SignInTicket {
   abandoned: boolean
+  /** The session the attempt made, once made: stopped the moment the attempt is let go (`signIn`). */
+  session?: { stop(): Promise<void> }
 }
 
 /** When a background sign-in may try this identity again (0: now). */
@@ -1455,12 +1457,25 @@ class VtiAgentController {
     const attempt = this.connectNow(agent, mediatorDid, options, ticket)
     // Let go after VTI_SIGNIN_TURN_MS, counted from here, when the turn starts: the next sign-in need not wait on one
     // that hangs (11-17). The attempt runs on, and closes whatever it opens (`ticket`).
+    // Measured by the wall clock: a timer pauses with the app's JS in the background, so the time away is also checked
+    // when the app comes back to the front (a2, #1022).
+    const turnStart = this.now()
     let timer: ReturnType<typeof setTimeout> | undefined
+    let expire = () => undefined as void
     const limit = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
+      expire = () => {
+        if (ticket.abandoned) return
         ticket.abandoned = true
+        // The socket is closed now, half-open or not: stop() closes whatever socket the session holds and makes it final
+        // (a stopped session never reopens), so a socket the OS kept alive does not hold the DID's one mediator slot.
+        // connectNow stops it again if its open was already under way (belt and braces).
+        void ticket.session?.stop().catch(() => undefined)
         reject(new VtiSignInTimedOut(this.signInTurnMs))
-      }, this.signInTurnMs)
+      }
+      timer = setTimeout(expire, this.signInTurnMs)
+    })
+    const back = AppState.addEventListener('change', (next) => {
+      if (next === 'active' && this.now() - turnStart >= this.signInTurnMs) expire()
     })
     attempt.catch(() => undefined)
     // The turn is the attempt or its limit, whichever ends first: a sign-in queued behind waits on this, never on an
@@ -1478,6 +1493,7 @@ class VtiAgentController {
       throw error
     } finally {
       if (timer) clearTimeout(timer)
+      back?.remove()
       if (this.connecting === turn) this.connecting = undefined
     }
     if (wantedDid) this.noteSignIn(agent, wantedDid, true)
@@ -1594,6 +1610,7 @@ class VtiAgentController {
             }
           : {}),
       })
+      if (ticket) ticket.session = session
       // Whatever else holds a connection for this DID lets go first: a mediator
       // keeps one live connection per DID (vtiIdentityListeners).
       for (const guard of [...this.signInGuards]) await guard(did).catch(() => undefined)

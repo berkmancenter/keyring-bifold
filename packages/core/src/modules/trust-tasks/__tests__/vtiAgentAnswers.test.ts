@@ -132,7 +132,7 @@ jest.mock('../module/tspCapability', () => ({
   }),
 }))
 
-import { DeviceEventEmitter } from 'react-native'
+import { AppState, DeviceEventEmitter } from 'react-native'
 
 import { plainError } from '../screens/plainError'
 import {
@@ -936,6 +936,39 @@ describe('one sign-in cannot hold the turn: a time limit, a late socket closed, 
     mockRelease[HUNG]()
     await until(() => mockStopped.includes(HUNG))
     expect(vtiAgent.getState()).toMatchObject({ status: 'connected', did: NEXT })
+  })
+
+  it('the limit is wall time: back from a background longer than it, the turn ends at once (control: a short trip does not)', async () => {
+    vtiAgent.signInTurnMs = 10_000
+    let clock = Date.parse('2026-11-17T02:37:15Z')
+    vtiAgent.now = () => clock
+    let onChange: ((s: string) => void) | undefined
+    jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, h: (s: string) => void) => {
+      onChange = h
+      return { remove: () => undefined }
+    }) as never)
+    mockHangStart.add(HUNG)
+    let ended: string | undefined
+    void outcome(as(HUNG)).then((o) => (ended = o))
+    await until(() => !!onChange && !!mockRelease[HUNG])
+    // A short trip away: back before the limit, the turn goes on.
+    clock += 5_000
+    onChange!('active')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(ended).toBeUndefined()
+    // 14 minutes away, as on 11-17: the first look back ends it, though the paused timer has not fired.
+    clock += 14 * 60_000
+    onChange!('active')
+    await until(() => ended !== undefined, 500)
+    expect(ended).toBe('VtiSignInTimedOut')
+    vtiAgent.now = () => Date.now()
+  })
+
+  it('the let-go sign-in is closed at once, while its socket is still opening (the DID has one mediator slot)', async () => {
+    mockHangStart.add(HUNG)
+    expect(await outcome(as(HUNG))).toBe('VtiSignInTimedOut')
+    // Not released: the socket never opened, and the session is already stopped.
+    await until(() => mockStopped.includes(HUNG), 500)
   })
 
   it('a time-out rests that identity from background sign-ins, as a failure does', async () => {
