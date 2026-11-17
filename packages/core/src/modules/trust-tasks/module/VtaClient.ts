@@ -108,7 +108,7 @@ import {
   goesFirst,
   inReadLane,
   VTA_HEARTBEAT_BESIDE,
-  VTA_KEY_FOR_SIGN_IN_FIRST,
+  isKeyForSignInFirstOn,
   VTA_READ_LANE_SIZE,
 } from './vtaReadLane'
 import {
@@ -1616,7 +1616,7 @@ export class VtaClient {
       const queued: QueuedTask = { ticket, type, start: () => run().then(resolve, reject) }
       // A member's own write goes ahead of what is queued, behind any other part of a write, in the order asked; what
       // is on the wire runs on (vtaReadLane, goesFirst). So does a key a sign-in waits for, where that is on.
-      const keyFirst = () => VTA_KEY_FOR_SIGN_IN_FIRST.on && priority?.first === true
+      const keyFirst = () => isKeyForSignInFirstOn() && priority?.first === true
       if (goesFirst(type, payload) || keyFirst()) this.placeFirst(queued)
       else this.waiting.push(queued)
       if (priority)
@@ -2741,14 +2741,20 @@ export class VtaClient {
   ): Promise<{ keyId: string; curve: 'Ed25519' | 'X25519'; publicKeyMultibase: string }> {
     if (isAgentsOwnDid(didOfKeyId(vtaKeyId), this.vtaDid))
       throw new Error(`${LOG_PREFIX} not borrowed: the key is the agent's own, not an identity's`)
-    const exported = await this.task<VtaExportedKey>(
-      VTA_TASK.keysExportSecret,
-      { keyId: vtaKeyId },
-      30000,
-      {},
-      undefined,
-      priority ? { priority } : {}
-    )
+    // With a place, the task's own defaults for the rest (undefined), so they never drift from task()'s; without one,
+    // asked exactly as before.
+    const exported = priority
+      ? await this.task<VtaExportedKey>(
+          VTA_TASK.keysExportSecret,
+          { keyId: vtaKeyId },
+          undefined,
+          undefined,
+          undefined,
+          {
+            priority,
+          }
+        )
+      : await this.task<VtaExportedKey>(VTA_TASK.keysExportSecret, { keyId: vtaKeyId })
     // Held in memory only (#10, plan part C), under an id that is the same every
     // session, so a persona's record keeps naming it across restarts.
     const into = { backend: EPHEMERAL_KMS_BACKEND, keyId: inMemoryKeyId(this.vtaDid, vtaKeyId) }

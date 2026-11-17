@@ -26,18 +26,10 @@ jest.mock('../module/vtiTsp', () => ({
 }))
 
 import { type TspReplyBreaker, VtaClient } from '../module/VtaClient'
-import { VTA_KEY_FOR_SIGN_IN_FIRST } from '../module/vtaReadLane'
+import { isKeyForSignInFirstOn, VTA_KEY_FOR_SIGN_IN_FIRST } from '../module/vtaReadLane'
 import type { Priority } from '../module/VtaClient'
 import type { VtiPersona } from '../module/VtiIdentityStore'
 import { inMemoryKeyId } from '../module/vtaKeys'
-
-const READ = 'https://trusttasks.org/spec/rooms/keys/read/0.1'
-const BROWSE = 'https://trusttasks.org/spec/rooms/keys/browse/0.1'
-const WHOAMI = 'https://trusttasks.org/spec/auth/whoami/0.1'
-const SEAL = 'https://trusttasks.org/spec/rooms/keys/seal/0.3'
-const ACT = 'https://trusttasks.org/spec/rooms/keys/act/0.9'
-const PUT = 'https://trusttasks.org/spec/rooms/records/put/0.3'
-const OFFERS = 'https://trusttasks.org/spec/vtc/rooms/offers/list/0.4'
 
 type Doc = { type: string; threadId: string; payload: Record<string, unknown> }
 
@@ -133,6 +125,7 @@ async function drain(h: ReturnType<typeof harness>, n: number) {
 
 afterEach(() => {
   VTA_KEY_FOR_SIGN_IN_FIRST.on = false
+  VTA_KEY_FOR_SIGN_IN_FIRST.remoteOff = false
 })
 
 describe("a sign-in's key copy on the agent's channel", () => {
@@ -148,6 +141,44 @@ describe("a sign-in's key copy on the agent's channel", () => {
       'keys/export-secret/0.1',
     ])
     await Promise.all([...start, exported])
+  })
+
+  it.each([
+    ['remoteOff set', { on: true, remoteOff: true }],
+    ['on not a boolean', { on: 'true', remoteOff: false }],
+    ['remoteOff not a boolean', { on: true, remoteOff: 'false' }],
+    ['remoteOff missing', { on: true, remoteOff: undefined }],
+  ])('fails closed (%s): off, and an export asked as first keeps the order asked', async (_name, values) => {
+    Object.assign(VTA_KEY_FOR_SIGN_IN_FIRST, values)
+    expect(isKeyForSignInFirstOn()).toBe(false)
+    const h = harness()
+    const start = await busyStart(h)
+    const exported = exportKey(h.client, 'k', { first: true })
+    expect(await drain(h, 4)).toEqual([
+      'auth/whoami/0.1',
+      'config/show/0.1',
+      'device/list/0.3',
+      'keys/export-secret/0.1',
+    ])
+    await Promise.all([...start, exported])
+  })
+
+  it('a kill set after an export was asked as first leaves a later raise doing nothing', async () => {
+    VTA_KEY_FOR_SIGN_IN_FIRST.on = true
+    VTA_KEY_FOR_SIGN_IN_FIRST.remoteOff = true
+    const h = harness()
+    const start = await busyStart(h)
+    const place: Priority = { first: true }
+    const sweep = exportKey(h.client, 'k', place)
+    await flush()
+    place.raise?.()
+    expect(await drain(h, 4)).toEqual([
+      'auth/whoami/0.1',
+      'config/show/0.1',
+      'device/list/0.3',
+      'keys/export-secret/0.1',
+    ])
+    await Promise.all([...start, sweep])
   })
 
   it('on: goes ahead of what is queued, never of the task on the wire, and says so', async () => {
@@ -274,7 +305,14 @@ describe('borrowKey', () => {
     const task = jest.spyOn(c, 'task').mockRejectedValue(new Error('stop here'))
     const place: Priority = { first: true }
     await expect(c.borrowKey('did:webvh:QmPersona:dids.example:al-first#key-0', place)).rejects.toThrow('stop here')
-    expect(task).toHaveBeenCalledWith(EXPORT, expect.anything(), 30000, {}, undefined, { priority: place })
+    expect(task).toHaveBeenCalledWith(EXPORT, expect.anything(), undefined, undefined, undefined, { priority: place })
+  })
+
+  it('control: with no place given it asks exactly as before, with the task defaults', async () => {
+    const c = new VtaClient({ config: { logger: { info: jest.fn() } } } as never, 'did:webvh:agent', {} as never)
+    const task = jest.spyOn(c, 'task').mockRejectedValue(new Error('stop here'))
+    await expect(c.borrowKey('did:webvh:QmPersona:dids.example:al-first#key-0')).rejects.toThrow('stop here')
+    expect(task.mock.calls[0]).toHaveLength(2)
   })
 })
 
