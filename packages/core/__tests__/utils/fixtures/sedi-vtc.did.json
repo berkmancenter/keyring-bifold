@@ -40,37 +40,27 @@
   "service": [
     {
       "id": "did:webs:webvh.storm.ws:sedi-vtc:EN7G2PZkzjb3TTWBrG3-oE5-A71XwLeX4et38jeh0C-a#tsp",
-      "type": [
-        "TSPTransport"
-      ],
+      "type": ["TSPTransport"],
       "serviceEndpoint": "did:webvh:QmR5xGk8pkd3ymu7xpfkjr7XZmwDALA5ZJmgG7qcrD2mKA:webvh.storm.ws:mediator"
     },
     {
       "id": "did:webs:webvh.storm.ws:sedi-vtc:EN7G2PZkzjb3TTWBrG3-oE5-A71XwLeX4et38jeh0C-a#vtc-rest",
-      "type": [
-        "VTCRest"
-      ],
+      "type": ["VTCRest"],
       "serviceEndpoint": "https://sedi-vtc.openvti.net/v1"
     },
     {
       "id": "did:webs:webvh.storm.ws:sedi-vtc:EN7G2PZkzjb3TTWBrG3-oE5-A71XwLeX4et38jeh0C-a#vtc-status-list",
-      "type": [
-        "VTCStatusList"
-      ],
+      "type": ["VTCStatusList"],
       "serviceEndpoint": "https://sedi-vtc.openvti.net/v1/status-lists"
     },
     {
       "id": "did:webs:webvh.storm.ws:sedi-vtc:EN7G2PZkzjb3TTWBrG3-oE5-A71XwLeX4et38jeh0C-a#trust-tasks",
-      "type": [
-        "TrustTaskHTTPS"
-      ],
+      "type": ["TrustTaskHTTPS"],
       "serviceEndpoint": "https://sedi-vtc.openvti.net/v1"
     },
     {
       "id": "did:webs:webvh.storm.ws:sedi-vtc:EN7G2PZkzjb3TTWBrG3-oE5-A71XwLeX4et38jeh0C-a#sign-in-portal",
-      "type": [
-        "SignInPortal"
-      ],
+      "type": ["SignInPortal"],
       "serviceEndpoint": "https://sedi-vtc.openvti.net/members/"
     }
   ],
