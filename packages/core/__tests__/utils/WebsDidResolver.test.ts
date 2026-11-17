@@ -92,12 +92,20 @@ describe('WebsDidResolver', () => {
     expect(result.didResolutionMetadata.error).toBe('invalidDidDocument')
   })
 
-  it('accepts the did:web twin a did:webs host may publish, renamed to the did:webs subject', async () => {
+  it('refuses the did:web twin: upstream takes it only with a designated-aliases attestation, read from the KEL', async () => {
     const twin = DID.replace('did:webs:', 'did:web:')
     const published = JSON.parse(JSON.stringify(SEDI_VTC).split(`"${DID}`).join(`"${twin}`))
     const result = await resolve(serving(answer(published)).fetchFn)
-    expect(result.didDocument?.id).toBe(DID)
-    expect(result.didDocument?.keyAgreement).toEqual([X25519])
+    expect(result.didDocument).toBeNull()
+    expect(result.didResolutionMetadata.error).toBe('invalidDidDocument')
+  })
+
+  it('makes relative references absolute against the subject, as upstream does', async () => {
+    const rel = JSON.parse(JSON.stringify(SEDI_VTC).split(`"${DID}#`).join('"#'))
+    const doc = (await resolve(serving(answer(rel)).fetchFn)).didDocument!
+    expect(doc.keyAgreement).toEqual([X25519])
+    expect(doc.dereferenceKey(X25519, ['keyAgreement']).id).toBe(X25519)
+    expect(doc.service?.[1].id).toBe(`${DID}#vtc-rest`)
   })
 
   it('refuses a redirect off the host, and reads 404 as not found', async () => {

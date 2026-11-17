@@ -1,6 +1,6 @@
 import { DidDocument, JsonTransformer, type AgentContext, type DidResolutionResult } from '@credo-ts/core'
 
-import { parseWebsDid, didWebTwin } from '../modules/sedi/webs/identifier'
+import { parseWebsDid } from '../modules/sedi/webs/identifier'
 import { getArtifact, WEBS_LIMITS, type WebsFetch } from '../modules/sedi/webs/resolve'
 
 /**
@@ -14,8 +14,8 @@ import { getArtifact, WEBS_LIMITS, type WebsFetch } from '../modules/sedi/webs/r
  * trust as a did:web, which Credo already resolves unverified. The verifying path is sedi/webs/resolve.ts
  * `resolveWebs` (KEL replay, document checked against the replayed keys), behind the state-verified approvers switch.
  * The fetch guards are that file's own (`getArtifact`): HTTPS only, no redirect off the identifier's origin, a 64 KiB
- * cap and a 10 s timeout. The document's `id` must be the DID asked for (or its did:web twin, which a did:webs host may
- * publish, renamed here as the did:webs spec's resolver does); any other id is refused.
+ * cap and a 10 s timeout. The document's `id` must be the DID asked for; anything else, its did:web twin included, is
+ * refused.
  */
 export class WebsDidResolver {
   public readonly supportedMethods = ['webs']
@@ -39,11 +39,10 @@ export class WebsDidResolver {
     if (!json || typeof json !== 'object' || Array.isArray(json))
       return failed('invalidDidDocument', 'did.json is not an object')
     const named = (json as { id?: unknown }).id
-    const twin = didWebTwin(id)
-    if (named !== id.did && named !== twin)
-      return failed('invalidDidDocument', `did.json names ${String(named)}, not ${id.did}`)
-    // A did:web-named document is renamed to the did:webs subject throughout (its key and service ids included).
-    const doc = (named === twin ? JSON.parse(JSON.stringify(json).split(`"${twin}`).join(`"${id.did}`)) : json) as Doc
+    // Only a document naming this did:webs. Its did:web twin is refused: upstream (vti-didcomm-js 0.16.1 did-webs.js
+    // `fromDidWeb`) takes the twin only with a designated-aliases attestation, which is read from the KEL, not here.
+    if (named !== id.did) return failed('invalidDidDocument', `did.json names ${String(named)}, not ${id.did}`)
+    const doc = json as Doc
     try {
       return {
         didDocument: JsonTransformer.fromJSON(websDocument(id.did, doc), DidDocument),
@@ -84,20 +83,38 @@ const RELATIONSHIPS = [
  * The published document in the forms Credo reads: its subject the DID asked for; each service's type a string
  * (did:webs hosts, the SEDI VTC among them, write a list of one, and Credo's DidDocumentService takes a string, so
  * each keeps its first type, which is what classifyDid and the transports read); each `JsonWebKey` method, listed or
- * embedded in a relationship, `JsonWebKey2020`. Nothing else is changed, and nothing is verified (see the class).
+ * embedded in a relationship, `JsonWebKey2020`; each relative reference (`#key`) made absolute against the subject, as
+ * upstream's `intoDocument` does. Nothing else is changed, and nothing is verified (see the class).
  */
+/** A relative reference (`#key`, or a bare fragment) against the subject, as upstream's `intoDocument` does. */
+const absolute = (value: unknown, did: string): unknown =>
+  typeof value !== 'string'
+    ? value
+    : value.startsWith('#')
+      ? did + value
+      : value.includes(':')
+        ? value
+        : `${did}#${value}`
+
+const withId = (entry: unknown, did: string): unknown =>
+  entry && typeof entry === 'object' && 'id' in entry
+    ? { ...(entry as object), id: absolute((entry as { id: unknown }).id, did) }
+    : entry
+
 export function websDocument(did: string, doc: Doc): Record<string, unknown> {
   const out: Record<string, unknown> = { ...doc, id: did }
   if (Array.isArray(doc.service)) {
     out.service = doc.service
       .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
-      .map((s) => (Array.isArray(s.type) ? { ...s, type: s.type[0] } : s))
+      .map((s) => withId(Array.isArray(s.type) ? { ...s, type: s.type[0] } : s, did) as Record<string, unknown>)
       .filter((s) => typeof s.type === 'string')
   }
-  if (Array.isArray(doc.verificationMethod)) out.verificationMethod = doc.verificationMethod.map(readable)
+  if (Array.isArray(doc.verificationMethod))
+    out.verificationMethod = doc.verificationMethod.map((vm) => readable(withId(vm, did)))
   for (const name of RELATIONSHIPS) {
     const list = doc[name]
-    if (Array.isArray(list)) out[name] = list.map((entry) => (typeof entry === 'string' ? entry : readable(entry)))
+    if (Array.isArray(list))
+      out[name] = list.map((entry) => (typeof entry === 'string' ? absolute(entry, did) : readable(withId(entry, did))))
   }
   return out
 }
