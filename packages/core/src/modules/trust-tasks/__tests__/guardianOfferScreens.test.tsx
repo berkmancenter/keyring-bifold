@@ -232,8 +232,9 @@ describe("the person's sheet", () => {
     expect(tree.getByText('Jordan offered to be your approver')).toBeTruthy()
     expect(tree.getByText(/Example State says Jordan is your guardian/)).toBeTruthy()
     expect(tree.getByTestId(id(GuardianOfferSheetIds.demo))).toBeTruthy()
+    // Option (b): with one approver, changing who approves is not written, so the line says what removal takes.
     expect(tree.getByTestId(id(GuardianOfferSheetIds.removing)).props.children).toBe(
-      "Removing Jordan later needs your approvers' yes."
+      'If Jordan is your only approver, you can remove them without their yes. With two approvers or more, removing one needs a yes from one of them.'
     )
   })
 

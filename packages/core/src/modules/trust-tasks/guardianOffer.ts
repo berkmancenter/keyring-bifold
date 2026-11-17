@@ -65,7 +65,11 @@ const LOG_PREFIX = '[TrustTasks:GuardianOffer]'
 export const GUARDIAN_OFFER_SENT = 'keyring.approver-guardian-offer-sent'
 export const GUARDIAN_OFFER_PROMPT = 'keyring.approver-guardian-offer-prompt'
 
-/** Always offered, never untickable: every ask covers who approves (ApproverAskRow's LOCKED). */
+/**
+ * Always offered, never untickable: every ask covers who approves (ApproverAskRow's LOCKED). The ward's phone writes it
+ * only once there are two approvers or more (trustedApprovers.ts CHANGE_APPROVERS_MIN), so a guardian who is the only
+ * approver cannot block their own removal (guardian research §4, option (b)).
+ */
 export const ALWAYS_OFFERED: RoleAction = 'changeApprovers'
 
 const CHALLENGE_BYTES = 32

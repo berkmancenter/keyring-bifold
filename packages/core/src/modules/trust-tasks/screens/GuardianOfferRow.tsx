@@ -190,7 +190,7 @@ const GuardianOfferRow: React.FC<Props> = ({ connectionId, name }) => {
             >
               <View style={styles.grow}>
                 <ThemedText>{t(`Approver.Action.${action}`)}</ThemedText>
-                {locked ? <ThemedText style={styles.muted}>{t('GuardianOffer.AlwaysOn')}</ThemedText> : null}
+                {locked ? <ThemedText style={styles.muted}>{t('GuardianOffer.AlwaysOn', words)}</ThemedText> : null}
               </View>
               <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
                 <Switch value={value} disabled={locked || busy} />

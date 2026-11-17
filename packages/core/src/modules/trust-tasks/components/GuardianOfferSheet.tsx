@@ -220,7 +220,7 @@ const GuardianOfferSheet: React.FC = () => {
                 >
                   <View style={styles.grow}>
                     <ThemedText>{t(`Approver.Action.${action}`)}</ThemedText>
-                    {/* Today's ask says the same of it: every approver covers changes to who approves. */}
+                    {/* Today's ask says the same of it: offered always, written once there are two approvers or more. */}
                     {locked ? (
                       <ThemedText style={styles.muted}>
                         {t('Approver.AlwaysOn', { name: guardian, interpolation: { escapeValue: false } })}
