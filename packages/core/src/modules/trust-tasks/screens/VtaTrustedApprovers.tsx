@@ -246,13 +246,16 @@ const VtaTrustedApprovers: React.FC = () => {
    * agent's list (as the My Agent badge counts them). A person with one goes first in I approve for, with the code.
    * Read at render: an expired one drops out the next time the list changes or the tab redraws.
    */
+  // Each list goes through waitingRequests as it is read, so a request from someone else's agent never shows while
+  // the trusted-approvers switch is off (approvalsShownThroughSwitch).
   const approvals = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().approvals)
   const otherRequests = useSyncExternalStore(vtaAgent.subscribe, () => vtaAgent.getState().otherRequests)
   const waitingForMe = useMemo(() => {
-    const all = otherRequests ? [...approvals, ...Object.values(otherRequests).flatMap((o) => o.approvals)] : approvals
-    return waitingRequests(all, Date.now()).filter(
-      (a): a is VtiApproval & { forAgent: NonNullable<VtiApproval['forAgent']> } => !!a.forAgent
-    )
+    const now = Date.now()
+    return [
+      ...waitingRequests(approvals, now),
+      ...Object.values(otherRequests ?? {}).flatMap((o) => waitingRequests(o.approvals, now)),
+    ].filter((a): a is VtiApproval & { forAgent: NonNullable<VtiApproval['forAgent']> } => !!a.forAgent)
   }, [approvals, otherRequests])
   /** The request waiting on this phone from this person's agent, if any (the newest). */
   const waitingFrom = (prompt: RoleOfferPrompt) =>
