@@ -296,6 +296,41 @@ describe('the Wallet shows a badge as a card of its own', () => {
     ).toEqual(['urn:uuid:7d0c5b1e-4f3a-4c2b-9e8d-1a2b3c4d5e6f', 'urn:uuid:university', membershipCard.id].sort())
   })
 
+  it('never touches a badge a known community gave someone else', async () => {
+    const p = phone()
+    await p.ready
+    const someoneElses = badgeCredential({
+      id: 'urn:uuid:someone-elses',
+      subject: 'did:webvh:QmSomeone:dids.example:x',
+    })
+    p.w3c.push(new W3cCredentialRecord({ credentialInstances: [{ credential: someoneElses as never }] }))
+    await p.deliver(badgeCredential())
+    const done = await p.sync()
+    expect(done.removed).toEqual([])
+    expect(
+      p
+        .wallet()
+        .filter(isBadgeCredential)
+        .map((vc) => vc.id)
+        .sort()
+    ).toEqual(['urn:uuid:7d0c5b1e-4f3a-4c2b-9e8d-1a2b3c4d5e6f', 'urn:uuid:someone-elses'].sort())
+  })
+
+  // Without an Achievement id a badge is kept and matched by its own id, as any card. Only one with nothing to
+  // key it by (no Achievement id, no id, no proof) cannot be mirrored, and it is left alone rather than removed.
+  it('leaves alone a badge of its own with nothing to key it by, rather than removing it', async () => {
+    const p = phone()
+    await p.ready
+    const unkeyable = badgeCredential()
+    delete ((unkeyable.credentialSubject as Record<string, unknown>).achievement as Record<string, unknown>).id
+    delete unkeyable.id
+    delete unkeyable.proof
+    p.w3c.push(new W3cCredentialRecord({ credentialInstances: [{ credential: unkeyable as never }] }))
+    const done = await p.sync()
+    expect(done.removed).toEqual([])
+    expect(p.wallet()).toHaveLength(2)
+  })
+
   it('takes out a copy the store no longer holds once the community is left', async () => {
     const p = phone()
     await p.ready

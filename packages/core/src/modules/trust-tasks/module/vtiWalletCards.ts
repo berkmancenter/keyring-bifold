@@ -161,21 +161,24 @@ function mirrorKey(vc: Json): string | undefined {
 }
 
 /**
- * The communities and identities this phone's cards can come from: every
- * community the store knows (a membership, ended or not, a held card, a
- * departure) and every identity it holds. A badge credential the Wallet holds
- * is this module's copy only when it names one of them, as its issuer or its
- * subject; any other Open Badge (one received some other way) is never
- * touched, as no other credential is.
+ * The identities this phone's badges are about: every identity it holds, and
+ * every one the store names (a membership, ended or not, a held card, a
+ * departure — leaving forgets the identity but keeps the departure). A badge
+ * credential the Wallet holds is this module's copy only when its subject is
+ * one of them. Its issuer is not enough: a badge a known community gave
+ * someone else is not this phone's to remove, and neither is any Open Badge
+ * received some other way.
  */
 async function badgeOwners(store: VtiCommunityStore, personas: { did: string }[]): Promise<(vc: Json) => boolean> {
-  const communities = new Set<string>()
-  for (const m of await store.listMemberships()) communities.add(m.communityDid)
-  for (const h of await store.listHeldCredentials()) communities.add(h.communityDid)
-  for (const d of (await store.listDepartures?.().catch(() => [])) ?? []) communities.add(d.communityDid)
   const subjects = new Set(personas.map((p) => p.did))
-  const idOf = (v: unknown) => (typeof v === 'string' ? v : String((v as { id?: unknown } | undefined)?.id ?? ''))
-  return (vc) => isBadgeCredential(vc) && (communities.has(idOf(vc.issuer)) || subjects.has(idOf(vc.credentialSubject)))
+  for (const m of await store.listMemberships()) subjects.add(m.personaDid)
+  for (const h of await store.listHeldCredentials()) if (h.subjectDid) subjects.add(h.subjectDid)
+  for (const d of (await store.listDepartures?.().catch(() => [])) ?? []) if (d.personaDid) subjects.add(d.personaDid)
+  const subjectOf = (vc: Json) => (vc.credentialSubject as { id?: unknown } | undefined)?.id
+  return (vc) => {
+    const subject = subjectOf(vc)
+    return isBadgeCredential(vc) && typeof subject === 'string' && subjects.has(subject)
+  }
 }
 
 /** The cards the store holds that the Wallet shows, by `walletCardKey`. */
@@ -329,6 +332,8 @@ export function syncCardsToWallet(
     for (const record of records) {
       const vc = jsonOf(record)
       if (!vc || !(isCommunityCard(vc) || ownBadge(vc))) continue
+      // A badge that cannot be keyed cannot be mirrored: it is left alone, never removed.
+      if (!isCommunityCard(vc) && !mirrorKey(vc)) continue
       const id = mirrorKey(vc) ?? ''
       const want = held.get(id)
       if (!want || seen.has(id)) {
