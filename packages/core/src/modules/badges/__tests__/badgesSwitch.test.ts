@@ -1,3 +1,5 @@
+jest.mock('../agentBadgesBackend', () => ({ createAgentBadgesBackend: jest.fn() }))
+
 import { isMemberBadgesOn, MEMBER_BADGES } from '../badgesSwitch'
 import { createFakeBadgeService } from '../fakeBadgeService'
 import { badgeServiceFor, resetBadgeService, setBadgeServiceForTests } from '../useBadges'
