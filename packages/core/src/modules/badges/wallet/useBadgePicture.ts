@@ -12,14 +12,14 @@
  * - only a `data:image/…` answer is drawn. Anything else (a URL included) draws the card's own mark instead, so no
  *   picture is ever loaded from the network by the image view.
  *
- * Nothing is asked, and nothing drawn, while badges are off (`badgesSwitch`): the service is then absent.
+ * Nothing is asked while badges are off: `useBadgeService` then gives no service (`badgesSwitch`), and the card that
+ * draws the picture draws nothing.
  *
  * @module badges/wallet/useBadgePicture
  */
 import { useEffect, useState } from 'react'
 
 import type { BadgeCardView } from '../../trust-tasks/module/badgeCredentials'
-import { isMemberBadgesOn } from '../badgesSwitch'
 import { useBadgeService } from '../useBadges'
 
 /** What the card needs to ask for its picture: its community, and its badge and digest when the credential names them. */
@@ -55,6 +55,5 @@ export function useBadgePicture(source: BadgePictureSource): string | undefined 
     }
   }, [service, communityDid, badgeId, imageSha256, key])
 
-  if (!isMemberBadgesOn()) return undefined
   return fetched?.key === key ? fetched.uri : undefined
 }
