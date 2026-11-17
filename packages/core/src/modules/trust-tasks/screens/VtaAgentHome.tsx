@@ -60,6 +60,9 @@ import { cardJoinOf, communityCardModel, type CommunityCardPrimary } from './com
 import { communityHeadingOf, communityLabelOf } from './communityName'
 import { communityCardKey as communityKeyOf } from './CommunityCard'
 import { VtaAgentHomeIds } from './VtaAgentHome.ids'
+import StopVettingSheet from './StopVettingSheet'
+import { stopVetting } from '../module/vtiJoin'
+import { GenericRecordsVettingStore } from '../module/vtiVetting'
 import { useVtaLinkWithClock, VtaStatusLine } from './VtaStatus'
 import { useRoomAboveTabBar } from './aboveTabBar'
 import { absoluteDate, appDateWords } from '../../../utils/localDay'
@@ -322,6 +325,9 @@ const VtaAgentHome: React.FC = () => {
   // Bumped when a community's name is read again, so the cards say it (the name lives in communityTarget).
   const [, setNamesRead] = useState(0)
   const [introPanel, setIntroPanel] = useState(0)
+  /** Row V5: the community whose vetting Stop this vetting was asked for, and whether it is stopping. */
+  const [stopFor, setStopFor] = useState<string>()
+  const [stopping, setStopping] = useState(false)
   const otherWaiting = useOtherAgentsWaiting()
   // The communities' cards read each one's journey; this page reads the same
   // readings, so it leads with a card's next step in the same render as the
@@ -348,6 +354,8 @@ const VtaAgentHome: React.FC = () => {
     card: { backgroundColor: ColorPalette.brand.secondaryBackground, borderRadius: 8, padding: CARD_PADDING, gap: 8 },
     row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 44 },
     muted: { color: ColorPalette.grayscale.mediumGrey },
+    stopVetting: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+    stopVettingText: { color: ColorPalette.semantic.error },
     mono: { ...TextTheme.normal, fontFamily: 'Menlo', fontSize: 12 },
     strip: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 },
     // A stop and the chevron before it wrap as one, so a narrow screen never
@@ -627,6 +635,15 @@ const VtaAgentHome: React.FC = () => {
     )
   const invitationFor = stepOf('acceptInvitation')
   const vettingFor = stepOf('continueVetting')
+  // Row V5: a vetting can be stopped from here only while nothing has gone to the community (its join reads none).
+  const vettingIndex = vettingFor ? held.indexOf(vettingFor) : -1
+  const vettingNothingSent =
+    vettingIndex >= 0 &&
+    !!holdings &&
+    cardJoinOf(
+      journeys[vettingIndex],
+      holdings.memberships.find((m) => m.communityDid === vettingFor)
+    )?.kind === 'none'
   const nextStep: { kind: 'invitation' | 'vetting'; communityDid: string } | undefined = invitationFor
     ? { kind: 'invitation', communityDid: invitationFor }
     : vettingFor
@@ -971,6 +988,18 @@ const VtaAgentHome: React.FC = () => {
                 nextStep.kind === 'invitation' ? VtaAgentHomeIds.nextInvitation : VtaAgentHomeIds.continueVetting
               )}
             />
+            {nextStep.kind === 'vetting' && vettingNothingSent ? (
+              <Pressable
+                style={styles.stopVetting}
+                onPress={() => setStopFor(nextStep.communityDid)}
+                accessibilityRole="button"
+                testID={testIdWithKey(VtaAgentHomeIds.stopVetting)}
+              >
+                <ThemedText variant="bold" style={styles.stopVettingText}>
+                  {t('Vetting.StopVetting')}
+                </ThemedText>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
@@ -1100,6 +1129,31 @@ const VtaAgentHome: React.FC = () => {
           </>
         ) : null}
       </ScrollView>
+      <StopVettingSheet
+        visible={!!stopFor}
+        community={stopFor ? communityLabelOf(stopFor, t) : ''}
+        busy={stopping}
+        onKeep={() => setStopFor(undefined)}
+        onStop={() => {
+          if (!agent || !stopFor) return
+          setStopping(true)
+          void stopVetting(
+            {
+              identityStore: new GenericRecordsIdentityStore(agent),
+              communityStore: new GenericRecordsCommunityStore(agent),
+              vettingStore: new GenericRecordsVettingStore(agent),
+            },
+            stopFor
+          )
+            .catch(() => undefined)
+            .finally(() => {
+              // The card goes once the holdings are read again (stopVetting announces the change). A request that had
+              // already gone (`sent`) is the community's card's to withdraw; nothing was cleared.
+              setStopping(false)
+              setStopFor(undefined)
+            })
+        }}
+      />
     </SafeAreaView>
   )
 }

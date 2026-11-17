@@ -12,6 +12,7 @@
  * @module trust-tasks/module/vtiJoin
  */
 
+import { emitCommunityChanged } from './communityChanged'
 import { didPrefix } from './didPrefix'
 import { DisclosureNotShown, disclosureShown } from './directoryDisclosure'
 import type { Agent } from '@credo-ts/core'
@@ -526,6 +527,38 @@ export function stateOfSubmission(submission: JoinSubmission): CommunityJoinStat
     default:
       return { kind: 'pending', submission }
   }
+}
+
+/**
+ * Stop a vetting under way (row V, Alberto 11-17): this phone forgets the application and the identity made for it,
+ * so joining again starts fresh with a new ticket. Only while nothing has gone to the community: a request sent (or an
+ * application submitted) is the community's, and is withdrawn, not forgotten, so nothing is cleared and `sent` comes
+ * back. Nothing is sent to anyone: the community never heard of it, and the protocol gives the applicant no cancel
+ * to send a vetter (the screen asks the person to tell them). An identity also kept for another community stays that
+ * community's (`forgetPersona` removes this community's record only, as leaving does); one that holds a membership
+ * here is not this vetting's to forget.
+ */
+export async function stopVetting(
+  deps: {
+    identityStore: Pick<VtiIdentityStore, 'forgetPersona'>
+    communityStore: Pick<VtiCommunityStore, 'getMembership' | 'getSubmission'>
+    vettingStore: {
+      getApplication(communityDid: string): Promise<{ submission?: unknown } | undefined>
+      forgetApplication?(communityDid: string): Promise<void>
+    }
+  },
+  communityDid: string
+): Promise<'stopped' | 'sent'> {
+  const [application, submission, membership] = await Promise.all([
+    deps.vettingStore.getApplication(communityDid).catch(() => undefined),
+    deps.communityStore.getSubmission?.(communityDid).catch(() => undefined),
+    deps.communityStore.getMembership(communityDid).catch(() => undefined),
+  ])
+  if (application?.submission || submission) return 'sent'
+  await deps.vettingStore.forgetApplication?.(communityDid)
+  if (!membership) await deps.identityStore.forgetPersona(communityDid)
+  emitCommunityChanged(communityDid, 'forgotten')
+  return 'stopped'
 }
 
 export interface LeaveCommunityDeps {

@@ -40,5 +40,7 @@ export const VtaAgentHomeIds = {
   holdsUnread: 'AgentHoldsUnread',
   holdsRetry: 'AgentHoldsRetry',
   joinAnother: 'AgentJoinAnother',
+  /** Row V5 (Alberto, 11-17): Stop this vetting, under Continue your vetting. */
+  stopVetting: 'AgentStopVetting',
 } as const
 export type VtaAgentHomeId = (typeof VtaAgentHomeIds)[keyof typeof VtaAgentHomeIds]
