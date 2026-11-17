@@ -219,6 +219,9 @@ const refusedAs = (code: string, reason: string | undefined) =>
  * not verifying, or no answer at all. A report held only the code (ATZC-JPDE, 11-17: a did:webs community's room, one
  * agent refusing what another read), so which of them it was could not be told. Words not listed here add nothing: the
  * line reads `refused (hostUnreachable)` as before.
+ *
+ * The first that matches is the word, so the order is behaviour: a narrower sentence stands above a wider one
+ * (`hostMethodNotResolved` above `hostKeyNotRetrieved`, whose words it also holds).
  */
 const HOST_FAILURE_KINDS: [RegExp, string][] = [
   [/does not resolve, so there is nothing to send to/, 'hostDidNotResolved'],
@@ -228,7 +231,9 @@ const HOST_FAILURE_KINDS: [RegExp, string][] = [
   [/will not dial/, 'endpointNotDialled'],
   [/did not answer/, 'noAnswer'],
   [/cannot read as a Trust-Task|not a Trust-Task document|unreadable body|is not JSON/, 'replyUnreadable'],
-  [/identityMismatch|can initiate|no protocol in common/i, 'noMatchingProtocol'],
+  // vti-common error.rs `NoMatchingProtocol`: "no transport in common with `<peer>`: it advertises […] and this agent
+  // can initiate […]". The literal phrase only.
+  [/no transport in common with/, 'noMatchingProtocol'],
 ]
 
 function hostFailureKind(said: unknown): string | undefined {

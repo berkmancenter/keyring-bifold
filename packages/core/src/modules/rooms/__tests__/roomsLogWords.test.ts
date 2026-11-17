@@ -178,6 +178,10 @@ describe('rooms log words', () => {
       [`\`${HOST}\` advertises a REST endpoint this VTA will not dial: private address`, 'endpointNotDialled'],
       [`\`${HOST}\` at https://vtc.example/v1/trust-tasks did not answer: connection reset`, 'noAnswer'],
       [`\`${HOST}\` sent a body that is not a Trust-Task document (HTTP 502, 12 bytes)`, 'replyUnreadable'],
+      [
+        `no transport in common with \`${HOST}\`: it advertises [tsp] and this agent can initiate [rest]. The document is issued by \`did:webvh:QmPersona:vta.example:p\``,
+        'noMatchingProtocol',
+      ],
     ])('%s', (why, kind) => {
       const line = failureCategory(new VtiRefusal('rooms/keys/read:hostUnreachable', said(why)))
       expect(line).toBe(`refused (hostUnreachable: ${kind})`)
@@ -195,6 +199,24 @@ describe('rooms log words', () => {
       )
       expect(failureCategory(new RoomsRefused('listNotes', 'hostUnreachable', true, 'x'))).toBe(
         'refused (hostUnreachable)'
+      )
+    })
+
+    it('CONTROL: the loose words of that sentence alone are not it', () => {
+      for (const why of [
+        'this agent can initiate [rest]',
+        'refused as identityMismatch',
+        'No Transport In Common With x',
+      ])
+        expect(failureCategory(new VtiRefusal('rooms/keys/read:hostUnreachable', said(why)))).toBe(
+          'refused (hostUnreachable)'
+        )
+    })
+
+    it('the first listed sentence that matches is the word', () => {
+      const both = said(`\`${HOST}\` advertises a REST endpoint this VTA will not dial, and it did not answer`)
+      expect(failureCategory(new VtiRefusal('rooms/keys/read:hostUnreachable', both))).toBe(
+        'refused (hostUnreachable: endpointNotDialled)'
       )
     })
 
