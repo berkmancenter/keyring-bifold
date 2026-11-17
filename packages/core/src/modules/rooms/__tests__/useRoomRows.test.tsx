@@ -14,6 +14,7 @@ import { AppState } from 'react-native'
 import { newEventId } from '../../chat/eventId'
 import { RUN_STARTED_AT } from '../../../utils/runStart'
 import { toInertText } from '../inertText'
+import { ROOMS_ROWS_AT_START } from '../rowsAtStart'
 import { chatMessageBody } from '../roomPosts'
 import type { Identity, Note, NoteList, NoteSummary, RoomsService, RoomSummary } from '../types'
 import {
@@ -24,6 +25,7 @@ import {
   ROOMS_HIDDEN_KEY,
   resetRoomRows,
   ROOMS_SEEN_KEY,
+  ROWS_KEEP_DELAY_MS,
   ROWS_POLL_MS,
   ROWS_RETRY_MS,
   ROWS_RETURN_FLOOR_MS,
@@ -1079,5 +1081,152 @@ describe('a community a listing skipped for now (a step kept its session: heldBa
     const last = lines[lines.length - 1]
     expect(last).toMatch(/^\[Rooms:rows\] 1 rooms listed, 0 not read yet, 1 kept as read before, in \d+ ms$/)
     expect(lines.join('\n')).not.toContain('Choir')
+  })
+})
+
+// 11-17: a cold start showed an empty Messages for the 20-55 s its first listing took. The last run's rows are kept
+// in the agent's encrypted wallet (room and community names, never a post's words) and shown at once (rowsAtStart).
+describe("the last run's rows at a start", () => {
+  const order = (rows: readonly { roomId: string }[]) => rows.map((r) => r.roomId)
+  const walletWith = (content?: Record<string, unknown>) => {
+    const state: { record: { content: Record<string, unknown> } | null } = { record: content ? { content } : null }
+    const genericRecords = {
+      findById: jest.fn(async () => state.record),
+      save: jest.fn(async ({ content: next }: { content: Record<string, unknown> }) => {
+        state.record = { content: next }
+      }),
+      update: jest.fn(async (record: { content: Record<string, unknown> }) => {
+        state.record = record
+      }),
+    }
+    return { genericRecords, state }
+  }
+  const lastRun = (rows: Record<string, unknown>[]) => ({ v: 1, rows })
+  const keptRow = (roomId: string, over: Record<string, unknown> = {}) => ({
+    key: roomId,
+    roomId,
+    roomName: `Name of ${roomId}`,
+    nameFrom: 'community',
+    communityDid: LAB,
+    communityName: 'Keyring Lab',
+    lastActivityAt: '2026-11-17T20:00:00.000Z',
+    unread: 2,
+    ...over,
+  })
+  /** A service whose first listing waits until `answer`. */
+  const waitingService = (rooms: RoomSummary[], wallet: ReturnType<typeof walletWith>) => {
+    const s = serviceWith(rooms, { [rooms[0]?.roomId ?? 'none']: [note('n1', 1)] }, { n1: 'the words of a post' })
+    let answer: () => void = () => undefined
+    s.listMyRooms.mockImplementationOnce(
+      () =>
+        new Promise<RoomSummary[]>((resolve) => {
+          answer = () => resolve(rooms)
+        })
+    )
+    Object.assign(s, { runsOn: wallet })
+    return { s, answer: () => act(async () => answer()) }
+  }
+  afterEach(() => {
+    ROOMS_ROWS_AT_START.on = true
+    ROOMS_ROWS_AT_START.remoteOff = false
+  })
+
+  test('are shown at once, each reading, and the first listing replaces them all', async () => {
+    const wallet = walletWith(lastRun([keptRow('planning'), keptRow('gone')]))
+    const { s, answer } = waitingService([room('garden')], wallet)
+    const lines: string[] = []
+    renderHook(() => useRoomRowsPoll(s, true, (line) => lines.push(line)))
+    const list = renderHook(() => useRoomRows())
+    await flush()
+
+    // Before the listing answers: the last run's rows, by their kept names, each reading.
+    expect(order(list.result.current.rows)).toEqual(['planning', 'gone'])
+    expect(list.result.current.rows[0]).toMatchObject({ roomName: 'Name of planning', unread: 2, reading: true })
+    expect(lines).toContainEqual(
+      expect.stringMatching(/^\[Rooms:rows\] 2 rows from the last run shown, \d+ ms after launch$/)
+    )
+
+    await answer()
+    await flush()
+    // The listing's rooms, and none of the last run's that it did not list.
+    expect(order(list.result.current.rows)).toEqual(['garden'])
+  })
+
+  test("keeps this run's rows once they settle: names and counts, never a post's words", async () => {
+    const wallet = walletWith()
+    const s = serviceWith([room('planning')], { planning: [note('n1', 1)] }, { n1: 'the words of a post' })
+    Object.assign(s, { runsOn: wallet })
+    renderHook(() => useRoomRowsPoll(s, true))
+    await flush()
+    await step(ROWS_KEEP_DELAY_MS)
+
+    const kept = JSON.stringify(wallet.state.record?.content)
+    expect(wallet.state.record?.content).toMatchObject({
+      v: 1,
+      rows: [expect.objectContaining({ roomId: 'planning' })],
+    })
+    expect(kept).toContain('planning')
+    expect(kept).not.toContain('the words of a post')
+    expect(kept).not.toContain('lastPost')
+  })
+
+  test('control: with nothing kept, Messages waits for its first listing, as before', async () => {
+    const wallet = walletWith()
+    const { s, answer } = waitingService([room('garden')], wallet)
+    renderHook(() => useRoomRowsPoll(s, true))
+    const list = renderHook(() => useRoomRows())
+    await flush()
+    expect(list.result.current.rows).toEqual([])
+    await answer()
+    await flush()
+    expect(order(list.result.current.rows)).toEqual(['garden'])
+  })
+
+  test.each([
+    ['switched off', { on: false, remoteOff: false }],
+    ['turned off remotely', { on: true, remoteOff: true }],
+    ['not a boolean (fails closed)', { on: 'true' as unknown as boolean, remoteOff: false }],
+  ])('control: %s, nothing is read or kept', async (_name, values) => {
+    Object.assign(ROOMS_ROWS_AT_START, values)
+    const wallet = walletWith(lastRun([keptRow('planning')]))
+    const { s, answer } = waitingService([room('garden')], wallet)
+    renderHook(() => useRoomRowsPoll(s, true))
+    const list = renderHook(() => useRoomRows())
+    await flush()
+    expect(list.result.current.rows).toEqual([])
+    await answer()
+    await step(ROWS_KEEP_DELAY_MS)
+    expect(wallet.genericRecords.findById).not.toHaveBeenCalled()
+    expect(wallet.genericRecords.save).not.toHaveBeenCalled()
+    expect(wallet.genericRecords.update).not.toHaveBeenCalled()
+  })
+
+  test('control: a listing that answered before the wallet did is never replaced by the last run', async () => {
+    const wallet = walletWith(lastRun([keptRow('planning')]))
+    let walletAnswers: () => void = () => undefined
+    wallet.genericRecords.findById.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          walletAnswers = () => resolve({ content: lastRun([keptRow('planning')]) })
+        })
+    )
+    const s = serviceWith([room('garden')], { garden: [] })
+    Object.assign(s, { runsOn: wallet })
+    renderHook(() => useRoomRowsPoll(s, true))
+    const list = renderHook(() => useRoomRows())
+    await flush()
+    expect(order(list.result.current.rows)).toEqual(['garden'])
+    await act(async () => walletAnswers())
+    await flush()
+    expect(order(list.result.current.rows)).toEqual(['garden'])
+  })
+
+  test('control: a kept record not shaped as rows shows nothing', async () => {
+    const wallet = walletWith({ v: 1, rows: [{ roomId: 'planning' }, 'nonsense', keptRow('bad', { unread: -1 })] })
+    const { s } = waitingService([room('garden')], wallet)
+    renderHook(() => useRoomRowsPoll(s, true))
+    const list = renderHook(() => useRoomRows())
+    await flush()
+    expect(list.result.current.rows).toEqual([])
   })
 })
