@@ -6,36 +6,30 @@
  * opens and when it is returned to, never on a timer: the community sees each read. Nothing is read, and nothing
  * shown, while badges are off (`badgesSwitch`).
  *
- * Tests (and the screens, until the client lands) put a service in with `setBadgeServiceForTests`, e.g. the fake in
- * `fakeBadgeService`, and take it out again with `resetBadgeService`.
+ * Tests put a service in with `setBadgeServiceForTests` (e.g. the fake in `fakeBadgeService`) and take it out again with
+ * `resetBadgeService`; a screen test may instead mock this module, as the polls tests mock `usePolls`.
  *
  * @module badges/useBadges
  */
 import type { Agent } from '@credo-ts/core'
 import { useAgent } from '@bifold/react-hooks'
 import { useFocusEffect } from '@react-navigation/native'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { createAgentBadgesBackend } from './agentBadgesBackend'
+import { createBadgeService } from './badgeService'
 import { isMemberBadgesOn } from './badgesSwitch'
 import type { BadgeService, MemberWallState, MyBadges, MyBadgesState } from './types'
 
 let made: { agent: Agent; service: BadgeService } | undefined
 let injected: BadgeService | undefined
-/** Made by the client (badgeService.ts) once it lands; until then only an injected service answers. */
-let factory: ((agent: Agent) => BadgeService) | undefined
-
-/** The client registers how a service is made for an agent (badgeService.ts). */
-export function registerBadgeServiceFactory(make: (agent: Agent) => BadgeService): void {
-  factory = make
-  made = undefined
-}
 
 /** The badge service on this phone's agent, or none before the agent is up, or while badges are off. */
 export function badgeServiceFor(agent: Agent | undefined): BadgeService | undefined {
   if (!isMemberBadgesOn()) return undefined
   if (injected) return injected
-  if (!agent || !factory) return undefined
-  if (made?.agent !== agent) made = { agent, service: factory(agent) }
+  if (!agent) return undefined
+  if (made?.agent !== agent) made = { agent, service: createBadgeService(createAgentBadgesBackend(agent)) }
   return made.service
 }
 
@@ -55,68 +49,89 @@ export function useBadgeService(): BadgeService | undefined {
   return badgeServiceFor(agent as Agent | undefined)
 }
 
-/** The member's own badges and offers in one community, read on opening and on coming back. */
+/** Whether the component is still mounted: an answer that comes after it is gone sets nothing. */
+function useMounted() {
+  const mounted = useRef(true)
+  useEffect(
+    () => () => {
+      mounted.current = false
+    },
+    []
+  )
+  return mounted
+}
+
+/** The same answer twice sets nothing: a screen re-rendered by its own read does not read again for nothing. */
+const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * The member's own badges and offers in one community, read on opening and on coming back.
+ *
+ * As `useCommunityPolls`: nothing is set during the focus callback itself (a navigator may run it on every render), one
+ * read at a time (`reading`), and the answer set only after it comes, while the screen is still mounted. Leaving focus
+ * does not drop an answer on its way: it is the same answer the next focus would read.
+ */
 export function useMyBadges(communityDid: string): MyBadgesState {
   const service = useBadgeService()
-  const [badges, setBadges] = useState<MyBadges | undefined>(undefined)
-  const [served, setServed] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const asked = useRef(0)
-  const load = useCallback(() => {
-    if (!service) {
-      setBadges(undefined)
-      setServed(false)
-      setLoading(false)
-      return
-    }
-    const mine = ++asked.current
-    setLoading(true)
-    service
-      .mine(communityDid)
-      .then((answer) => {
-        if (mine !== asked.current) return
-        if (answer === 'notServed') {
-          setBadges(undefined)
-          setServed(false)
-        } else {
-          setBadges(answer)
-          setServed(true)
-        }
-      })
-      .catch(() => {
+  const [answer, setAnswer] = useState<{ badges?: MyBadges; served: boolean; loading: boolean }>({
+    served: false,
+    loading: true,
+  })
+  const reading = useRef(false)
+  const mounted = useMounted()
+  const read = useCallback(() => {
+    if (!service || reading.current) return
+    reading.current = true
+    void (async () => {
+      try {
+        const mine = await service.mine(communityDid)
+        const next =
+          mine === 'notServed' ? { served: false, loading: false } : { badges: mine, served: true, loading: false }
+        if (mounted.current) setAnswer((was) => (same(was, next) ? was : next))
+      } catch {
         // A read that failed shows what was shown before; the next visit asks again.
-        if (mine === asked.current) setServed((was) => was)
-      })
-      .finally(() => {
-        if (mine === asked.current) setLoading(false)
-      })
-  }, [service, communityDid])
-  useFocusEffect(load)
-  return { badges, served, loading, refresh: load }
+        if (mounted.current) setAnswer((was) => (was.loading ? { ...was, loading: false } : was))
+      } finally {
+        reading.current = false
+      }
+    })()
+  }, [service, communityDid, mounted])
+  useFocusEffect(read)
+  const refresh = useCallback(() => {
+    reading.current = false
+    read()
+  }, [read])
+  return {
+    badges: service ? answer.badges : undefined,
+    served: !!service && answer.served,
+    loading: !!service && answer.loading,
+    refresh,
+  }
 }
 
 /** Another member's wall in one community, by their directory entry, read on opening and on coming back. */
 export function useMemberWall(communityDid: string, entryId: string | undefined): MemberWallState {
   const service = useBadgeService()
-  const [state, setState] = useState<MemberWallState>({ state: 'loading' })
-  const asked = useRef(0)
-  const load = useCallback(() => {
-    if (!service || !entryId) {
-      setState({ state: 'notServed' })
-      return
-    }
-    const mine = ++asked.current
-    service
-      .wall(communityDid, entryId)
-      .then((answer) => {
-        if (mine !== asked.current) return
-        if (answer === 'notServed' || answer === 'hidden') setState({ state: answer })
-        else setState({ state: 'shown', wall: answer })
-      })
-      .catch(() => {
-        if (mine === asked.current) setState((was) => (was.state === 'loading' ? { state: 'notServed' } : was))
-      })
-  }, [service, communityDid, entryId])
-  useFocusEffect(load)
-  return state
+  const [answer, setAnswer] = useState<MemberWallState>({ state: 'loading' })
+  const reading = useRef(false)
+  const mounted = useMounted()
+  useFocusEffect(
+    useCallback(() => {
+      if (!service || !entryId || reading.current) return
+      reading.current = true
+      void (async () => {
+        try {
+          const wall = await service.wall(communityDid, entryId)
+          const next: MemberWallState =
+            wall === 'notServed' || wall === 'hidden' ? { state: wall } : { state: 'shown', wall }
+          if (mounted.current) setAnswer((was) => (same(was, next) ? was : next))
+        } catch {
+          if (mounted.current) setAnswer((was) => (was.state === 'loading' ? { state: 'notServed' } : was))
+        } finally {
+          reading.current = false
+        }
+      })()
+    }, [service, communityDid, entryId, mounted])
+  )
+  return !service || !entryId ? { state: 'notServed' } : answer
 }

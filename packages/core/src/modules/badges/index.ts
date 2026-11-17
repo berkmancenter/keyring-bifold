@@ -7,11 +7,11 @@ export * from './types'
 export { isMemberBadgesOn, MEMBER_BADGES } from './badgesSwitch'
 export {
   badgeServiceFor,
-  registerBadgeServiceFactory,
   resetBadgeService,
   setBadgeServiceForTests,
   useBadgeService,
   useMemberWall,
   useMyBadges,
 } from './useBadges'
+export { BadgeRefused, createBadgeService, type BadgesBackend } from './badgeService'
 export { createFakeBadgeService, FAKE_BADGES } from './fakeBadgeService'
