@@ -203,7 +203,7 @@ export function evidenceBytes(
   return te.encode(json ?? '').length
 }
 
-const evidenceOf = (from: GuardianEvidence): GuardianEvidence => ({
+export const evidenceOf = (from: GuardianEvidence): GuardianEvidence => ({
   guardianSaid: from.guardianSaid,
   holder: from.holder,
   kels: from.kels,
@@ -643,36 +643,16 @@ export async function sendGuardianEvidence(
   const connection = await agent.modules.didcomm.connections.getById(connectionId)
   if (!connection.did || !connection.theirDid) return 'noRelationship'
 
-  // The authorization this phone's holder issues the card's ward (S2): only for a card issued to this phone's own
-  // holder AID, so a K0 card's payload is exactly what older builds accept. A failure to issue one never stops the
-  // card: it goes without it, and the person's phone shows the card as before.
-  const issued = await socialMaterialFor(agent, held).catch((e: unknown) => {
-    warn(agent, `no authorization sent with the card on ${connectionId}: ${(e as Error)?.message ?? e}`)
-    return undefined
-  })
-  const withIt = issued ? withSocial(held, issued) : undefined
-  const carried = withIt && evidenceBytes(withIt) <= GUARDIAN_EVIDENCE_MAX_BYTES ? withIt : undefined
-  if (issued && !carried) warn(agent, `the card and its authorization are over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes`)
-
+  const { card, v2 } = await cardWithItsExtras(agent, held, connectionId)
   const id = utils.uuid()
-  // The host goes ONLY with a K1 card, and only as 0.2: a K0 card stays 0.1, exactly what earlier builds send and
-  // accept. A phone that knows only 0.1 refuses a 0.2 document by its type (and, today, silently: it answers nothing).
-  const k1Card = isK1Card(held)
-  const stateHost = k1Card ? await heldGuardianStateHost(agent) : undefined
-  // 0.2 for a K1 card or a card carrying its authorization; 0.1 (unchanged) otherwise, so a K0 card is what it was.
-  // `carried` cannot widen this to a K0 card: socialMaterialFor returns undefined unless the card's holder is this
-  // phone's own holder AID (holder === evidence.holder) AND the Guardian credential is issued to it (a.i === holder),
-  // which a K0 card, issued to the kit's own holder, never is. So a K0 card never carries an authorization.
-  const v2 = k1Card || !!carried
+  // Key order as before this was split out: the card's lists, then stateHost, sentAt, then social.
+  const { social, ...rest } = card
   const payload: GuardianEvidencePayload = {
     agent: agentDid,
     approver: approverDid,
-    ...(carried ?? held),
-    // The host the card came with (K1 'fromCard'), so the person's phone fetches the state from the same one.
-    ...(stateHost ? { stateHost } : {}),
+    ...rest,
     sentAt: new Date().toISOString(),
-    // 0.2's `social` names the authorization; its proof, registry and the guardian's KEL are in the lists above.
-    ...(carried && issued ? { social: { said: issued.said } } : {}),
+    ...(social ? { social } : {}),
   }
   const document: Record<string, unknown> = {
     id,
@@ -689,6 +669,52 @@ export async function sendGuardianEvidence(
   await sendTrustTaskDocument(agent, connectionId, signed)
   agent.config?.logger?.info(`${LOG_PREFIX} guardian card sent on connection ${connectionId}`)
   return 'sent'
+}
+
+/**
+ * The card as it goes to the contact on `connectionId`, and whether it needs guardian-evidence 0.2: the held card, with
+ * the Social Authorization this phone's holder issues its ward when it can (and it fits), and the host a K1 card came
+ * with. Shared by the card sent after a yes and the card a guardian offer carries (guardianOffer.ts), so both say the
+ * same. `stateHost` comes before `social` in what it returns, the order the card has always gone in.
+ */
+export async function cardWithItsExtras(
+  agent: Agent,
+  held: GuardianEvidence,
+  connectionId: string
+): Promise<{
+  card: GuardianEvidence & Pick<GuardianEvidencePayload, 'stateHost' | 'social'>
+  v2: boolean
+}> {
+  // The authorization this phone's holder issues the card's ward (S2): only for a card issued to this phone's own
+  // holder AID, so a K0 card's payload is exactly what older builds accept. A failure to issue one never stops the
+  // card: it goes without it, and the person's phone shows the card as before.
+  const issued = await socialMaterialFor(agent, held).catch((e: unknown) => {
+    warn(agent, `no authorization sent with the card on ${connectionId}: ${(e as Error)?.message ?? e}`)
+    return undefined
+  })
+  const withIt = issued ? withSocial(held, issued) : undefined
+  const carried = withIt && evidenceBytes(withIt) <= GUARDIAN_EVIDENCE_MAX_BYTES ? withIt : undefined
+  if (issued && !carried) warn(agent, `the card and its authorization are over ${GUARDIAN_EVIDENCE_MAX_BYTES} bytes`)
+
+  // The host goes ONLY with a K1 card, and only as 0.2: a K0 card stays 0.1, exactly what earlier builds send and
+  // accept. A phone that knows only 0.1 refuses a 0.2 document by its type (and, today, silently: it answers nothing).
+  const k1Card = isK1Card(held)
+  const stateHost = k1Card ? await heldGuardianStateHost(agent) : undefined
+  // 0.2 for a K1 card or a card carrying its authorization; 0.1 (unchanged) otherwise, so a K0 card is what it was.
+  // `carried` cannot widen this to a K0 card: socialMaterialFor returns undefined unless the card's holder is this
+  // phone's own holder AID (holder === evidence.holder) AND the Guardian credential is issued to it (a.i === holder),
+  // which a K0 card, issued to the kit's own holder, never is. So a K0 card never carries an authorization.
+  const v2 = k1Card || !!carried
+  return {
+    card: {
+      ...(carried ?? held),
+      // The host the card came with (K1 'fromCard'), so the person's phone fetches the state from the same one.
+      ...(stateHost ? { stateHost } : {}),
+      // 0.2's `social` names the authorization; its proof, registry and the guardian's KEL are in the lists above.
+      ...(carried && issued ? { social: { said: issued.said } } : {}),
+    },
+    v2,
+  }
 }
 
 /** The ceremony module, reached lazily: it registers this type, so importing it at the top would be a cycle. */
@@ -812,7 +838,7 @@ export const guardianCardEvents = new EventEmitter()
  * never the card's word.
  */
 /** The root on this phone's list the card chains to (its AID found among the card's KELs), if it is on the list. */
-function rootAidOf(evidence: GuardianEvidence): string | undefined {
+export function rootAidOf(evidence: GuardianEvidence): string | undefined {
   return trustedStateRoots().find((known) => evidence.kels.some((kel) => kel.includes(`"i":"${known.aid}"`)))?.aid
 }
 

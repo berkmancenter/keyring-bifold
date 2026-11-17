@@ -60,6 +60,12 @@ export {
   isStateVerifiedApproversEnabled,
   STATE_VERIFIED_APPROVERS_REMOTE_OFF,
 } from './module/stateVerifiedApproversFlag'
+export {
+  setGuardianOffersEnabled,
+  isGuardianOffersEnabled,
+  isGuardianOffersOn,
+  GUARDIAN_OFFERS_REMOTE_OFF,
+} from './module/guardianOffersFlag'
 export { setTrustTestStateEnabled, isTrustTestStateEnabled } from './module/trustTestStateFlag'
 export {
   holdK0TestGuardianCard,

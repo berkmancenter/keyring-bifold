@@ -650,7 +650,31 @@ export async function handleRoleOfferRequest(
   await keepPrompt(agent, prompt).catch((error: unknown) =>
     agent.config?.logger?.warn(`${LOG_PREFIX} could not keep an offer: ${(error as Error)?.message ?? error}`)
   )
+  // An ask that takes up this phone's guardian offer to them (guardianOffer.ts) is answered yes at once, as the DID
+  // named when the offer was sent, and never shown: the guardian already said yes to exactly this, or more. If that
+  // yes cannot be sent, the ask shows as any other, so the person can answer it by hand.
+  const takenUp = await guardianOffer()
+    .guardianOfferTakenUp(agent, context.connectionId, prompt.actions)
+    .catch(() => undefined)
+  if (takenUp) {
+    try {
+      await respondToRoleOffer(agent, context.connectionId, true, takenUp)
+      await guardianOffer().guardianOfferAnswered(agent, context.connectionId)
+      agent.config?.logger?.info(`${LOG_PREFIX} an ask took up my guardian offer on ${context.connectionId}: yes sent`)
+      return
+    } catch (error) {
+      agent.config?.logger?.warn(
+        `${LOG_PREFIX} the yes to an ask that took up my guardian offer was not sent: ${(error as Error)?.message ?? error}`
+      )
+    }
+  }
   approverRoleEvents.emit('offer', { connectionId: context.connectionId })
+}
+
+/** The guardian-offer module, reached lazily: it imports this one, so importing it at the top is a cycle. */
+function guardianOffer(): typeof import('./guardianOffer') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  return require('./guardianOffer')
 }
 
 const keepPrompt = (agent: Pick<Agent, 'genericRecords'>, prompt: RoleOfferPrompt) =>
