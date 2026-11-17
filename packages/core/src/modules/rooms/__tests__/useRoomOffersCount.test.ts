@@ -247,6 +247,28 @@ describe('asking again from Messages (askOffersAgain)', () => {
     expect(service.listOffers).toHaveBeenCalledTimes(2)
   })
 
+  // ac (11-17): a second guard, apart from the floor: an ask still out is never doubled.
+  test('control: while an ask is still out, past the floor, asks nothing more', async () => {
+    const service = serviceWith(0)
+    let answer: () => void = () => undefined
+    renderHook(() => useRoomOffersCount(service, true))
+    await flush()
+    await advance(OFFERS_REFRESH_FLOOR_MS)
+    service.listOffers.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = () => resolve([])
+        })
+    )
+    await act(async () => askOffersAgain())
+    expect(service.listOffers).toHaveBeenCalledTimes(2)
+    await advance(OFFERS_REFRESH_FLOOR_MS)
+
+    await act(async () => askOffersAgain())
+    expect(service.listOffers).toHaveBeenCalledTimes(2)
+    await act(async () => answer())
+  })
+
   test('control: within the floor of the last ask, asks nothing more', async () => {
     const service = serviceWith(0)
     renderHook(() => useRoomOffersCount(service, true))
