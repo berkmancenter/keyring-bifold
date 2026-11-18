@@ -102,6 +102,7 @@ import { GenericRecordsTspProbeStore, runTspProbe, type TspProbeOutcome, type Ts
 import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
+import { isConnectDrainEarlyOn } from './connectDrainSwitch'
 import { isReplacedSessionStopsOn } from './replacedSessionSwitch'
 import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
 import {
@@ -1436,7 +1437,26 @@ export class VtaClient {
     // and this DID is persisted, so that backlog can include stale replies from
     // earlier sessions. No reply to any request of ours can exist yet, so a
     // short drain with nothing pending discards the backlog before the first send.
-    await new Promise((resolve) => setTimeout(resolve, this.options.connectDrainMs ?? 2000))
+    // The whole time is the ceiling; where the mediator says the queue was handed over, the wait ends there
+    // (connectDrainSwitch). Which of the two it was is said, so a report shows what the wait cost.
+    const ceilingMs = this.options.connectDrainMs ?? 2000
+    const began = Date.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const ceiling = new Promise<'ceiling'>((resolve) => {
+      timer = setTimeout(() => resolve('ceiling'), ceilingMs)
+    })
+    const early =
+      isConnectDrainEarlyOn() && typeof session.firstDrained === 'function'
+        ? session.firstDrained().then(() => 'answered' as const)
+        : undefined
+    const ended = await (early ? Promise.race([early, ceiling]) : ceiling)
+    if (timer) clearTimeout(timer)
+    if (early)
+      this.agent.config.logger.info(
+        ended === 'answered'
+          ? `${LOG_PREFIX} connect: the mediator handed over its queue in ${Date.now() - began} ms; going on`
+          : `${LOG_PREFIX} connect: the mediator did not answer the queue request within ${ceilingMs} ms; going on`
+      )
   }
 
   /** Ask the session to prove its socket answers (back in the foreground); one that does not is reopened. */
