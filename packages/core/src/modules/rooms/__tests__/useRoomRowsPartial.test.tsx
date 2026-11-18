@@ -68,6 +68,10 @@ function slowListing(early: RoomSummary[], answered: string[], all: RoomSummary[
   let fail: ((e: Error) => void) | undefined
   const service = {
     isSample: false,
+    getRoom: jest.fn(async (roomId: string) => ({
+      ...all.find((r) => r.roomId === roomId)!,
+      actingAs: { did: 'did:peer:2.me' },
+    })),
     listMyRooms: jest.fn(
       (options: { onPartial?: (rooms: RoomSummary[], answered: readonly string[]) => void } = {}) =>
         new Promise<RoomSummary[]>((resolve, reject) => {
@@ -223,7 +227,13 @@ describe("the rooms service's partial answers", () => {
         { did: SEDI, personaDid: 'did:peer:2.me' },
       ],
       communityTask: jest.fn(async (communityDid: string) => {
-        const item = (roomId: string) => ({ roomId, state: 'active', tier: 'open', label: roomId })
+        const item = (roomId: string) => ({
+          roomId,
+          host: communityDid,
+          visibility: 'open',
+          state: 'admitted',
+          label: roomId,
+        })
         if (communityDid === LAB) return { items: [item('planning')] }
         if (sedi === 'unreachable') throw new Error('network down')
         if (sedi === 'waits') await sediWaits
