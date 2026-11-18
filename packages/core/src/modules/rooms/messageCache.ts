@@ -130,14 +130,32 @@ export function setMessageCacheBiometryGate(gate: () => Promise<boolean>): void 
   biometryGate = gate
 }
 
+/**
+ * The biometric unlock as the app holds it this run (`useMessageCacheBiometryGuard`), ahead of the saved preference,
+ * which is written a moment after the person turns it off: no keep slips in between.
+ */
+let biometryNow: boolean | undefined
+
 /** Whether words may be kept and shown now: the switch on, and biometric unlock on. */
 export async function messageCacheAllowed(): Promise<boolean> {
   if (!isMessageCacheOn()) return false
+  if (biometryNow === false) return false
   try {
     return (await biometryGate()) === true
   } catch {
     return false
   }
+}
+
+/**
+ * The person turned biometric unlock on or off. Off empties every copy at once, not at the next start: no words are
+ * kept without biometric protection (Alberto, 11-18, decision 6; the coordinator's ask, #1130).
+ */
+export async function noteBiometricUnlock(on: boolean): Promise<void> {
+  const was = biometryNow
+  biometryNow = on
+  const agent = bound
+  if (!on && was !== false && agent) await emptyMessageCache(agent, { all: true }, 'biometryOff')
 }
 
 const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 0
@@ -297,13 +315,15 @@ async function apply(agent: CacheWallet, entry: JournalEntry): Promise<number> {
  * Empties the kept copies `scope` covers, writing the intent to the journal first: one cut short is finished at the
  * next start ({@link sweepMessageCache}), and nothing the journal names is ever shown. Says how many, never which.
  */
-export function emptyMessageCache(agent: CacheWallet, scope: EmptyScope, reason: string): Promise<number> {
-  return inTurn(async () => {
+export async function emptyMessageCache(agent: CacheWallet, scope: EmptyScope, reason: string): Promise<number> {
+  const n = await inTurn(async () => {
     const entry = entryOf(scope, reason)
     const { record, entries } = await journalOf(agent)
     if (!entries.some((e) => sameEntry(e, entry))) await writeJournal(agent, record, [...entries, entry])
     return apply(agent, entry)
   })
+  await sayCounts(agent, reason)
+  return n
 }
 
 /** Whether a kept copy is one the journal still means to empty. */
@@ -435,6 +455,17 @@ export function sweepMessageCache(
   })
 }
 
+/**
+ * The memberships a kept copy stands on: none when the agent no longer accepts this phone (the link `revoked`: a lost
+ * phone revoked from another device), whatever the wallet still lists; else each one not removed (a2's finding, #1130).
+ */
+export function standingMemberships(
+  linkKind: string,
+  memberships: ReadonlyArray<{ communityDid: string; personaDid: string }>
+): ReadonlyArray<{ communityDid: string; personaDid: string }> {
+  return linkKind === 'revoked' ? [] : memberships
+}
+
 /** A room as a listing gives it: its id, its standing and end. */
 export interface ListedRoom {
   roomId: string
@@ -457,6 +488,30 @@ export async function emptyGoneRooms(agent: CacheWallet, rooms: readonly ListedR
 
 let bound: CacheWallet | undefined
 let listening = false
+let cacheLog: ((line: string) => void) | undefined
+
+/**
+ * How many copies are kept, how many hold posts, and how many emptyings wait in the journal: counts only, never which.
+ * What a report reads to see an emptying happen (the device proof reads it, plan phase 3).
+ */
+export async function messageCacheCounts(
+  agent: CacheWallet
+): Promise<{ records: number; kept: number; journal: number }> {
+  const records = await agent.genericRecords.findAllByQuery({ type: RECORD_TYPE })
+  const { entries } = await journalOf(agent)
+  return { records: records.length, kept: records.filter((r) => !!contentOf(r)).length, journal: entries.length }
+}
+
+/** Says the counts, after `reason`: one line, counts and a kind only. */
+async function sayCounts(agent: CacheWallet, reason: string): Promise<void> {
+  if (!cacheLog) return
+  try {
+    const c = await messageCacheCounts(agent)
+    cacheLog(`[Rooms:cache] records ${c.records}, kept ${c.kept}, journal ${c.journal} (${reason})`)
+  } catch {
+    // Only a line.
+  }
+}
 /** The agent the cache answers events for: the app's, bound when its rooms service starts (`bindMessageCache`). */
 export function boundCacheAgent(): CacheWallet | undefined {
   return bound
@@ -473,6 +528,10 @@ export async function bindMessageCache(
 ): Promise<void> {
   if (!isCacheWallet(agent)) return
   bound = agent
+  if (log) cacheLog = log
+  log?.(
+    `[Rooms:cache] ROOMS_MESSAGE_CACHE on=${ROOMS_MESSAGE_CACHE.on === true} remoteOff=${ROOMS_MESSAGE_CACHE.remoteOff === true} biometrics=${await biometryGate().catch(() => false)}`
+  )
   if (!listening) {
     listening = true
     DeviceEventEmitter.addListener(VTI_REMOVED_EVENT, (e: { communityDid?: unknown } | undefined) => {
@@ -501,6 +560,7 @@ export async function bindMessageCache(
   try {
     const n = await sweepMessageCache(agent, await current())
     if (n > 0) log?.(`[Rooms:cache] ${n} rooms' kept posts emptied at start`)
+    await sayCounts(agent, 'start')
   } catch {
     log?.('[Rooms:cache] the kept posts were not swept at start; the next start does')
   }
@@ -509,5 +569,7 @@ export async function bindMessageCache(
 /** For tests: forget what is bound. */
 export function resetMessageCache(): void {
   bound = undefined
+  cacheLog = undefined
+  biometryNow = undefined
   turn = Promise.resolve()
 }

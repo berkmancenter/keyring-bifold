@@ -26,7 +26,7 @@ import { GenericRecordsTspPeerRevisionStore } from '../../trust-tasks/module/vti
 import { isRoomLiveDeliveryOn } from '../liveDeliverySwitch'
 import { isRoomRecordSendingOn } from '../recordSendingSwitch'
 import { afterLeavingCommunity } from '../roomsLeave'
-import { bindMessageCache } from '../messageCache'
+import { bindMessageCache, standingMemberships } from '../messageCache'
 
 import type { RoomsBackend, RoomsCommunity, RoomsUploadBackend } from './agentRoomsService'
 import { storedConsentHolds } from './consentHolds'
@@ -127,7 +127,8 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
         if (persona?.did === membership.personaDid)
           out.push({ communityDid: membership.communityDid, personaDid: membership.personaDid })
       }
-      return out
+      // An agent that no longer accepts this phone leaves no membership standing here.
+      return standingMemberships(vtaAgent.getState().link.kind, out)
     },
     (line) => agent.config?.logger?.warn?.(line)
   )
