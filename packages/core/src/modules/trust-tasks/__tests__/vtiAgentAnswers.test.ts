@@ -1595,6 +1595,16 @@ describe('a read left unanswered while the community answers a later ask', () =>
     expect(session.didcomm).toHaveLength(2)
   })
 
+  it('turned on after the read was sent: that read was set up for none, and is not asked again', async () => {
+    VTI_READ_REASK.remoteOff = true
+    const { session, later } = await overtaken('on-during')
+    VTI_READ_REASK.remoteOff = false
+    session.onMessage(didcommReply(sentOf(session)[1], OFFERS, { items: [] }))
+    await later
+    await pause(WAIT + 60)
+    expect(session.didcomm).toHaveLength(2)
+  })
+
   it('a read whose clock has run out is not asked again: nobody waits for it', async () => {
     const community = 'did:webvh:c:reask-gone'
     const session = await connectTo(community, 'didcomm', 'did:webvh:p:reask-gone')
