@@ -1091,9 +1091,8 @@ class VtiAgentController {
     const key = `${entry.did}|${entry.communityDid}`
     if ((this.answeredSeq.get(key) ?? -1) < entry.seq) this.answeredSeq.set(key, entry.seq)
     if (!isReadReaskOn()) return
-    for (const other of [...this.asks.values()])
-      if (other !== entry && other.did === entry.did && other.communityDid === entry.communityDid)
-        this.maybeReask(other)
+    // Each ask is judged by its own identity and community (`maybeReask`): this answer moves only theirs.
+    for (const other of [...this.asks.values()]) if (other !== entry) this.maybeReask(other)
   }
 
   /**
@@ -1101,11 +1100,13 @@ class VtiAgentController {
    * {@link VTI_READ_REASK_AFTER_MS} with no answer, someone still waits for it, and the same community has answered
    * an ask this identity sent after it. Looked at when the wait is up and at each answer from that community.
    */
-  private maybeReask(entry: AskEntry): void {
+  private maybeReask(entry: AskEntry, waitIsUp = false): void {
     if (!isReadReaskOn() || !entry.reask || entry.reasked || entry.answer || !entry.waiters.length) return
     if (this.asks.get(entry.id) !== entry) return
     const waited = Date.now() - entry.sentAt
-    if (waited < this.readReaskAfterMs) return
+    // The wait's own timer says the wait is up: it can fire a millisecond early by the clock, and nothing would look
+    // again if that read as "not yet" (the later answer is already in).
+    if (!waitIsUp && waited < this.readReaskAfterMs) return
     if ((this.answeredSeq.get(`${entry.did}|${entry.communityDid}`) ?? -1) <= entry.seq) return
     // The shared session is another identity's now: nothing is sent as this one over it.
     if (entry.shared && this.state.did !== entry.did) return
@@ -2311,7 +2312,7 @@ class VtiAgentController {
           body: second,
         })
       }
-      const timer = setTimeout(() => this.maybeReask(entry), this.readReaskAfterMs)
+      const timer = setTimeout(() => this.maybeReask(entry, true), this.readReaskAfterMs)
       // The wait holds nothing open: a process with nothing else to do may end.
       ;(timer as unknown as { unref?: () => void }).unref?.()
     }

@@ -1377,7 +1377,8 @@ describe('a read left unanswered while the community answers a later ask', () =>
   const OFFERS = OFFERS_LIST_TYPES[0]
   const WAIT = 60
   const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-  const sentOf = (session: { didcomm: unknown[] }) => session.didcomm as (Sent & { thid: string })[]
+  type SentRead = Sent & { thid: string; from: string; to: string[]; body: Sent['body'] & { id: string } }
+  const sentOf = (session: { didcomm: unknown[] }) => session.didcomm as SentRead[]
 
   beforeEach(() => {
     vtiAgent.readReaskAfterMs = WAIT
@@ -1435,7 +1436,7 @@ describe('a read left unanswered while the community answers a later ask', () =>
     expect(again.thid).not.toBe(one.thid)
     expect(again.body.threadId).not.toBe(one.body.threadId)
     expect(again.thid).toBe(again.body.threadId)
-    expect((again.body as { id?: string }).id).not.toBe((one.body as { id?: string }).id)
+    expect(again.body.id).not.toBe(one.body.id)
     session.onMessage(didcommReply(again, MEMBERSHIPS, { items: ['second'] }))
     expect(await first).toMatchObject({ body: { payload: { items: ['second'] } } })
   })
@@ -1447,6 +1448,41 @@ describe('a read left unanswered while the community answers a later ask', () =>
     await until(() => session.didcomm.length === 3)
     session.onMessage(didcommReply(sentOf(session)[0], MEMBERSHIPS, { items: ['first'] }))
     expect(await first).toMatchObject({ body: { payload: { items: ['first'] } } })
+  })
+
+  // A reply names its request by the message it answers, by the request document's thread, or by the document's own
+  // id (`askAnswered`): each of the second request's three is the ask's, as each of the first's is.
+  it.each([
+    ['its thread alone, as a reply over TSP does', (again: SentRead) => ({ thread: again.body.threadId })],
+    ['its document’s id alone', (again: SentRead) => ({ thread: again.body.id })],
+    ['its message alone', (again: SentRead) => ({ thread: again.id })],
+  ])('an answer naming the second request by %s is the ask’s', async (_name, by) => {
+    const { session, first, later } = await overtaken(`by-${_name.split(' ')[1]}`)
+    session.onMessage(didcommReply(sentOf(session)[1], OFFERS, { items: [] }))
+    await later
+    await until(() => session.didcomm.length === 3)
+    const { thread } = by(sentOf(session)[2])
+    session.onMessage({
+      id: 'urn:uuid:reply-to-the-second',
+      type: `${MEMBERSHIPS}#response`,
+      thid: thread,
+      body: { type: `${MEMBERSHIPS}#response`, payload: { items: ['named'] } },
+    })
+    expect(await first).toMatchObject({ body: { payload: { items: ['named'] } } })
+  })
+
+  it('a wait whose timer fires a moment early by the clock still asks: nothing else would look again', async () => {
+    const { session, first, later } = await overtaken('early-timer')
+    session.onMessage(didcommReply(sentOf(session)[1], OFFERS, { items: [] }))
+    await later
+    // From here the clock reads 20 ms behind: when the wait's timer fires, the clock says the wait is not up yet.
+    const real = Date.now
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => real() - 20)
+    await new Promise((resolve) => setTimeout(resolve, WAIT + 15))
+    clock.mockRestore()
+    expect(session.didcomm).toHaveLength(3)
+    session.onMessage(didcommReply(sentOf(session)[2], MEMBERSHIPS, { items: [] }))
+    expect(await first).toBeDefined()
   })
 
   it('is asked at the later answer, when that comes after the wait is up', async () => {
@@ -1596,7 +1632,7 @@ describe('a read left unanswered while the community answers a later ask', () =>
   it('over an identity’s own session: asked once more over that session, as that identity', async () => {
     const community = 'did:webvh:c:reask-own'
     const shared = await connectTo(community, 'didcomm', 'did:webvh:p:reask-own-shared')
-    const sent: (Sent & { thid: string; from: string })[] = []
+    const sent: SentRead[] = []
     const who = 'did:webvh:p:reask-own'
     keepOwnSession(who, { sendTo: async (_to: string, message: unknown) => void sent.push(message as never) })
     try {
