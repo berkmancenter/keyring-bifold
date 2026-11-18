@@ -237,7 +237,14 @@ describe('the key sweep of a phone its agent removed', () => {
     vtaDid: 'did:webvh:bob',
     kmsKeyIds: { signing: `mem:${n}` },
   }))
-  const asked = () => mockClient.holdPersonaKeys.mock.calls.map(([persona]) => (persona as { did: string }).did)
+  // The shared mock is declared with no arguments; what it was called with is read as the sweep passes it.
+  const asked = () =>
+    (mockClient.holdPersonaKeys.mock.calls as unknown as Array<[{ did: string }]>).map(([persona]) => persona.did)
+  /** The agent hands over the first identity's keys and refuses every other as not on its access list. */
+  const refusesAfterTheFirst = (async (persona: { did: string }) => {
+    if (persona.did === 'did:webvh:a') return true
+    throw NOT_ON_ACL()
+  }) as unknown as () => Promise<boolean>
   const removals = () =>
     logger.warn.mock.calls.filter(([line]) => /no longer accepts this phone; the link is removed/.test(String(line)))
 
@@ -250,10 +257,7 @@ describe('the key sweep of a phone its agent removed', () => {
   })
 
   it('refused once several go together: the three running are all refused, removed once, and the fifth is never asked', async () => {
-    mockClient.holdPersonaKeys.mockImplementation(async (persona: { did: string }) => {
-      if (persona.did === 'did:webvh:a') return true
-      throw NOT_ON_ACL()
-    })
+    mockClient.holdPersonaKeys.mockImplementation(refusesAfterTheFirst)
     const vta = await onlineController({ personas: five, expect: 'revoked' })
     expect(vta.getState().link).toMatchObject({ kind: 'revoked' })
     expect(asked()).toEqual(['did:webvh:a', 'did:webvh:b', 'did:webvh:c', 'did:webvh:d'])
@@ -264,10 +268,7 @@ describe('the key sweep of a phone its agent removed', () => {
 
   it('killed: one identity after another, and a refusal at the second stops it there', async () => {
     KEY_COPIES_TOGETHER.remoteOff = true
-    mockClient.holdPersonaKeys.mockImplementation(async (persona: { did: string }) => {
-      if (persona.did === 'did:webvh:a') return true
-      throw NOT_ON_ACL()
-    })
+    mockClient.holdPersonaKeys.mockImplementation(refusesAfterTheFirst)
     await onlineController({ personas: five, expect: 'revoked' })
     expect(asked()).toEqual(['did:webvh:a', 'did:webvh:b'])
     expect(removals()).toHaveLength(1)
