@@ -158,8 +158,11 @@ const settle = async () => {
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/** What the release ships (off until the device proof, #1138): these rows run with the cache on, and put it back. */
+const SHIPPED = { ...ROOMS_MESSAGE_CACHE }
 let biometry = true
 beforeEach(() => {
+  Object.assign(ROOMS_MESSAGE_CACHE, { on: true, remoteOff: false })
   biometry = true
   setMessageCacheBiometryGate(async () => biometry)
   resetMessageCache()
@@ -172,8 +175,7 @@ beforeEach(() => {
   mockLinkKind = 'linked'
 })
 afterEach(() => {
-  ROOMS_MESSAGE_CACHE.on = true
-  ROOMS_MESSAGE_CACHE.remoteOff = false
+  Object.assign(ROOMS_MESSAGE_CACHE, SHIPPED)
 })
 
 describe('leaving a community', () => {
@@ -265,7 +267,7 @@ describe('at the rooms backend’s start', () => {
     createAgentRoomsBackend(w as never)
     await settle()
     expect(await keepRoomPosts(w, { personaDid: ME, roomId: SONGS, communityDid: CHOIR }, [post('after')])).toBe(false)
-    ROOMS_MESSAGE_CACHE.remoteOff = false
+    Object.assign(ROOMS_MESSAGE_CACHE, { on: true, remoteOff: false })
     expect(await reads(w, ALL)).toEqual([undefined, undefined, undefined, undefined])
   })
 })
