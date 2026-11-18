@@ -23,6 +23,8 @@ import { cacheWallet } from './fixtures/cacheWallet'
 
 let mockService: RoomsService | undefined
 const mockOptions: unknown[] = []
+/** What the screen last asked of the feed. */
+const last = () => mockOptions[mockOptions.length - 1]
 const ROOM = 'did:webvh:sample:planning'
 jest.mock('../useRoomsService', () => ({ useRoomsService: () => mockService }))
 jest.mock('@react-navigation/elements', () => ({ useHeaderHeight: () => 100 }))
@@ -80,17 +82,15 @@ describe("the room screen's chat, by the room's tier", () => {
     const { sample } = roomOfTier(tier)
     const room = await sample.getRoom(ROOM)
     show()
-    await waitFor(() => expect(mockOptions.at(-1)).toEqual({ messageCache: expect.anything() }))
-    expect((mockOptions.at(-1) as { messageCache: { communityDid: string } }).messageCache.communityDid).toBe(
-      room.communityDid
-    )
+    await waitFor(() => expect(last()).toEqual({ messageCache: expect.anything() }))
+    expect((last() as { messageCache: { communityDid: string } }).messageCache.communityDid).toBe(room.communityDid)
   })
 
   it.each(['private', 'unknown'] as const)('control: %s: never kept', async (tier) => {
     const { wallet } = roomOfTier(tier)
     const tree = show()
     await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/).length).toBeGreaterThan(0))
-    expect(mockOptions.at(-1)).toEqual({})
+    expect(last()).toEqual({})
     expect(mockOptions.every((o) => !(o as { messageCache?: unknown }).messageCache)).toBe(true)
     expect(wallet.genericRecords.save).not.toHaveBeenCalled()
     expect(wallet.genericRecords.findById).not.toHaveBeenCalled()
