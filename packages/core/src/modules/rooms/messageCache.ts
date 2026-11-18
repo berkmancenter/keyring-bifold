@@ -438,6 +438,10 @@ export async function readRoomPosts(
  * are each shown only on their own screen. The read itself is {@link readRoomPosts}'s, with every check it makes (the
  * switch, biometric unlock, the journal, the room's end, the age), and the room screen takes the copy down if the room,
  * once known, acts as another identity or is not kept.
+ *
+ * A room's id is taken to name one room across communities (a did:webvh of its own), so a copy found by its room tag is
+ * this room's. Were room ids ever scoped by community, a copy of another room of the member's could be drawn here for
+ * a moment; the takedown, which checks the room's community as well as its identity, is what covers that (ac).
  */
 export async function readRoomPostsBeforeRoom(
   agent: CacheWallet,
