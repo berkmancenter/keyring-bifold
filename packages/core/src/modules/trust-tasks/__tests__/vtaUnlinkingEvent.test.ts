@@ -10,8 +10,9 @@ import { vtaAgent, VtaAgentController } from '../module/vtaAgent'
 
 const WORK = 'did:webvh:agent:work'
 /** A controller whose look at another agent cannot connect: the unlink goes on at once, not after its deadline. */
-const offline = () =>
-  new VtaAgentController({
+function offline(): VtaAgentController {
+  const controller = new VtaAgentController()
+  controller.configure({
     lookClient: () => ({
       connect: async () => {
         throw new Error('offline')
@@ -32,6 +33,8 @@ const offline = () =>
       }) as never,
     identityStore: () => ({ forgetManager: async () => undefined }) as never,
   })
+  return controller
+}
 
 function heard() {
   const said: unknown[] = []
