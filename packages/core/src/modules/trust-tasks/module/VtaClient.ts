@@ -87,7 +87,7 @@ import {
   type StepUpRequest,
 } from './stepUp'
 import { isDigestMultibase } from './vettingShape'
-import { TaskVersions } from './taskVersions'
+import { isUnsupportedVersionRefusal, TaskVersions } from './taskVersions'
 import { chooseCarriage, type Carriage } from './tspCapability'
 import {
   GenericRecordsTspPeerRevisionStore,
@@ -103,6 +103,7 @@ import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
 import { isConnectDrainEarlyOn } from './connectDrainSwitch'
+import { isKeyCopiesTogetherOn } from './keyCopySweep'
 import { isReplacedSessionStopsOn } from './replacedSessionSwitch'
 import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
 import {
@@ -159,6 +160,12 @@ export const VTA_TASK = {
   contextsList: 'https://trusttasks.org/spec/vta/contexts/list/1.0',
   contextsCreate: 'https://trusttasks.org/spec/vta/contexts/create/1.0',
   didsList: 'https://trusttasks.org/spec/vta/webvh/dids/list/1.0',
+  /**
+   * The list of every DID the agent holds, whatever its method. VTI #2763 (a78a040e8, 2026-11-17) serves it and no
+   * longer serves `vta/webvh/dids/list/1.0`, with vta-service's version left at 0.83.0: the tagged 0.83.0 serves only
+   * the old one, a build of main after it only this one. Asked first, the old one on a refusal (VTA_TASK_VERSIONS).
+   */
+  vtaDidsList01: 'https://trusttasks.org/spec/vta/dids/list/0.1',
   didsCreate: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.0',
   didsCreate11: 'https://trusttasks.org/spec/vta/webvh/dids/create/1.1',
   /** 1.2 adds only OPTIONAL request members (`didMethod`, `scidAlsoKnownAs`); 1.1's payload is a valid 1.2 one. */
@@ -203,6 +210,8 @@ export const VTA_TASK = {
   contextsDelete: 'https://trusttasks.org/spec/vta/contexts/delete/1.0',
   /** 1.1 (trust-tasks-tf #967, vta-service 1afebe27): 1.0's payload plus `abandonHostCopies`, default false. */
   contextsDelete11: 'https://trusttasks.org/spec/vta/contexts/delete/1.1',
+  /** 1.2 (VTI #2763, a78a040e8): the payload's members are 1.1's (`id`, `force`, `abandonHostCopies`, `ext`). */
+  contextsDelete12: 'https://trusttasks.org/spec/vta/contexts/delete/1.2',
   // The approval rules' row (vta-sdk trust_tasks.rs:2048-2060). Writing is super-admin.
   policyGet: 'https://trusttasks.org/spec/policy/get/0.1',
   policyUpsert: 'https://trusttasks.org/spec/policy/upsert/0.2',
@@ -267,10 +276,14 @@ export const VTA_TASK_VERSIONS = {
   policyUpsert: [VTA_TASK.policyUpsert03, VTA_TASK.policyUpsert],
   // 0.3 first: every VTA in use serves it (pcsVtaPayloads.ts DISCOVERY_TASK_03).
   discovery: [DISCOVERY_TASK_03, DISCOVERY_TASK],
-  // 1.1 first. vta-service serves only 1.0 up to v0.66.0, both in v0.67.0, and only 1.1 from 61c23f20 (#2332,
-  // 2026-10-29: v0.68.0 and the nightlies). An agent before v0.67.0 steps down to 1.0 on a refusal. The test
-  // request's context holds nothing, so 1.1's host settling has nothing to do and the payload is the same in both.
-  contextsDelete: [VTA_TASK.contextsDelete11, VTA_TASK.contextsDelete],
+  // 1.2 first. vta-service serves only 1.0 up to v0.66.0, both 1.0 and 1.1 in v0.67.0, only 1.1 from 61c23f20
+  // (#2332, 2026-10-29: v0.68.0 to the tagged v0.83.0), and only 1.2 from a78a040e8 (#2763, 2026-11-17: main after
+  // v0.83.0, its version unchanged). An older agent steps down on a refusal. The test request's context holds
+  // nothing, so the host settling of 1.1 and 1.2 has nothing to do, and the payload sent is the same in all three.
+  contextsDelete: [VTA_TASK.contextsDelete12, VTA_TASK.contextsDelete11, VTA_TASK.contextsDelete],
+  // The method-neutral list first, the did:webvh one on a refusal: two families, one question. An agent serves
+  // one or the other, never both (VTA_TASK.vtaDidsList01). Each is asked in its own payload (VtaClient.listDids).
+  didsList: [VTA_TASK.vtaDidsList01, VTA_TASK.didsList],
 } as const
 
 /** The `type` of the DIDComm message a sealed vault secret travels in (vta-sdk didcomm_session.rs:567-570; informational). */
@@ -402,6 +415,37 @@ export interface VtaContext {
   name?: string
   did?: string
   [key: string]: unknown
+}
+
+/** The methods a did:webvh identity is listed under by `vta/dids/list/0.1`: itself, and its did:scid:vh:1 form. */
+export const DIDS_LIST_METHODS = ['webvh', 'scid:vh'] as const
+
+/** The most pages of `vta/dids/list/0.1` read in one listing (the agent chooses a page's size, at most 500). */
+export const DIDS_LIST_MAX_PAGES = 20
+
+/**
+ * One entry of `vta/dids/list/0.1` (DidSummary) as the did:webvh list answered it, or undefined for an entry that is
+ * not a did:webvh identity or names no DID. An identity presented as its did:scid:vh:1 DID is listed under that DID
+ * with its did:webvh one in `alsoKnownAs`; the did:webvh list named it by its did:webvh DID, and so does this.
+ */
+export function mintedDidOf(summary: unknown): VtaMintedDid | undefined {
+  if (!summary || typeof summary !== 'object') return undefined
+  const s = summary as Record<string, unknown>
+  const method = s.method
+  if (typeof s.did !== 'string' || !s.did || !DIDS_LIST_METHODS.some((m) => m === method)) return undefined
+  const aliases = Array.isArray(s.alsoKnownAs) ? s.alsoKnownAs.filter((a): a is string => typeof a === 'string') : []
+  const did = s.did.startsWith('did:webvh:') ? s.did : aliases.find((a) => a.startsWith('did:webvh:'))
+  if (!did) return undefined
+  const details = (s.methodDetails as Record<string, { scid?: unknown } | undefined> | undefined)?.[String(method)]
+  const text = (value: unknown) => (typeof value === 'string' ? value : '')
+  return {
+    did,
+    contextId: text(s.contextId),
+    ...(typeof s.serverId === 'string' ? { serverId: s.serverId } : {}),
+    scid: text(details?.scid),
+    signingKeyId: text(s.signingKeyId),
+    kaKeyId: text(s.keyAgreementKeyId),
+  }
 }
 
 /** `vta/webvh/dids/create/1.0`'s answer — the persona, and the VTA's ids for its keys. */
@@ -1593,7 +1637,7 @@ export class VtaClient {
     const done = queued.catch(async (error: unknown) => {
       const stepUp = this.managerDid ? stepUpRequestOf(error, { vtaDid: this.vtaDid, me: this.managerDid }) : undefined
       if (stepUp)
-        return this.answerStepUp<T>(stepUp, error, type, () =>
+        return this.stepUpInTurn<T>(stepUp, error, type, () =>
           this.sendTask<T>(type, payload, timeoutMs, documentExtras)
         )
       // A task the policy holds for consent is refused with
@@ -1722,7 +1766,10 @@ export class VtaClient {
   }
 
   private sharesLane(type: string): boolean {
-    return this.readLaneSize > 1 && this.replyThreading === 'threaded' && inReadLane(type)
+    if (this.readLaneSize <= 1 || this.replyThreading !== 'threaded') return false
+    // A key copy shares the lane where that is on (keyCopySweep.ts): its answer changes nothing at the agent and its
+    // order among reads does not matter. Not through VTA_READ_LANE_TYPES, which other code reads as "a rooms read".
+    return inReadLane(type) || (type === VTA_TASK.keysExportSecret && isKeyCopiesTogetherOn())
   }
 
   /** Whether a task of `type` at the head of the queue could start now. */
@@ -1744,6 +1791,71 @@ export class VtaClient {
         this.pump()
       })
     }
+  }
+
+  /** How the step-up answered last on this client ended, for those that came while it was being answered. */
+  private stepUpBefore?: Promise<{ approved: true } | { approved: false; error: unknown }>
+
+  /**
+   * One step-up at a time on this client. Tasks side by side (the read lane, key copies where that is on) can each be
+   * refused with a step-up at the same moment, and the person is shown one card at a time (vtaAgent askStepUp keeps
+   * one): a second ask replaced the first's card, whose task then waited out the whole time allowed for an answer
+   * nobody could give. So a step-up that comes while another is being answered waits for it, and then does what a
+   * task sent after it would have done:
+   * - the one before was approved: this session is elevated, so the task is sent again first, and the person is asked
+   *   only if the agent still wants a step-up for it;
+   * - the one before was not approved (declined, not answered, could not be asked): this one ends the same way,
+   *   without asking the person again.
+   *
+   * With nothing being answered it is `answerStepUp`, exactly. Only where key copies go together (keyCopySweep.ts):
+   * off, every step-up is answered as it comes, as before.
+   */
+  private stepUpInTurn<T>(
+    first: NonNullable<ReturnType<typeof stepUpRequestOf>>,
+    refusal: unknown,
+    taskType: string,
+    resubmit: () => Promise<T>
+  ): Promise<T> {
+    if (!isKeyCopiesTogetherOn()) return this.answerStepUp<T>(first, refusal, taskType, resubmit)
+    const before = this.stepUpBefore
+    // Whether this session was approved by the time this one ended: by the one before, or by the person here.
+    let approved = false
+    const run = (async (): Promise<T> => {
+      let stepUp = first
+      let refused = refusal
+      if (before) {
+        this.agent.config.logger.info(`${LOG_PREFIX} ${taskType}: its step-up waits for the one being answered`)
+        const outcome = await before
+        if (!outcome.approved) throw outcome.error
+        approved = true
+        try {
+          const answer = await resubmit()
+          this.agent.config.logger.info(`${LOG_PREFIX} ${taskType}: went through after that step-up, with no second`)
+          return answer
+        } catch (again) {
+          const still = this.managerDid
+            ? stepUpRequestOf(again, { vtaDid: this.vtaDid, me: this.managerDid })
+            : undefined
+          if (!still) throw again
+          approved = false
+          stepUp = still
+          refused = again
+        }
+      }
+      return this.answerStepUp<T>(stepUp, refused, taskType, () => {
+        approved = true
+        return resubmit()
+      })
+    })()
+    const mine = run.then(
+      () => ({ approved: true as const }),
+      (error: unknown) => (approved ? { approved: true as const } : { approved: false as const, error })
+    )
+    this.stepUpBefore = mine
+    void mine.then(() => {
+      if (this.stepUpBefore === mine) this.stepUpBefore = undefined
+    })
+    return run
   }
 
   /**
@@ -2569,12 +2681,70 @@ export class VtaClient {
     return Array.isArray(result) ? result : (result.servers ?? [])
   }
 
+  /**
+   * The identities (did:webvh, and its did:scid:vh:1 form) this agent holds, in the task the agent serves: the
+   * method-neutral `vta/dids/list/0.1`, else `vta/webvh/dids/list/1.0` (VTA_TASK_VERSIONS.didsList). Either way each
+   * is answered as the did:webvh list always answered it, under its did:webvh DID.
+   */
   async listDids(contextId?: string): Promise<VtaMintedDid[]> {
-    const result = await this.task<{ dids?: VtaMintedDid[] } | VtaMintedDid[]>(
-      VTA_TASK.didsList,
-      contextId ? { contextId } : {}
-    )
+    const ladder = VTA_TASK_VERSIONS.didsList
+    const ask = () =>
+      this.versions
+        .ask('didsList', ladder, (type) =>
+          type === VTA_TASK.vtaDidsList01 ? this.listDidsNeutral(type, contextId) : this.listDidsWebvh(type, contextId)
+        )
+        .then(({ answer }) => answer)
+    // An agent remembered as serving the older task may have been updated since: its refusal of a task it no longer
+    // serves at all names nothing to go up to (the two are different families), so the ladder is asked once more from
+    // its top. One that was asked from the top already has refused both, and that refusal stands.
+    const fromTop = this.versions.first('didsList', ladder) === ladder[0]
+    try {
+      return await ask()
+    } catch (error) {
+      if (fromTop || !isUnsupportedVersionRefusal(error)) throw error
+      return ask()
+    }
+  }
+
+  /** `vta/webvh/dids/list/1.0`: one answer, every record. */
+  private async listDidsWebvh(type: string, contextId?: string): Promise<VtaMintedDid[]> {
+    const result = await this.task<{ dids?: VtaMintedDid[] } | VtaMintedDid[]>(type, contextId ? { contextId } : {})
     return Array.isArray(result) ? result : (result.dids ?? [])
+  }
+
+  /**
+   * `vta/dids/list/0.1`: paged, and every method the agent holds, so it is asked for the two a did:webvh identity
+   * is listed under and read page by page. Stops at {@link DIDS_LIST_MAX_PAGES} pages, or at a cursor the agent
+   * repeats, and says so: what was read is still answered, since an identity missing from a long list is asked for
+   * again at the next Bring back, where a refusal here would bring none back.
+   */
+  private async listDidsNeutral(type: string, contextId?: string): Promise<VtaMintedDid[]> {
+    const listed: VtaMintedDid[] = []
+    const seen = new Set<string>()
+    let cursor: string | undefined
+    for (let page = 1; ; page++) {
+      const result = await this.task<{ dids?: unknown; nextCursor?: unknown }>(type, {
+        methods: [...DIDS_LIST_METHODS],
+        ...(contextId ? { contextId } : {}),
+        ...(cursor ? { cursor } : {}),
+      })
+      for (const summary of Array.isArray(result?.dids) ? result.dids : []) {
+        const did = mintedDidOf(summary)
+        if (did) listed.push(did)
+      }
+      const next = typeof result?.nextCursor === 'string' && result.nextCursor ? result.nextCursor : undefined
+      if (!next) return listed
+      if (page >= DIDS_LIST_MAX_PAGES || seen.has(next)) {
+        this.agent.config.logger.warn(
+          `${LOG_PREFIX} the agent's list of identities was not read to its end (${
+            seen.has(next) ? 'it repeated a page' : `more than ${DIDS_LIST_MAX_PAGES} pages`
+          }): ${listed.length} read`
+        )
+        return listed
+      }
+      seen.add(next)
+      cursor = next
+    }
   }
 
   /**
