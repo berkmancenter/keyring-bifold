@@ -62,17 +62,17 @@ const show = () =>
       <Room />
     </BasicAppContext>
   )
+/** What the build ships (off on main, on in a cut that carries #1140): these rows run it on, and put it back. */
+const SHIPPED = { ...ROOMS_MESSAGE_CACHE }
 beforeEach(() => {
   mockOptions.length = 0
   setMessageCacheBiometryGate(async () => true)
   resetMessageCache()
   // These rows are about the cache at work: switched on, as a cut that carries it does.
-  ROOMS_MESSAGE_CACHE.on = true
+  Object.assign(ROOMS_MESSAGE_CACHE, { on: true, remoteOff: false })
 })
 afterEach(() => {
-  // As main ships it: off (rooms/messageCache).
-  ROOMS_MESSAGE_CACHE.on = false
-  ROOMS_MESSAGE_CACHE.remoteOff = false
+  Object.assign(ROOMS_MESSAGE_CACHE, SHIPPED)
 })
 
 describe("the room screen's chat, by the room's tier", () => {
