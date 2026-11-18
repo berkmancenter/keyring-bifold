@@ -68,6 +68,7 @@ import * as witnessShare from './witnessShareSpec'
 import * as continuitySpec from '../vrc/contacts/continuitySpec'
 import { handleContinuityRequest, handleContinuityResponse } from '../vrc/contacts/continuity'
 import * as approverRoleSpec from './approverRoleSpec'
+import * as guardianOfferSpec from './guardianOfferSpec'
 import { handleRoleOfferRequest, handleRoleOfferResponse, handleRoleRemoved, handleRoleStepDown } from './approverRole'
 import * as confirmItsYouSpec from './confirmItsYouSpec'
 import { handleConfirmRequest, handleConfirmResponse } from './confirmItsYou'
@@ -2091,6 +2092,22 @@ function registerBuiltinTrustTasks(): void {
     orchestration: { requiresDiscovery: false },
     handleRequest: handleConfirmRequest,
     handleResponse: handleConfirmResponse,
+  })
+
+  // Keyring's own type (private authority): a guardian's phone offers to be a person's approver, with its state Guardian
+  // card; the person's phone checks the card first. Its handlers do nothing unless guardian offers, trusted approvers
+  // and state-verified approvers are all on. Loaded on arrival, as the Guardian card's handler is.
+  trustTaskRegistry.register({
+    typeUri: guardianOfferSpec.GUARDIAN_OFFER_TYPE_URI,
+    spec: guardianOfferSpec.GUARDIAN_OFFER_SPEC as never,
+    responseSpec: guardianOfferSpec.GUARDIAN_OFFER_RESPONSE_SPEC as never,
+    orchestration: { requiresDiscovery: false },
+    handleRequest: (...args: Parameters<typeof import('./guardianOffer').handleGuardianOffer>) =>
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      (require('./guardianOffer') as typeof import('./guardianOffer')).handleGuardianOffer(...args),
+    handleResponse: (...args: Parameters<typeof import('./guardianOffer').handleGuardianOfferResponse>) =>
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      (require('./guardianOffer') as typeof import('./guardianOffer')).handleGuardianOfferResponse(...args),
   })
 
   // Keyring's own type (private authority): an approver's phone sends its state Guardian card after a yes. One way,

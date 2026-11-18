@@ -34,6 +34,7 @@ import { formInputFromTemplate, profileLabel } from '../types/rcard'
 import { testIdWithKey } from '../../../utils/testable'
 import { DidDetails } from '../../trust-tasks/screens/DidDetails'
 import ApproverAskRow from '../../trust-tasks/screens/ApproverAskRow'
+import GuardianOfferRow from '../../trust-tasks/screens/GuardianOfferRow'
 import ConfirmItsYouRow from '../../trust-tasks/screens/ConfirmItsYouRow'
 import { isConfirmItsYouEnabled } from '../../trust-tasks/module/confirmItsYouFlag'
 import { isTrustedApproversEnabled } from '../../trust-tasks/module/trustedApproversFlag'
@@ -490,6 +491,8 @@ const ContactDetails: React.FC<ContactDetailsProps> = ({ route, navigation }) =>
             </ThemedText>
             <ConfirmItsYouRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
             <ApproverAskRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
+            {/* Offering to approve for them as their guardian: only with guardian offers on and a Guardian card held. */}
+            <GuardianOfferRow connectionId={connectionId} name={displayName || t('Approver.UnnamedContact')} />
           </View>
         ) : null}
 
