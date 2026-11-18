@@ -159,6 +159,17 @@ const LIST_PAGES = 5
 const workKey = (via: string, electionId: string) => `${via} ${electionId}`
 
 export function createPollService(b: PollsBackend) {
+  /** Whoever shows a poll hears each record written for it, so a vote carried on behind shows as it goes. */
+  const recordListeners = new Set<(record: PollRecord) => void>()
+  const put = async (record: PollRecord): Promise<void> => {
+    await b.records.put(record)
+    recordListeners.forEach((listener) => listener(record))
+  }
+  const onRecord = (listener: (record: PollRecord) => void): (() => void) => {
+    recordListeners.add(listener)
+    return () => void recordListeners.delete(listener)
+  }
+
   const target = async (community: string): Promise<VoterTarget> => {
     if (!b.currentAgent()) throw new PollRefusal('noAgent')
     const t = await b.voterTarget(community)
@@ -309,7 +320,7 @@ export function createPollService(b: PollsBackend) {
       // Written before anything is asked: a crash from here on finds the record, and both parties answer a resend
       // from their own.
       const record: PollRecord = { community, electionId, via, member: t.member, agent, ticketRequestedAt: b.now() }
-      await b.records.put(record)
+      await put(record)
       let registered: ReturnType<typeof parseRegistered>
       try {
         registered = parseRegistered(await b.agentTask(at.register, registerPayload(t, shown)))
@@ -330,7 +341,7 @@ export function createPollService(b: PollsBackend) {
 
   const held = async (record: PollRecord) => {
     const next = { ...record, ticketAt: b.now() }
-    await b.records.put(next)
+    await put(next)
     return next
   }
 
@@ -345,7 +356,8 @@ export function createPollService(b: PollsBackend) {
   /**
    * Vote: the ballot checked here, the cast built by the agent, stored, and sent after its pause. Returns once the
    * receipt is kept, or throws: a `CastFailure` of kind `unreachable` leaves the cast stored, and `resumePending` (or
-   * voting again) sends the same one. `onStep` hears each step as it starts.
+   * voting again) sends the same one. `onStep` hears each step as it starts. `onStored` hears once the cast is stored,
+   * from when the vote goes whatever happens to the screen (`POLLS_VOTE_BEHIND`); nothing before it has been sent.
    *
    * @versionLadder vta/pcs/vote
    */
@@ -353,13 +365,17 @@ export function createPollService(b: PollsBackend) {
     via: string,
     electionId: string,
     given: Record<string, GivenAnswer>,
-    onStep?: (step: VoteStep) => void
+    onStep?: (step: VoteStep) => void,
+    onStored?: (record: PollRecord) => void
   ): Promise<PollRecord> =>
     b.serially(workKey(via, electionId), async () => {
       onStep?.({ step: 'ready' })
       const { shown, at } = await readAt(via, electionId)
       const record = await b.records.get(shown.manifest.community, electionId)
-      if (record?.pending) return carryOn(record, onStep)
+      if (record?.pending) {
+        onStored?.(record)
+        return carryOn(record, onStep)
+      }
       if (record?.votedAt !== undefined) throw new PollRefusal('voted')
       if (record?.ticketAt === undefined) throw new PollRefusal('noTicket')
       const t = await target(via)
@@ -385,7 +401,8 @@ export function createPollService(b: PollsBackend) {
         sendAfter: b.now() + castDelayMs(() => b.random()),
       }
       const next = { ...record, pending }
-      await b.records.put(next)
+      await put(next)
+      onStored?.(next)
       return carryOn(next, onStep)
     })
 
@@ -413,9 +430,9 @@ export function createPollService(b: PollsBackend) {
             pending: undefined,
             stopped: { kind: failure.kind, code: failure.code, at: b.now() },
           }
-          await b.records.put(stopped)
+          await put(stopped)
         } else {
-          await b.records.put({ ...current, stopped: { kind: failure.kind, at: b.now() } })
+          await put({ ...current, stopped: { kind: failure.kind, at: b.now() } })
         }
         b.warn(
           `[polls] a cast for ${current.electionId} stopped: ${failure.kind}${failure.code ? ` (${failure.code})` : ''}`
@@ -423,7 +440,7 @@ export function createPollService(b: PollsBackend) {
         throw failure
       }
       current = { ...current, pending: { stage: 'receipt', receipt }, stopped: undefined }
-      await b.records.put(current)
+      await put(current)
     }
     if (current.pending?.stage === 'receipt') {
       onStep?.({ step: 'receipt' })
@@ -434,11 +451,11 @@ export function createPollService(b: PollsBackend) {
       try {
         await b.agentTask(POLL_TASK.receipt, receiptPayload(voter, current.electionId, current.pending.receipt))
       } catch (e) {
-        await b.records.put({ ...current, stopped: { kind: 'agent', code: codeOf(e), at: b.now() } })
+        await put({ ...current, stopped: { kind: 'agent', code: codeOf(e), at: b.now() } })
         throw refused(e)
       }
       current = { ...current, pending: undefined, stopped: undefined, votedAt: b.now() }
-      await b.records.put(current)
+      await put(current)
     }
     return current
   }
@@ -486,6 +503,7 @@ export function createPollService(b: PollsBackend) {
     resumePending,
     agentReadiness,
     record: recordOf,
+    onRecord,
   }
 }
 
