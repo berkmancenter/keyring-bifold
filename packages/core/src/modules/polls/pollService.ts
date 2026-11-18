@@ -160,14 +160,14 @@ const workKey = (via: string, electionId: string) => `${via} ${electionId}`
 
 export function createPollService(b: PollsBackend) {
   /** Whoever shows a poll hears each record written for it, so a vote carried on behind shows as it goes. */
-  const recordListeners = new Set<(record: PollRecord) => void>()
+  const watchers = new Set<(record: PollRecord) => void>()
   const put = async (record: PollRecord): Promise<void> => {
     await b.records.put(record)
-    recordListeners.forEach((listener) => listener(record))
+    watchers.forEach((listener) => listener(record))
   }
   const onRecord = (listener: (record: PollRecord) => void): (() => void) => {
-    recordListeners.add(listener)
-    return () => void recordListeners.delete(listener)
+    watchers.add(listener)
+    return () => void watchers.delete(listener)
   }
 
   const target = async (community: string): Promise<VoterTarget> => {

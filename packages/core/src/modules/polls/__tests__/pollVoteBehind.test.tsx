@@ -16,7 +16,7 @@ import { createKeyLock } from '../../../utils/keyLock'
 import { PollsIds } from '../components/Polls.ids'
 import { testIdWithKey } from '../../../utils/testable'
 import type { BallotBoxDoor } from '../ballotBox'
-import type { PollRecord, PollsBackend } from '../pollService'
+import { createPollService, type PollRecord, type PollsBackend } from '../pollService'
 import { POLLS_VOTE_BEHIND } from '../pollsVoteBehindSwitch'
 import { POLL_GENERATIONS, POLL_TASK } from '../pollTasks'
 import Poll from '../screens/Poll'
@@ -199,7 +199,7 @@ function world() {
     ticketRequestedAt: Date.now() - 3 * 3600_000,
     ticketAt: Date.now() - 3 * 3600_000,
   })
-  return { backend, records, posted, state, record: () => records.get(`${COMMUNITY} ${POLL}`) }
+  return { backend, records, posted, state, builds: () => builds, record: () => records.get(`${COMMUNITY} ${POLL}`) }
 }
 
 const id = (key: string) => testIdWithKey(key)
@@ -285,12 +285,55 @@ describe('the poll, while the vote goes behind', () => {
   })
 })
 
+describe('what the poll and the vote hear', () => {
+  test('a vote on another poll carried on behind leaves this poll as it was', async () => {
+    // Another poll's vote, left on its way: the next start takes it on, and writes its records.
+    w.records.set(`${COMMUNITY} other`, {
+      community: COMMUNITY,
+      electionId: 'other',
+      via: COMMUNITY,
+      member: MEMBER,
+      agent: AGENT,
+      ticketRequestedAt: Date.now() - 3 * 3600_000,
+      ticketAt: Date.now() - 3 * 3600_000,
+      pending: { stage: 'receipt', receipt: {} },
+    })
+    const tree = show(<Poll />)
+    await waitFor(() => expect(w.records.get(`${COMMUNITY} other`)?.votedAt).toBeDefined())
+    await flush()
+    expect(tree.getByTestId(id(PollsIds.voteNow))).toBeTruthy()
+    expect(tree.queryByTestId(id(PollsIds.voteIn))).toBeNull()
+    tree.unmount()
+  })
+
+  test('voting again on a vote already on its way goes at once, and sends the stored cast, not a new one', async () => {
+    // The first vote is stored, then the app is killed in the pause.
+    w.state.pause = 'kill'
+    await expect(
+      createPollService(w.backend).vote(COMMUNITY, POLL, { motion: { choice: ['option-yes'] } })
+    ).rejects.toThrow('killed')
+    const stored = w.record()?.pending
+    expect(stored?.stage).toBe('cast')
+    // After the restart, before anything takes it on, the member votes again.
+    w.state.pause = 'never'
+    const again = createPollService(w.backend)
+    const gone = jest.fn()
+    void again.vote(COMMUNITY, POLL, { motion: { choice: ['option-no'] } }, undefined, gone)
+    await flush()
+    expect(gone).toHaveBeenCalledTimes(1)
+    expect(gone.mock.calls[0][0].pending).toEqual(stored)
+    expect(w.builds()).toBe(1)
+  })
+})
+
 describe('a failure after the member left', () => {
   const leaveThenOpenPoll = async () => {
     const ballot = await castOnBallot()
     await waitFor(() => expect(goBack()).toHaveBeenCalledTimes(1))
-    ballot.unmount()
+    // The vote goes on while the ballot closes: whatever happens to it is not said on the ballot, which is going.
     await flush()
+    expect(ballot.queryByTestId(id(PollsIds.castFailed))).toBeNull()
+    ballot.unmount()
     return show(<Poll />)
   }
 
