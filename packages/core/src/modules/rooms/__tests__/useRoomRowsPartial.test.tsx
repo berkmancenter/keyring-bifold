@@ -119,7 +119,7 @@ const mount = (service: RoomsService) => {
   renderHook(() => useRoomRowsPoll(service, true))
   return renderHook(() => useRoomRows())
 }
-const ids = (rows: { rows: { roomId: string }[] }) => rows.rows.map((r) => r.roomId)
+const ids = (rows: { rows: readonly { roomId: string }[] }) => rows.rows.map((r) => r.roomId)
 
 const SHIPPED = { ...ROOMS_PARTIAL_LISTING }
 const told: RoomSummary[][] = []
