@@ -389,6 +389,38 @@ describe('a linked phone after a restart', () => {
     await new Promise((resolve) => setImmediate(resolve))
     expect(vta.getState().link).toMatchObject({ kind: 'revoked', reason: expect.stringMatching(/not in ACL/) })
   })
+
+  // a2's finding on #1130: a phone revoked from another device (lost) loses what it keeps, as an unlink does.
+  it('says the phone has lost its agent when the agent no longer accepts it', async () => {
+    const said: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTA_UNLINKING_EVENT, (e) => said.push(e))
+    try {
+      mockClient.connect.mockImplementation(async () => {
+        throw new Error('refusing trust task: DID not in ACL')
+      })
+      const { vta } = controller({ linked })
+      await vta.restore({} as never)
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(vta.getState().link.kind).toBe('revoked')
+      expect(said).toEqual([{ vtaDid: expect.any(String), revoked: true }])
+    } finally {
+      sub.remove()
+    }
+  })
+
+  it('control: a linked phone whose agent answers says nothing of losing it', async () => {
+    const said: unknown[] = []
+    const sub = DeviceEventEmitter.addListener(VTA_UNLINKING_EVENT, (e) => said.push(e))
+    try {
+      const { vta } = controller({ linked })
+      await vta.restore({} as never)
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(vta.getState().link.kind).toBe('linked')
+      expect(said).toEqual([])
+    } finally {
+      sub.remove()
+    }
+  })
 })
 
 describe('linking without a QR through the controller', () => {

@@ -202,7 +202,11 @@ const Room: React.FC = () => {
     room?.actingAs,
     !!room && canList && room.joined !== false,
     inView,
-    isChatPost
+    isChatPost,
+    // An open room's chat is kept in the wallet and opens on it (rooms/messageCache); a sealed room's never is.
+    room?.tier === 'open' && room.communityDid
+      ? { messageCache: { communityDid: room.communityDid, validUntil: room.validUntil } }
+      : {}
   )
   // The posts drawn are the phone's own copy from before (the kept copy, or this run's last listing), and the room's
   // first listing has not answered yet (useRoomPosts `unconfirmed`). Said under the newest post until it has.

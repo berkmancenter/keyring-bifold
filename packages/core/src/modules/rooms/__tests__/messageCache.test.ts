@@ -18,15 +18,17 @@ import {
   MSG_CACHE_BODY_MAX,
   MSG_CACHE_BYTES,
   MSG_CACHE_DAYS,
-  MSG_CACHE_JOURNAL_ID,
   MSG_CACHE_POSTS,
   MSG_CACHE_ROOMS,
+  noteBiometricUnlock,
   readRoomPosts,
   resetMessageCache,
   ROOMS_MESSAGE_CACHE,
   setMessageCacheBiometryGate,
+  standingMemberships,
   sweepMessageCache,
 } from '../messageCache'
+import { cacheWallet } from './fixtures/cacheWallet'
 
 jest.mock('../useRoomRows', () => ({ onRoomsListed: jest.fn() }))
 
@@ -55,28 +57,7 @@ const post = (key: string, agoMs = 60_000, over: Partial<CachedPost> = {}): Cach
   ...over,
 })
 
-/** Askar's generic records, as far as this uses them: by id, and by every tag a query names. */
-function wallet() {
-  const records = new Map<string, { id: string; content: Record<string, unknown>; tags: Record<string, string> }>()
-  // Copies, as Askar answers: a record changed in hand is written only by an update that succeeds.
-  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
-  const genericRecords = {
-    findById: jest.fn(async (id: string) => (records.has(id) ? copy(records.get(id)!) : null)),
-    findAllByQuery: jest.fn(async (query: Record<string, unknown>) =>
-      [...records.values()].filter((r) => Object.entries(query).every(([k, v]) => r.tags[k] === v)).map(copy)
-    ),
-    save: jest.fn(async (o: { id: string; content: Record<string, unknown>; tags?: Record<string, string> }) => {
-      records.set(o.id, { id: o.id, content: o.content, tags: o.tags ?? {} })
-    }),
-    update: jest.fn(async (r: { id?: string; content: Record<string, unknown> }) => {
-      const at = records.get(r.id ?? '')
-      if (at) at.content = copy(r.content)
-    }),
-  }
-  /** The kept copies' contents, emptied ones included. */
-  const copies = () => [...records.values()].filter((r) => r.id !== MSG_CACHE_JOURNAL_ID).map((r) => r.content)
-  return { genericRecords, records, copies }
-}
+const wallet = cacheWallet
 
 let biometry = true
 beforeEach(() => {
@@ -202,6 +183,29 @@ describe('off', () => {
   })
 })
 
+// The coordinator's ask on #1130 (decision 6): turned off mid-run, the copies go at once, not at the next start.
+describe('biometric unlock turned off while the app runs', () => {
+  it('empties every copy at once, and nothing is kept after, even before the saved preference says so', async () => {
+    const w = wallet()
+    await bindMessageCache(w, async () => [{ communityDid: LAB, personaDid: ME }])
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    // The saved preference still reads on (it is written a moment later).
+    await noteBiometricUnlock(false)
+    expect(w.copies()).toEqual([{ v: 1, emptied: true }])
+    expect(await keepRoomPosts(w, room(), [post('b')], NOW)).toBe(false)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeUndefined()
+  })
+
+  it('control: turned on, or on again, empties nothing', async () => {
+    const w = wallet()
+    await bindMessageCache(w, async () => [{ communityDid: LAB, personaDid: ME }])
+    await noteBiometricUnlock(true)
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await noteBiometricUnlock(true)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeDefined()
+  })
+})
+
 describe('emptying', () => {
   const kept = async (w: ReturnType<typeof wallet>) => {
     await keepRoomPosts(w, room(), [post('a')], NOW)
@@ -288,7 +292,7 @@ describe('emptying', () => {
       NOW
     )
     expect(w.copies().filter((c) => c.emptied === true)).toHaveLength(3)
-    expect(w.records.get(MSG_CACHE_JOURNAL_ID)?.content.pending as unknown[]).toHaveLength(0)
+    expect(w.journal()).toHaveLength(0)
   })
 
   it('control: nothing is kept for a room the journal still means to empty', async () => {
@@ -325,6 +329,80 @@ describe('at each start', () => {
     const w = wallet()
     await keepRoomPosts(w, room(), [post('a')], NOW)
     expect(await sweepMessageCache(w, [{ communityDid: LAB, personaDid: ME }], NOW)).toBe(0)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeDefined()
+  })
+})
+
+// b0's findings on #1130, verified by ac.
+describe('a membership read that fails, and a keep after an emptying', () => {
+  const failing = async (): Promise<{ communityDid: string; personaDid: string }[]> => {
+    throw new Error('store unreadable')
+  }
+
+  it('a failed membership read still lets the journal finish and the kill empty every copy', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await keepRoomPosts(w, room({ roomId: ROOM2, communityDid: CHOIR }), [post('b')], NOW)
+    // A journal entry left by an emptying cut short.
+    w.genericRecords.update.mockImplementationOnce(async (r) => {
+      w.records.get(r.id ?? '')!.content = r.content
+    })
+    w.genericRecords.update.mockRejectedValueOnce(new Error('disk'))
+    await expect(emptyMessageCache(w, { community: CHOIR }, 'left')).rejects.toThrow()
+    expect(w.journal()).toHaveLength(1)
+
+    ROOMS_MESSAGE_CACHE.remoteOff = true
+    await sweepMessageCache(w, failing, NOW)
+    expect(w.journal()).toHaveLength(0)
+    expect(w.copies().every((c) => c.emptied === true)).toBe(true)
+  })
+
+  it('control: a failed membership read, with the cache on, only skips the standing check', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    expect(await sweepMessageCache(w, failing, NOW)).toBe(0)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeDefined()
+  })
+
+  it('a keep on its way after its community was emptied does not put the posts back', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await emptyMessageCache(w, { community: LAB }, 'removed')
+    expect(w.journal()).toHaveLength(0)
+    expect(await keepRoomPosts(w, room(), [post('a'), post('b')], NOW)).toBe(false)
+    expect(JSON.stringify(w.copies())).not.toContain('the words of')
+  })
+
+  it('control: a keep of another community after one was emptied is kept', async () => {
+    const w = wallet()
+    await emptyMessageCache(w, { community: LAB }, 'removed')
+    expect(await keepRoomPosts(w, room({ communityDid: CHOIR, roomId: ROOM2 }), [post('b')], NOW)).toBe(true)
+  })
+
+  it('a copy in a shape this build does not read is emptied by its tags once its membership is gone', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    const [record] = [...w.records.values()]
+    record.content = { ...record.content, v: 2 }
+    await sweepMessageCache(w, [{ communityDid: CHOIR, personaDid: ME }], NOW)
+    expect(record.content).toEqual({ v: 1, emptied: true })
+  })
+})
+
+describe('a phone its agent no longer accepts (revoked: a lost phone)', () => {
+  const members = [{ communityDid: LAB, personaDid: ME }]
+  it('has no membership standing, so a start empties every copy', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await sweepMessageCache(w, standingMemberships('revoked', members), NOW)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeUndefined()
+  })
+
+  it('control: a linked phone keeps its copies', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    expect(standingMemberships('linked', members)).toEqual(members)
+    await sweepMessageCache(w, standingMemberships('linked', members), NOW)
     expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeDefined()
   })
 })

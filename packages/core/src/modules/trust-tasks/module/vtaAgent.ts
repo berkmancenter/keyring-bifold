@@ -807,6 +807,9 @@ export class VtaAgentController {
         this.agent?.config?.logger?.warn?.(
           `[VTA] the agent no longer accepts this phone; the link is removed: ${event.reason}`
         )
+        // The phone has lost its agent as surely as by an unlink, and most often because it was lost (a revoke from
+        // another device): what it keeps for the agent's identities goes too (unlinkEvent; a2's finding, #1130).
+        DeviceEventEmitter.emit(VTA_UNLINKING_EVENT, { vtaDid: next.vtaDid, revoked: true })
         // The session the agent no longer accepts is closed, and no screen reads it as connected (IN-350, run
         // 1022-1822: the link moved to revoked while the status stayed 'connected').
         this.set({ status: 'disconnected' })
