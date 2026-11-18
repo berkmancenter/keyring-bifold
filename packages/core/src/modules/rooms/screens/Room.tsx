@@ -203,12 +203,18 @@ const Room: React.FC = () => {
     !!room && canList && room.joined !== false,
     inView,
     isChatPost,
-    // The chat of an open or attributed room is kept in the wallet and opens on it (rooms/messageCache; Alberto,
-    // 11-18). A private room's never is, nor a room whose tier is unknown (custody-only): the tiers are named, never
-    // "not private".
-    (room?.tier === 'open' || room?.tier === 'attributed') && room.communityDid
-      ? { messageCache: { communityDid: room.communityDid, validUntil: room.validUntil } }
-      : {}
+    // The chat of an open, attributed or private room is kept in the wallet and opens on it (rooms/messageCache;
+    // Alberto, 11-18: private rooms too). Never a room whose tier is unknown (custody-only): the tiers are named, never
+    // "not unknown".
+    {
+      ...((room?.tier === 'open' || room?.tier === 'attributed' || room?.tier === 'private') && room.communityDid
+        ? { messageCache: { communityDid: room.communityDid, validUntil: room.validUntil } }
+        : {}),
+      // Before the room is known, its kept copy is drawn by the identity this phone says acts there, and taken down if
+      // the room, once read, says otherwise or cannot be read (useRoomPosts `seedBeforeRoom`).
+      seedBeforeRoom: true,
+      roomNotRead: state.failed && !room,
+    }
   )
   // The posts drawn are the phone's own copy from before (the kept copy, or this run's last listing), and the room's
   // first listing has not answered yet (useRoomPosts `unconfirmed`). Said under the newest post until it has.
@@ -294,10 +300,12 @@ const Room: React.FC = () => {
   useEffect(() => {
     if (inView && feed.posts?.length) markRoomSeen(service, roomId, Math.max(...feed.posts.map((p) => p.version)))
   }, [inView, feed.posts, service, roomId])
-  const pendingPosts = useMemo(
-    () => outbox.pending.map((p) => pendingAsPost(p, room?.actingAs)),
-    [outbox.pending, room?.actingAs]
-  )
+  // A sent post leaves the outbox in the effect above, so one frame after the list first carries it. Drawn for that
+  // frame it showed twice, and the chat jumped up a bubble and back (279.3): it is left out here as soon as it is listed.
+  const pendingPosts = useMemo(() => {
+    const listed = new Set(feed.posts?.map((p) => p.key))
+    return outbox.pending.filter((p) => !(p.key && listed.has(p.key))).map((p) => pendingAsPost(p, room?.actingAs))
+  }, [outbox.pending, feed.posts, room?.actingAs])
   // The list is drawn from the bottom up, so offset 0 is the newest post: a post just sent shows there.
   const list = useRef<FlatList<Item>>(null)
   // The day of the posts at the top of the screen, floated while the member scrolls (as the person-to-person chat's).
