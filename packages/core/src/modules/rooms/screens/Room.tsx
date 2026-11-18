@@ -203,6 +203,9 @@ const Room: React.FC = () => {
     inView,
     isChatPost
   )
+  // The posts drawn are the phone's own copy from before (the kept copy, or this run's last listing), and the room's
+  // first listing has not answered yet (useRoomPosts `unconfirmed`). Said under the newest post until it has.
+  const unconfirmed = (feed as { unconfirmed?: boolean }).unconfirmed === true
   // A reaction, edit or withdrawal the member just asked for, laid over the posts until the room's list carries it.
   const pendingWrites = usePendingWrites(feed.posts)
   // The member's own writes that succeeded but have not landed in the posts: the room keeps its 10 s poll for them, so a
@@ -612,10 +615,19 @@ const Room: React.FC = () => {
                   />
                 )
               }
-              // The header of a list drawn bottom up is at its bottom, under the newest post: where a failed poll is said.
+              // The header of a list drawn bottom up is at its bottom, under the newest post: where a failed poll is said, and
+              // that the posts are the phone's copy from last time until the room's first listing answers.
               ListHeaderComponent={
                 feed.pollFailed && shown.length > 0 ? (
                   <View style={styles.pollFailed} testID={testIdWithKey('RoomPollFailed')}>
+                    {unconfirmed ? (
+                      <>
+                        <ThemedText style={styles.muted} testID={testIdWithKey('RoomFromLastTime')}>
+                          {t('Rooms.FromLastTime')}
+                        </ThemedText>
+                        <ThemedText style={styles.muted}>·</ThemedText>
+                      </>
+                    ) : null}
                     <ThemedText style={styles.muted}>{t('Rooms.RefreshFailed')}</ThemedText>
                     <ThemedText style={styles.muted}>·</ThemedText>
                     <Pressable
@@ -626,6 +638,15 @@ const Room: React.FC = () => {
                     >
                       <ThemedText style={styles.tryAgain}>{t('Rooms.TryAgain')}</ThemedText>
                     </Pressable>
+                  </View>
+                ) : unconfirmed && shown.length > 0 ? (
+                  <View
+                    style={styles.pollFailed}
+                    accessibilityLiveRegion="polite"
+                    testID={testIdWithKey('RoomUnconfirmed')}
+                  >
+                    <ActivityIndicator size="small" color={ColorPalette.grayscale.mediumGrey} />
+                    <ThemedText style={styles.muted}>{t('Rooms.FromLastTimeUpdating')}</ThemedText>
                   </View>
                 ) : null
               }
