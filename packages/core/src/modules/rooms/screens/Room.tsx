@@ -493,6 +493,8 @@ const Room: React.FC = () => {
               }
               ListHeaderComponent={<RoomFromLastTime />}
               // Laid out with posts: they are on the screen, and only now is the opening said (useRoomPosts `painted`).
+              // `h > 0` alone is enough here only because this list exists only while `drawnBefore.length > 0` (above):
+              // a list drawn with no posts must guard on them too, as the room's own list below does (ac).
               onContentSizeChange={(_w, h) => {
                 if (h > 0) feed.painted()
               }}
