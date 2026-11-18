@@ -468,7 +468,8 @@ describe('the newest generation both sides serve', () => {
       await w.service.readPolls(COMMUNITY)
       w.warnings.length = 0
       w.asked.length = 0
-      // Past the shared read (pollsReadSwitch), so the community is asked again.
+      // Keep this clock advance: without it the second read would be served from the shared read (pollsReadSwitch,
+      // SHARED_READ_MS), nothing would go to the community, and this row would pass without testing the ladder at all.
       await w.backend.sleep(SHARED_READ_MS)
       await w.service.readPolls(COMMUNITY)
       expect(w.asked).toEqual([G2.list])
