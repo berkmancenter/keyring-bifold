@@ -411,7 +411,7 @@ describe('AgentRoomsService', () => {
   describe('an answer the backend says has moved', () => {
     const stamped = () => {
       let stamp = 0
-      let types = [ROOMS_TASK.keysList01]
+      let types: string[] = [ROOMS_TASK.keysList01]
       const agentServedTypes = jest.fn(async () => types)
       const { b } = backend({ agentServedTypes, agentServedStamp: () => stamp })
       return {

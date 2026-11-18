@@ -593,6 +593,28 @@ describe('more than one agent, and a lock', () => {
     expect(mockClient.supportedTypes).not.toHaveBeenCalled()
     expect(mockClient.agentLabel).not.toHaveBeenCalled()
   })
+
+  it('a session let go whose client still reads connected (its close failed) is asked nothing either', async () => {
+    const phone = linkedPhone({
+      served: { types: [A], at: START - DAY },
+      agentName: { label: 'runner', source: 'vtaName' },
+    })
+    await phone.start()
+    mockClient.disconnect.mockImplementationOnce(async () => {
+      throw new Error('the socket would not close')
+    })
+    // The unlock's session is a client of its own, as in the app, and has not opened yet.
+    const next = { ...mockClient, isConnected: false, connect: jest.fn(() => new Promise<void>(() => undefined)) }
+    const VtaClientMock = jest.requireMock('../module/VtaClient').VtaClient as jest.Mock
+    VtaClientMock.mockImplementationOnce(() => next)
+    void phone.vta.restore({ tag: 'after the unlock' } as never)
+    await jest.advanceTimersByTimeAsync(0)
+    expect(next.connect).toHaveBeenCalledTimes(1)
+    expect(mockClient.isConnected).toBe(true)
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    expect(mockClient.supportedTypes).not.toHaveBeenCalled()
+    expect(mockClient.agentLabel).not.toHaveBeenCalled()
+  })
 })
 
 describe('what the agent is called', () => {

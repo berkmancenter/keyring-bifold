@@ -1015,8 +1015,8 @@ export class VtaAgentController {
     if (this.behind) clearTimeout(this.behind.timer)
     const timer = setTimeout(() => {
       if (this.behind?.timer === timer) this.behind = undefined
-      // Only on the session it was set for, still open: a session that ended is not reopened for this, and the next
-      // one sets its own wait.
+      // Only on the session it was set for, still open. A session let go since (a lock, an unlink, a drop) is not
+      // reopened for this and is asked nothing, so nothing has to cancel the wait; the next session sets its own.
       if (!isAgentLastKnownOn() || this.current?.client !== client || !client.isConnected) return
       this.learnAgentName(client, vtaDid)
       void this.askServedAgain(agent, client, vtaDid)
@@ -1026,20 +1026,14 @@ export class VtaAgentController {
     this.behind = { client, timer }
   }
 
-  /** The asks put off for a session that is being let go are not made. */
-  private dropBehind() {
-    if (this.behind) clearTimeout(this.behind.timer)
-    this.behind = undefined
-  }
-
   /**
    * Ask the agent again what it serves, once per agent per app run, when an answer of its is kept: the kept one was
    * given out meanwhile, and a different one replaces it. Nothing kept: nothing to check, and whoever needs the
    * answer asks live (`servedTypes`). An ask the agent did not answer is made again at the next session.
    */
   private async askServedAgain(agent: Agent, client: VtaClient, vtaDid: string): Promise<void> {
-    if (this.servedAskedAgain.has(vtaDid)) return
     if (!(await this.servedLastKnown(agent, vtaDid))) return
+    // Checked after the read, with nothing awaited before the mark: of two callers, one asks.
     if (this.servedAskedAgain.has(vtaDid)) return
     this.servedAskedAgain.add(vtaDid)
     const live = await client.supportedTypes().catch(() => undefined)
@@ -1601,7 +1595,6 @@ export class VtaAgentController {
     // can run first): that one is current, not a leftover, and is kept.
     if (previous && !(previous.agent === agent && before !== agent)) {
       this.current = undefined
-      this.dropBehind()
       this.handedOver = previous.vtaDid
       await previous.client.disconnect().catch(() => undefined)
     }
@@ -3754,7 +3747,6 @@ export class VtaAgentController {
   /** Drop the current client and its session, and any held question with them. */
   private async reset() {
     this.heldAnswer = undefined
-    this.dropBehind()
     const current = this.current
     this.current = undefined
     await current?.client.disconnect().catch(() => undefined)
