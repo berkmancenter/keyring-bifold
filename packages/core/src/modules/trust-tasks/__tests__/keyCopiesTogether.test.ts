@@ -26,7 +26,7 @@ jest.mock('../module/vtiTsp', () => ({
   packTrustTaskForPeer: jest.fn(),
 }))
 
-import { VtaClient } from '../module/VtaClient'
+import { VTA_TASK, VtaClient } from '../module/VtaClient'
 import { isKeyCopiesTogetherOn, KEY_COPIES_AT_ONCE, KEY_COPIES_TOGETHER, sweepKeyCopies } from '../module/keyCopySweep'
 import { StepUpDeclined } from '../module/stepUp'
 import { inReadLane, VTA_READ_LANE_SIZE } from '../module/vtaReadLane'
@@ -764,5 +764,73 @@ describe('step-ups for tasks refused side by side', () => {
     h.asks[0].answer('approve')
     await expect(Promise.all(all)).resolves.toEqual([{ ok: 'r1' }, { ok: 'r2' }])
     expect(h.ask).toHaveBeenCalledTimes(1)
+  })
+})
+
+// An approval (consent) is not a step-up: each held task waits for its own grant, named by its own digest, so three
+// held at once share nothing while they wait. What the person is SHOWN is one comparison code, the last one's
+// (vtaAgent onConsentPending keeps one): known, and not changed here.
+describe('exports held for an approval side by side', () => {
+  const VTA = 'did:webvh:agent'
+  const held = (key: string) =>
+    new VtiRefusal('taskFailed', 'task failed: auth:consent_required', {
+      reason: 'auth:consent_required',
+      payloadDigest: `digest-${key}`,
+      challenge: `challenge-${key}`,
+      consentRequests: [],
+    })
+
+  function heldClient() {
+    const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn() }
+    const pending: string[] = []
+    const vta = new VtaClient({ config: { logger } } as never, VTA, {} as never, {
+      onInbound: jest.fn(),
+      onConsentPending: ({ payloadDigest }: { payloadDigest?: string }) => pending.push(String(payloadDigest)),
+    })
+    jest.spyOn(vta, 'managerDid', 'get').mockReturnValue('did:key:z6MkPhoneManager')
+    ;(vta as unknown as { replyThreading: string }).replyThreading = 'threaded'
+    const granted = new Set<string>()
+    const sends: string[] = []
+    jest
+      .spyOn(vta as unknown as { sendTask: (...a: unknown[]) => Promise<unknown> }, 'sendTask')
+      .mockImplementation(async (...args: unknown[]) => {
+        const key = String((args[1] as { keyId: string }).keyId)
+        sends.push(`export:${key}`)
+        await Promise.resolve()
+        if (!granted.has(key)) throw held(key)
+        return { ok: key }
+      })
+    /** The agent's notice that the approver said yes to `key`'s request. */
+    const grant = (key: string) => {
+      granted.add(key)
+      ;(vta as unknown as { deliver: (m: unknown) => void }).deliver({
+        id: `urn:uuid:granted-${key}`,
+        type: 'https://trusttasks.org/binding/didcomm/v2',
+        from: VTA,
+        created_time: Math.floor(Date.now() / 1000),
+        body: { type: VTA_TASK.consentGranted, payload: { payloadDigest: `digest-${key}` } },
+      })
+    }
+    return { vta, pending, sends, grant }
+  }
+
+  it('three held at once: each is told as pending, waits for its own grant, and goes through when it comes', async () => {
+    const h = heldClient()
+    const done: string[] = []
+    const all = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k).then(() => done.push(k)))
+    await flush()
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c'])
+    expect(h.pending).toEqual(['digest-a', 'digest-b', 'digest-c'])
+    // Granted out of order: each grant frees its own task and no other.
+    h.grant('c')
+    await flush()
+    expect(done).toEqual(['c'])
+    h.grant('a')
+    await flush()
+    expect(done).toEqual(['c', 'a'])
+    h.grant('b')
+    await Promise.all(all)
+    expect(done).toEqual(['c', 'a', 'b'])
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c', 'export:c', 'export:a', 'export:b'])
   })
 })
