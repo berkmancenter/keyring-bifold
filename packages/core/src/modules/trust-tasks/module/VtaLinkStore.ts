@@ -58,6 +58,12 @@ export interface VtaLink {
    * none, and read "your agent" beside another that did (Alberto, 10-06).
    */
   nickname?: string
+  /**
+   * Which Trust Task types the agent said it serves (its `trust-task-discovery` answer), and when (epoch ms). A
+   * session starts from it and asks again behind (agentLastKnownSwitch.ts). Written only while that switch is on; a
+   * build without it carries the field along untouched.
+   */
+  served?: { types: string[]; at: number }
 }
 
 export interface VtaLinkStore {

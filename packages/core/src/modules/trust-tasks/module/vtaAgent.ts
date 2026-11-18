@@ -26,6 +26,12 @@ import {
   type AgentHostOffer,
 } from './agentHostConnection'
 import type { AgentLabel } from './agentLabel'
+import {
+  AGENT_LAST_KNOWN_MAX_AGE_MS,
+  AGENT_LAST_KNOWN_REFRESH_AFTER_MS,
+  AGENT_LAST_KNOWN_REWRITE_MS,
+  isAgentLastKnownOn,
+} from './agentLastKnownSwitch'
 import { classifyDid, type DidResolverAgent } from './classifyDid'
 import { VTI_PERSONA_KEYS_HELD_EVENT } from './communityChanged'
 import { setCurrentAgentDid } from './currentAgent'
@@ -42,6 +48,7 @@ import {
   type TrustedApproversView,
   type TrustedKey,
 } from './trustedApprovers'
+import { isUnsupportedVersionRefusal } from './taskVersions'
 import { VtiRefusal, vtiAgent } from './vtiAgent'
 import {
   ManagerKeyUnresolved,
@@ -625,6 +632,13 @@ export async function tellAgentLeaving(
  * (`isInitialized` false) until the person unlocks and a new one is handed
  * over. An agent that does not say is taken as up.
  */
+/** Whether two discovery answers name the same task types, in whatever order. */
+function sameTypes(a: readonly string[], b: readonly string[]): boolean {
+  const left = new Set(a)
+  const right = new Set(b)
+  return left.size === right.size && [...left].every((type) => right.has(type))
+}
+
 function agentIsUp(agent: Agent): boolean {
   return (agent as unknown as { isInitialized?: boolean }).isInitialized !== false
 }
@@ -732,6 +746,14 @@ export class VtaAgentController {
   private readonly switchedThisRun = new Set<string>()
   /** Agents whose name is being read, or was read, in this app run. */
   private namesAsked = new Set<string>()
+  /** What each agent last said it serves, as kept with its link: read once per run, then held here (agentLastKnownSwitch.ts). */
+  private readonly servedKept = new Map<string, { types: string[]; at: number }>()
+  /** Agents asked again in this app run for what they serve: once is enough, as one ask a run was before. */
+  private readonly servedAskedAgain = new Set<string>()
+  /** Moves each time an agent's kept answer is replaced by a different one (`servedTypesStamp`). */
+  private servedStamp = 0
+  /** The asks put off until a session has been open a while (`askBehind`). */
+  private behind?: { client: VtaClient; timer: ReturnType<typeof setTimeout> }
   /** The agent the current link attempt is creating from this phone ("Create my agent"), if it is one. */
   private ownerFor?: string
   /** The agent that was current when "Add another agent" began: the way back. */
@@ -939,7 +961,12 @@ export class VtaAgentController {
           if (refusedAsNotOnAcl(error)) throw error
         })
         this.set({ status: 'connected', managerDid: client.managerDid, sessionOpenedAt: this.now() })
-        this.learnAgentName(client, vtaDid)
+        // With a name already shown for the agent, asking it again waits behind the session's first work, with the
+        // ask of what it serves (agentLastKnownSwitch.ts). With none, or with the switch off: at once, as before.
+        if (isAgentLastKnownOn()) {
+          if (!this.state.agentNames?.[vtaDid]) this.learnAgentName(client, vtaDid)
+          this.askBehind(agent, client, vtaDid)
+        } else this.learnAgentName(client, vtaDid)
       } catch (error) {
         this.set({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
         // Removed here, for every caller: My Agent's own connect drops the throw, and would otherwise wait for the
@@ -977,6 +1004,163 @@ export class VtaAgentController {
         }
       })
       .catch(() => this.namesAsked.delete(vtaDid))
+  }
+
+  /**
+   * Once this session has been open a while, ask the agent again what it is called and what it serves
+   * (agentLastKnownSwitch.ts): behind the key copies and the rooms' first read, which no longer wait for either
+   * answer. One wait at a time: a session that opens while another's wait is running takes its place.
+   */
+  private askBehind(agent: Agent, client: VtaClient, vtaDid: string) {
+    if (this.behind) clearTimeout(this.behind.timer)
+    const timer = setTimeout(() => {
+      if (this.behind?.timer === timer) this.behind = undefined
+      // Only on the session it was set for, still open: a session that ended is not reopened for this, and the next
+      // one sets its own wait.
+      if (!isAgentLastKnownOn() || this.current?.client !== client || !client.isConnected) return
+      this.learnAgentName(client, vtaDid)
+      void this.askServedAgain(agent, client, vtaDid)
+    }, AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    // The wait holds nothing open: a process with nothing else to do may end.
+    ;(timer as unknown as { unref?: () => void }).unref?.()
+    this.behind = { client, timer }
+  }
+
+  /** The asks put off for a session that is being let go are not made. */
+  private dropBehind() {
+    if (this.behind) clearTimeout(this.behind.timer)
+    this.behind = undefined
+  }
+
+  /**
+   * Ask the agent again what it serves, once per agent per app run, when an answer of its is kept: the kept one was
+   * given out meanwhile, and a different one replaces it. Nothing kept: nothing to check, and whoever needs the
+   * answer asks live (`servedTypes`). An ask the agent did not answer is made again at the next session.
+   */
+  private async askServedAgain(agent: Agent, client: VtaClient, vtaDid: string): Promise<void> {
+    if (this.servedAskedAgain.has(vtaDid)) return
+    if (!(await this.servedLastKnown(agent, vtaDid))) return
+    if (this.servedAskedAgain.has(vtaDid)) return
+    this.servedAskedAgain.add(vtaDid)
+    const live = await client.supportedTypes().catch(() => undefined)
+    if (!live) {
+      this.servedAskedAgain.delete(vtaDid)
+      return
+    }
+    await this.keepServed(agent, vtaDid, live)
+  }
+
+  /** The link kept for `vtaDid`, read afresh. */
+  private async linkFor(agent: Agent, vtaDid: string): Promise<{ store: VtaLinkStore; link?: VtaLink }> {
+    const store = this.linkStore(agent)
+    const links = (await Promise.resolve(store.list?.()).catch(() => undefined)) ?? []
+    const link =
+      links.find((l) => l.vtaDid === vtaDid) ??
+      (await store
+        .get()
+        .then((l) => (l?.vtaDid === vtaDid ? l : undefined))
+        .catch(() => undefined))
+    return { store, link }
+  }
+
+  /**
+   * What the agent last said it serves, if that is kept and not older than {@link AGENT_LAST_KNOWN_MAX_AGE_MS}. Read
+   * from its link once per run, then from memory. A time in the future (a clock set back since) is no better known
+   * than an old one.
+   */
+  private async servedLastKnown(agent: Agent, vtaDid: string): Promise<string[] | undefined> {
+    let held = this.servedKept.get(vtaDid)
+    if (!held) {
+      const kept = (await this.linkFor(agent, vtaDid)).link?.served
+      const listed: unknown = kept?.types
+      const types = Array.isArray(listed) ? listed.filter((t): t is string => typeof t === 'string') : []
+      // Answered meanwhile (a live ask kept its answer while the link was being read): that one is newer.
+      held = this.servedKept.get(vtaDid)
+      if (!held && types.length > 0 && typeof kept?.at === 'number') {
+        held = { types, at: kept.at }
+        this.servedKept.set(vtaDid, held)
+      }
+    }
+    if (!held || Math.abs(this.now() - held.at) >= AGENT_LAST_KNOWN_MAX_AGE_MS) return undefined
+    return held.types
+  }
+
+  /**
+   * Keep what the agent just said it serves: in memory, and with its link. An answer different from the one held
+   * moves `servedTypesStamp`, so whoever was given the old one reads again. The same answer is written again only
+   * when the kept one is over a day old, so that "still so" costs one store write a day.
+   */
+  private async keepServed(agent: Agent, vtaDid: string, types: string[]): Promise<void> {
+    const before = this.servedKept.get(vtaDid)
+    const now = this.now()
+    const same = before !== undefined && sameTypes(before.types, types)
+    if (same && Math.abs(now - before.at) < AGENT_LAST_KNOWN_REWRITE_MS) return
+    // Unlinked while it was being asked: nothing of it is kept, here or with a link that is gone.
+    const { store, link } = await this.linkFor(agent, vtaDid)
+    if (!link) return
+    const served = { types: [...types], at: now }
+    this.servedKept.set(vtaDid, served)
+    if (before && !same) {
+      this.servedStamp++
+      releaseWarn(
+        `[VTA] the agent serves a different set of tasks than it last said (${before.types.length} then, ${types.length} now)`
+      )
+    }
+    await store.set({ ...link, served }).catch(() => undefined)
+  }
+
+  /** An agent unlinked: nothing it said is held for it any more. */
+  private forgetLastKnown(vtaDid: string) {
+    this.servedKept.delete(vtaDid)
+    this.servedAskedAgain.delete(vtaDid)
+  }
+
+  /**
+   * Which Trust Task types this phone's agent serves (`trust-task-discovery`), for the rooms and polls services;
+   * undefined with no agent linked, or when it could not be asked or listed nothing.
+   *
+   * The session is opened first, as before: `auth/whoami` is asked live, and an agent that no longer accepts this
+   * phone ends it there. Then, with agentLastKnownSwitch.ts on, the agent's last answer is given at once and the
+   * agent is asked again behind (`askBehind`); with nothing kept the agent is asked now and its answer kept. With
+   * the switch off, the agent is asked each time, as before.
+   */
+  async servedTypes(agent: Agent): Promise<string[] | undefined> {
+    const vtaDid = this.agentAddress()
+    if (!vtaDid) return undefined
+    const client = await this.signedIn(agent, vtaDid)
+    if (!isAgentLastKnownOn()) return client.supportedTypes()
+    const kept = await this.servedLastKnown(agent, vtaDid)
+    if (kept) return kept
+    const live = await client.supportedTypes()
+    if (live) {
+      // Asked live in this run: there is nothing older to check it against.
+      this.servedAskedAgain.add(vtaDid)
+      await this.keepServed(agent, vtaDid, live)
+    }
+    return live
+  }
+
+  /**
+   * The agent refused a task of the rooms or polls services. When it refused it as a version or a type it does not
+   * serve, an answer kept from an earlier launch is out of date (the agent was changed since): the agent is asked
+   * again now, not at the end of the wait. Once per agent per app run, as the wait's own ask is, so an agent that
+   * refuses again after answering is not asked each time. Any other refusal, and any refusal with
+   * agentLastKnownSwitch.ts off, does nothing here.
+   */
+  servedRefused(agent: Agent, error: unknown): void {
+    if (!isAgentLastKnownOn() || !isUnsupportedVersionRefusal(error)) return
+    const current = this.current
+    if (!current || current.vtaDid !== this.agentAddress() || !current.client.isConnected) return
+    void this.askServedAgain(agent, current.client, current.vtaDid)
+  }
+
+  /**
+   * Moves when the agent's answer to "what do you serve" was found to differ from the one given out before
+   * (`servedTypes`). A service that holds an answer compares this with what it read beside it, and asks again when
+   * it has moved. Never moves with agentLastKnownSwitch.ts off.
+   */
+  servedTypesStamp(): number {
+    return this.servedStamp
   }
 
   /**
@@ -1370,6 +1554,7 @@ export class VtaAgentController {
     await Promise.resolve(this.linkStore(agent).remove?.(vtaDid)).catch(() => undefined)
     await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
     this.namesAsked.delete(vtaDid)
+    this.forgetLastKnown(vtaDid)
     const others = { ...(this.state.otherRequests ?? {}) }
     delete others[vtaDid]
     this.set({ otherRequests: others })
@@ -1413,6 +1598,7 @@ export class VtaAgentController {
     // can run first): that one is current, not a leftover, and is kept.
     if (previous && !(previous.agent === agent && before !== agent)) {
       this.current = undefined
+      this.dropBehind()
       this.handedOver = previous.vtaDid
       await previous.client.disconnect().catch(() => undefined)
     }
@@ -1521,6 +1707,7 @@ export class VtaAgentController {
     if (vtaDid) {
       await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
       this.namesAsked.delete(vtaDid)
+      this.forgetLastKnown(vtaDid)
     }
     this.set({
       status: 'disconnected',
@@ -3564,6 +3751,7 @@ export class VtaAgentController {
   /** Drop the current client and its session, and any held question with them. */
   private async reset() {
     this.heldAnswer = undefined
+    this.dropBehind()
     const current = this.current
     this.current = undefined
     await current?.client.disconnect().catch(() => undefined)
