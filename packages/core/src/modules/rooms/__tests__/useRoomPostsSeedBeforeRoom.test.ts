@@ -267,7 +267,7 @@ describe('a room the rooms listing does not hold', () => {
     await keep(w, ME)
     await expect(serviceOn(w, CHOIR).getRoom(ROOM)).rejects.toThrow('among this member')
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0))
-    expect((await readRoomPosts(w, ME, ROOM))?.posts.map((p) => p.key)).toEqual(['a', 'b'])
+    expect((await readRoomPosts(w, ME, ROOM))?.posts.map((p) => p.key)).toEqual(['b', 'a'])
   })
 
   it('the room service says which communities and identities the phone holds, from the backend alone', async () => {

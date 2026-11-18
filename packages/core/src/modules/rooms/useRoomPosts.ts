@@ -281,6 +281,8 @@ export function useRoomPosts(
   // The identity and community the copy drawn before the room was known is of (seedBeforeRoom), until the room agrees.
   const seededBefore = useRef<{ personaDid: string; communityDid: string } | undefined>(undefined)
   const [drawnBeforeAs, setDrawnBeforeAs] = useState<string>()
+  // A copy drawn before the room, once taken down: never drawn again from a render that still held it.
+  const takenDown = useRef<Listing | undefined>(undefined)
   // Records read and drawn: `wanted` counted posts, and as many more records as it takes to reach them.
   const [shown, setShown] = useState(POSTS_PAGE)
   const wanted = useRef(POSTS_PAGE)
@@ -390,6 +392,7 @@ export function useRoomPosts(
     const agrees = enabled && !roomNotRead && knownAs === before.personaDid && cacheCommunity === before.communityDid
     if (agrees) return
     if (seeded.current && listingNow.current === seeded.current) {
+      takenDown.current = seeded.current
       seeded.current = undefined
       setListing(undefined)
       setPosts(undefined)
@@ -558,7 +561,8 @@ export function useRoomPosts(
     [actingAs, drawnBeforeAs]
   )
   useEffect(() => {
-    if (!service || !listing) return
+    // A copy taken down (above) is still this render's `listing` when the room's arrival reruns this effect with it.
+    if (!service || !listing || listing === takenDown.current) return
     let current = true
     const read = reads.current.notes
     const unopened = reads.current.unopened
