@@ -115,6 +115,8 @@ function world() {
     /** What the ballot box does with a cast. */
     box: 'receipt' as 'receipt' | 'never' | 'offline' | 'refuse',
     voteRefusal: undefined as string | undefined,
+    /** Holds the agent's answer to a receipt until it resolves. */
+    receiptGate: undefined as Promise<void> | undefined,
   }
   const receiptFor = (cast: Record<string, unknown>) => ({
     type: `${POLL_TASK.cast}#response`,
@@ -163,7 +165,10 @@ function world() {
           tag: 'z3tag',
         }
       }
-      if (type === POLL_TASK.receipt) return { electionId: POLL, status: 'kept', leafIndex: 0 }
+      if (type === POLL_TASK.receipt) {
+        await state.receiptGate
+        return { electionId: POLL, status: 'kept', leafIndex: 0 }
+      }
       throw new Error(`unexpected ${type}`)
     },
     agentServedTypes: async () => [G1.register, POLL_TASK.accept, G1.vote, POLL_TASK.receipt],
@@ -298,7 +303,12 @@ describe('what the poll and the vote hear', () => {
       ticketAt: Date.now() - 3 * 3600_000,
       pending: { stage: 'receipt', receipt: {} },
     })
+    // Its receipt is kept only once this poll is on screen, so its record is written last.
+    let keepReceipt: () => void = () => undefined
+    w.state.receiptGate = new Promise<void>((resolve) => (keepReceipt = resolve))
     const tree = show(<Poll />)
+    await waitFor(() => expect(tree.getByTestId(id(PollsIds.voteNow))).toBeTruthy())
+    await act(async () => keepReceipt())
     await waitFor(() => expect(w.records.get(`${COMMUNITY} other`)?.votedAt).toBeDefined())
     await flush()
     expect(tree.getByTestId(id(PollsIds.voteNow))).toBeTruthy()
