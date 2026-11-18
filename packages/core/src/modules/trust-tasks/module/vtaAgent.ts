@@ -1109,8 +1109,11 @@ export class VtaAgentController {
     await store.set({ ...link, served }).catch(() => undefined)
   }
 
-  /** An agent unlinked: nothing it said is held for it any more. */
-  private forgetLastKnown(vtaDid: string) {
+  /**
+   * An agent unlinked: what it said is no longer held in memory for it. Nothing stored is touched here: what was kept
+   * with its link went with the link record, which the unlink itself removes.
+   */
+  private lastKnownGone(vtaDid: string) {
     this.servedKept.delete(vtaDid)
     this.servedAskedAgain.delete(vtaDid)
   }
@@ -1554,7 +1557,7 @@ export class VtaAgentController {
     await Promise.resolve(this.linkStore(agent).remove?.(vtaDid)).catch(() => undefined)
     await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
     this.namesAsked.delete(vtaDid)
-    this.forgetLastKnown(vtaDid)
+    this.lastKnownGone(vtaDid)
     const others = { ...(this.state.otherRequests ?? {}) }
     delete others[vtaDid]
     this.set({ otherRequests: others })
@@ -1707,7 +1710,7 @@ export class VtaAgentController {
     if (vtaDid) {
       await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
       this.namesAsked.delete(vtaDid)
-      this.forgetLastKnown(vtaDid)
+      this.lastKnownGone(vtaDid)
     }
     this.set({
       status: 'disconnected',
