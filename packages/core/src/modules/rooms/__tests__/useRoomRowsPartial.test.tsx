@@ -209,8 +209,11 @@ describe('a community that has not answered yet', () => {
     expect(listOff.result.current.rows.map((r) => [r.roomId, r.lastPost?.text])).toEqual(withPartial)
   })
 
-  // The one whose failure costs a person their data (ac): a partial listing is one where the rooms of the communities
-  // still to answer are absent because nobody has answered yet, never because they are gone.
+  // A guard on the property, not on today's mechanism (ac): a partial listing is one where the rooms of the communities
+  // still to answer are absent because nobody has answered yet, never because they are gone, and it must never cost a
+  // person their kept chats. Today no path could (no listener hears a partial: the first row; and emptyGoneRooms empties
+  // only rooms a listing names as gone), so no mutant of today's code fails here; a later change that routes partials
+  // into anything that empties absent rooms would.
   it("never empties the kept posts of a community still to answer, with the message cache's listeners bound", async () => {
     const SHIPPED_CACHE = { ...ROOMS_MESSAGE_CACHE }
     Object.assign(ROOMS_MESSAGE_CACHE, { on: true, remoteOff: false })
