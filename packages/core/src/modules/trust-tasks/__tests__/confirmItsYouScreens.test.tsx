@@ -409,6 +409,15 @@ describe('the words (IN-677/678)', () => {
     for (const text of allStrings(en)) expect(text).not.toMatch(/it's me|it's you/i)
   })
 
+  // The feature has no setting, so the line under the sheet's title is all a first-time person gets (Alberto's words,
+  // 2026-11-18). English is held word for word; the other two must name the asker too.
+  test('the request sheet explains itself, naming who asks and that declining is fine', () => {
+    expect(wordsOf('en').PromptExplains).toBe(
+      "{{asker}} is asking you to confirm it's really you. Approve with your phone's lock, or decline if you'd rather not — declining is fine."
+    )
+    for (const lang of LANGS) expect(String(wordsOf(lang).PromptExplains).startsWith('{{asker}} ')).toBe(true)
+  })
+
   test('every language has exactly the keys English has', () => {
     const keys = (w: Record<string, unknown>) => Object.keys(w).sort()
     for (const lang of ['fr', 'pt-br']) expect(keys(wordsOf(lang))).toEqual(keys(wordsOf('en')))
@@ -424,6 +433,8 @@ describe('the words (IN-677/678)', () => {
     const sheet = await show(<ConfirmItsYouModal />)
     expect(sheet.getByText('ConfirmItsYou.PromptTitle')).toBeTruthy()
     expect(sheet.queryByText('ConfirmItsYou.DemoChip')).toBeNull()
+    // The explaining line is on an open request's sheet, under its title.
+    expect(sheet.getByText('ConfirmItsYou.PromptExplains')).toBeTruthy()
   })
 })
 
