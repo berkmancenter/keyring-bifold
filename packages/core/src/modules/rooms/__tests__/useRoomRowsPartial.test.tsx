@@ -266,9 +266,12 @@ describe("the rooms service's partial answers", () => {
     release()
     const all = await listing
     expect(all.map((r) => r.roomId)).toEqual(['planning', 'vetting'])
+    // Nothing is told once the listing has ended (the last community's answer may come with the end, harmlessly: the
+    // listing replaces it).
+    const toldByTheEnd = partials.length
     await settle()
-    // The last community's answer came with the end: nothing is told once the listing has ended.
-    expect(partials.at(-1)?.[1]).not.toContain(SEDI)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(partials).toHaveLength(toldByTheEnd)
   })
 
   it("a partial answer is not the member's rooms: a room it holds is read only from the listing", async () => {
