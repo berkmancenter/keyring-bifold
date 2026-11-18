@@ -218,11 +218,13 @@ jobs:
       # A new PR's first run of each part transforms cold, and that is accepted. This job runs only on pull requests,
       # so its entries sit under each PR's own ref (refs/pull/N/merge) and nothing is ever saved under main; a run
       # reads only its own ref's caches and its base branch's (GitHub's cache scoping), so no PR warms from another's.
-      # Nothing here restores from main: there is no such entry to restore. Warming PRs from main needs something that
-      # runs these parts on main without coverage, and the store has no room for it (full-tests.yaml's entries are
-      # coverage-instrumented, so jest would not read them here).
-      # The `-part<N>-` fallback matches an entry of this PR's own under another key; it holds only while this never
-      # runs on a ref PRs share.
+      # Nothing here restores from main: there is no such entry to restore. A daily plain run of these parts on main
+      # would make one, and was weighed and declined (ac, 11-18): the full suite's entries are coverage-instrumented,
+      # so a plain run cannot read them and it would have to be a second run, and its extra daily entries risked
+      # evicting the per-PR ones.
+      # The `-part<N>-` fallback is for a PR that changes yarn.lock or core's babel or jest config mid-review: its exact
+      # key changes, and the fallback restores that same PR's earlier entry. It reaches no other PR's, which holds only
+      # while this never runs on a ref PRs share.
       - name: Restore jest's cache
         if: steps.plan.outputs.work == 'true'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
