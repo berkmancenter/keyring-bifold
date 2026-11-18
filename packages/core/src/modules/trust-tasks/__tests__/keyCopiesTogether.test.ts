@@ -28,7 +28,9 @@ jest.mock('../module/vtiTsp', () => ({
 
 import { VtaClient } from '../module/VtaClient'
 import { isKeyCopiesTogetherOn, KEY_COPIES_AT_ONCE, KEY_COPIES_TOGETHER, sweepKeyCopies } from '../module/keyCopySweep'
+import { StepUpDeclined } from '../module/stepUp'
 import { inReadLane, VTA_READ_LANE_SIZE } from '../module/vtaReadLane'
+import { VtiRefusal } from '../module/vtiAgent'
 
 type Doc = { type: string; threadId: string; payload: Record<string, unknown> }
 
@@ -394,6 +396,67 @@ describe('the sweep', () => {
     expect(f.log.filter((l) => l.startsWith('start'))).toEqual(['start a', 'start b', 'start c', 'start d'])
   })
 
+  // A callback that throws must end the sweep as a stop does: nothing goes on asking for key copies behind it.
+  it('one at a time: a fetch that throws ends it with that error, and nothing after is started', async () => {
+    const started: string[] = []
+    const done = sweepKeyCopies(
+      ['a', 'b', 'c'],
+      async (item) => {
+        started.push(item)
+        if (item === 'b') throw new Error('b broke')
+        return 'go'
+      },
+      1
+    )
+    await expect(done).rejects.toThrow('b broke')
+    expect(started).toEqual(['a', 'b'])
+  })
+
+  it('together: the first throws, alone, and nothing else is ever started', async () => {
+    const started: string[] = []
+    const done = sweepKeyCopies(
+      ['a', 'b', 'c', 'd'],
+      async (item) => {
+        started.push(item)
+        throw new Error(`${item} broke`)
+      },
+      3
+    )
+    await expect(done).rejects.toThrow('a broke')
+    await flush()
+    expect(started).toEqual(['a'])
+  })
+
+  it('together: a later one throws, nothing more is started, and the sweep throws only once the others have ended', async () => {
+    const log: string[] = []
+    const ends = new Map<string, { go: () => void; fail: (e: Error) => void }>()
+    const fetch = (item: string) =>
+      new Promise<'go' | 'stop'>((resolve, reject) => {
+        log.push(`start ${item}`)
+        ends.set(item, { go: () => resolve('go'), fail: reject })
+      })
+    let outcome: string | undefined
+    const done = sweepKeyCopies(['a', 'b', 'c', 'd', 'e', 'f'], fetch, 3).then(
+      () => (outcome = 'ended'),
+      (e: Error) => (outcome = `threw ${e.message}`)
+    )
+    await flush()
+    ends.get('a')?.go()
+    await flush()
+    expect(log).toEqual(['start a', 'start b', 'start c', 'start d'])
+    ends.get('c')?.fail(new Error('c broke'))
+    await flush()
+    // Two are still running: not ended yet, and no place freed by the throw was taken.
+    expect(outcome).toBeUndefined()
+    ends.get('b')?.go()
+    await flush()
+    expect(outcome).toBeUndefined()
+    ends.get('d')?.go()
+    await done
+    expect(outcome).toBe('threw c broke')
+    expect(log).toEqual(['start a', 'start b', 'start c', 'start d'])
+  })
+
   it.each([
     ['none', [] as string[]],
     ['one', ['a']],
@@ -504,5 +567,202 @@ describe('the sweep over the agent channel', () => {
     expect(await runOut(h)).toBe(1)
     await done
     expect(h.sent().filter((s) => s.startsWith('export:'))).toHaveLength(10)
+  })
+})
+
+// Tasks side by side can each be refused with a step-up at the same moment, and the person is shown one card at a
+// time (vtaAgent askStepUp keeps one): a second ask replaced the first's card, and its task then waited the whole two
+// minutes for an answer nobody could give. Reachable from the sweep once exports go together.
+describe('step-ups for tasks refused side by side', () => {
+  const VTA = 'did:webvh:agent'
+  const PHONE = 'did:key:z6MkPhoneManager'
+  const stepUpRefusal = () =>
+    new VtiRefusal('taskFailed', 'task failed: auth:step_up_required', {
+      reason: 'auth:step_up_required',
+      requiredAcr: 'aal2',
+      approveRequest: {
+        id: 'urn:uuid:step-up-1',
+        type: 'https://trusttasks.org/spec/auth/step-up/approve-request/0.2',
+        issuer: VTA,
+        recipient: PHONE,
+        issuedAt: '2026-11-18T08:00:00Z',
+        payload: {
+          subject: PHONE,
+          sessionId: 'session-7',
+          challenge: 'Y2hhbGxlbmdlLWZyb20tdGhlLWFnZW50LTAx',
+          reason: 'Confirm it is you',
+          targetAcr: 'aal2',
+          acceptableEvidence: ['didSigned', 'webauthn'],
+          ttl: 300,
+        },
+        proof: { type: 'DataIntegrityProof', proofPurpose: 'authentication' },
+      },
+    })
+
+  /**
+   * A client whose agent refuses a task with a step-up until the session is elevated. `stillWants` are keys it wants
+   * a step-up for once more even then; `breaks` are keys whose re-send fails for a reason of its own.
+   */
+  function stepped(options: { stillWants?: string[]; breaks?: string[] } = {}) {
+    const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn() }
+    const asks: Array<{ answer: (c: 'approve' | 'deny') => void; fail: (e: Error) => void }> = []
+    let asking = 0
+    let mostAsking = 0
+    const ask = jest.fn(
+      () =>
+        new Promise<'approve' | 'deny'>((resolve, reject) => {
+          asking++
+          mostAsking = Math.max(mostAsking, asking)
+          const end = () => asking--
+          asks.push({
+            answer: (c) => (end(), resolve(c)),
+            fail: (e) => (end(), reject(e)),
+          })
+        })
+    )
+    const vta = new VtaClient({ config: { logger } } as never, VTA, {} as never, { onStepUp: ask })
+    jest.spyOn(vta, 'managerDid', 'get').mockReturnValue(PHONE)
+    ;(vta as unknown as { replyThreading: string }).replyThreading = 'threaded'
+    const agent = { elevated: false, stillWants: new Set(options.stillWants), breaks: new Set(options.breaks) }
+    const sends: string[] = []
+    jest
+      .spyOn(vta as unknown as { sendTask: (...a: unknown[]) => Promise<unknown> }, 'sendTask')
+      .mockImplementation(async (...args: unknown[]) => {
+        const [type, payload] = args as [string, Record<string, unknown>]
+        if (type.includes('/auth/step-up/approve-response/')) {
+          sends.push(`answer:${String(payload.decision)}`)
+          if (payload.decision === 'approved') agent.elevated = true
+          return { status: 'ok' }
+        }
+        const key = String(payload.keyId ?? payload.key)
+        sends.push(`${type === EXPORT ? 'export' : 'read'}:${key}`)
+        await Promise.resolve()
+        if (!agent.elevated) throw stepUpRefusal()
+        if (agent.stillWants.delete(key)) throw stepUpRefusal()
+        if (agent.breaks.has(key)) throw new Error(`${key} failed for a reason of its own`)
+        return { ok: key }
+      })
+    return { vta, ask, asks, agent, sends, logger, mostAsking: () => mostAsking }
+  }
+
+  it('three exports refused at once: the person is asked once, and after a yes the other two go through unasked', async () => {
+    const h = stepped()
+    const all = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k))
+    await flush()
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c'])
+    expect(h.ask).toHaveBeenCalledTimes(1)
+    h.asks[0].answer('approve')
+    await expect(Promise.all(all)).resolves.toEqual([{ ok: 'a' }, { ok: 'b' }, { ok: 'c' }])
+    expect(h.ask).toHaveBeenCalledTimes(1)
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c', 'answer:approved', 'export:a', 'export:b', 'export:c'])
+  })
+
+  it('a no answers all three: asked once, one signed no, and nothing is sent again', async () => {
+    const h = stepped()
+    const all = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k))
+    const ended = Promise.allSettled(all)
+    await flush()
+    h.asks[0].answer('deny')
+    const results = await ended
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected', 'rejected'])
+    for (const r of results) expect((r as PromiseRejectedResult).reason).toBeInstanceOf(StepUpDeclined)
+    expect(h.ask).toHaveBeenCalledTimes(1)
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c', 'answer:denied'])
+  })
+
+  it('a check that could not be made ends all three the same way: asked once, nothing sent', async () => {
+    const h = stepped()
+    const ended = Promise.allSettled(['a', 'b', 'c'].map((k) => exportKey(h.vta, k)))
+    await flush()
+    h.asks[0].fail(new Error('the extra check was not answered'))
+    const results = await ended
+    for (const r of results)
+      expect((r as PromiseRejectedResult).reason).toMatchObject({ message: 'the extra check was not answered' })
+    expect(h.ask).toHaveBeenCalledTimes(1)
+    expect(h.sends).toEqual(['export:a', 'export:b', 'export:c'])
+  })
+
+  it('an agent that still wants a step-up for one of them: asked again, one card at a time, and the third goes through', async () => {
+    const h = stepped({ stillWants: ['b'] })
+    const all = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k))
+    await flush()
+    h.asks[0].answer('approve')
+    await flush()
+    expect(h.ask).toHaveBeenCalledTimes(2)
+    h.asks[1].answer('approve')
+    await expect(Promise.all(all)).resolves.toEqual([{ ok: 'a' }, { ok: 'b' }, { ok: 'c' }])
+    expect(h.ask).toHaveBeenCalledTimes(2)
+    expect(h.mostAsking()).toBe(1)
+  })
+
+  it('one whose re-send fails for a reason of its own fails with that, and the one behind it still goes through', async () => {
+    const h = stepped({ breaks: ['b'] })
+    const [a, b, c] = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k))
+    const bEnded = b.then(
+      () => 'resolved',
+      (e: Error) => e.message
+    )
+    await flush()
+    h.asks[0].answer('approve')
+    await expect(a).resolves.toEqual({ ok: 'a' })
+    await expect(bEnded).resolves.toBe('b failed for a reason of its own')
+    await expect(c).resolves.toEqual({ ok: 'c' })
+    expect(h.ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('the one the person answered for fails after the yes for a reason of its own: the two behind it still go through', async () => {
+    const h = stepped({ breaks: ['a'] })
+    const [a, b, c] = ['a', 'b', 'c'].map((k) => exportKey(h.vta, k))
+    const aEnded = a.then(
+      () => 'resolved',
+      (e: Error) => e.message
+    )
+    await flush()
+    h.asks[0].answer('approve')
+    await expect(aEnded).resolves.toBe('a failed for a reason of its own')
+    await expect(b).resolves.toEqual({ ok: 'b' })
+    await expect(c).resolves.toEqual({ ok: 'c' })
+    expect(h.ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('a step-up that comes when none is being answered is asked at once, with nothing sent before the answer', async () => {
+    const h = stepped()
+    const first = exportKey(h.vta, 'a')
+    await flush()
+    h.asks[0].answer('approve')
+    await first
+    // The elevation lapsed: a later task is refused again, and asks as the first did.
+    h.agent.elevated = false
+    h.sends.length = 0
+    const later = exportKey(h.vta, 'd')
+    await flush()
+    expect(h.ask).toHaveBeenCalledTimes(2)
+    expect(h.sends).toEqual(['export:d'])
+    h.asks[1].answer('approve')
+    await expect(later).resolves.toEqual({ ok: 'd' })
+    expect(h.sends).toEqual(['export:d', 'answer:approved', 'export:d'])
+  })
+
+  it('killed: each is asked as it comes, as before (two reads in the lane both ask at once)', async () => {
+    KEY_COPIES_TOGETHER.remoteOff = true
+    const h = stepped()
+    const all = ['r1', 'r2'].map((k) => read(h.vta, k))
+    const ended = Promise.allSettled(all)
+    await flush()
+    expect(h.ask).toHaveBeenCalledTimes(2)
+    expect(h.mostAsking()).toBe(2)
+    h.asks[0].answer('approve')
+    h.asks[1].answer('approve')
+    await ended
+  })
+
+  it('on, two reads in the lane refused at once are asked once too', async () => {
+    const h = stepped()
+    const all = ['r1', 'r2'].map((k) => read(h.vta, k))
+    await flush()
+    expect(h.ask).toHaveBeenCalledTimes(1)
+    h.asks[0].answer('approve')
+    await expect(Promise.all(all)).resolves.toEqual([{ ok: 'r1' }, { ok: 'r2' }])
+    expect(h.ask).toHaveBeenCalledTimes(1)
   })
 })

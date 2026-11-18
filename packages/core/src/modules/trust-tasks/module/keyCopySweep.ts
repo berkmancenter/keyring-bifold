@@ -16,7 +16,10 @@
  *   {@link KEY_COPIES_AT_ONCE} identities at a time. The first goes alone so that whatever the agent has to say about
  *   this phone (it was removed, it wants a step-up or an approval) is said once, to one ask, before any go together;
  * - an export may share the agent channel's read lane (VtaClient `sharesLane`), under the lane's own rules: only once
- *   this session's agent has threaded a reply, never past the lane's size, and reads count against the same size.
+ *   this session's agent has threaded a reply, never past the lane's size, and reads count against the same size;
+ * - step-ups on one agent channel are answered one at a time (VtaClient `stepUpInTurn`). Tasks side by side can each be
+ *   refused with a step-up at once, and the person is shown one card at a time: one that comes while another is being
+ *   answered waits for it, then is sent again, and asks the person only if the agent still wants it.
  *
  * What does not change: which keys are asked for, each ask and its answer, where a copy is kept (memory only), and
  * the agent's own check and record of every export. A task that is not in the lane still runs alone and still holds
@@ -56,7 +59,8 @@ export type SweepStep = 'go' | 'stop'
  * otherwise the first alone, then up to `atOnce` side by side, each started in order as a place frees.
  *
  * A fetch that answers `stop` ends the sweep: nothing more is started, and what is already running is waited for.
- * `fetch` must not throw; a caller handles its own failures and answers `go` or `stop`.
+ * A fetch that throws ends it the same way, and the sweep then throws what it threw: never while others are still
+ * running, and never leaving any to go on starting more.
  */
 export async function sweepKeyCopies<T>(
   items: readonly T[],
@@ -74,8 +78,15 @@ export async function sweepKeyCopies<T>(
   const worker = async (): Promise<void> => {
     while (!stopped && next < items.length) {
       const item = items[next++]
-      if ((await fetch(item)) === 'stop') stopped = true
+      try {
+        if ((await fetch(item)) === 'stop') stopped = true
+      } catch (error) {
+        stopped = true
+        throw error
+      }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(atOnce, items.length - 1) }, worker))
+  const ended = await Promise.allSettled(Array.from({ length: Math.min(atOnce, items.length - 1) }, worker))
+  const threw = ended.find((one): one is PromiseRejectedResult => one.status === 'rejected')
+  if (threw) throw threw.reason
 }
