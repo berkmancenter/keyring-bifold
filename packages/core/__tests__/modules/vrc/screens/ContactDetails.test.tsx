@@ -764,6 +764,8 @@ describe('ContactDetails Screen', () => {
       mockRepository.findByCounterpartyRelationshipDid.mockResolvedValue(null)
       const contact: ContactCredentialDetails = { issuer: TEST_CONTACTS.alice.issuer }
 
+      // It ships on: off is something a run (or a release's kill) has to do.
+      setConfirmItsYouEnabled(false)
       const off = render(<ContactDetails {...createRouteParams(contact)} />, { wrapper: TestContainerWrapper })
       expect(await off.findByText('Alice Smith')).toBeTruthy()
       await relationshipRead()
