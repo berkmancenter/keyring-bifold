@@ -758,6 +758,9 @@ describe('ContactDetails Screen', () => {
   })
 
   describe('the Safety section', () => {
+    // Forces it off for the rows after this one, as it always has: before the switch shipped on this read as "put the
+    // default back", and it is deliberately not changed to that, since the later rows in this file were written
+    // against off.
     afterEach(() => setConfirmItsYouEnabled(false))
 
     test("with Confirm it's you on, the Safety heading shows; off, there is no Safety section at all", async () => {
