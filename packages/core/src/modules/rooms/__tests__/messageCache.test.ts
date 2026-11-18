@@ -333,6 +333,62 @@ describe('at each start', () => {
   })
 })
 
+// b0's findings on #1130, verified by ac.
+describe('a membership read that fails, and a keep after an emptying', () => {
+  const failing = async (): Promise<{ communityDid: string; personaDid: string }[]> => {
+    throw new Error('store unreadable')
+  }
+
+  it('a failed membership read still lets the journal finish and the kill empty every copy', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await keepRoomPosts(w, room({ roomId: ROOM2, communityDid: CHOIR }), [post('b')], NOW)
+    // A journal entry left by an emptying cut short.
+    w.genericRecords.update.mockImplementationOnce(async (r) => {
+      w.records.get(r.id ?? '')!.content = r.content
+    })
+    w.genericRecords.update.mockRejectedValueOnce(new Error('disk'))
+    await expect(emptyMessageCache(w, { community: CHOIR }, 'left')).rejects.toThrow()
+    expect(w.journal()).toHaveLength(1)
+
+    ROOMS_MESSAGE_CACHE.remoteOff = true
+    await sweepMessageCache(w, failing, NOW)
+    expect(w.journal()).toHaveLength(0)
+    expect(w.copies().every((c) => c.emptied === true)).toBe(true)
+  })
+
+  it('control: a failed membership read, with the cache on, only skips the standing check', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    expect(await sweepMessageCache(w, failing, NOW)).toBe(0)
+    expect(await readRoomPosts(w, ME, ROOM, NOW)).toBeDefined()
+  })
+
+  it('a keep on its way after its community was emptied does not put the posts back', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    await emptyMessageCache(w, { community: LAB }, 'removed')
+    expect(w.journal()).toHaveLength(0)
+    expect(await keepRoomPosts(w, room(), [post('a'), post('b')], NOW)).toBe(false)
+    expect(JSON.stringify(w.copies())).not.toContain('the words of')
+  })
+
+  it('control: a keep of another community after one was emptied is kept', async () => {
+    const w = wallet()
+    await emptyMessageCache(w, { community: LAB }, 'removed')
+    expect(await keepRoomPosts(w, room({ communityDid: CHOIR, roomId: ROOM2 }), [post('b')], NOW)).toBe(true)
+  })
+
+  it('a copy in a shape this build does not read is emptied by its tags once its membership is gone', async () => {
+    const w = wallet()
+    await keepRoomPosts(w, room(), [post('a')], NOW)
+    const [record] = [...w.records.values()]
+    record.content = { ...record.content, v: 2 }
+    await sweepMessageCache(w, [{ communityDid: CHOIR, personaDid: ME }], NOW)
+    expect(record.content).toEqual({ v: 1, emptied: true })
+  })
+})
+
 describe('a phone its agent no longer accepts (revoked: a lost phone)', () => {
   const members = [{ communityDid: LAB, personaDid: ME }]
   it('has no membership standing, so a start empties every copy', async () => {
