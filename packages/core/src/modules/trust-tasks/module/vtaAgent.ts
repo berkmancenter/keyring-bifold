@@ -90,6 +90,7 @@ import {
 import { EnrolmentError, submitEnrolment, waitForGrant } from './vtaEnrolment'
 import { migratePersonaKeys } from './vtaKeyMigration'
 import { forgetKeyCopy, setInMemoryKeyFetcher } from './vtaKeys'
+import { VTA_UNLINKING_EVENT } from './unlinkEvent'
 import {
   initialLinkState,
   QUIET_DROP_MS,
@@ -1319,6 +1320,8 @@ export class VtaAgentController {
    * An agent still on the list afterwards is marked failed, for a retry.
    */
   async unlinkAgent(agent: Agent, vtaDid: string): Promise<void> {
+    // Before anything of it is let go: what the phone keeps for its identities goes with it (unlinkEvent).
+    DeviceEventEmitter.emit(VTA_UNLINKING_EVENT, { vtaDid })
     const link = this.state.link
     if ((link.kind === 'linked' || link.kind === 'revoked') && link.vtaDid === vtaDid) return this.unlink(agent)
     if (this.state.unlinkingOthers?.[vtaDid] === 'unlinking') return
@@ -1487,6 +1490,8 @@ export class VtaAgentController {
    */
   async unlink(agent: Agent): Promise<void> {
     const vtaDid = this.state.link.kind === 'notLinked' ? undefined : this.state.link.vtaDid
+    // Before anything of it is let go: what the phone keeps for its identities goes with it (unlinkEvent).
+    DeviceEventEmitter.emit(VTA_UNLINKING_EVENT, { vtaDid })
     // Every state published until the next agent is up says an unlink is under
     // way, so no screen draws "Link your agent" in between (Phase 1).
     this.set({ unlinking: true })

@@ -26,6 +26,7 @@ import { GenericRecordsTspPeerRevisionStore } from '../../trust-tasks/module/vti
 import { isRoomLiveDeliveryOn } from '../liveDeliverySwitch'
 import { isRoomRecordSendingOn } from '../recordSendingSwitch'
 import { afterLeavingCommunity } from '../roomsLeave'
+import { bindMessageCache } from '../messageCache'
 
 import type { RoomsBackend, RoomsCommunity, RoomsUploadBackend } from './agentRoomsService'
 import { storedConsentHolds } from './consentHolds'
@@ -113,6 +114,23 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     if (!c) throw new Error('rooms: no agent is linked to this phone')
     return c
   }
+
+  // The rooms' kept posts answer to this agent, and are swept as it starts: a copy whose membership no longer stands (a
+  // removal or an identity let go with the app closed) is emptied before any room can show it (rooms/messageCache).
+  void bindMessageCache(
+    agent,
+    async () => {
+      const out: { communityDid: string; personaDid: string }[] = []
+      for (const membership of await communityStore.listMemberships()) {
+        if (membership.removal) continue
+        const persona = await personaForCommunity(identityStore, communityStore, membership.communityDid)
+        if (persona?.did === membership.personaDid)
+          out.push({ communityDid: membership.communityDid, personaDid: membership.personaDid })
+      }
+      return out
+    },
+    (line) => agent.config?.logger?.warn?.(line)
+  )
 
   return {
     runsOn: agent,
