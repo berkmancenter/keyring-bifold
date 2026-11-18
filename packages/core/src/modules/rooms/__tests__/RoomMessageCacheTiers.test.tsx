@@ -1,8 +1,9 @@
 /**
- * Which rooms' chats are kept in the wallet (rooms/messageCache), as the room screen asks: open and attributed rooms
- * (Alberto, 11-18), never a private room nor one whose tier is unknown (a custody-only room). The tiers are named at
- * the call (Room.tsx), never "not private": a denylist would start keeping the unknown ones. And an attributed room's
- * copy goes as an open room's does: the emptyings never read a tier (messageCacheMatrix.test.ts has every trigger).
+ * Which rooms' chats are kept in the wallet (rooms/messageCache), as the room screen asks: open, attributed and private
+ * rooms (Alberto, 11-18), never one whose tier is unknown (a custody-only room). The tiers are named at the call
+ * (Room.tsx), never "not unknown": a denylist would start keeping any tier added later. And an attributed or private
+ * room's copy goes as an open room's does: the emptyings never read a tier (messageCacheMatrix.test.ts has every
+ * trigger).
  */
 import { render, waitFor } from '@testing-library/react-native'
 import React from 'react'
@@ -78,7 +79,7 @@ afterEach(() => {
 })
 
 describe("the room screen's chat, by the room's tier", () => {
-  it.each(['open', 'attributed'] as const)('%s: kept, by its community', async (tier) => {
+  it.each(['open', 'attributed', 'private'] as const)('%s: kept, by its community', async (tier) => {
     const { sample } = roomOfTier(tier)
     const room = await sample.getRoom(ROOM)
     show()
@@ -86,7 +87,7 @@ describe("the room screen's chat, by the room's tier", () => {
     expect((last() as { messageCache: { communityDid: string } }).messageCache.communityDid).toBe(room.communityDid)
   })
 
-  it.each(['private', 'unknown'] as const)('control: %s: never kept', async (tier) => {
+  it.each(['unknown'] as const)('control: %s (custody-only): never kept', async (tier) => {
     const { wallet } = roomOfTier(tier)
     const tree = show()
     await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/).length).toBeGreaterThan(0))
@@ -97,10 +98,10 @@ describe("the room screen's chat, by the room's tier", () => {
   })
 })
 
-describe("an attributed room's copy", () => {
-  /** Opens the attributed sample room and lets its posts be kept. */
+describe.each(['attributed', 'private'] as const)("the %s room's copy", (tier) => {
+  /** Opens the sample room as a room of `tier` and lets its posts be kept. */
   const kept = async () => {
-    const { sample, wallet } = roomOfTier('attributed')
+    const { sample, wallet } = roomOfTier(tier)
     const room = await sample.getRoom(ROOM)
     show()
     await waitFor(() => expect(wallet.genericRecords.save).toHaveBeenCalled(), { timeout: 6000 })
