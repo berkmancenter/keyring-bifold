@@ -43,7 +43,6 @@ import { emptyMessageCache, isCacheWallet } from '../messageCache'
 import { failureCategory, logRef } from '../roomsLogWords'
 import { takesRepliesOrReactions } from '../recordPermits'
 import { keepRecordsOn, recordsWereOnAt } from '../recordsWereOn'
-import { emptyMessageCache, isCacheWallet } from '../messageCache'
 import type {
   AgentGrant,
   CommunityRoomMember,
