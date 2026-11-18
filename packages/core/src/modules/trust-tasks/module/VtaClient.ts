@@ -103,6 +103,7 @@ import { purposeForDocumentType } from './proofPurpose'
 import { checkVtaReply } from './vtaReplyProof'
 import { releaseWarn } from './releaseLog'
 import { isConnectDrainEarlyOn } from './connectDrainSwitch'
+import { isKeyCopiesTogetherOn } from './keyCopySweep'
 import { isReplacedSessionStopsOn } from './replacedSessionSwitch'
 import { didOfKeyId, isAgentsOwnDid, isAgentsOwnPersona } from './agentOwnIdentity'
 import {
@@ -1722,7 +1723,10 @@ export class VtaClient {
   }
 
   private sharesLane(type: string): boolean {
-    return this.readLaneSize > 1 && this.replyThreading === 'threaded' && inReadLane(type)
+    if (this.readLaneSize <= 1 || this.replyThreading !== 'threaded') return false
+    // A key copy shares the lane where that is on (keyCopySweep.ts): its answer changes nothing at the agent and its
+    // order among reads does not matter. Not through VTA_READ_LANE_TYPES, which other code reads as "a rooms read".
+    return inReadLane(type) || (type === VTA_TASK.keysExportSecret && isKeyCopiesTogetherOn())
   }
 
   /** Whether a task of `type` at the head of the queue could start now. */
