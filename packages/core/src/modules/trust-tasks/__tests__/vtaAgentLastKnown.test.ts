@@ -7,6 +7,8 @@
 import {
   AGENT_LAST_KNOWN_AT_CONNECT,
   AGENT_LAST_KNOWN_MAX_AGE_MS,
+  AGENT_LAST_KNOWN_MAX_CHARS,
+  AGENT_LAST_KNOWN_MAX_TYPES,
   AGENT_LAST_KNOWN_REFRESH_AFTER_MS,
   AGENT_LAST_KNOWN_REWRITE_MS,
   isAgentLastKnownOn,
@@ -66,6 +68,8 @@ function linkedPhone(kept: Partial<VtaLink> = {}) {
   const links: VtaLink[] = [{ vtaDid: AGENT, label: 'Lab agent', linkedAt: 't0', introSeenAt: 't1', ...kept }]
   const saved: VtaLink[] = []
   const read = jest.fn(async () => links.map((l) => ({ ...l })))
+  /** Writes held back until released: each waits where the store would be writing, holding the copy it was given. */
+  let held: (() => void)[] | undefined
   const vta = new VtaAgentController()
   vta.configure({
     now: () => clock,
@@ -73,6 +77,7 @@ function linkedPhone(kept: Partial<VtaLink> = {}) {
       get: async () => (await read())[0],
       list: read,
       set: async (link) => {
+        if (held) await new Promise<void>((resolve) => held?.push(resolve))
         saved.push(link)
         const at = links.findIndex((l) => l.vtaDid === link.vtaDid)
         if (at >= 0) links[at] = link
@@ -93,6 +98,17 @@ function linkedPhone(kept: Partial<VtaLink> = {}) {
     saved,
     links,
     read,
+    /** From now, each write of a link waits until `release`. */
+    holdWrites: () => {
+      held = []
+    },
+    /** Let every write held so far go on, and later ones go straight through. */
+    release: async () => {
+      const waiting = held ?? []
+      held = undefined
+      for (const go of waiting) go()
+      await jest.advanceTimersByTimeAsync(0)
+    },
     /** Move the phone's clock, without running any timer. */
     clockTo: (ms: number) => (clock = ms),
     /** Let time pass: the clock and the timers together. */
@@ -614,6 +630,176 @@ describe('more than one agent, and a lock', () => {
     await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
     expect(mockClient.supportedTypes).not.toHaveBeenCalled()
     expect(mockClient.agentLabel).not.toHaveBeenCalled()
+  })
+})
+
+// `set` replaces the whole link record, so each change is a read, a change and a write of all of it. Side by side, the
+// later write puts back what it read before the earlier one. Every change of a link goes one at a time (`changeLink`).
+describe('changes of the same link, side by side', () => {
+  const NAMED = { label: 'renamed', source: 'vtaName' }
+
+  it('a name the person types while the later ask is being kept is not lost, and neither is the answer', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY } })
+    await phone.start()
+    phone.holdWrites()
+    // The later ask's answer is on its way to the store, holding the link as it read it: with no name.
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    const naming = phone.vta.nameAgent(agent, AGENT, 'Home agent')
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.release()
+    await naming
+    expect(phone.links[0].nickname).toBe('Home agent')
+    expect(phone.links[0].served?.types).toEqual([A, B])
+  })
+
+  it('the name typed first, the answer kept while it is being written: both stand', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY } })
+    await phone.start()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS - 1)
+    phone.holdWrites()
+    const naming = phone.vta.nameAgent(agent, AGENT, 'Home agent')
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.pass(1)
+    await phone.release()
+    await naming
+    expect(phone.links[0].nickname).toBe('Home agent')
+    expect(phone.links[0].served?.types).toEqual([A, B])
+  })
+
+  it('the agent’s new name and its new answer, both kept from the same wait, both stand', async () => {
+    mockClient.agentLabel.mockImplementation(async () => NAMED)
+    const phone = linkedPhone({
+      served: { types: [A], at: START - DAY },
+      agentName: { label: 'runner', source: 'vtaName' },
+    })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    await phone.release()
+    expect(phone.links[0].agentName).toEqual(NAMED)
+    expect(phone.links[0].served?.types).toEqual([A, B])
+  })
+
+  it('clearing the name while the answer is being kept leaves no name, and the answer', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY }, nickname: 'Home agent' })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    const clearing = phone.vta.nameAgent(agent, AGENT, '')
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.release()
+    await clearing
+    expect(phone.links[0].nickname).toBeUndefined()
+    expect(phone.links[0].served?.types).toEqual([A, B])
+  })
+
+  it('"seen the introduction", marked while the answer is being kept, is not lost', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY }, introSeenAt: undefined })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    const marking = phone.vta.markIntroSeen(agent)
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.release()
+    await marking
+    expect(phone.links[0].introSeenAt).toEqual(expect.any(String))
+    expect(phone.links[0].served?.types).toEqual([A, B])
+  })
+
+  it('an unlink while the answer is being kept takes the link out for good: the write does not put it back', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY } })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    const unlinking = phone.vta.unlink(agent)
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.release()
+    await unlinking
+    expect(phone.links).toEqual([])
+  })
+
+  it('"reached the agent", noted as the session opens, does not put back a link from before a name was typed', async () => {
+    const phone = linkedPhone()
+    phone.holdWrites()
+    // The session opens and notes when the agent was reached: that write is held, with the link as it read it.
+    await phone.start()
+    const naming = phone.vta.nameAgent(agent, AGENT, 'Home agent')
+    await jest.advanceTimersByTimeAsync(0)
+    await phone.release()
+    await naming
+    expect(phone.links[0].nickname).toBe('Home agent')
+    expect(phone.links[0].lastOnlineAt).toBe(START)
+  })
+
+  it('unlinking another agent while its link is being written takes it out for good', async () => {
+    const phone = linkedPhone()
+    phone.links.push({ vtaDid: OTHER, label: 'Other', linkedAt: 't9' })
+    await phone.start()
+    phone.holdWrites()
+    const naming = phone.vta.nameAgent(agent, OTHER, 'Work agent')
+    await jest.advanceTimersByTimeAsync(0)
+    const unlinking = phone.vta.unlinkAgent(agent, OTHER)
+    await jest.advanceTimersByTimeAsync(60_000)
+    await phone.release()
+    await jest.advanceTimersByTimeAsync(60_000)
+    await Promise.all([naming, unlinking])
+    expect(phone.links.map((l) => l.vtaDid)).toEqual([AGENT])
+  })
+
+  it('a change of one agent’s link does not wait for another agent’s', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY } })
+    phone.links.push({ vtaDid: OTHER, label: 'Other', linkedAt: 't9' })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    // This agent's write is held; the other agent's name is written without waiting for it.
+    const naming = phone.vta.nameAgent(agent, OTHER, 'Work agent')
+    await jest.advanceTimersByTimeAsync(0)
+    expect(phone.saved.filter((l) => l.vtaDid === OTHER)).toEqual([])
+    await phone.release()
+    await naming
+    expect(phone.links.find((l) => l.vtaDid === OTHER)?.nickname).toBe('Work agent')
+  })
+})
+
+describe('an answer too long to keep', () => {
+  const long = (count: number, each = 40) =>
+    Array.from({ length: count }, (_, i) => `https://trusttasks.org/spec/${String(i).padStart(each, 'x')}/0.1`)
+
+  it.each([
+    ['one type over the limit', () => long(AGENT_LAST_KNOWN_MAX_TYPES + 1, 4), false],
+    ['at the limit of types', () => long(AGENT_LAST_KNOWN_MAX_TYPES, 4), true],
+    ['over the limit of characters', () => long(100, AGENT_LAST_KNOWN_MAX_CHARS / 100), false],
+  ])('%s', async (_name, list, kept) => {
+    const types = list()
+    mockClient.supportedTypes.mockImplementation(async () => types)
+    const phone = linkedPhone()
+    await phone.start()
+    await expect(phone.vta.servedTypes(agent)).resolves.toEqual(types)
+    await expect(phone.vta.servedTypes(agent)).resolves.toEqual(types)
+    // Kept: asked once. Not kept: used, and asked each time, as before.
+    expect(mockClient.supportedTypes).toHaveBeenCalledTimes(kept ? 1 : 2)
+    expect(Boolean(phone.links[0].served)).toBe(kept)
+  })
+
+  it('takes away a shorter one kept before, and whoever held that one reads again', async () => {
+    const types = long(AGENT_LAST_KNOWN_MAX_TYPES + 1, 4)
+    mockClient.supportedTypes.mockImplementation(async () => types)
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY }, nickname: 'mine' })
+    await phone.start()
+    await expect(phone.vta.servedTypes(agent)).resolves.toEqual([A])
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    expect(phone.links[0].served).toBeUndefined()
+    expect(phone.links[0].nickname).toBe('mine')
+    expect(phone.vta.servedTypesStamp()).toBe(1)
+    await expect(phone.vta.servedTypes(agent)).resolves.toEqual(types)
+  })
+
+  it('one kept by an earlier build beyond the limit is not used', async () => {
+    const phone = linkedPhone({ served: { types: long(AGENT_LAST_KNOWN_MAX_TYPES + 1, 4), at: START - DAY } })
+    await phone.start()
+    await expect(phone.vta.servedTypes(agent)).resolves.toEqual([A, B])
+    expect(mockClient.supportedTypes).toHaveBeenCalledTimes(1)
   })
 })
 

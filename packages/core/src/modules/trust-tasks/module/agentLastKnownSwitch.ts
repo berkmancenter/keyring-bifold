@@ -17,9 +17,14 @@
  * - What the agent is called is asked at that same later moment when a name is already shown for it; with none shown
  *   it is asked at once, as before.
  *
- * What it costs: for the first seconds of the first launch after the agent is upgraded, the phone may ask with a task
- * version the agent no longer serves (the agent refuses it, and the ask works after the refresh), or not use one it has
- * just gained.
+ * What it costs:
+ * - For up to {@link AGENT_LAST_KNOWN_REFRESH_AFTER_MS} of the first launch after the agent is upgraded or downgraded,
+ *   the phone may ask with a task version the agent no longer serves, or not use one it has just gained. A task the
+ *   agent refuses as not served has the agent asked again at once, not at the end of the wait.
+ * - The later asks are not in the read lane and do not go beside the queue (vtaReadLane.ts), so each runs alone: it
+ *   waits for the reads on the wire, and everything queued waits for it, an open room's read included. That is about
+ *   0.6 s for the task list, once per agent per app run, and about 0.5 s for the name when one is asked, at the
+ *   10 s mark instead of at the front of the launch.
  *
  * What it does not change: the approvals screens and the hidden-vetting probe still ask the agent live each time.
  *
@@ -54,6 +59,13 @@ export const AGENT_LAST_KNOWN_REFRESH_AFTER_MS = 10_000
  * this bounds the case where asking again keeps failing, or never runs.
  */
 export const AGENT_LAST_KNOWN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * The longest answer that is kept: this many task types, and this many characters in all. vta-service 0.83.0 spells
+ * out about a hundred types (some 5 KB). A longer list is used but not kept, and the agent is asked each time.
+ */
+export const AGENT_LAST_KNOWN_MAX_TYPES = 2000
+export const AGENT_LAST_KNOWN_MAX_CHARS = 200_000
 
 /** A kept answer still good is not written again more often than this: one store write a day says "still so". */
 export const AGENT_LAST_KNOWN_REWRITE_MS = 24 * 60 * 60 * 1000

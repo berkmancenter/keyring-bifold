@@ -18,6 +18,7 @@ import type { EnrolmentOffer } from '@bifold/trust-tasks'
 
 import { AGENT_NOT_FOUND_CONFIRM_MS, agentGoneVerdict, type AgentGoneWhy } from './agentGone'
 import { didPrefix } from './didPrefix'
+import { withKeyLock } from './keyedRecords'
 import {
   AGENT_HOST_QR_LIFETIME_MS,
   AgentHostConnectionError,
@@ -28,6 +29,8 @@ import {
 import type { AgentLabel } from './agentLabel'
 import {
   AGENT_LAST_KNOWN_MAX_AGE_MS,
+  AGENT_LAST_KNOWN_MAX_CHARS,
+  AGENT_LAST_KNOWN_MAX_TYPES,
   AGENT_LAST_KNOWN_REFRESH_AFTER_MS,
   AGENT_LAST_KNOWN_REWRITE_MS,
   isAgentLastKnownOn,
@@ -71,7 +74,7 @@ import {
   type VtiManagerIdentity,
   type VtiPersona,
 } from './VtiIdentityStore'
-import { GenericRecordsVtaLinkStore, type VtaLink, type VtaLinkStore } from './VtaLinkStore'
+import { GenericRecordsVtaLinkStore, vtaLinkLockKey, type VtaLink, type VtaLinkStore } from './VtaLinkStore'
 import { createVtiTemporaryDidKey } from './VtiMediatorTransport'
 import {
   AGENT_DEVICE_TASK,
@@ -639,6 +642,17 @@ function sameTypes(a: readonly string[], b: readonly string[]): boolean {
   return left.size === right.size && [...left].every((type) => right.has(type))
 }
 
+/**
+ * Whether a discovery answer is short enough to keep with the link: an agent's list is around a hundred types, and one
+ * far beyond that is not written to the store at each change. It is still used, asked live.
+ */
+function keepable(types: readonly string[]): boolean {
+  if (types.length > AGENT_LAST_KNOWN_MAX_TYPES) return false
+  let chars = 0
+  for (const type of types) chars += type.length
+  return chars <= AGENT_LAST_KNOWN_MAX_CHARS
+}
+
 function agentIsUp(agent: Agent): boolean {
   return (agent as unknown as { isInitialized?: boolean }).isInitialized !== false
 }
@@ -854,9 +868,14 @@ export class VtaAgentController {
   /** The person dismissed the first-link introduction; it does not come back on its own. */
   async markIntroSeen(agent: Agent): Promise<void> {
     this.set({ introSeen: true })
-    const store = this.linkStore(agent)
-    const link = await store.get().catch(() => undefined)
-    if (link) await store.set({ ...link, introSeenAt: new Date(this.now()).toISOString() })
+    const current = await this.linkStore(agent)
+      .get()
+      .catch(() => undefined)
+    if (current)
+      await this.changeLink(agent, current.vtaDid, (link) => ({
+        ...link,
+        introSeenAt: new Date(this.now()).toISOString(),
+      }))
   }
 
   /** "What is my agent?" — show the introduction again. */
@@ -1058,6 +1077,35 @@ export class VtaAgentController {
   }
 
   /**
+   * Change the link kept for `vtaDid`: behind every earlier change of the same link, it is read afresh, `change` is
+   * given what was read, and what it returns is written, once (`vtaLinkLockKey`). `change` returns the whole link as
+   * it should be kept, built from the one it was given so that what it does not touch is carried along; undefined
+   * writes nothing. Resolves whether a write was made; no link kept for the agent is no write. A write the store
+   * refuses rejects.
+   */
+  private changeLink(agent: Agent, vtaDid: string, change: (link: VtaLink) => VtaLink | undefined): Promise<boolean> {
+    return withKeyLock(vtaLinkLockKey(vtaDid), async () => {
+      const { store, link } = await this.linkFor(agent, vtaDid)
+      if (!link) return false
+      const next = change(link)
+      if (!next) return false
+      await store.set(next)
+      return true
+    })
+  }
+
+  /** Take an agent's link out, behind every change of it under way: none of them writes it back afterwards. */
+  private removeLink(agent: Agent, vtaDid: string): Promise<void> {
+    return withKeyLock(vtaLinkLockKey(vtaDid), () => Promise.resolve(this.linkStore(agent).remove?.(vtaDid)))
+  }
+
+  /** Take the current agent's link out; `vtaDid`, when known, is that agent, and the same holds as for `removeLink`. */
+  private clearLink(agent: Agent, vtaDid: string | undefined): Promise<void> {
+    const clear = () => this.linkStore(agent).clear()
+    return vtaDid ? withKeyLock(vtaLinkLockKey(vtaDid), clear) : clear()
+  }
+
+  /**
    * What the agent last said it serves, if that is kept and not older than {@link AGENT_LAST_KNOWN_MAX_AGE_MS}. Read
    * from its link once per run, then from memory. A time in the future (a clock set back since) is no better known
    * than an old one.
@@ -1070,7 +1118,7 @@ export class VtaAgentController {
       const types = Array.isArray(listed) ? listed.filter((t): t is string => typeof t === 'string') : []
       // Answered meanwhile (a live ask kept its answer while the link was being read): that one is newer.
       held = this.servedKept.get(vtaDid)
-      if (!held && types.length > 0 && typeof kept?.at === 'number') {
+      if (!held && types.length > 0 && keepable(types) && typeof kept?.at === 'number') {
         held = { types, at: kept.at }
         this.servedKept.set(vtaDid, held)
       }
@@ -1080,27 +1128,36 @@ export class VtaAgentController {
   }
 
   /**
-   * Keep what the agent just said it serves: in memory, and with its link. An answer different from the one held
+   * Keep what the agent just said it serves: with its link, and in memory. An answer different from the one held
    * moves `servedTypesStamp`, so whoever was given the old one reads again. The same answer is written again only
-   * when the kept one is over a day old, so that "still so" costs one store write a day.
+   * when the kept one is over a day old, so that "still so" costs one store write a day. A list too long to keep
+   * (`keepable`) is not kept, and takes an earlier kept one away: the agent is then asked each time, as before.
    */
   private async keepServed(agent: Agent, vtaDid: string, types: string[]): Promise<void> {
     const before = this.servedKept.get(vtaDid)
     const now = this.now()
     const same = before !== undefined && sameTypes(before.types, types)
     if (same && Math.abs(now - before.at) < AGENT_LAST_KNOWN_REWRITE_MS) return
+    const served = keepable(types) ? { types: [...types], at: now } : undefined
+    if (!served && !before) return
     // Unlinked while it was being asked: nothing of it is kept, here or with a link that is gone.
-    const { store, link } = await this.linkFor(agent, vtaDid)
-    if (!link) return
-    const served = { types: [...types], at: now }
-    this.servedKept.set(vtaDid, served)
+    let linked = false
+    await this.changeLink(agent, vtaDid, (link) => {
+      linked = true
+      if (served) return { ...link, served }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { served: _tooLong, ...rest } = link
+      return rest
+    }).catch(() => undefined)
+    if (!linked) return
+    if (served) this.servedKept.set(vtaDid, served)
+    else this.servedKept.delete(vtaDid)
     if (before && !same) {
       this.servedStamp++
       releaseWarn(
         `[VTA] the agent serves a different set of tasks than it last said (${before.types.length} then, ${types.length} now)`
       )
     }
-    await store.set({ ...link, served }).catch(() => undefined)
   }
 
   /**
@@ -1166,29 +1223,23 @@ export class VtaAgentController {
    * itself. Local only; the agent is not told.
    */
   async nameAgent(agent: Agent, vtaDid: string, nickname: string): Promise<void> {
-    const store = this.linkStore(agent)
-    const links = (await Promise.resolve(store.list?.()).catch(() => undefined)) ?? []
-    const link =
-      links.find((l) => l.vtaDid === vtaDid) ??
-      (await store
-        .get()
-        .then((l) => (l?.vtaDid === vtaDid ? l : undefined))
-        .catch(() => undefined))
-    if (!link) return
     const name = nickname.trim().slice(0, AGENT_NICKNAME_MAX)
-    const { nickname: _old, ...rest } = link
-    await store.set(name ? { ...rest, nickname: name } : rest)
+    const linked = await this.changeLink(agent, vtaDid, (link) => {
+      const { nickname: _old, ...rest } = link
+      return name ? { ...rest, nickname: name } : rest
+    })
+    if (!linked) return
     await this.refreshAgents(agent)
   }
 
   /** Keep an agent's name with its link, so it survives a restart while another agent is current. */
   private async keepAgentName(vtaDid: string, name: AgentLabel): Promise<void> {
     if (!this.agent) return
-    const store = this.linkStore(this.agent)
-    const links = (await Promise.resolve(store.list?.()).catch(() => undefined)) ?? []
-    const link = links.find((l) => l.vtaDid === vtaDid)
-    if (!link || (link.agentName?.label === name.label && link.agentName?.source === name.source)) return
-    await store.set({ ...link, agentName: name }).catch(() => undefined)
+    await this.changeLink(this.agent, vtaDid, (link) =>
+      link.agentName?.label === name.label && link.agentName?.source === name.source
+        ? undefined
+        : { ...link, agentName: name }
+    ).catch(() => undefined)
   }
 
   /**
@@ -1548,7 +1599,7 @@ export class VtaAgentController {
     ])
     clearTimeout(timer)
     await client.disconnect().catch(() => undefined)
-    await Promise.resolve(this.linkStore(agent).remove?.(vtaDid)).catch(() => undefined)
+    await this.removeLink(agent, vtaDid).catch(() => undefined)
     await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
     this.namesAsked.delete(vtaDid)
     this.lastKnownGone(vtaDid)
@@ -1656,7 +1707,7 @@ export class VtaAgentController {
 
   /** A removed agent's link and this phone's key for it, gone; the list of agents read again. */
   private async forgetRemovedAgent(agent: Agent, vtaDid: string): Promise<void> {
-    await Promise.resolve(this.linkStore(agent).remove?.(vtaDid)).catch(() => undefined)
+    await this.removeLink(agent, vtaDid).catch(() => undefined)
     await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
     await this.refreshAgents(agent).catch(() => undefined)
   }
@@ -1697,9 +1748,7 @@ export class VtaAgentController {
     this.retryTimer = undefined
     this.reconnectAttempt = 0
     await this.reset()
-    await this.linkStore(agent)
-      .clear()
-      .catch(() => undefined)
+    await this.clearLink(agent, vtaDid).catch(() => undefined)
     if (vtaDid) {
       await Promise.resolve(this.identityStore(agent).forgetManager?.(vtaDid)).catch(() => undefined)
       this.namesAsked.delete(vtaDid)
@@ -2167,7 +2216,9 @@ export class VtaAgentController {
     // after a swap that never happened, even after a restart, still knows it.
     const manager = await Promise.resolve(identities.getManager?.(vtaDid)).catch(() => undefined)
     const farmLogin = manager?.claimedFrom ? { farmLogin: { farmDid: manager.claimedFrom, did: manager.did } } : {}
-    await links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
+    await withKeyLock(vtaLinkLockKey(vtaDid), () =>
+      links.set({ vtaDid, label, linkedAt, ...(owner ? { owner: true } : {}), ...farmLogin })
+    )
     // The agent just linked is the one this phone acts with: the store keeps
     // every linked agent, and a link no longer replaces another one's record.
     await links.use?.(vtaDid)
@@ -2201,7 +2252,9 @@ export class VtaAgentController {
           // offered no Try again and a scan of it said "already linked".
           // Only this agent's: a person who went back meanwhile made the one
           // before current again, and that link stays.
-          await (links.remove ? links.remove(vtaDid) : links.clear()).catch(() => undefined)
+          await withKeyLock(vtaLinkLockKey(vtaDid), () => (links.remove ? links.remove(vtaDid) : links.clear())).catch(
+            () => undefined
+          )
           if (addingFrom && addingFrom !== vtaDid) {
             // An "Add" that did not finish: back is still back to the agent before.
             this.addingFrom = addingFrom
@@ -3607,9 +3660,7 @@ export class VtaAgentController {
         // VTA's words under Details, not a revocation of a working link and
         // not a retry that can never succeed. A later swap from a permanent
         // key refused both ways is a revocation, read as one below.
-        await this.linkStore(agent)
-          .clear()
-          .catch(() => undefined)
+        await this.clearLink(agent, link.vtaDid).catch(() => undefined)
         await this.reset()
         this.set({ status: 'disconnected', managerDid: undefined })
         this.dispatch({ type: 'linkLost', failure: { reason: 'failed', detail: reason } })
@@ -3630,16 +3681,19 @@ export class VtaAgentController {
 
   /** The agent answered: keep when, and forget any "not found" seen before (agentGone.ts). */
   private async noteReached(agent: Agent, vtaDid: string): Promise<void> {
-    const store = this.linkStore(agent)
-    const link = await store.get().catch(() => undefined)
-    if (!link || link.vtaDid !== vtaDid) return
+    const current = await this.linkStore(agent)
+      .get()
+      .catch(() => undefined)
+    if (!current || current.vtaDid !== vtaDid) return
     const now = this.now()
-    // One write an hour is plenty for a threshold counted in days.
-    const fresh = link.lastOnlineAt !== undefined && now - link.lastOnlineAt < 60 * 60 * 1000
-    if (fresh && link.notFoundAt === undefined) return
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { notFoundAt: _forgotten, ...rest } = link
-    await store.set({ ...rest, lastOnlineAt: now }).catch(() => undefined)
+    await this.changeLink(agent, vtaDid, (link) => {
+      // One write an hour is plenty for a threshold counted in days.
+      const fresh = link.lastOnlineAt !== undefined && now - link.lastOnlineAt < 60 * 60 * 1000
+      if (fresh && link.notFoundAt === undefined) return undefined
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { notFoundAt: _forgotten, ...rest } = link
+      return { ...rest, lastOnlineAt: now }
+    }).catch(() => undefined)
   }
 
   /** A gone agent is said once, with a way on (a new agent), and retrying stops. */
@@ -3669,11 +3723,13 @@ export class VtaAgentController {
       now: this.now(),
     })
     if (verdict.notFoundAt !== link.notFoundAt) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { notFoundAt: _previous, ...rest } = link
-      await store
-        .set(verdict.notFoundAt !== undefined ? { ...rest, notFoundAt: verdict.notFoundAt } : rest)
-        .catch(() => undefined)
+      // The look-up took seconds: the link is read again for the write, and only this field is changed.
+      await this.changeLink(agent, vtaDid, (now) => {
+        if (now.notFoundAt === verdict.notFoundAt) return undefined
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { notFoundAt: _previous, ...rest } = now
+        return verdict.notFoundAt !== undefined ? { ...rest, notFoundAt: verdict.notFoundAt } : rest
+      }).catch(() => undefined)
     }
     return verdict.gone
   }
