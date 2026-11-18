@@ -12,11 +12,20 @@ import { AppState } from 'react-native'
 
 import { newEventId } from '../../chat/eventId'
 import { toInertText } from '../inertText'
+import {
+  bindMessageCache,
+  keepRoomPosts,
+  readRoomPosts,
+  resetMessageCache,
+  ROOMS_MESSAGE_CACHE,
+  setMessageCacheBiometryGate,
+} from '../messageCache'
 import { ROOMS_PARTIAL_LISTING } from '../partialListingSwitch'
 import { AgentRoomsService, type RoomsBackend } from '../real/agentRoomsService'
 import { ROOMS_TASK } from '../real/wire'
 import { chatMessageBody } from '../roomPosts'
 import type { Note, NoteList, NoteSummary, RoomsService, RoomSummary } from '../types'
+import { cacheWallet } from './fixtures/cacheWallet'
 import {
   onRoomsListed,
   refreshRoomRows,
@@ -198,6 +207,44 @@ describe('a community that has not answered yet', () => {
     await off.end()
     await flush()
     expect(listOff.result.current.rows.map((r) => [r.roomId, r.lastPost?.text])).toEqual(withPartial)
+  })
+
+  // The one whose failure costs a person their data (ac): a partial listing is one where the rooms of the communities
+  // still to answer are absent because nobody has answered yet, never because they are gone.
+  it("never empties the kept posts of a community still to answer, with the message cache's listeners bound", async () => {
+    const SHIPPED_CACHE = { ...ROOMS_MESSAGE_CACHE }
+    Object.assign(ROOMS_MESSAGE_CACHE, { on: true, remoteOff: false })
+    setMessageCacheBiometryGate(async () => true)
+    resetMessageCache()
+    try {
+      const ME = 'did:peer:2.me'
+      const wallet = cacheWallet()
+      // Bound as the app binds it: its onRoomsListed listener (emptyGoneRooms) hears every listing told.
+      await bindMessageCache(wallet, async () => [
+        { communityDid: LAB, personaDid: ME },
+        { communityDid: SEDI, personaDid: ME },
+      ])
+      await keepRoomPosts(
+        wallet,
+        { personaDid: ME, roomId: 'vetting', communityDid: SEDI },
+        [{ key: 'v1', version: 1, author: 'did:peer:them', writtenAt: new Date().toISOString(), body: 'kept words' }],
+        Date.now()
+      )
+      const lab = room('planning', LAB)
+      const sedi = room('vetting', SEDI)
+      const l = slowListing([lab], [LAB], [lab, sedi])
+      Object.assign(l.service, { runsOn: wallet })
+      const list = mount(l.service)
+      await flush()
+      expect(ids(list.result.current)).toEqual(['planning'])
+      expect((await readRoomPosts(wallet, ME, 'vetting'))?.posts.map((p) => p.body)).toEqual(['kept words'])
+      await l.end()
+      await flush()
+      expect((await readRoomPosts(wallet, ME, 'vetting'))?.posts.map((p) => p.body)).toEqual(['kept words'])
+    } finally {
+      resetMessageCache()
+      Object.assign(ROOMS_MESSAGE_CACHE, SHIPPED_CACHE)
+    }
   })
 
   it('control: no community answering fails as today, the rows read before kept', async () => {
