@@ -83,7 +83,8 @@ describe("the room screen's chat, by the room's tier", () => {
     const { sample } = roomOfTier(tier)
     const room = await sample.getRoom(ROOM)
     show()
-    await waitFor(() => expect(last()).toMatchObject({ messageCache: expect.anything() }))
+    // The screen asks for the copy before the room too (#1146): the hook's own rows pass the option themselves.
+    await waitFor(() => expect(last()).toMatchObject({ seedBeforeRoom: true, messageCache: expect.anything() }))
     expect((last() as { messageCache: { communityDid: string } }).messageCache.communityDid).toBe(room.communityDid)
   })
 
@@ -92,6 +93,7 @@ describe("the room screen's chat, by the room's tier", () => {
     const tree = show()
     await waitFor(() => expect(tree.getAllByTestId(/RoomPost_/).length).toBeGreaterThan(0))
     expect((last() as { messageCache?: unknown }).messageCache).toBeUndefined()
+    expect(last()).toMatchObject({ seedBeforeRoom: true })
     expect(mockOptions.every((o) => !(o as { messageCache?: unknown }).messageCache)).toBe(true)
     expect(wallet.genericRecords.save).not.toHaveBeenCalled()
     expect(wallet.genericRecords.findById).not.toHaveBeenCalled()
