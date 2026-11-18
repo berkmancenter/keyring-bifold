@@ -30,11 +30,12 @@ import { onRoomsListed } from './useRoomRows'
  * a journal first and replayed at each start, so one a crash or a failed write cut short is finished then.
  *
  * Two values a release (an OTA included) sets, and nothing else, as for `liveDeliverySwitch.ts`:
- * - `on`: the release's choice. **It ships ON on main, by Alberto's decision (11-18 ~03:45Z, through the
- *   coordinator), before the device proof** (plan phase 3: every wipe seen to empty on a phone) and without a ring0
- *   check: the demo build (279.2) carries it to everyone. This is the first change that stores message text on the
- *   phone; the kill below is how it comes back off. Off, the cache keeps and shows nothing, and every start empties
- *   any copy an earlier bundle kept.
+ * - `on`: the release's choice. **On by Alberto's decision (11-18 ~03:45Z, through the coordinator), before the
+ *   device proof** (plan phase 3: every wipe seen to empty on a phone) **and without a ring0 check.** Main ships it
+ *   off (#1138); this value is on only on #1140's branch, which stays open and never merges on its own. The cuts
+ *   carry it: 279.2 for open rooms, 279.3 for open and attributed rooms. This is the first change that stores message
+ *   text on the phone; the kill below is how it comes back off. Off, the cache keeps and shows nothing, and every
+ *   start empties any copy an earlier bundle kept.
  * - `remoteOff`: the release's kill. Set it to `true` by OTA and nothing is kept or shown, and the first start empties
  *   every copy, for everyone, whatever `on` says, until a release sets it back.
  *
