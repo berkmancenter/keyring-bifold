@@ -299,8 +299,16 @@ async function emptyRecords(agent: CacheWallet, records: RecordLike[]): Promise<
   return n
 }
 
+/**
+ * Every scope emptied this run, so a keep that was already on its way (the writer waits 2 s for a room's posts to
+ * settle) cannot put the posts back once the journal entry is done (b0's finding, #1130). For the run only: at the
+ * next start the sweep decides from the memberships again.
+ */
+let emptiedThisRun: JournalEntry[] = []
+
 /** Applies one entry, then takes it off the journal. A failure leaves it there for the next start. */
 async function apply(agent: CacheWallet, entry: JournalEntry): Promise<number> {
+  if (!emptiedThisRun.some((e) => sameEntry(e, entry))) emptiedThisRun.push(entry)
   const n = await emptyRecords(agent, await coveredBy(agent, entry))
   const { record, entries } = await journalOf(agent)
   await writeJournal(
@@ -350,7 +358,7 @@ export function keepRoomPosts(
   return inTurn(async () => {
     if (!(await messageCacheAllowed())) return false
     const { entries } = await journalOf(agent)
-    if (journaled(entries, room)) return false
+    if (journaled([...entries, ...emptiedThisRun], room)) return false
     const kept = trimPosts(posts, now)
     const id = recordIdOf(room.personaDid, room.roomId)
     const content = {
@@ -395,12 +403,27 @@ export function keepRoomPosts(
  * identity, not past the room's end, not named by the journal, and only the posts within {@link MSG_CACHE_DAYS}.
  * A copy past the room's end is emptied, not shown.
  */
-export function readRoomPosts(
+export async function readRoomPosts(
   agent: CacheWallet,
   personaDid: string,
   roomId: string,
   now = Date.now()
 ): Promise<{ room: CachedRoom; posts: CachedPost[] } | undefined> {
+  const read = await readInTurn(agent, personaDid, roomId, now).catch(() => undefined)
+  if (read === 'ended') {
+    // Emptied journal first, as every emptying is; the reader hears nothing either way (b0's note, #1130).
+    await emptyMessageCache(agent, { room: roomId }, 'room ended').catch(() => undefined)
+    return undefined
+  }
+  return read
+}
+
+function readInTurn(
+  agent: CacheWallet,
+  personaDid: string,
+  roomId: string,
+  now: number
+): Promise<{ room: CachedRoom; posts: CachedPost[] } | 'ended' | undefined> {
   return inTurn(async () => {
     if (!(await messageCacheAllowed())) return undefined
     const record = await agent.genericRecords.findById(recordIdOf(personaDid, roomId))
@@ -408,10 +431,7 @@ export function readRoomPosts(
     if (!content || content.personaDid !== personaDid || content.roomId !== roomId) return undefined
     const { entries } = await journalOf(agent)
     if (journaled(entries, content)) return undefined
-    if (content.validUntil && Date.parse(content.validUntil) <= now) {
-      if (record) await emptyRecords(agent, [record])
-      return undefined
-    }
+    if (content.validUntil && Date.parse(content.validUntil) <= now) return 'ended' as const
     const posts = content.posts
       .map(postOf)
       .filter((p): p is CachedPost => !!p)
@@ -428,23 +448,42 @@ export function readRoomPosts(
  * community and identity the member is in now, not removed), whose room has ended, or whose posts are all past
  * {@link MSG_CACHE_DAYS}. That catches what happened with the app closed: a removal, an identity let go.
  */
+type Memberships = ReadonlyArray<{ communityDid: string; personaDid: string }>
+
 export function sweepMessageCache(
   agent: CacheWallet,
-  current: ReadonlyArray<{ communityDid: string; personaDid: string }>,
+  current: Memberships | (() => Promise<Memberships>),
   now = Date.now()
 ): Promise<number> {
   return inTurn(async () => {
     let n = 0
+    // First and whatever else fails: the journal, and with the cache not allowed, every copy. A membership read that
+    // fails only skips the standing check (b0's finding, #1130): a store that fails at every start must not keep a
+    // kill or an emptying from ever running.
     const { entries } = await journalOf(agent)
     for (const entry of entries) n += await apply(agent, entry)
     const records = await agent.genericRecords.findAllByQuery({ type: RECORD_TYPE })
     if (!(await messageCacheAllowed())) return n + (await emptyRecords(agent, records))
-    const standing = new Set(current.map((m) => `${m.communityDid}\n${m.personaDid}`))
+    let members: Memberships | undefined
+    try {
+      members = typeof current === 'function' ? await current() : current
+    } catch {
+      members = undefined
+    }
+    const standing = members ? new Set(members.map((m) => `${m.communityDid}\n${m.personaDid}`)) : undefined
+    const standingByTag = members
+      ? new Set(members.map((m) => `${hashOf(m.communityDid)}\n${hashOf(m.personaDid)}`))
+      : undefined
     const ended = records.filter((record) => {
       const c = contentOf(record)
-      // A copy in a shape this build does not read (a newer one's) is left alone, and never shown.
-      if (!c) return false
-      if (!standing.has(`${c.communityDid}\n${c.personaDid}`)) return true
+      if (!c) {
+        // A copy in a shape this build does not read (a newer one's) is never shown; its tags still say whose it is,
+        // so one whose membership no longer stands is emptied too (b0's note).
+        if (record.content?.emptied === true || !standingByTag) return false
+        const tags = record.tags ?? record.getTags?.() ?? {}
+        return !standingByTag.has(`${String(tags.community)}\n${String(tags.persona)}`)
+      }
+      if (standing && !standing.has(`${c.communityDid}\n${c.personaDid}`)) return true
       if (c.validUntil && Date.parse(c.validUntil) <= now) return true
       return !c.posts.some((p) => {
         const post = postOf(p)
@@ -558,7 +597,8 @@ export async function bindMessageCache(
     })
   }
   try {
-    const n = await sweepMessageCache(agent, await current())
+    // The memberships are read inside the sweep's turn, so no read or keep runs before it.
+    const n = await sweepMessageCache(agent, current)
     if (n > 0) log?.(`[Rooms:cache] ${n} rooms' kept posts emptied at start`)
     await sayCounts(agent, 'start')
   } catch {
@@ -568,6 +608,7 @@ export async function bindMessageCache(
 
 /** For tests: forget what is bound. */
 export function resetMessageCache(): void {
+  emptiedThisRun = []
   bound = undefined
   cacheLog = undefined
   biometryNow = undefined

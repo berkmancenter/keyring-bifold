@@ -27,6 +27,7 @@ import { isRoomLiveDeliveryOn } from '../liveDeliverySwitch'
 import { isRoomRecordSendingOn } from '../recordSendingSwitch'
 import { afterLeavingCommunity } from '../roomsLeave'
 import { bindMessageCache, standingMemberships } from '../messageCache'
+import { cardStandingOf } from '../../trust-tasks/module/vtiCardStanding'
 
 import type { RoomsBackend, RoomsCommunity, RoomsUploadBackend } from './agentRoomsService'
 import { storedConsentHolds } from './consentHolds'
@@ -123,6 +124,8 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
       const out: { communityDid: string; personaDid: string }[] = []
       for (const membership of await communityStore.listMemberships()) {
         if (membership.removal) continue
+        // A card the community revoked, as its status list was last read, stands no more, notice or not (b0's finding).
+        if (cardStandingOf(membership.vmc).state === 'revoked') continue
         const persona = await personaForCommunity(identityStore, communityStore, membership.communityDid)
         if (persona?.did === membership.personaDid)
           out.push({ communityDid: membership.communityDid, personaDid: membership.personaDid })

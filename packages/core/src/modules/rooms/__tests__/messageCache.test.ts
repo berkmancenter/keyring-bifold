@@ -292,7 +292,7 @@ describe('emptying', () => {
       NOW
     )
     expect(w.copies().filter((c) => c.emptied === true)).toHaveLength(3)
-    expect(w.records.get(MSG_CACHE_JOURNAL_ID)?.content.pending as unknown[]).toHaveLength(0)
+    expect(w.journal()).toHaveLength(0)
   })
 
   it('control: nothing is kept for a room the journal still means to empty', async () => {
