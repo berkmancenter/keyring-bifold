@@ -58,6 +58,7 @@ import { BiometricConfirmationProvider } from '../../src/contexts/biometric-conf
 import ApproverOfferModal from '../../src/modules/trust-tasks/components/ApproverOfferModal'
 import ConfirmItsYouModal from '../../src/modules/trust-tasks/components/ConfirmItsYouModal'
 import CredentialExchangeQueryModal from '../../src/modules/trust-tasks/components/CredentialExchangeQueryModal'
+import GuardianOfferSheet from '../../src/modules/trust-tasks/components/GuardianOfferSheet'
 import ContinuityCheckModal from '../../src/modules/vrc/components/ContinuityCheckModal'
 import LateStepReadyModal from '../../src/modules/vrc/components/LateStepReadyModal'
 import LocalityPreflightModal from '../../src/modules/vrc/components/LocalityPreflightModal'
@@ -66,6 +67,9 @@ import { roleOfferPromptStore } from '../../src/modules/trust-tasks/approverRole
 import { setTrustedApproversEnabled } from '../../src/modules/trust-tasks/module/trustedApproversFlag'
 import { confirmPromptStore } from '../../src/modules/trust-tasks/confirmItsYou'
 import { setConfirmItsYouEnabled } from '../../src/modules/trust-tasks/module/confirmItsYouFlag'
+import { guardianOfferPrompts } from '../../src/modules/trust-tasks/guardianOffer'
+import { setGuardianOffersEnabled } from '../../src/modules/trust-tasks/module/guardianOffersFlag'
+import { setStateVerifiedApproversEnabled } from '../../src/modules/trust-tasks/module/stateVerifiedApproversFlag'
 
 /**
  * Everything RootStack renders inside `if (shouldRenderMainStack && agent)`:
@@ -81,6 +85,7 @@ const ABOVE_THE_NAVIGATORS = [
   'ConfirmItsYouModal',
   'ContinuityCheckModal',
   'CredentialExchangeQueryModal',
+  'GuardianOfferSheet',
   'LateStepReadyModal',
   'LocalityPreflightModal',
   'MainStack',
@@ -131,6 +136,7 @@ describe('what RootStack mounts above the navigators', () => {
     ['CredentialExchangeQueryModal', CredentialExchangeQueryModal],
     ['ApproverOfferModal', ApproverOfferModal],
     ['ConfirmItsYouModal', ConfirmItsYouModal],
+    ['GuardianOfferSheet', GuardianOfferSheet],
   ])('%s', (_name, Component) => {
     it('mounts with no safe-area provider in scope', () => {
       // BasicAppContext carries the container, the three agent-backed providers
@@ -181,6 +187,39 @@ describe('what RootStack mounts above the navigators', () => {
       expect(view.UNSAFE_root.findAllByType(Modal).length).toBeGreaterThan(0)
     } finally {
       roleOfferPromptStore.clear()
+      setTrustedApproversEnabled(false)
+    }
+  })
+
+  it('mounts GuardianOfferSheet SHOWING an offer with no safe-area provider in scope', () => {
+    // Its row above renders nothing (the switches are off by default). Here all three are on and an offer waits.
+    setTrustedApproversEnabled(true)
+    setStateVerifiedApproversEnabled(true)
+    setGuardianOffersEnabled(true)
+    guardianOfferPrompts.set({
+      connectionId: 'conn-guard',
+      guardian: 'Jordan',
+      actions: ['joinCommunity', 'changeApprovers'],
+      challenge: 'x'.repeat(43),
+      threadId: 't-guard',
+      request: {},
+      receivedAt: new Date().toISOString(),
+      state: 'open',
+      verdict: { ok: true, root: 'r', state: 'Example State', checkedAt: new Date().toISOString() },
+    })
+    try {
+      const view = render(
+        <BasicAppContext>
+          <ActivityProvider>
+            <GuardianOfferSheet />
+          </ActivityProvider>
+        </BasicAppContext>
+      )
+      expect(view.UNSAFE_root.findAllByType(Modal).length).toBeGreaterThan(0)
+    } finally {
+      guardianOfferPrompts.clear()
+      setGuardianOffersEnabled(false)
+      setStateVerifiedApproversEnabled(false)
       setTrustedApproversEnabled(false)
     }
   })
