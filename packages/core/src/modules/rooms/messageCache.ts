@@ -41,7 +41,7 @@ import { onRoomsListed } from './useRoomRows'
  *
  * @module rooms/messageCache
  */
-export const ROOMS_MESSAGE_CACHE: { on: boolean; remoteOff: boolean } = { on: true, remoteOff: false }
+export const ROOMS_MESSAGE_CACHE: { on: boolean; remoteOff: boolean } = { on: true, remoteOff: true }
 
 export function isMessageCacheOn(): boolean {
   return ROOMS_MESSAGE_CACHE.on === true && ROOMS_MESSAGE_CACHE.remoteOff === false
