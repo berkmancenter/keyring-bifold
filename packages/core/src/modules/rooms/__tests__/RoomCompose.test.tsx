@@ -176,7 +176,9 @@ describe('posting to a room', () => {
       await send(tree)
       await waitFor(() => expect(tree.queryByTestId(id('RoomPostSending'))).toBeNull())
       await waitFor(() => expect(tree.getAllByText(words)).toHaveLength(1))
-      // It was drawn (control), and in no draw more than once.
+      // It was drawn (control), and in no draw more than once. The greatest of the draws, on purpose: if the list's
+      // draws stop being seen at all, there are none, their greatest is -Infinity, and this fails. `draws.every(...)`
+      // would pass on none, for ever.
       expect(Math.max(...draws)).toBe(1)
     } finally {
       drawn.mockRestore()
