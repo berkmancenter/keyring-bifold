@@ -43,6 +43,7 @@ import { emptyMessageCache, isCacheWallet } from '../messageCache'
 import { failureCategory, logRef } from '../roomsLogWords'
 import { takesRepliesOrReactions } from '../recordPermits'
 import { keepRecordsOn, recordsWereOnAt } from '../recordsWereOn'
+import { emptyMessageCache, isCacheWallet } from '../messageCache'
 import type {
   AgentGrant,
   CommunityRoomMember,
@@ -452,6 +453,11 @@ export class AgentRoomsService implements RoomsService {
   public readonly label = 'rooms: the person’s own agent and communities'
   public get runsOn(): object | undefined {
     return this.backend.runsOn
+  }
+
+  /** The backend's communities, read from the wallet alone: a room's kept posts are drawn by them before it is known. */
+  public async localCommunities(): Promise<ReadonlyArray<{ did: string; personaDid: string }>> {
+    return (await this.backend.communities()).map(({ did, personaDid }) => ({ did, personaDid }))
   }
 
   /** What the agent serves, when it was read, and the backend's stamp from before the read (`agentServedStamp`). */
@@ -873,7 +879,15 @@ export class AgentRoomsService implements RoomsService {
   private async known(roomId: string): Promise<KnownRoom> {
     if (!this.rooms.has(roomId)) await this.listMyRooms()
     const room = this.rooms.get(roomId)
-    if (!room) throw new Error(`no room ${roomId} among this member's rooms`)
+    if (!room) {
+      // Listed whole and not among them: its kept posts go too (rooms/messageCache), or a cold start would open on them
+      // again before each read says so. Not when the listing held a community back for another identity: the room may
+      // be among those.
+      const wallet = this.backend.runsOn
+      if (this.keptBack.length === 0 && isCacheWallet(wallet))
+        void emptyMessageCache(wallet, { room: roomId }, 'not listed').catch(() => undefined)
+      throw new Error(`no room ${roomId} among this member's rooms`)
+    }
     return room
   }
 
