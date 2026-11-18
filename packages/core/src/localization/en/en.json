@@ -3387,7 +3387,6 @@
     "PostArrivedLate": "Arrived late. It says it was written {{when}}.",
     "PostsFailed": "Couldn't read this room's messages. Pull down to try again.",
     "RefreshFailed": "Couldn't refresh",
-    "FromLastTime": "From last time",
     "FromLastTimeUpdating": "From last time · Updating…",
     "PostsNone": "No messages yet.",
     "NotesWaiting_one": "{{count}} note in this room",

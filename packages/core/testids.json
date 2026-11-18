@@ -1285,7 +1285,7 @@
     "RoomFilesReading": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFilesUnavailable": ["src/modules/rooms/components/RoomFilesTab.tsx"],
     "RoomFloatingDay": ["src/modules/rooms/screens/Room.tsx"],
-    "RoomFromLastTime": ["src/modules/rooms/screens/Room.tsx"],
+    "RoomFromLastTime": ["src/modules/rooms/components/RoomFromLastTime.tsx"],
     "RoomHeader": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomHostConflict": ["src/modules/rooms/screens/Room.tsx"],
     "RoomIdentityAddName": ["src/modules/rooms/components/RoomIdentitySheet.tsx"],
@@ -1433,7 +1433,6 @@
       "src/modules/rooms/screens/RoomInfo.tsx",
       "src/modules/rooms/screens/RoomPart.tsx"
     ],
-    "RoomUnconfirmed": ["src/modules/rooms/screens/Room.tsx"],
     "RoomWhere": ["src/modules/rooms/components/RoomHeader.tsx"],
     "RoomWithdrawBackdrop": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
     "RoomWithdrawConfirm": ["src/modules/rooms/components/RoomWithdrawSheet.tsx"],
