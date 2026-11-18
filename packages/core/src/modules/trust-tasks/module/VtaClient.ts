@@ -1220,7 +1220,13 @@ export class VtaClient {
     // takes it, and the rest of the session goes one at a time.
     const [only] = this.pendings.size === 1 ? [...this.pendings] : []
     const sentAt = only ? only[1].sentAt : Math.min(...[...this.pendings.values()].map((p) => p.sentAt))
-    const stale = typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < sentAt - 5000
+    // One with no time at all cannot be told from an old one. While this connect's drain may still be arriving
+    // (the wait ended early, `drainSettlesAt`), it is taken for old: before that wait could end early, such a reply
+    // was handed over while nothing was asked yet and so answered nothing. After that time, as before.
+    const untimedWhileDraining = typeof plaintext.created_time !== 'number' && Date.now() < this.drainSettlesAt
+    const stale =
+      untimedWhileDraining ||
+      (typeof plaintext.created_time === 'number' && plaintext.created_time * 1000 < sentAt - 5000)
     if (stale) {
       this.options.onInbound?.(plaintext)
       return
@@ -1349,6 +1355,12 @@ export class VtaClient {
   private connecting?: Promise<void>
 
   /**
+   * Until when (ms) a reply with no thread and no time is taken for old: set when a connect's drain wait ended early
+   * (connectDrainSwitch), to when the whole wait would have ended. 0: never ended early, or switched off.
+   */
+  private drainSettlesAt = 0
+
+  /**
    * One connect at a time: back in the foreground, the foreground handler and the dropped-session reconnect both
    * called this in the same moment, each found no open socket, and each opened a session as the same DID (report
    * EFNN-34F9, 11-17). A second caller now joins the first, and gets its outcome.
@@ -1451,6 +1463,9 @@ export class VtaClient {
         : undefined
     const ended = await (early ? Promise.race([early, ceiling]) : ceiling)
     if (timer) clearTimeout(timer)
+    // Ended early: until the whole drain time has passed, what was queued may still be arriving (a queue larger than
+    // one delivery, a mediator slow to send the rest). `deliver` is stricter about an unthreaded reply until then.
+    this.drainSettlesAt = ended === 'answered' ? began + ceilingMs : 0
     if (early)
       this.agent.config.logger.info(
         ended === 'answered'

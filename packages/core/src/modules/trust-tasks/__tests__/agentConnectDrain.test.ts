@@ -202,4 +202,61 @@ describe('a stale reply that arrives after the wait ended early', () => {
     await asked
     expect(answer).toMatchObject({ did: PHONE })
   })
+
+  describe('a reply with no thread and no time, from an agent that does not thread', () => {
+    const untimed = () =>
+      mockDrain.onMessage?.({
+        type: ENVELOPE,
+        body: { type: `${WHOAMI}#response`, payload: { did: 'did:peer:2.old' } },
+      })
+    /** Connect, with the wait ending at `at` ms (or at the ceiling when undefined), then ask whoami. */
+    async function askedAfter(at: number | undefined) {
+      const client = newClient()
+      const c = connecting(client)
+      if (at === undefined) await jest.advanceTimersByTimeAsync(2000)
+      else {
+        await jest.advanceTimersByTimeAsync(at)
+        mockDrain.answered()
+        await jest.advanceTimersByTimeAsync(0)
+      }
+      await c.done
+      let answer: unknown
+      void client.whoAmI(5000).then(
+        (a) => void (answer = a),
+        (e) => void (answer = e)
+      )
+      await jest.advanceTimersByTimeAsync(0)
+      return { answer: () => answer }
+    }
+
+    it('is not taken while the drain may still be arriving (the wait ended early)', async () => {
+      const a = await askedAfter(100)
+      untimed()
+      await jest.advanceTimersByTimeAsync(10)
+      expect(a.answer()).toBeUndefined()
+    })
+
+    it('CONTROL: once the whole drain time has passed, it is taken as before', async () => {
+      const a = await askedAfter(100)
+      await jest.advanceTimersByTimeAsync(1900) // 2000 ms since the wait began
+      untimed()
+      await jest.advanceTimersByTimeAsync(10)
+      expect(a.answer()).toMatchObject({ did: 'did:peer:2.old' })
+    })
+
+    it('CONTROL: when the wait ran its whole time, it is taken as before', async () => {
+      const a = await askedAfter(undefined)
+      untimed()
+      await jest.advanceTimersByTimeAsync(10)
+      expect(a.answer()).toMatchObject({ did: 'did:peer:2.old' })
+    })
+
+    it('CONTROL: with the switch off, it is taken as before', async () => {
+      CONNECT_DRAIN_EARLY.remoteOff = true
+      const a = await askedAfter(undefined)
+      untimed()
+      await jest.advanceTimersByTimeAsync(10)
+      expect(a.answer()).toMatchObject({ did: 'did:peer:2.old' })
+    })
+  })
 })
