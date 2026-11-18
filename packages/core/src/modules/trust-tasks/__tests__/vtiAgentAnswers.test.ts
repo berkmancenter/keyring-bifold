@@ -151,7 +151,13 @@ import {
 import { fakeAgent } from '../../../../__tests__/helpers/cardVault'
 import { VTI_JOIN_STATUS_LATE_EVENT } from '../module/communityChanged'
 import { OFFERS_LIST_TYPES } from '../../rooms/real/wire'
-import { dropAllOwnSessions, dropOwnSession, keepOwnSession, ownSessionFor } from '../module/vtiOwnSessions'
+import {
+  dropAllOwnSessions,
+  dropOwnSession,
+  keepOwnSession,
+  ownSessionFor,
+  ownSessionOpening,
+} from '../module/vtiOwnSessions'
 
 const logger = { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() }
 const agent = { config: { logger } } as never
@@ -318,7 +324,24 @@ describe('an answer a listener heard for the shared session', () => {
       orphanOf('https://trusttasks.org/spec/vetting/request/0.1#response'),
     ],
     ['an answer to a write nothing waits for', orphanOf(`${SUBMIT}#response`)],
-    ['a refusal', orphanOf('https://trusttasks.org/spec/trust-task-error/0.1')],
+    ['a refusal that threads on no ask of this phone’s', orphanOf('https://trusttasks.org/spec/trust-task-error/0.1')],
+    [
+      'a refusal that names no thread',
+      {
+        id: 'urn:uuid:bare-refusal',
+        type: 'https://trusttasks.org/spec/trust-task-error/0.6',
+        body: { type: 'https://trusttasks.org/spec/trust-task-error/0.6', payload: { code: 'malformed' } },
+      },
+    ],
+    [
+      'a problem-report that threads on no ask',
+      {
+        id: 'urn:uuid:stray-problem',
+        type: 'https://didcomm.org/report-problem/2.0/problem-report',
+        pthid: 'urn:uuid:no-such-request',
+        body: { code: 'e.p.msg.unsupported' },
+      },
+    ],
     [
       'an answer to a read that names no thread',
       { id: 'urn:uuid:bare', type: `${MEMBERSHIPS}#response`, body: { type: `${MEMBERSHIPS}#response`, payload: {} } },
@@ -1127,6 +1150,111 @@ describe('an ask as an identity, over its own session', () => {
     await expect(
       vtiAgent.askAs(persona('did:webvh:p:shared-self'), community, STATUS, {}, 1000)
     ).rejects.toBeInstanceOf(VtiNoOwnSession)
+  })
+
+  // ZN6C-WNXG (11-18): a directory lookup over an identity's own session was refused in half a second, the refusal was
+  // left on the mediator as "the shared session's", and the lookup waited 30 s as "no answer". A member's card never
+  // showed, since the lookups after it were never asked.
+  describe('a refusal of an ask sent over the identity’s own session', () => {
+    const DIRECTORY = 'https://trusttasks.org/spec/vtc/directory/query/0.1'
+    const refusalOn = (sent: Sent, code: string) => ({
+      id: `urn:uuid:refused-${sent.id}`,
+      type: 'https://trusttasks.org/spec/trust-task-error/0.6',
+      from: 'did:webvh:c:own-refused',
+      thid: sent.id,
+      body: {
+        type: 'https://trusttasks.org/spec/trust-task-error/0.6',
+        threadId: sent.body.threadId,
+        payload: { code, message: 'no directory entry for that DID is visible to this caller' },
+      },
+    })
+
+    it('heard on its listener, is given to the ask at once, as the refusal it is, and said with its code', async () => {
+      const community = 'did:webvh:c:own-refused'
+      await connectTo(community, 'didcomm', 'did:webvh:p:refused-shared')
+      const mine = own()
+      keepOwnSession('did:webvh:p:refused-own', mine.session)
+      logger.warn.mockClear()
+      const asked = vtiAgent
+        .communityTaskAs(persona('did:webvh:p:refused-own'), community, DIRECTORY, {})
+        .catch((e: unknown) => e)
+      await until(() => mine.sent.length === 1)
+      expect(vtiAgent.answerFromListener('did:webvh:p:refused-own', refusalOn(mine.sent[0], 'notFound') as never)).toBe(
+        'answered'
+      )
+      const outcome = (await asked) as { name?: string; code?: string }
+      expect(outcome).not.toBeInstanceOf(VtiSentNoAnswer)
+      expect([outcome.name, outcome.code]).toEqual(['VtiRefusal', 'notFound'])
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/refused vtc\/directory\/query: notFound — no directory/)
+      )
+    })
+
+    it('a problem-report threaded on the ask answers it too', async () => {
+      const community = 'did:webvh:c:own-problem'
+      await connectTo(community, 'didcomm', 'did:webvh:p:problem-shared')
+      const mine = own()
+      keepOwnSession('did:webvh:p:problem-own', mine.session)
+      const asked = vtiAgent
+        .communityTaskAs(persona('did:webvh:p:problem-own'), community, DIRECTORY, {})
+        .catch((e: unknown) => e)
+      await until(() => mine.sent.length === 1)
+      const report = {
+        id: 'urn:uuid:problem',
+        type: 'https://didcomm.org/report-problem/2.0/problem-report',
+        pthid: mine.sent[0].id,
+        body: { code: 'e.p.msg.unsupported', comment: 'unsupported message type' },
+      }
+      expect(vtiAgent.answerFromListener('did:webvh:p:problem-own', report as never)).toBe('answered')
+      // The refusal it stands for, not an empty answer.
+      expect(((await asked) as { name?: string }).name).toBe('VtiRefusal')
+    })
+
+    it('heard on another identity’s listener, it is not that ask’s: it stays where it is (control)', async () => {
+      const community = 'did:webvh:c:own-refused-other'
+      await connectTo(community, 'didcomm', 'did:webvh:p:refused-shared-2')
+      const mine = own()
+      keepOwnSession('did:webvh:p:refused-own-2', mine.session)
+      const asked = vtiAgent.askAs(persona('did:webvh:p:refused-own-2'), community, DIRECTORY, {}, 300)
+      await until(() => mine.sent.length === 1)
+      expect(
+        vtiAgent.answerFromListener('did:webvh:p:someone-else', refusalOn(mine.sent[0], 'notFound') as never)
+      ).toBeUndefined()
+      await expect(asked).resolves.toBeUndefined()
+    })
+  })
+
+  // A listing waits for a listener that is opening (#1114, QG4P-MQCT). What the wait must never end in: the identity's
+  // own session used while the shared session is signed in as that identity, two sockets on one DID again.
+  describe('a listing’s wait for an own session that is opening', () => {
+    const opening = (did: string) => {
+      let listens!: () => void
+      ownSessionOpening(did, new Promise<void>((resolve) => (listens = resolve)))
+      return () => (keepOwnSession(did, own().session), listens())
+    }
+
+    it('ends open once the listener listens', async () => {
+      await connectTo('did:webvh:c:wait-open', 'didcomm', 'did:webvh:p:wait-shared')
+      const listens = opening('did:webvh:p:wait-own')
+      const waited = vtiAgent.ownSessionOnceOpen('did:webvh:p:wait-own', 5000)
+      listens()
+      await expect(waited).resolves.toBe(true)
+    })
+
+    it('ends not open when the shared session signed in as that identity during the wait, though its listener listened', async () => {
+      await connectTo('did:webvh:c:wait-taken', 'didcomm', 'did:webvh:p:wait-other')
+      const listens = opening('did:webvh:p:wait-taken')
+      const waited = vtiAgent.ownSessionOnceOpen('did:webvh:p:wait-taken', 5000)
+      await connectTo('did:webvh:c:wait-taken', 'didcomm', 'did:webvh:p:wait-taken')
+      listens()
+      await expect(waited).resolves.toBe(false)
+    })
+
+    it('does not wait at all for the identity the shared session is signed in as (control)', async () => {
+      await connectTo('did:webvh:c:wait-self', 'didcomm', 'did:webvh:p:wait-self')
+      opening('did:webvh:p:wait-self')
+      await expect(vtiAgent.ownSessionOnceOpen('did:webvh:p:wait-self', 60_000)).resolves.toBe(false)
+    })
   })
 
   // ee's read of #1022 (11-12): the listener can let go of the identity while its ask is out. A poll signs the shared

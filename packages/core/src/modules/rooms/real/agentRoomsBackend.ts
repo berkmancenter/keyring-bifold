@@ -26,6 +26,8 @@ import { GenericRecordsTspPeerRevisionStore } from '../../trust-tasks/module/vti
 import { isRoomLiveDeliveryOn } from '../liveDeliverySwitch'
 import { isRoomRecordSendingOn } from '../recordSendingSwitch'
 import { afterLeavingCommunity } from '../roomsLeave'
+import { bindMessageCache, standingMemberships } from '../messageCache'
+import { cardStandingOf } from '../../trust-tasks/module/vtiCardStanding'
 
 import type { RoomsBackend, RoomsCommunity, RoomsUploadBackend } from './agentRoomsService'
 import { storedConsentHolds } from './consentHolds'
@@ -88,7 +90,14 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     // Sessions phase B: the identity's own session, where it is open, so no sign-in or hold of the shared session is
     // needed and one community's ask no longer waits on another's (rooms-slow §8b). Only a session that turned out not
     // to be open falls back, and that is said before anything is sent: a write never goes out twice.
-    if (own && isSessionsPerIdentityOn() && vtiAgent.ownSessionOpen(persona.did)) {
+    // A listing also waits, bounded, for that session while it is opening (the seconds after launch): signing the
+    // shared session in as the same identity then put two sockets on one DID and lost the answer (QG4P-MQCT, 11-17).
+    // Never an accept or a write: those go at once, as before.
+    if (
+      own &&
+      isSessionsPerIdentityOn() &&
+      (vtiAgent.ownSessionOpen(persona.did) || (poll && (await vtiAgent.ownSessionOnceOpen(persona.did))))
+    ) {
       try {
         return await own(persona)
       } catch (error) {
@@ -107,6 +116,26 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     return c
   }
 
+  // The rooms' kept posts answer to this agent, and are swept as it starts: a copy whose membership no longer stands (a
+  // removal or an identity let go with the app closed) is emptied before any room can show it (rooms/messageCache).
+  void bindMessageCache(
+    agent,
+    async () => {
+      const out: { communityDid: string; personaDid: string }[] = []
+      for (const membership of await communityStore.listMemberships()) {
+        if (membership.removal) continue
+        // A card the community revoked, as its status list was last read, stands no more, notice or not (b0's finding).
+        if (cardStandingOf(membership.vmc).state === 'revoked') continue
+        const persona = await personaForCommunity(identityStore, communityStore, membership.communityDid)
+        if (persona?.did === membership.personaDid)
+          out.push({ communityDid: membership.communityDid, personaDid: membership.personaDid })
+      }
+      // An agent that no longer accepts this phone leaves no membership standing here.
+      return standingMemberships(vtaAgent.getState().link.kind, out)
+    },
+    (line) => agent.config?.logger?.warn?.(line)
+  )
+
   return {
     runsOn: agent,
     agentLinked: () => vtaAgent.agentAddress() !== undefined,
@@ -115,16 +144,34 @@ export function createAgentRoomsBackend(agent: Agent, options: { mediatorDid?: s
     consentHolds: storedConsentHolds(() => vtaAgent.agentAddress()),
     // A watched room's change, pushed by the linked agent on this phone's own channel: no identity switch to hear it.
     onRoomSignal: (listener) => vtaAgent.onRoomSignal(listener),
-    agentServedTypes: async () => (await vtaAgent.roomsClient(agent))?.supportedTypes(),
-    agentTask: async (type, payload, options) =>
-      (await client()).task(
-        type,
-        payload,
-        options?.timeoutMs,
-        undefined,
-        undefined,
-        options?.waitForConsent === undefined ? undefined : { waitForConsent: options.waitForConsent }
-      ),
+    // The agent's last answer, asked again behind the session's first work (agentLastKnownSwitch.ts); the stamp
+    // moves when asking again found a different one.
+    agentServedTypes: () => vtaAgent.servedTypes(agent),
+    agentServedStamp: () => vtaAgent.servedTypesStamp(),
+    agentTask: async (type, payload, options) => {
+      try {
+        return await (
+          await client()
+        ).task(
+          type,
+          payload,
+          options?.timeoutMs,
+          undefined,
+          undefined,
+          options?.waitForConsent === undefined && !options?.inView
+            ? undefined
+            : {
+                ...(options?.waitForConsent === undefined ? {} : { waitForConsent: options.waitForConsent }),
+                // The open room's read: it may go ahead of the queue (vtaReadLane VTA_ROOM_IN_VIEW_FIRST).
+                ...(options?.inView ? { priority: { first: false, inView: true } } : {}),
+              }
+        )
+      } catch (error) {
+        // Refused as a task the agent does not serve: what was kept of its answer is asked for again now.
+        vtaAgent.servedRefused(agent, error)
+        throw error
+      }
+    },
 
     // The communities this phone holds a membership in under the agent it acts with now, as the
     // persona that holds it. A membership the community has ended (its removal notice) is left out.

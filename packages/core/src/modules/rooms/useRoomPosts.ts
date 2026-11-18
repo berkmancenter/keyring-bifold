@@ -25,6 +25,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useAgentSession } from './agentSession'
 import { newestFirst, postOf, type RoomPost, withRepliesToReactions } from './roomPosts'
+import { inertFlags, toInertText } from './inertText'
+import { dropKeptListing, keepListing, keptListing } from './keptListings'
+import { type CachedPost, emptyMessageCache, isCacheWallet, keepRoomPosts, readRoomPosts } from './messageCache'
+import { logRef } from './roomsLogWords'
 import {
   RECORD_UNOPENED_REASONS,
   RoomsRefused,
@@ -80,6 +84,12 @@ export interface RoomPosts {
   pollFailed: boolean
   /** Asks for new posts at once, without waiting out the ticks a failure skips. Nothing while the room isn't polled. */
   pollNow: () => void
+  /**
+   * The posts drawn are from before this opening: this run's kept listing (keptListings) or the wallet's kept copy
+   * (messageCache), and the room's first listing has not answered yet. Its answer replaces them; its failure takes them
+   * down (posts undefined, `failed`).
+   */
+  unconfirmed: boolean
   /**
    * The member's own writes that succeeded and that the posts do not carry yet (pendingRecordWrites `written`). While
    * any is, a watched room is polled every {@link ROOM_POLL_MS} again, not at {@link ROOM_WATCHED_POLL_MS}: the host
@@ -151,6 +161,59 @@ const unopenedReason = (e: unknown): RecordUnopenedReason | undefined =>
     ? RECORD_UNOPENED_REASONS.find((r) => r === e.code)
     : undefined
 
+/** How long a room's drawn posts settle before they are kept in the wallet (rooms/messageCache). */
+export const MESSAGE_KEEP_DELAY_MS = 2_000
+
+/**
+ * A listing seeded from the wallet's kept posts (rooms/messageCache), with each post's words put where a read would
+ * have put them, so the posts draw at once and nothing is read for them. Marked unverified: the room's listing that
+ * follows replaces it, verdicts and all.
+ */
+function seedOf(posts: readonly CachedPost[], read: Map<string, Note>): Listing {
+  const notes: NoteSummary[] = posts.map((post) => {
+    const summary: NoteSummary = {
+      key: post.key,
+      version: post.version,
+      ...(post.author ? { author: { did: post.author } } : {}),
+      updatedAt: post.writtenAt,
+      status: 'active',
+      pinned: false,
+    }
+    const body = toInertText(post.body)
+    const verdict = post.verdict === 'consistent' || post.verdict === 'conflict' ? post.verdict : 'unverified'
+    read.set(readKey(summary), {
+      ...summary,
+      body,
+      flags: inertFlags(body),
+      check: { verdict, detail: '' },
+      ...(post.kind ? { kind: post.kind } : {}),
+      ...(post.inReplyTo ? { inReplyTo: { key: post.inReplyTo } } : {}),
+      writtenAt: post.writtenAt,
+    })
+    return summary
+  })
+  return { notes: newestFirst(notes), check: { verdict: 'unverified', detail: '' }, complete: false }
+}
+
+/**
+ * A drawn post as kept: only one the member was shown in full, read and not refused, never one on its way, a file, or
+ * a withdrawn one. Its words are the post's own; nothing of a file is kept.
+ */
+function keptOf(post: RoomPost): CachedPost | undefined {
+  const writtenAt = post.writtenAt ?? post.at?.toISOString()
+  if (!writtenAt || post.retracted || post.unread || post.refused || post.delivery || post.files.length > 0)
+    return undefined
+  return {
+    key: post.key,
+    version: post.version,
+    ...(post.kind ? { kind: post.kind } : {}),
+    ...(post.author?.did ? { author: post.author.did } : {}),
+    writtenAt,
+    body: String(post.text),
+    ...(post.inReplyTo?.key ? { inReplyTo: post.inReplyTo.key } : {}),
+  }
+}
+
 /**
  * A listing, counted in `inFlight` until it settles, even when the call throws before it returns a promise: left
  * counted, every later poll would be skipped for the life of the screen.
@@ -178,15 +241,43 @@ export function useRoomPosts(
    * The posts a page is counted in, when the screen draws only some of them: a room's chat leaves its notes out, so
    * its page is POSTS_PAGE chat posts, and the notes among them are read too. Every post counts when absent.
    */
-  counts?: (post: RoomPost) => boolean
+  counts?: (post: RoomPost) => boolean,
+  options: {
+    /**
+     * Keep this room's posts in the wallet, and open on them (rooms/messageCache): the chat of an open or attributed
+     * room, by its community and end. Absent for a private room or one of unknown tier, and for every other screen.
+     */
+    messageCache?: { communityDid: string; validUntil?: string }
+  } = {}
 ): RoomPosts {
   const [listing, setListing] = useState<Listing>()
+  // The room's last listing this run, when one is kept (keptListings): shown at once when the room can be listed, while
+  // its first listing reads behind it. A seed that first listing cannot confirm is dropped.
+  const seeded = useRef<Listing | undefined>(undefined)
+  // The room's first listing of this opening answered: a kept copy read after it is never shown.
+  const confirmed = useRef(false)
+  const cacheNow = useRef(options.messageCache)
+  cacheNow.current = options.messageCache
+  const actingAsNow = useRef(actingAs)
+  actingAsNow.current = actingAs
   // Records read and drawn: `wanted` counted posts, and as many more records as it takes to reach them.
   const [shown, setShown] = useState(POSTS_PAGE)
   const wanted = useRef(POSTS_PAGE)
   const countsNow = useRef(counts)
   countsNow.current = counts
   const [posts, setPosts] = useState<RoomPost[]>()
+  // When this room was opened here, and whether the first posts shown since were said: how long a room takes to open
+  // was in no report (11-17). Once per opening, by the room's short ref and a count; never a post's words. Only posts
+  // drawn from a listing read since it opened are its own: the listing held then is another room's, when the room
+  // changes under the same screen, and its posts are drawn again for a moment.
+  const opened = useRef<{ roomId: string; at: number; said: boolean; listing?: Listing }>(undefined)
+  if (opened.current?.roomId !== roomId) {
+    // A kept listing is the room's it was taken for: another room under the same screen may take its own.
+    if (opened.current) seeded.current = undefined
+    opened.current = { roomId, at: Date.now(), said: false, listing: opened.current ? listing : undefined }
+  }
+  /** The posts last drawn, and the listing they were drawn from. */
+  const drawnFrom = useRef<{ posts: RoomPost[]; listing: Listing }>(undefined)
   const [failed, setFailed] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -242,16 +333,52 @@ export function useRoomPosts(
     let current = true
     const sentOn = openedAt.current
     askedAt.current = Date.now()
+    confirmed.current = false
+    if (!seeded.current && (!listingNow.current || listingNow.current === opened.current?.listing)) {
+      const kept = keptListing<Listing>(service, roomId)
+      if (kept) {
+        seeded.current = kept
+        setListing(kept)
+      }
+    }
+    // Else the wallet's kept copy of this room, when there is one (rooms/messageCache): it checks the switch, the
+    // biometric unlock, the identity, the room's end and the journal itself.
+    const wallet = service.runsOn
+    const cache = cacheNow.current
+    const me = actingAsNow.current
+    if (!seeded.current && !listingNow.current && cache && me && isCacheWallet(wallet))
+      readRoomPosts(wallet, me.did, roomId).then(
+        (copy) => {
+          if (!current || !copy || confirmed.current || seeded.current) return
+          const seed = seedOf(copy.posts, reads.current.notes)
+          seeded.current = seed
+          setListing(seed)
+        },
+        () => undefined
+      )
     counted(listingsInFlight, () => service.listNotes(roomId)).then(
       (list) => {
         skips.current = 0
         if (!current) return
-        setListing(listingOf(list))
+        confirmed.current = true
+        const full = listingOf(list)
+        keepListing(service, roomId, full)
+        setListing(full)
         setFailed(false)
         notePoll(false)
       },
-      () => {
+      (e: unknown) => {
         if (!current) return
+        // A kept listing nothing has confirmed is not shown: the room may be left since, or no longer readable.
+        dropKeptListing(service, roomId)
+        // Refused: the wallet's copy goes too, whatever drew it (rooms/messageCache).
+        if (e instanceof RoomsRefused && isCacheWallet(wallet))
+          void emptyMessageCache(wallet, { room: roomId }, 'refused').catch(() => undefined)
+        if (seeded.current && listingNow.current === seeded.current) {
+          seeded.current = undefined
+          setListing(undefined)
+          setPosts(undefined)
+        }
         listFailedOn.current = sentOn
         setFailed(true)
         setRefreshing(false)
@@ -301,7 +428,10 @@ export function useRoomPosts(
             const fullOn = openedAt.current
             counted(listingsInFlight, () => service.listNotes(roomId)).then(
               (full) => {
-                if (current) setListing(listingOf(full))
+                if (!current) return
+                const replaced = listingOf(full)
+                keepListing(service, roomId, replaced)
+                setListing(replaced)
               },
               () => {
                 skips.current = POLL_SKIPS_AFTER_FAILURE
@@ -315,6 +445,7 @@ export function useRoomPosts(
           // Armed again from what is held now: a signal's watch is spent, and a poll may have moved the room.
           if (current) service.watchRoom?.(roomId, newestVersion((merged?.listing ?? now)?.notes ?? []))
           if (!merged) return
+          keepListing(service, roomId, merged.listing)
           setListing(merged.listing)
           // New posts go first (the chat draws them at its bottom); the posts already shown stay shown.
           if (merged.added > 0) setShown((n) => n + merged.added)
@@ -362,10 +493,14 @@ export function useRoomPosts(
       return why ? { ...post, unreadWhy: why } : post
     }
     const postsOf = (notes: NoteSummary[]) => withRepliesToReactions(notes.map(postOfSummary))
-    const draw = (notes: NoteSummary[]) => setPosts(postsOf(notes))
+    const put = (drawn: RoomPost[]) => {
+      drawnFrom.current = { posts: drawn, listing }
+      setPosts(drawn)
+    }
+    const draw = (notes: NoteSummary[]) => put(postsOf(notes))
     const show = () => {
       const drawn = postsOf(page)
-      setPosts(drawn)
+      put(drawn)
       // A page short of the posts it is counted in, with records left, reads on by the shortfall. Only once a page
       // is read: on a private room a note's title is sealed with its body, so the listing cannot tell one. On an open
       // room the notes it can tell were never read, so a shortfall round reads only what may be a chat post.
@@ -433,6 +568,48 @@ export function useRoomPosts(
     }
   }, [service, roomId, listing, shown, actingAs])
 
+  useEffect(() => {
+    const opening = opened.current
+    const from = drawnFrom.current
+    if (!posts || !opening || opening.said || opening.roomId !== roomId) return
+    if (!from || from.posts !== posts || from.listing === opening.listing) return
+    opening.said = true
+    const kept = from.listing === seeded.current ? ' (kept listing)' : ''
+    service?.note?.(
+      `[Room] ${logRef(roomId)} opened: ${posts.length} posts shown in ${Date.now() - opening.at} ms${kept}`
+    )
+  }, [posts, roomId, service])
+
+  // In view: this room's reads go ahead of the agent's queue (RoomsService.roomInView), until it is not.
+  useEffect(() => {
+    if (!service?.roomInView || !enabled || !live) return
+    service.roomInView(roomId, true)
+    return () => service.roomInView?.(roomId, false)
+  }, [service, roomId, enabled, live])
+
+  // The posts the room's own listing drew, kept in the wallet once they settle (rooms/messageCache): never those drawn
+  // from a kept listing or the kept copy itself, and only the posts the screen counts (the chat's, for the chat).
+  useEffect(() => {
+    const cache = cacheNow.current
+    const me = actingAsNow.current
+    const wallet = service?.runsOn
+    if (!cache || !me || !posts || !listing || !isCacheWallet(wallet)) return
+    if (!confirmed.current || listing === seeded.current) return
+    const counted = countsNow.current
+    const kept = posts
+      .filter((post) => !counted || counted(post))
+      .map(keptOf)
+      .filter((post): post is CachedPost => !!post)
+    const timer = setTimeout(() => {
+      void keepRoomPosts(
+        wallet,
+        { personaDid: me.did, roomId, communityDid: cache.communityDid, validUntil: cache.validUntil },
+        kept
+      ).catch(() => undefined)
+    }, MESSAGE_KEEP_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [posts, listing, service, roomId])
+
   const loadOlder = useCallback(() => {
     setLoadingOlder(true)
     wanted.current += POSTS_PAGE
@@ -471,6 +648,7 @@ export function useRoomPosts(
     refresh,
     pollFailed: pollFailed && !session.reconnecting,
     pollNow,
+    unconfirmed: !!listing && listing === seeded.current,
     awaitWrites,
   }
 }

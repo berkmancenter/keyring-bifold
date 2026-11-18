@@ -29,7 +29,7 @@ import { purposeForDocumentType } from './proofPurpose'
 import { MEMBER_VMC, type MemberVmcReceipt } from './vtiMemberVmc'
 import { GenericRecordsCommunityStore } from './VtiCommunityStore'
 import type { VtiPersona } from './VtiIdentityStore'
-import { ownSessionFor, type OwnSession } from './vtiOwnSessions'
+import { ownSessionFor, ownSessionOnceOpen as heldOnceOpen, type OwnSession } from './vtiOwnSessions'
 import {
   advertisedMediatorDid,
   advertisedTspMediatorDid,
@@ -294,6 +294,12 @@ export interface VtiSignInRest {
  * 11-17 (ZAF5): one identity whose agent was gone held the turn for 20 minutes and every sign-in waited behind it.
  */
 export const VTI_SIGNIN_TURN_MS = 60_000
+/**
+ * How long a listing waits for its identity's own session while that session is opening (`ownSessionOnceOpen`). A
+ * launch's first listener listened 11–13 s after it started in 11-17's reports (the borrowed keys are fetched first),
+ * so less than that would fall back mid-open and bring the two-socket fight back.
+ */
+export const VTI_OWN_SESSION_OPENING_WAIT_MS = 15_000
 
 /**
  * A sign-in that held the turn longer than `VTI_SIGNIN_TURN_MS`: it is let go, and whatever it opens later is closed.
@@ -949,10 +955,14 @@ class VtiAgentController {
    * moved on before the answer came, so nothing collects as that persona: left on the mediator, it came back at every
    * drain (15 s) until the session's next turn as the persona (277.8, SHARED-SESSION-ORPHAN-REPLY).
    *
-   * - 'answered': the ask it threads on, sent as that persona, is given it, as `deliver` gives it.
+   * - 'answered': the ask it threads on, sent as that persona, is given it, as `deliver` gives it. A refusal threaded
+   *   on such an ask (a `trust-task-error`, or a DIDComm problem-report) answers it too: left on the mediator, the ask
+   *   waited out its clock as "no answer" while the community's reason sat unread, redelivered at every drain (a
+   *   directory lookup over an identity's own session, ZN6C-WNXG, 11-18).
    * - 'orphan': it threads on no ask, and answers a read (`VTI_READ_TASKS`): nothing waits for it and the read is asked
    *   again, so it may be dropped.
-   * - undefined: anything else stays the shared session's. A request, a refusal, a reply naming no thread (matched by
+   * - undefined: anything else stays the shared session's. A request, a refusal that threads on no ask this identity
+   *   sent, a reply naming no thread (matched by
    *   type, which a listener must not guess at), an ask of another identity, or an unclaimed answer to a write, whose
    *   only copy this may be (276.10: a vetting request taken by a listener was lost).
    *
@@ -962,7 +972,9 @@ class VtiAgentController {
   answerFromListener(did: string, received: DidCommV2PlaintextMessage): 'answered' | 'orphan' | undefined {
     const plaintext = unwrapBindingEnvelope(received)
     const type = String(plaintext.type ?? '')
-    if (!type.endsWith(RESPONSE_SUFFIX)) return undefined
+    const response = type.endsWith(RESPONSE_SUFFIX)
+    const refusal = type.startsWith(TASK_ERROR) || type === PROBLEM_REPORT
+    if (!response && !refusal) return undefined
     const threadId = (plaintext.body as { threadId?: unknown } | undefined)?.threadId
     const threaded = [threadId, plaintext.thid, plaintext.pthid].some((id) => typeof id === 'string' && id.length > 0)
     if (!threaded) return undefined
@@ -970,9 +982,19 @@ class VtiAgentController {
     const entry = this.askAnswered(plaintext)
     if (entry) {
       if (entry.did !== did) return undefined
-      this.settle(entry, plaintext)
+      // Said as `deliver` says a refusal it receives, with its code: a report then shows why, not only that.
+      if (type.startsWith(TASK_ERROR)) {
+        const words = refusalWordsOf(plaintext)
+        const who = isHiddenVettingType(entry.type) ? 'the community' : didPrefix(plaintext.from)
+        this.agent?.config?.logger?.warn?.(
+          `vtiAgent: ${who} refused ${taskName(entry.type)}: ${words.code}${words.message ? ` — ${words.message}` : ''}`
+        )
+      }
+      this.settle(entry, type === PROBLEM_REPORT ? problemReportAsRefusal(plaintext) : plaintext)
       return 'answered'
     }
+    // A refusal that threads on no ask of this phone's is never dropped here: it stays the shared session's.
+    if (!response) return undefined
     return isVtiReadTask(type.slice(0, -RESPONSE_SUFFIX.length)) ? 'orphan' : undefined
   }
 
@@ -1973,6 +1995,26 @@ class VtiAgentController {
   }
 
   /**
+   * `ownSessionOpen`, after waiting up to `maxMs` for a listener of `did`'s that is opening now. For listings only
+   * (rooms, polls): nothing is opening → no wait, and the caller asks the shared way exactly as before. The wait and
+   * how it ended are said once, so a report shows which path a launch's first listings took.
+   */
+  async ownSessionOnceOpen(did: string, maxMs = VTI_OWN_SESSION_OPENING_WAIT_MS): Promise<boolean> {
+    if (did === this.state.did) return false
+    if (ownSessionFor(did)) return true
+    const t0 = Date.now()
+    // Asked again after the wait: the shared session may have signed in as this identity meanwhile, and its own session
+    // used then would be a second socket for the DID.
+    const open = (await heldOnceOpen(did, maxMs)) !== undefined && did !== this.state.did
+    const waited = Date.now() - t0
+    if (open || waited >= 50)
+      releaseWarn(
+        `vtiAgent: a listing as ${didPrefix(did)} waited ${waited} ms for its own session: ${open ? 'open' : 'not open, asked the shared way'}`
+      )
+    return open
+  }
+
+  /**
    * `ask`, as `persona`, over that identity's own session (`ownSessionOpen`) rather than the shared one: no sign-in, no
    * hold, nothing taken from a step holding the shared session as another identity. Its answer comes back on the same
    * session and is given to this ask by `answerFromListener`, which matches the identity. DIDComm only for now: the TSP
@@ -2619,12 +2661,17 @@ class VtiAgentController {
    */
   async status(
     communityDid: string,
-    options: { requestId?: string; resendCredentials?: boolean } = {}
+    options: { requestId?: string; resendCredentials?: boolean; as?: VtiPersona } = {}
   ): Promise<JoinRequestStatus | undefined> {
-    const answer = await this.ask(communityDid, STATUS, {
+    const asked = {
       ...(options.requestId ? { requestId: options.requestId } : {}),
       ...(options.resendCredentials ? { resendCredentials: true } : {}),
-    })
+    }
+    // `as`: over that identity's own session (`askAs`: no sign-in, nothing taken from the shared session), for a look
+    // nobody asked for (vtiJoinWatch). Throws `VtiNoOwnSession` when it has none. Without it, exactly as before.
+    const answer = options.as
+      ? await this.askAs(options.as, communityDid, STATUS, asked)
+      : await this.ask(communityDid, STATUS, asked)
     if (!answer) throw this.sentNoAnswer(communityDid, STATUS)
     const refusal = refusalOf(answer)
     if (refusal) {

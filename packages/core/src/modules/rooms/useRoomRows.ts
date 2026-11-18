@@ -44,11 +44,22 @@ import { useFocusEffect } from '@react-navigation/native'
 import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import { AppState } from 'react-native'
 
+import { RUN_STARTED_AT } from '../../utils/runStart'
 import { onSessionOpened } from './agentSession'
-import type { InertText } from './inertText'
+import { toInertText, type InertText } from './inertText'
+import { askOffersAgain } from './useRoomOffersCount'
 import { failureCategory, logRef } from './roomsLogWords'
+import {
+  emptyRowsAtStart,
+  isRowsAtStartOn,
+  isRowsWallet,
+  keepRowsAtStart,
+  readRowsAtStart,
+  type RowAtStart,
+} from './rowsAtStart'
 import { isNote, newestFirst, placeOf, postOf } from './roomPosts'
 import type { Identity, NoteSummary, RoomsService, RoomSummary } from './types'
+import { isRoomWatchWheneverOpenOn } from './watchWheneverOpenSwitch'
 
 /** While Messages is in view: about the offers poll's idle pace, never faster. */
 export const ROWS_POLL_MS = 120_000
@@ -153,6 +164,18 @@ const feed: Feed = {
 }
 // The app's log, from the poll: one line per read, so a tester's report says when the rows came and why not.
 let log: ((line: string) => void) | undefined
+/**
+ * Whether this run said when Messages first had rows to show, which no line marked: the listed line comes only once
+ * every room's posts are read, after the rows are shown (11-17). It says how long after launch (runStart), so a cold
+ * start's sign-ins and session waits before the read are in the number, and how far into this read, as the listed
+ * line counts.
+ */
+let firstRowsSaid = false
+/** Whether this run looked for the last run's rows (rowsAtStart): once, before its first listing. */
+let rowsAtStartLooked = false
+let keepTimer: ReturnType<typeof setTimeout> | undefined
+/** How long the rows settle before they are kept for the next start: a listing publishes once per room read. */
+export const ROWS_KEEP_DELAY_MS = 2_000
 // Per service, so another agent (and its service) starts with none.
 let tracks = new WeakMap<RoomsService, Map<string, Track>>()
 
@@ -275,6 +298,79 @@ const rowOf = (room: RoomSummary & { communityDid: string }, track: Track | unde
   ...(room.joined === false ? { notJoined: true } : track ? {} : { reading: true }),
 })
 
+const NAMES_FROM: readonly RoomRow['nameFrom'][] = ['community', 'personal', 'roomId']
+
+/** A row as kept for the next start: what it names, never its newest post's words. */
+const keptRowOf = (row: RoomRow): RowAtStart => ({
+  key: row.key,
+  roomId: row.roomId,
+  roomName: row.roomName,
+  nameFrom: row.nameFrom,
+  communityDid: row.communityDid,
+  ...(row.communityName !== undefined ? { communityName: row.communityName } : {}),
+  ...(row.lastActivityAt ? { lastActivityAt: row.lastActivityAt.toISOString() } : {}),
+  ...(row.notJoined ? { notJoined: true } : {}),
+})
+
+/** A row kept by the last run, shown as reading until the first listing replaces it. Its words read as inert again. */
+const rowFromKept = (kept: RowAtStart): RoomRow => ({
+  key: kept.key,
+  roomId: kept.roomId,
+  roomName: toInertText(kept.roomName),
+  nameFrom: NAMES_FROM.find((n) => n === kept.nameFrom) ?? 'roomId',
+  communityDid: kept.communityDid,
+  ...(kept.communityName !== undefined ? { communityName: toInertText(kept.communityName) } : {}),
+  ...(kept.lastActivityAt ? { lastActivityAt: new Date(kept.lastActivityAt) } : {}),
+  // None until the first listing reads the room: a count kept from the last run is not this run's (Alberto, 11-18).
+  unread: 0,
+  ...(kept.notJoined ? { notJoined: true } : { reading: true }),
+})
+
+/**
+ * The last run's rows, shown at once on a cold start while the first listing reads (rowsAtStart): once a run, and only
+ * while Messages has no rows of this run yet, so a listing that answered first is never replaced by them.
+ */
+function showRowsAtStart(service: RoomsService): void {
+  if (rowsAtStartLooked) return
+  rowsAtStartLooked = true
+  const agent = service.runsOn
+  if (!isRowsWallet(agent)) return
+  // Off: nothing is shown, and what an earlier run kept is emptied, so the kill undoes the names at rest too.
+  if (!isRowsAtStartOn()) {
+    emptyRowsAtStart(agent).catch((e: unknown) =>
+      log?.(`[Rooms:rows] the last run's rows were not emptied: ${failureCategory(e)}`)
+    )
+    return
+  }
+  readRowsAtStart(agent).then(
+    (kept) => {
+      if (!kept || feed.service !== service || feed.all !== undefined) return
+      feed.all = kept.map(rowFromKept)
+      showRows(service)
+      publish()
+      log?.(
+        `[Rooms:rows] ${feed.rows?.length ?? 0} rows from the last run shown, ${Date.now() - RUN_STARTED_AT} ms after launch`
+      )
+    },
+    (e: unknown) => log?.(`[Rooms:rows] the last run's rows were not read: ${failureCategory(e)}`)
+  )
+}
+
+/** Keeps the rows for the next start once they settle, the most recently active first (rowsAtStart). */
+function keepRowsSoon(service: RoomsService): void {
+  const agent = service.runsOn
+  if (!isRowsWallet(agent) || !isRowsAtStartOn()) return
+  if (keepTimer) clearTimeout(keepTimer)
+  keepTimer = setTimeout(() => {
+    keepTimer = undefined
+    if (feed.service !== service || !feed.all) return
+    const rows = [...feed.all].sort((a, b) => (b.lastActivityAt?.getTime() ?? 0) - (a.lastActivityAt?.getTime() ?? 0))
+    keepRowsAtStart(agent, rows.map(keptRowOf)).catch((e: unknown) =>
+      log?.(`[Rooms:rows] the rows were not kept for the next start: ${failureCategory(e)}`)
+    )
+  }, ROWS_KEEP_DELAY_MS)
+}
+
 /**
  * Whether two rows read the same: the room and its community (the row reads names and petnames by the community, and
  * Messages' chips are built from it), its newest post, when, its unread and whether it is reading. `key` is the room's
@@ -334,6 +430,7 @@ async function readAll(service: RoomsService): Promise<void> {
   const began = feed.lastAsk
   try {
     await readSeen()
+    showRowsAtStart(service)
     const listed = await service.listMyRooms()
     if (feed.service === service)
       for (const listener of listedListeners) {
@@ -367,6 +464,15 @@ async function readAll(service: RoomsService): Promise<void> {
       feed.all = next
       showRows(service)
       publish()
+      keepRowsSoon(service)
+      const shownNow = feed.rows ?? []
+      if (!firstRowsSaid && shownNow.length > 0) {
+        firstRowsSaid = true
+        const reading = shownNow.filter((row) => row.reading).length
+        log?.(
+          `[Rooms:rows] first rows shown: ${shownNow.length}, ${reading} reading, ${Date.now() - RUN_STARTED_AT} ms after launch (${Date.now() - began} ms into this read)`
+        )
+      }
     }
     if (feed.service !== service) return
     show()
@@ -416,8 +522,8 @@ function readSignalledWhileReading(service: RoomsService): void {
 }
 
 /**
- * While Messages is in view, the {@link ROWS_WATCHED_MAX} most recently active rooms read are armed at their hosts, from
- * the newest version read, so a post in one reaches its row on the agent's signal rather than at the next two-minute
+ * While the app is open (or only while Messages is in view, with `watchWheneverOpenSwitch` off), the
+ * {@link ROWS_WATCHED_MAX} most recently active rooms read are armed at their hosts, from the newest version read, so a post in one reaches its row on the agent's signal rather than at the next two-minute
  * read. Arming one already armed from that version sends nothing (roomWatches). Where the agent, the host or the release
  * switch can't watch, nothing is armed and the rows read as before.
  *
@@ -426,7 +532,10 @@ function readSignalledWhileReading(service: RoomsService): void {
  * and that room is polled (roomWatches), so the cost of a residue is polling, never a missed post.
  */
 function watchActive(service: RoomsService): void {
-  if (!service.watchRoom || feed.inView === 0 || AppState.currentState !== 'active') return
+  if (!service.watchRoom || AppState.currentState !== 'active') return
+  // Out of view too, where the release says so: else a read that ends on another tab arms nothing, and the unread
+  // count waits for Messages to be opened (watchWheneverOpenSwitch).
+  if (feed.inView === 0 && !isRoomWatchWheneverOpenOn()) return
   const byRoom = tracks.get(service)
   if (!byRoom) return
   const active = [...(feed.listed?.keys() ?? [])]
@@ -658,6 +767,10 @@ export function resetRoomRows(): void {
   feed.lastAsk = 0
   feed.inView = 0
   log = undefined
+  firstRowsSaid = false
+  rowsAtStartLooked = false
+  if (keepTimer) clearTimeout(keepTimer)
+  keepTimer = undefined
   tracks = new WeakMap()
   stopRetrying()
   seenVersions = undefined
@@ -744,12 +857,17 @@ export function useRoomRows(): RoomRows {
     useCallback(() => {
       feed.inView++
       refreshRoomRows(ROWS_FOCUS_FLOOR_MS)
+      // A new invite shows where the member looks for it, not at the poll's next two-minute ask (11-17).
+      askOffersAgain()
       return () => {
         feed.inView = Math.max(0, feed.inView - 1)
       }
     }, [])
   )
-  const reload = useCallback(() => refreshRoomRows(), [])
+  const reload = useCallback(() => {
+    refreshRoomRows()
+    askOffersAgain()
+  }, [])
   return { rows, reload, failed }
 }
 

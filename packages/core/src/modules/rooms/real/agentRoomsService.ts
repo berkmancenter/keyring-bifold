@@ -37,7 +37,9 @@ import { newThrowawayKey } from '../../trust-tasks/module/oobSignIn'
 import { consentPendingOf } from '../../trust-tasks/module/VtaClient'
 import { VtiRefusal } from '../../trust-tasks/module/vtiAgent'
 import { roomRef } from '../roomRef'
+import { ACCEPT_FROM_PREVIEW_MAX_AGE_MS, isAcceptFromPreviewOn } from '../acceptFromPreviewSwitch'
 import { holdsTwoAuthorities, permanentRefusal } from '../postRefusal'
+import { emptyMessageCache, isCacheWallet } from '../messageCache'
 import { failureCategory, logRef } from '../roomsLogWords'
 import { takesRepliesOrReactions } from '../recordPermits'
 import { keepRecordsOn, recordsWereOnAt } from '../recordsWereOn'
@@ -146,12 +148,21 @@ export interface RoomsBackend {
   agentLinked(): boolean
   /** The agent's `trust-task-discovery` answer; undefined when it could not be asked. */
   agentServedTypes(): Promise<readonly string[] | undefined>
+  /**
+   * Moves when the backend's answer to `agentServedTypes` has changed since it was last given (the real backend gives
+   * the agent's last answer at once and asks again behind, agentLastKnownSwitch.ts). The answer held here is read
+   * again when it has moved. Absent: an answer, once held, stands until a refresh.
+   */
+  agentServedStamp?(): number
   /** Send a Trust Task to the person's own agent; resolves with the response payload. */
   agentTask(
     type: string,
     payload: Record<string, unknown>,
-    /** `waitForConsent: false`: a task held for consent is refused at once, instead of waiting for the grant. */
-    options?: { timeoutMs?: number; waitForConsent?: boolean }
+    /**
+     * `waitForConsent: false`: a task held for consent is refused at once, instead of waiting for the grant.
+     * `inView`: a read the open room's screen asks, which may go ahead of the agent's queue (VtaClient `Priority`).
+     */
+    options?: { timeoutMs?: number; waitForConsent?: boolean; inView?: boolean }
   ): Promise<unknown>
   communities(): Promise<RoomsCommunity[]>
   /** Send a Trust Task to a community as this phone's persona for it; resolves with the response payload. */
@@ -247,6 +258,8 @@ export const UNSERVED_LISTING_MS = 30 * 60 * 1000
  * file-key, backfill, chain, commit, profile read and seal, at any version (Keyring sends no profile write). Not `read-marker`, `key-package`, `welcome`,
  * `list`, `watch` or `act` (which names its member as the document's issuer).
  */
+/** A read of a room's records: what the open room's screen waits for (roomInView). */
+const ROOM_READ_TASK = /\/rooms\/keys\/(browse|read)\/\d/
 const CUSTODY_TASK = /\/rooms\/keys\/((browse|read|open|file-key|backfill|chain|commit|seal)|profile\/read)\/\d/
 
 /** Keyring's and the agent's extension namespace on rooms tasks. */
@@ -441,7 +454,8 @@ export class AgentRoomsService implements RoomsService {
     return this.backend.runsOn
   }
 
-  private served?: { types: readonly string[] | undefined; at: number }
+  /** What the agent serves, when it was read, and the backend's stamp from before the read (`agentServedStamp`). */
+  private served?: { types: readonly string[] | undefined; at: number; stamp?: number }
   private servedInFlight?: Promise<void>
   /** How many asks of what the agent serves were started: only the latest one's answer is kept. */
   private servedAsks = 0
@@ -453,6 +467,8 @@ export class AgentRoomsService implements RoomsService {
   private heldBy = new Map<string, Set<string>>()
   /** The rooms already said to be held as more than one identity, so it is said once. */
   private namedSaid = new Set<string>()
+  /** The rooms open on a screen and in view, by how many screens (roomInView). */
+  private readonly inView = new Map<string, number>()
   private roomsInFlight?: Promise<RoomSummary[]>
   /** Counts the accepts and leaves: a listing asked before one is neither joined nor kept after it. */
   private roomsChanged = 0
@@ -461,7 +477,8 @@ export class AgentRoomsService implements RoomsService {
   private readonly watches: RoomWatches
   private readonly changedListeners = new Set<(roomId: string) => void>()
   private stopSignals?: () => void
-  private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord }>()
+  /** Each offer as last read, and when: an accept goes ahead on one read moments ago (acceptFromPreviewSwitch). */
+  private offers = new Map<string, { community: RoomsCommunity; offer: OfferRecord; readAt: number }>()
   private previews = new Map<string, { offerId: string; at: number }>()
   private writes = new Map<string, { roomId: string; draft: WriteDraft; at: number; replacedVersion?: number }>()
   // Records opened through the agent, by room, key and version: what a file listing and a second read of a post
@@ -531,7 +548,10 @@ export class AgentRoomsService implements RoomsService {
   public async capabilities(options: { refresh?: boolean } = {}): Promise<RoomsCapabilities> {
     const linked = this.backend.agentLinked()
     const unknownAged = !this.served?.types && this.now() - (this.served?.at ?? -Infinity) >= SERVED_UNKNOWN_RETRY_MS
-    if (linked && (options.refresh || unknownAged)) await this.askServed(options.refresh)
+    // The backend's answer moved since the one held was read: read it again. Whoever asks while that read is out
+    // waits for the same one.
+    const moved = this.served !== undefined && this.backend.agentServedStamp?.() !== this.served.stamp
+    if (linked && (options.refresh || unknownAged || moved)) await this.askServed(options.refresh)
     return deriveCapabilities({ agentLinked: linked, servedTypes: this.served?.types, built: this.built })
   }
 
@@ -549,8 +569,10 @@ export class AgentRoomsService implements RoomsService {
     const asked = ++this.servedAsks
     const latest = () => asked === this.servedAsks
     this.servedInFlight = (async () => {
+      // Read before the ask: an answer that moves while this one is out is read again by the next caller.
+      const stamp = this.backend.agentServedStamp?.()
       const types = await this.backend.agentServedTypes()
-      if (latest()) this.served = { types, at: this.now() }
+      if (latest()) this.served = { types, at: this.now(), stamp }
     })().finally(() => {
       if (latest()) this.servedInFlight = undefined
     })
@@ -647,6 +669,10 @@ export class AgentRoomsService implements RoomsService {
           else if (e instanceof Error && e.name === 'VtiKeysNotHeld') awaitingKeys.push(community.did)
           else if (refusalCode(e) === 'unsupportedType') tooOld.push(community.did)
           else unreachable.push(community.did)
+          // Refused as no member: what was kept of its rooms goes, whether or not a removal notice ever came (b0).
+          const wallet = this.backend.runsOn
+          if (refusalCode(e) === 'notAMember' && isCacheWallet(wallet))
+            void emptyMessageCache(wallet, { community: community.did }, 'not a member').catch(() => undefined)
           return []
         }),
       }))
@@ -777,8 +803,21 @@ export class AgentRoomsService implements RoomsService {
     options?: { timeoutMs?: number; waitForConsent?: boolean }
   ): Promise<unknown> {
     const sent = this.namingMember(type, payload)
+    // A read of the room open on screen says so, and may go ahead of the agent's queue (VtaClient Priority.inView).
+    const viewed = ROOM_READ_TASK.test(type) && typeof payload.roomId === 'string' && this.inView.has(payload.roomId)
+    const asked = viewed ? { ...(options ?? {}), inView: true } : options
     // Asked with the same arguments as before when no options are given.
-    return options ? this.backend.agentTask(type, sent, options) : this.backend.agentTask(type, sent)
+    return asked ? this.backend.agentTask(type, sent, asked) : this.backend.agentTask(type, sent)
+  }
+
+  /**
+   * The room open on a screen, while it is in view (useRoomPosts): its reads go ahead of the agent's queue. Counted, so
+   * two screens of one room (its chat and a part) leave it in view until both have gone.
+   */
+  public roomInView(roomId: string, inView: boolean): void {
+    const n = (this.inView.get(roomId) ?? 0) + (inView ? 1 : -1)
+    if (n > 0) this.inView.set(roomId, n)
+    else this.inView.delete(roomId)
   }
 
   private namingMember(type: string, payload: Record<string, unknown>): Record<string, unknown> {
@@ -1430,7 +1469,7 @@ export class AgentRoomsService implements RoomsService {
           if (rooms.some((h) => holdsAs(h, offer.roomId, community.personaDid))) continue
         } else if (offer.state === 'accepted') continue
         const offerId = offerIdOf(community.did, offer.roomId)
-        this.offers.set(offerId, { community, offer })
+        this.offers.set(offerId, { community, offer, readAt: this.now() })
         if (!hidden.has(offerId)) out.push(this.toRoomOffer(community, offer, offerId))
       }
     }
@@ -1561,7 +1600,9 @@ export class AgentRoomsService implements RoomsService {
   /**
    * Accepts what the preview showed, step for step as every other surface does (`pnm rooms offers accept`), so
    * any surface finishes what another began: each step answers a repeat with its first answer. The offer is read
-   * again first, since it may have been withdrawn or accepted elsewhere since the preview.
+   * again first, since it may have been withdrawn or accepted elsewhere since the preview, unless it was read at most
+   * ACCEPT_FROM_PREVIEW_MAX_AGE_MS ago and the switch is on (acceptFromPreviewSwitch): then it is accepted as shown,
+   * and a withdrawn one is refused by the community's accept step, after the two cards are stored.
    */
   public async acceptOffer(token: string): Promise<{ roomId: string }> {
     const pending = this.previews.get(token)
@@ -1581,8 +1622,13 @@ export class AgentRoomsService implements RoomsService {
       steps.push(`${name} ${at - mark} ms`)
       mark = at
     }
-    const offer = (await this.offersOf(community)).items.find((o) => o.roomId === roomId && o.host === community.did)
-    timed('offers read')
+    // The offer on screen when it was read moments ago, else read again as before: that read waits for the community
+    // session, and waited 21.6 s of a 31 s accept while the session signed in again (YDXH-SH9W, 11-17).
+    const previewed = isAcceptFromPreviewOn() && this.now() - entry.readAt <= ACCEPT_FROM_PREVIEW_MAX_AGE_MS
+    const offer = previewed
+      ? entry.offer
+      : (await this.offersOf(community)).items.find((o) => o.roomId === roomId && o.host === community.did)
+    timed(previewed ? 'offer as previewed' : 'offers read')
     if (!offer) throw new RoomsRefused('acceptOffer', 'notFound', false, `${community.did} no longer lists ${roomId}`)
     this.requireSealedSupport(offer)
     const sealed = isSealed(offer.tier)

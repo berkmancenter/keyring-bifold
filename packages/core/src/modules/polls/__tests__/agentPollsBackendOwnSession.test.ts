@@ -6,6 +6,7 @@
  */
 const mockHolding = jest.fn(async (..._a: unknown[]) => 'shared')
 const mockOwnOpen = jest.fn((_did: string) => true)
+const mockOnceOpen = jest.fn(async (_did: string) => false)
 const mockTaskAs = jest.fn(async (..._a: unknown[]): Promise<unknown> => 'own')
 const mockCompletedAs = jest.fn(async (..._a: unknown[]): Promise<unknown> => 'own')
 let mockPersona: Record<string, unknown> | undefined
@@ -47,12 +48,22 @@ jest.mock('../../trust-tasks/module/vtiAgent', () => {
       communityTask: jest.fn(),
       sendCompleted: jest.fn(),
       ownSessionOpen: (did: string) => mockOwnOpen(did),
+      ownSessionOnceOpen: (did: string) => mockOnceOpen(did),
       communityTaskAs: (...a: unknown[]) => mockTaskAs(...a),
       sendCompletedAs: (...a: unknown[]) => mockCompletedAs(...a),
     },
   }
 })
-jest.mock('../../trust-tasks/module/vtaAgent', () => ({ vtaAgent: {} }))
+const mockAgentTask = jest.fn(async (..._a: unknown[]): Promise<unknown> => ({ ok: true }))
+const mockServedRefused = jest.fn()
+const mockServedTypes = jest.fn(async (..._a: unknown[]) => ['a'])
+jest.mock('../../trust-tasks/module/vtaAgent', () => ({
+  vtaAgent: {
+    roomsClient: async () => ({ task: (...a: unknown[]) => mockAgentTask(...a) }),
+    servedRefused: (...a: unknown[]) => mockServedRefused(...a),
+    servedTypes: (...a: unknown[]) => mockServedTypes(...a),
+  },
+}))
 jest.mock('../../trust-tasks/module/vtiTsp', () => ({ GenericRecordsTspPeerRevisionStore: class {} }))
 jest.mock('../ballotBoxDoor', () => ({ createBallotBoxDoor: () => ({}) }))
 
@@ -74,8 +85,9 @@ const noOwnSession = () => {
 }
 
 beforeEach(() => {
-  for (const m of [mockHolding, mockOwnOpen, mockTaskAs, mockCompletedAs]) m.mockClear()
+  for (const m of [mockHolding, mockOwnOpen, mockOnceOpen, mockTaskAs, mockCompletedAs]) m.mockClear()
   mockOwnOpen.mockImplementation(() => true)
+  mockOnceOpen.mockImplementation(async () => false)
   mockTaskAs.mockImplementation(async () => 'own')
   mockCompletedAs.mockImplementation(async () => 'own')
   mockPersona = {
@@ -175,5 +187,73 @@ describe('the polls backend asks the shared way, exactly as before (controls)', 
   it('a switch that is not plainly on reads as off', async () => {
     Object.assign(SESSIONS_PER_IDENTITY, { on: 'yes' as unknown as boolean })
     await expect(listing()).resolves.toBe('shared')
+  })
+})
+
+// QG4P-MQCT (11-17): a launch's first listing signed the shared session in as an identity whose own listener was a
+// moment from listening; two sockets for one DID, one closed by the mediator, the answer lost for 43 s.
+describe('the polls backend, with its identity’s own session still opening', () => {
+  beforeEach(() => mockOwnOpen.mockImplementation(() => false))
+
+  it('a listing waits for it and goes out on it, with no sign-in of the shared session as that identity', async () => {
+    mockOnceOpen.mockImplementation(async () => true)
+    await expect(listing()).resolves.toBe('own')
+    expect(mockOnceOpen).toHaveBeenCalledWith(mockPersona?.did)
+    expect(mockTaskAs).toHaveBeenCalledTimes(1)
+    expect(mockHolding).not.toHaveBeenCalled()
+  })
+
+  it('a listing whose wait ends with no session (not opening, failed, or past its bound) goes the shared way, once', async () => {
+    await expect(listing()).resolves.toBe('shared')
+    expect(mockOnceOpen).toHaveBeenCalledTimes(1)
+    expect(mockTaskAs).not.toHaveBeenCalled()
+    expect(mockHolding).toHaveBeenCalledTimes(1)
+  })
+
+  it('a ticket request never waits: it goes the shared way at once, as before (control)', async () => {
+    mockOnceOpen.mockImplementation(async () => true)
+    await expect(ticket()).resolves.toBe('shared')
+    expect(mockOnceOpen).not.toHaveBeenCalled()
+    expect(mockCompletedAs).not.toHaveBeenCalled()
+  })
+
+  it('with the switch off, or turned off remotely, a listing does not wait either (control)', async () => {
+    mockOnceOpen.mockImplementation(async () => true)
+    SESSIONS_PER_IDENTITY.on = false
+    await expect(listing()).resolves.toBe('shared')
+    Object.assign(SESSIONS_PER_IDENTITY, { on: true, remoteOff: true })
+    await expect(listing()).resolves.toBe('shared')
+    expect(mockOnceOpen).not.toHaveBeenCalled()
+    expect(mockTaskAs).not.toHaveBeenCalled()
+  })
+})
+
+// agentLastKnownSwitch.ts: the polls service reads what the agent serves through the agent controller (its last answer,
+// asked again behind), and a task the agent refuses is handed to it, which asks again when the refusal says "not served".
+describe('the polls backend and what the agent serves', () => {
+  beforeEach(() => {
+    mockAgentTask.mockClear()
+    mockServedRefused.mockClear()
+  })
+
+  it('reads it from the agent controller', async () => {
+    await expect(createAgentPollsBackend(agent).agentServedTypes()).resolves.toEqual(['a'])
+    expect(mockServedTypes).toHaveBeenCalledWith(agent)
+  })
+
+  it('hands a refused agent task to the agent controller, and the caller gets the same error', async () => {
+    const refusal = new Error('unsupportedVersion')
+    mockAgentTask.mockImplementationOnce(async () => {
+      throw refusal
+    })
+    await expect(createAgentPollsBackend(agent).agentTask('t', { a: 1 })).rejects.toBe(refusal)
+    expect(mockServedRefused).toHaveBeenCalledTimes(1)
+    expect(mockServedRefused).toHaveBeenCalledWith(agent, refusal)
+  })
+
+  it('control: an answered agent task hands it nothing', async () => {
+    await expect(createAgentPollsBackend(agent).agentTask('t', { a: 1 })).resolves.toEqual({ ok: true })
+    expect(mockAgentTask).toHaveBeenCalledWith('t', { a: 1 })
+    expect(mockServedRefused).not.toHaveBeenCalled()
   })
 })
