@@ -102,6 +102,8 @@ function linkedPhone(kept: Partial<VtaLink> = {}) {
     holdWrites: () => {
       held = []
     },
+    /** How many writes have reached the store and wait there. */
+    writesHeld: () => held?.length ?? 0,
     /** Let every write held so far go on, and later ones go straight through. */
     release: async () => {
       const waiting = held ?? []
@@ -752,13 +754,26 @@ describe('changes of the same link, side by side', () => {
     await phone.start()
     phone.holdWrites()
     await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
-    // This agent's write is held; the other agent's name is written without waiting for it.
+    expect(phone.writesHeld()).toBe(1)
+    // This agent's write waits at the store. The other agent's reaches the store too: it did not wait behind it.
     const naming = phone.vta.nameAgent(agent, OTHER, 'Work agent')
     await jest.advanceTimersByTimeAsync(0)
-    expect(phone.saved.filter((l) => l.vtaDid === OTHER)).toEqual([])
+    expect(phone.writesHeld()).toBe(2)
     await phone.release()
     await naming
     expect(phone.links.find((l) => l.vtaDid === OTHER)?.nickname).toBe('Work agent')
+  })
+
+  it('control: a second change of the same agent’s link does wait: it has not reached the store', async () => {
+    const phone = linkedPhone({ served: { types: [A], at: START - DAY } })
+    await phone.start()
+    phone.holdWrites()
+    await phone.pass(AGENT_LAST_KNOWN_REFRESH_AFTER_MS)
+    const naming = phone.vta.nameAgent(agent, AGENT, 'Home agent')
+    await jest.advanceTimersByTimeAsync(0)
+    expect(phone.writesHeld()).toBe(1)
+    await phone.release()
+    await naming
   })
 })
 
