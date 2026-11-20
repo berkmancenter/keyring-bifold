@@ -19,7 +19,12 @@
  * @module trust-tasks/module/contactTspCapability
  */
 import type { Agent } from '@credo-ts/core'
-import { DidCommFeatureRegistry, DidCommProtocol, type DidCommFeature } from '@credo-ts/didcomm'
+import {
+  DidCommConnectionRepository,
+  DidCommFeatureRegistry,
+  DidCommProtocol,
+  type DidCommFeature,
+} from '@credo-ts/didcomm'
 
 import { TspEnvelopeMessage } from '../messages/TspEnvelopeMessage'
 
@@ -71,7 +76,9 @@ const record = async (agent: Agent, connectionId: string, capability: TspCapabil
   const connection = await agent.modules.didcomm.connections.findById(connectionId)
   if (!connection) return
   connection.metadata.set(TSP_CAPABILITY_METADATA_KEY, capability as unknown as Record<string, unknown>)
-  await agent.modules.didcomm.connections.update(connection)
+  // Through the repository: metadata.set changes the record in memory only, and this Credo's connections API has no
+  // update (measured on a real agent: the answer was lost).
+  await agent.dependencyManager.container.resolve(DidCommConnectionRepository).update(agent.context, connection)
 }
 
 /** One question per contact at a time, in this run. */

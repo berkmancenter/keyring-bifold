@@ -6,7 +6,7 @@
  * from this one registers the handler and advertises the protocol, and older builds answer a Discover Features query
  * without it.
  */
-import { DidCommFeatureRegistry, DidCommProtocol } from '@credo-ts/didcomm'
+import { DidCommConnectionRepository, DidCommFeatureRegistry, DidCommProtocol } from '@credo-ts/didcomm'
 
 import {
   askPeerReadsTsp,
@@ -36,18 +36,20 @@ function fakeAgent(options: { kept?: Kept; queryFeatures?: jest.Mock; registry?:
   const queryFeatures = options.queryFeatures ?? jest.fn(async () => ({ features: [] }))
   const registry = options.registry ?? new DidCommFeatureRegistry()
   const agent = {
+    context: {},
     config: { logger: { info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn() } },
     dependencyManager: {
       container: {
         resolve: (token: unknown) => {
           if (token === DidCommFeatureRegistry) return registry
+          if (token === DidCommConnectionRepository) return { update }
           throw new Error(`fake container cannot resolve ${String(token)}`)
         },
       },
     },
     modules: {
       didcomm: {
-        connections: { findById: async (id: string) => (id === 'conn-1' ? connection : null), update },
+        connections: { findById: async (id: string) => (id === 'conn-1' ? connection : null) },
         discovery: { queryFeatures },
       },
     },
@@ -155,4 +157,11 @@ describe('what a contact says about TSP', () => {
     await recordPeerReadsTsp(agent, 'conn-1')
     expect(state.kept?.reads).toBe(true)
   })
+})
+
+test('a recorded answer is saved through the connection repository (metadata.set alone is in memory only)', async () => {
+  const queryFeatures = jest.fn(async () => ({ features: [] }))
+  const { agent, update } = fakeAgent({ queryFeatures })
+  await askPeerReadsTsp(agent, 'conn-1')
+  expect(update).toHaveBeenCalledWith({}, expect.objectContaining({ id: 'conn-1' }))
 })
