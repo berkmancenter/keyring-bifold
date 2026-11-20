@@ -19,7 +19,7 @@
  * @module trust-tasks/module/contactTspCapability
  */
 import type { Agent } from '@credo-ts/core'
-import { DidCommFeatureRegistry, DidCommProtocol } from '@credo-ts/didcomm'
+import { DidCommFeatureRegistry, DidCommProtocol, type DidCommFeature } from '@credo-ts/didcomm'
 
 import { TspEnvelopeMessage } from '../messages/TspEnvelopeMessage'
 
@@ -101,7 +101,7 @@ export function askPeerReadsTsp(
         agent.config.logger.info(`${LOG_PREFIX} no answer from connection ${connectionId} yet; the binding is used`)
         return undefined
       }
-      const reads = features.some((feature) => feature.id === TSP_ENVELOPE_PROTOCOL_URI)
+      const reads = features.some((feature: DidCommFeature) => feature.id === TSP_ENVELOPE_PROTOCOL_URI)
       await record(agent, connectionId, { reads, at: Date.now(), from: 'discovery' })
       agent.config.logger.info(`${LOG_PREFIX} connection ${connectionId} ${reads ? 'reads' : 'does not read'} TSP`)
       return reads
