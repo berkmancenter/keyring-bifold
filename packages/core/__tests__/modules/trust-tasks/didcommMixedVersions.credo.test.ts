@@ -49,6 +49,9 @@ type Versions = ('v1' | 'v2')[]
 /** Agents by name; `memory://<name>` reaches the one registered under it. */
 const hub = new Map<string, Agent>()
 
+/** An agent's name, its label here (this Credo's agent config carries no label). */
+const nameOf = (agent: Agent): string => [...hub].find(([, a]) => a === agent)?.[0] ?? 'agent'
+
 class MemoryOutbound implements DidCommOutboundTransport {
   public supportedSchemes = ['memory']
   public async start(): Promise<void> {}
@@ -109,12 +112,12 @@ async function stop(agent: Agent): Promise<void> {
 async function connect(inviter: Agent, invitee: Agent, didCommVersion: 'v1' | 'v2' = 'v1') {
   const oob = await inviter.modules.didcomm.oob.createInvitation({
     didCommVersion,
-    label: inviter.config.label,
+    label: nameOf(inviter),
   } as never)
   const url = oob.outOfBandInvitation.toUrl({ domain: 'https://example.test' })
   // A label, as the app passes one: the DID Exchange request is refused without it.
   const { connectionRecord } = await invitee.modules.didcomm.oob.receiveInvitationFromUrl(url, {
-    label: invitee.config.label,
+    label: nameOf(invitee),
   })
   if (!connectionRecord) throw new Error('test setup: no connection record from the invitation')
   const inviteeSide = await invitee.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, {
