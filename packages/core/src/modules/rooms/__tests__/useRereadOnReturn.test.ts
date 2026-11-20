@@ -234,6 +234,18 @@ describe('the read for an unshown offer whose offers failed', () => {
     expect(reread).toHaveBeenCalledTimes(2)
   })
 
+  it('once for those offers, even when a later read of theirs answers without them and one after it fails', () => {
+    const { reread, hook } = mount(false)
+    hook.rerender({ failed: false, offersNotShown: 'o1', offersFailed: true })
+    pass(OFFERS_REREAD_RETRY_MS)
+    expect(reread).toHaveBeenCalledTimes(2)
+    // The retry answered and still does not show the offer; then another read (a pull, say) fails in its offers.
+    hook.rerender({ failed: false, offersNotShown: 'o1', offersFailed: false })
+    hook.rerender({ failed: false, offersNotShown: 'o1', offersFailed: true })
+    pass(100 * OFFERS_REREAD_RETRY_MS)
+    expect(reread).toHaveBeenCalledTimes(2)
+  })
+
   it('other offers unshown later, failing too, are read once more as well', () => {
     const { reread, hook } = mount(false)
     hook.rerender({ failed: false, offersNotShown: 'o1', offersFailed: true })
