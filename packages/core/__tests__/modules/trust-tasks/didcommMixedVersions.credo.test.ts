@@ -86,12 +86,14 @@ async function makeAgent(name: string, didcommVersions: Versions, storeId = `${n
       }),
       didcomm: new DidCommModule({
         endpoints: [`memory://${name}`],
-        transports: { inbound: [new MemoryInbound()], outbound: [new MemoryOutbound()] },
         didcommVersions,
         connections: { autoAcceptConnections: true },
       } as never),
     },
   })
+  // Registered the way the app registers its transports (useBCAgentSetup.ts createNewAgent), before initialize.
+  agent.modules.didcomm.registerOutboundTransport(new MemoryOutbound())
+  agent.modules.didcomm.registerInboundTransport(new MemoryInbound())
   await agent.initialize()
   hub.set(name, agent)
   running.push(agent)
@@ -105,9 +107,15 @@ async function stop(agent: Agent): Promise<void> {
 
 /** Inviter mints (v1 unless told), invitee accepts; both sides' completed connection records. */
 async function connect(inviter: Agent, invitee: Agent, didCommVersion: 'v1' | 'v2' = 'v1') {
-  const oob = await inviter.modules.didcomm.oob.createInvitation({ didCommVersion } as never)
+  const oob = await inviter.modules.didcomm.oob.createInvitation({
+    didCommVersion,
+    label: inviter.config.label,
+  } as never)
   const url = oob.outOfBandInvitation.toUrl({ domain: 'https://example.test' })
-  const { connectionRecord } = await invitee.modules.didcomm.oob.receiveInvitationFromUrl(url, {})
+  // A label, as the app passes one: the DID Exchange request is refused without it.
+  const { connectionRecord } = await invitee.modules.didcomm.oob.receiveInvitationFromUrl(url, {
+    label: invitee.config.label,
+  })
   if (!connectionRecord) throw new Error('test setup: no connection record from the invitation')
   const inviteeSide = await invitee.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, {
     timeoutMs: 20000,
@@ -147,14 +155,19 @@ describe('mixed DIDComm versions between real agents', () => {
   test('1. a v1-only agent (278/279) refuses an out-of-band/2.0 invitation', async () => {
     const newPhone = await makeAgent('new-phone', ['v1', 'v2'])
     const oldPhone = await makeAgent('old-phone', ['v1'])
-    const v2 = await newPhone.modules.didcomm.oob.createInvitation({ didCommVersion: 'v2' } as never)
+    const v2 = await newPhone.modules.didcomm.oob.createInvitation({
+      didCommVersion: 'v2',
+      label: 'new-phone',
+    } as never)
     const url = v2.outOfBandInvitation.toUrl({ domain: 'https://example.test' })
 
     let refusal: Error | undefined
     try {
       // A config object, as the app always passes: this Credo's receiveInvitation throws without one, which must not
       // pass for the refusal this row is about.
-      const { connectionRecord } = await oldPhone.modules.didcomm.oob.receiveInvitationFromUrl(url, {})
+      const { connectionRecord } = await oldPhone.modules.didcomm.oob.receiveInvitationFromUrl(url, {
+        label: 'old-phone',
+      })
       if (connectionRecord) {
         await oldPhone.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, { timeoutMs: 5000 })
       }
