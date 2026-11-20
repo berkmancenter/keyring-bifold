@@ -340,7 +340,11 @@ describe('when the check asks', () => {
       await flush()
     })
   const asked = () => mockService.readPolls.mock.calls.map(([community]) => community)
-  const byCommunity = (community: string) => [listed(community === C ? 'inC' : community === A ? 'inA' : 'inB')]
+  const D = 'did:webvh:QmCommunityD:vtc.example.org'
+  const E = 'did:webvh:QmCommunityE:vtc.example.org'
+  // Each community lists one poll, named for it: A lists inA.
+  const byCommunity = (community: string) => [listed('in' + community.split(':')[2].replace('QmCommunity', ''))]
+  const checksAsked = () => asked().filter((c) => c === A).length
 
   test('a community just joined shows its polls at once, inside the floor, without waiting for the hour', async () => {
     mockService.readPolls.mockImplementation(async (community: string) => byCommunity(community))
@@ -381,24 +385,83 @@ describe('when the check asks', () => {
     expect(mockService.readPolls).not.toHaveBeenCalled()
   })
 
-  test('a check begun before the join cannot put back the list it read then', async () => {
+  test('memberships written all at once, then heard one by one, ask once', async () => {
+    mockService.readPolls.mockImplementation(async (community: string) => byCommunity(community))
+    const { result } = renderHook(() => usePollsWaiting())
+    mount()
+    await act(flush)
+    mockService.readPolls.mockClear()
+    mockMemberships.current = [
+      ...mockMemberships.current,
+      { communityDid: C },
+      { communityDid: D },
+      { communityDid: E },
+    ]
+    await act(async () => {
+      for (const c of [C, D, E])
+        DeviceEventEmitter.emit(COMMUNITY_CHANGED_EVENT, { communityDid: c, what: 'membership' })
+      await flush()
+    })
+    expect(checksAsked()).toBe(1)
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC', 'inD', 'inE'])
+  })
+
+  test('memberships written one by one while a check asks cost one check after it, not one each', async () => {
     const late: Array<() => void> = []
+    let holdB = false
     mockService.readPolls.mockImplementation((community: string) =>
-      late.length === 0 && community === B
+      holdB && community === B
         ? new Promise((resolve) => late.push(() => resolve(byCommunity(B))))
         : Promise.resolve(byCommunity(community))
     )
     const { result } = renderHook(() => usePollsWaiting())
     mount()
     await act(flush)
-    mockMemberships.current = [...mockMemberships.current, { communityDid: C }]
-    await membershipSaved(C)
-    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC'])
+    mockService.readPolls.mockClear()
+    holdB = true
+    for (const c of [C, D, E]) {
+      mockMemberships.current = [...mockMemberships.current, { communityDid: c }]
+      await membershipSaved(c)
+    }
+    expect(checksAsked()).toBe(1)
+    holdB = false
     await act(async () => {
       late.forEach((answer) => answer())
       await flush()
     })
-    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC'])
+    expect(checksAsked()).toBe(2)
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC', 'inD', 'inE'])
+  })
+
+  test('a join heard as the app goes to the background is asked on coming back, inside the floor', async () => {
+    const late: Array<() => void> = []
+    let holdB = false
+    mockService.readPolls.mockImplementation((community: string) =>
+      holdB && community === B
+        ? new Promise((resolve) => late.push(() => resolve(byCommunity(B))))
+        : Promise.resolve(byCommunity(community))
+    )
+    const { result } = renderHook(() => usePollsWaiting())
+    mount()
+    await act(flush)
+    holdB = true
+    mockMemberships.current = [...mockMemberships.current, { communityDid: C }]
+    await membershipSaved(C)
+    mockMemberships.current = [...mockMemberships.current, { communityDid: D }]
+    await membershipSaved(D)
+    await act(async () => appState('background'))
+    holdB = false
+    await act(async () => {
+      late.forEach((answer) => answer())
+      await flush()
+    })
+    mockService.readPolls.mockClear()
+    await act(async () => {
+      appState('active')
+      await flush()
+    })
+    expect(asked()).toContain(D)
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC', 'inD'])
   })
 
   // A phone with several agents: two identities members of A. Leaving as one drops A's cards at once (the leave);

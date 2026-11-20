@@ -290,11 +290,14 @@ const sameCommunities = (a: readonly string[], b: readonly string[]): boolean =>
  * The check, run from the tab navigator: when the app opens, when it comes back to the foreground, and once an hour
  * while it stays there; never in the background. Nothing is asked without a linked agent.
  *
- * Also when the communities this phone is a member of change (a join, a rejoin, a removal), at once and past the
- * floor, so a community just joined shows its polls without waiting for the next hour. A membership written again with
- * no community added or gone (a card refreshed, say) asks no one: the memberships are read on the phone and compared
- * with what the last check asked. Only the newest check puts its list on the stack, so one begun before the change
- * cannot put back what it read then.
+ * Also when the communities this phone is a member of change (a join, a rejoin, a removal), past the floor, so a
+ * community just joined shows its polls without waiting for the next hour. A membership written again with no
+ * community added or gone (a card refreshed, say) asks no one: the memberships are read on the phone and compared with
+ * what was last asked, or is about to be.
+ *
+ * One check at a time. A change heard while a check is asking is asked once more right after it, however many
+ * memberships were written meanwhile: a sweep that brings cards for several communities, each written on its own and
+ * each heard on its own, costs one check after the one under way, not one each.
  */
 export function usePollsWaitingCheck(): void {
   const { agent } = useAgent()
@@ -310,11 +313,15 @@ export function usePollsWaitingCheck(): void {
   useEffect(() => {
     if (!agent || !service || !linked || !active) return
     let live = true
+    // A check is asking; a membership change was heard that it may not have read, so ask again past the floor.
+    let checking = false
+    let askAgain = false
     const check = async () => {
-      if (Date.now() - lastCheck < POLLS_CHECK_FLOOR_MS) return
+      if (checking) return
+      if (!askAgain && Date.now() - lastCheck < POLLS_CHECK_FLOOR_MS) return
+      askAgain = false
+      checking = true
       lastCheck = Date.now()
-      const turn = ++checkTurn
-      const newest = () => live && turn === checkTurn
       const left = new Set<string>()
       leftDuringChecks.add(left)
       try {
@@ -322,17 +329,19 @@ export function usePollsWaitingCheck(): void {
           memberCommunities(agent as Agent),
           loadHiddenPolls(agent as Agent),
         ])
-        checkedCommunities = communities
+        if (live) knownCommunities = communities
         // Each community's cards as it answers (POLLS_CHECK_PARALLEL): the others keep what the stack shows until theirs do.
         const stillIn = () => communities.filter((c) => !left.has(c))
         const found = await findPollsWaiting(service, communities, hidden, Date.now(), (answered) => {
-          if (newest() && isPollsCheckParallelOn()) publish(mergeAnswered(waiting.items ?? NONE, stillIn(), answered))
+          if (live && isPollsCheckParallelOn()) publish(mergeAnswered(waiting.items ?? NONE, stillIn(), answered))
         })
-        if (newest()) publish(found.filter((p) => !left.has(p.communityDid)))
+        if (live) publish(found.filter((p) => !left.has(p.communityDid)))
       } catch {
-        // The stack keeps what the last check found.
+        // The stack keeps what the last check found: publish is never called, so nothing leaves the screen.
       } finally {
         leftDuringChecks.delete(left)
+        checking = false
+        if (askAgain && live) void check()
       }
     }
     void check()
@@ -343,8 +352,10 @@ export function usePollsWaitingCheck(): void {
         if (event?.what !== 'membership') return
         void memberCommunities(agent as Agent)
           .then((now) => {
-            if (!live || (checkedCommunities && sameCommunities(now, checkedCommunities))) return
-            lastCheck = 0
+            if (!live || (knownCommunities && sameCommunities(now, knownCommunities))) return
+            // Decided now, before any asking: the rest of a burst compares equal and asks no one.
+            knownCommunities = now
+            askAgain = true
             return check()
           })
           .catch(() => undefined)
@@ -354,18 +365,21 @@ export function usePollsWaitingCheck(): void {
       live = false
       clearInterval(timer)
       membershipChanged.remove()
+      // A change still to be asked (the app went to the background mid-check): the next start asks past the floor.
+      if (askAgain) lastCheck = 0
     }
   }, [agent, service, linked, active])
 }
 
 let lastCheck = 0
-/** Which check is the newest: only it publishes. */
-let checkTurn = 0
-/** The communities the last check asked, to tell a membership change that adds or drops one from one that doesn't. */
-let checkedCommunities: readonly string[] | undefined
+/**
+ * The communities a check last asked, or is about to ask because a membership change was heard: a change that leaves
+ * them as they are asks no one.
+ */
+let knownCommunities: readonly string[] | undefined
 
 /** Forget when the last check ran, and what it asked (tests). */
 export function resetPollsCheckFloor(): void {
   lastCheck = 0
-  checkedCommunities = undefined
+  knownCommunities = undefined
 }
