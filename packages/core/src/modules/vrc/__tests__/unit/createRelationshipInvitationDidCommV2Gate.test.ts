@@ -131,3 +131,30 @@ describe('createRelationshipInvitation: v2 accepted by default, minted only thro
     })
   })
 })
+
+describe('DIDCOMM_V2_MINT_REMOTE_OFF beats what DIDComm v2 ships as', () => {
+  afterEach(() => {
+    DIDCOMM_V2_MINT_REMOTE_OFF.off = false
+    setDidCommV2Enabled(DIDCOMM_V2_ON_BY_DEFAULT)
+  })
+
+  test('with nothing having set it, the kill is the only way it goes off (control: kill lifted, it is on again)', () => {
+    jest.isolateModules(() => {
+      const fresh = require('../../../trust-tasks/ceremony') as typeof import('../../../trust-tasks/ceremony')
+      expect(fresh.isDidCommV2Enabled()).toBe(true)
+      fresh.DIDCOMM_V2_MINT_REMOTE_OFF.off = true
+      expect(fresh.isDidCommV2Enabled()).toBe(false)
+      fresh.DIDCOMM_V2_MINT_REMOTE_OFF.off = false
+      expect(fresh.isDidCommV2Enabled()).toBe(true)
+    })
+  })
+
+  test('the kill beats a run that turned v2 on, and never turns it on', () => {
+    setDidCommV2Enabled(true)
+    DIDCOMM_V2_MINT_REMOTE_OFF.off = true
+    expect(isDidCommV2Enabled()).toBe(false)
+    setDidCommV2Enabled(false)
+    DIDCOMM_V2_MINT_REMOTE_OFF.off = false
+    expect(isDidCommV2Enabled()).toBe(false)
+  })
+})

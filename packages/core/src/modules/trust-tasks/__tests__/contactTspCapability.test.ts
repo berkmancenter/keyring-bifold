@@ -16,6 +16,7 @@ import {
   resetTspCapabilityQuestions,
   TSP_CAPABILITY_METADATA_KEY,
   TSP_ENVELOPE_PROTOCOL_URI,
+  TSP_YES_RECHECK_MS,
 } from '../module/contactTspCapability'
 import { TspEnvelopeMessage } from '../messages/TspEnvelopeMessage'
 
@@ -164,4 +165,32 @@ test('a recorded answer is saved through the connection repository (metadata.set
   const { agent, update } = fakeAgent({ queryFeatures })
   await askPeerReadsTsp(agent, 'conn-1')
   expect(update).toHaveBeenCalledWith({}, expect.objectContaining({ id: 'conn-1' }))
+})
+
+describe('a yes does not stand forever (a contact can roll back to a build with no envelope handler)', () => {
+  test('CONTROL: a yes within the week: TSP, and nobody is asked', async () => {
+    const queryFeatures = jest.fn(async () => ({ features: [] }))
+    const { agent } = fakeAgent({ kept: { reads: true, at: Date.now() - 1000, from: 'discovery' }, queryFeatures })
+    await expect(peerReadsTsp(agent, 'conn-1')).resolves.toBe(true)
+    expect(queryFeatures).not.toHaveBeenCalled()
+  })
+
+  test('a yes older than a week: the binding for this send, and the contact is asked again', async () => {
+    const queryFeatures = jest.fn(async () => ({ features: [] }))
+    const old = { reads: true, at: Date.now() - TSP_YES_RECHECK_MS - 1, from: 'discovery' }
+    const { agent, state } = fakeAgent({ kept: old, queryFeatures })
+    await expect(peerReadsTsp(agent, 'conn-1')).resolves.toBe(false)
+    expect(queryFeatures).toHaveBeenCalledTimes(1)
+    await new Promise((resolve) => setImmediate(resolve))
+    // A rolled-back contact answers without the protocol: now a no.
+    expect(state.kept?.reads).toBe(false)
+  })
+
+  test('an envelope from the contact renews the yes', async () => {
+    const old = { reads: true, at: Date.now() - TSP_YES_RECHECK_MS - 1, from: 'discovery' }
+    const { agent, state } = fakeAgent({ kept: old })
+    await recordPeerReadsTsp(agent, 'conn-1')
+    expect(Date.now() - (state.kept?.at ?? 0)).toBeLessThan(TSP_YES_RECHECK_MS)
+    await expect(peerReadsTsp(agent, 'conn-1')).resolves.toBe(true)
+  })
 })

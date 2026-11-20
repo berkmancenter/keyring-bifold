@@ -118,7 +118,10 @@ export async function provisionV2Mediation(
  * every running loop first (the anti-stacking guard), the v4 start does not.
  */
 export async function startV2MessagePickup(agent: Agent): Promise<boolean> {
-  // Off, no second loop runs, even on a phone that provisioned a v2 record while the switch was on.
+  // Off, no second loop runs, even on a phone that provisioned a v2 record while the switch was on. That strands what
+  // reaches its v2 connections: their mail waits uncollected in the v2 mailbox until the switch is on again. Accepted
+  // (Alberto, 2026-11-20: no Pickup 4.0 loop for anyone with the switch off); only a phone that turned the switch on
+  // has such connections, and no store build ships a v2 mailbox.
   if (!v2MediationEnabled) return false
   const record = await findV2MediationRecord(agent)
   if (!record) return false

@@ -22,6 +22,7 @@ import '../../helpers/realAskar'
 import { AskarModule } from '@credo-ts/askar'
 import { Agent } from '@credo-ts/core'
 import {
+  DidCommBasicMessageRecord,
   DidCommConnectionRecord,
   DidCommMessageHandlerRegistry,
   DidCommMessageReceiver,
@@ -76,7 +77,7 @@ const running: Agent[] = []
 
 async function makeAgent(name: string, didcommVersions: Versions, storeId = `${name}-${process.pid}`): Promise<Agent> {
   const agent = new Agent({
-    config: { label: name },
+    config: {},
     dependencies: agentDependencies,
     modules: {
       askar: new AskarModule({
@@ -135,7 +136,7 @@ async function deliver(from: Agent, fromConnection: DidCommConnectionRecord, to:
   await from.modules.didcomm.basicMessages.sendMessage(fromConnection.id, text)
   for (let i = 0; i < 100; i++) {
     const got = await to.modules.didcomm.basicMessages.findAllByQuery({})
-    if (got.some((record) => record.content === text)) return
+    if (got.some((record: DidCommBasicMessageRecord) => record.content === text)) return
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error(`"${text}" never arrived`)
@@ -178,10 +179,9 @@ describe('mixed DIDComm versions between real agents', () => {
       refusal = error as Error
     }
     expect(refusal).toBeDefined()
-    // Said in the log, so the reason is on record: it is the version, not some other failure.
-    console.info(`[v1-only refuses v2] ${refusal?.message}`)
-    expect(refusal?.message).not.toMatch(/reading 'routing'/)
-    expect(refusal?.message).toMatch(/v2|version|support/i)
+    // The reason, exactly: the version, not some other failure (the config-less TypeError included).
+    expect(refusal?.message).toContain('DIDComm v2 is not enabled for this agent')
+    expect(refusal?.message).toContain('Configured didcommVersions: [v1]')
     expect(await oldPhone.modules.didcomm.connections.getAll()).toHaveLength(0)
   }, 60000)
 

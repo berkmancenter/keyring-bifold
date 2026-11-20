@@ -39,6 +39,13 @@ export const TSP_CAPABILITY_METADATA_KEY = 'keyring:tspCarriage'
 /** How long a contact's "no" stands before it is asked again (it may have updated). */
 export const TSP_NO_RECHECK_MS = 24 * 60 * 60 * 1000
 
+/**
+ * How long a contact's "yes" stands. Not forever: a contact that rolls back to a build from before TSP was on by
+ * default (an OTA rollback) registers no envelope handler again, and a yes kept forever would send it envelopes it
+ * drops. Past this, a send takes the binding while the contact is asked again; an envelope from it renews the yes.
+ */
+export const TSP_YES_RECHECK_MS = 7 * 24 * 60 * 60 * 1000
+
 /** How long a send's background question waits for the contact's answer. */
 export const TSP_QUERY_TIMEOUT_MS = 10_000
 
@@ -139,16 +146,17 @@ export async function peerReadsTsp(agent: Agent, connectionId: string, now: numb
     agent.config.logger.info(`${LOG_PREFIX} could not read what ${connectionId} said: ${(error as Error)?.message}`)
     return false
   }
-  if (kept?.reads) return true
-  if (!kept || now - kept.at >= TSP_NO_RECHECK_MS) void askPeerReadsTsp(agent, connectionId)
+  if (kept?.reads && now - kept.at < TSP_YES_RECHECK_MS) return true
+  if (!kept || now - kept.at >= (kept.reads ? TSP_YES_RECHECK_MS : TSP_NO_RECHECK_MS)) {
+    void askPeerReadsTsp(agent, connectionId)
+  }
   return false
 }
 
 /** An envelope arrived from this contact, so it reads TSP: record the yes. Never throws. */
 export async function recordPeerReadsTsp(agent: Agent, connectionId: string): Promise<void> {
   try {
-    const kept = await readRecorded(agent, connectionId)
-    if (kept?.reads) return
+    // Recorded every time, so the yes is as fresh as the last envelope (TSP_YES_RECHECK_MS).
     await record(agent, connectionId, { reads: true, at: Date.now(), from: 'envelope' })
   } catch (error) {
     agent.config.logger.info(`${LOG_PREFIX} could not record a yes for ${connectionId}: ${(error as Error)?.message}`)

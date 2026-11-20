@@ -77,6 +77,7 @@ import { setupChatInbound } from '../chat/inbound'
 import { createDidCommV2Carriage } from './module/DidCommV2Carriage'
 import { createTspCarriage } from './module/TspCarriage'
 import { advertiseTspCarriage, peerReadsTsp, recordPeerReadsTsp } from './module/contactTspCapability'
+import { findV2MediationRecord, isV2MediationEnabled } from './v2Routing'
 import { hasJcsProof, verifySharedConnectVrc } from './module/sharedConnectCredential'
 import { isSharedConnectEnabled } from './module/sharedConnectFlag'
 import { WITNESS_VERIFIED_TAG } from '../vrc/utils/witnessCredentialUtils'
@@ -133,8 +134,13 @@ export function setDidCommV2Enabled(enabled: boolean): void {
   didCommV2Enabled = enabled
 }
 
+/**
+ * Whether this phone uses DIDComm v2 for what it starts (today: new invitations), with the release kill folded in, as
+ * {@link isTspCarriageEnabled} folds its own. Accepting v2 is the agent's didcommVersions, fixed when the wallet builds
+ * the agent, and no kill takes it away.
+ */
 export function isDidCommV2Enabled(): boolean {
-  return didCommV2Enabled
+  return didCommV2Enabled && !DIDCOMM_V2_MINT_REMOTE_OFF.off
 }
 
 /**
@@ -146,11 +152,9 @@ export function isDidCommV2Enabled(): boolean {
  */
 export async function canMintV2Invitation(agent: Agent): Promise<{ v2: boolean; why: string }> {
   if (DIDCOMM_V2_MINT_REMOTE_OFF.off) return { v2: false, why: 'v2 invitations are turned off in this release' }
-  if (!didCommV2Enabled) return { v2: false, why: 'DIDComm v2 is off' }
+  if (!isDidCommV2Enabled()) return { v2: false, why: 'DIDComm v2 is off' }
   if (!agent.modules.didcomm.config.isSupported('v2'))
     return { v2: false, why: 'this agent was constructed without v2 support (restart required to apply the toggle)' }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const { isV2MediationEnabled, findV2MediationRecord } = require('./v2Routing') as typeof import('./v2Routing')
   if (!isV2MediationEnabled()) return { v2: false, why: 'the v2 mailbox is off' }
   if (!(await findV2MediationRecord(agent))) return { v2: false, why: 'no v2 mailbox is provisioned' }
   return { v2: true, why: 'v2 on, with a v2 mailbox' }
