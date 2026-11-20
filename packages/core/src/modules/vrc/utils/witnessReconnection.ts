@@ -9,9 +9,15 @@
  */
 
 import { Agent } from '@credo-ts/core'
-import { DidCommConnectionRecord, DidCommDidExchangeState, DidCommOutOfBandRecord, DidCommOutOfBandRole } from '@credo-ts/didcomm'
+import {
+  DidCommConnectionRecord,
+  DidCommDidExchangeState,
+  DidCommOutOfBandRecord,
+  DidCommOutOfBandRole,
+} from '@credo-ts/didcomm'
 
 import { createVrcLogger } from '../vrc-logging'
+import { routingForInvitation } from '../../trust-tasks/v2Routing'
 
 /**
  * Connection status after checking
@@ -211,7 +217,13 @@ export async function handleWitnessReconnection(
       try {
         logger.info(`Connection attempt ${attempt}/${maxRetries + 1}`)
 
-        const { connectionRecord } = await agent.modules.didcomm.oob.receiveInvitationFromUrl(invitationUrl)
+        // Parsed first so a v2 invitation gets v2 routing (routingForInvitation): the default mediator cannot route it.
+        const invitation = await agent.modules.didcomm.oob.parseInvitation(invitationUrl)
+        const routing = await routingForInvitation(agent, invitation)
+        const { connectionRecord } = await agent.modules.didcomm.oob.receiveInvitation(
+          invitation,
+          routing ? { routing } : undefined
+        )
 
         if (!connectionRecord) {
           return {
