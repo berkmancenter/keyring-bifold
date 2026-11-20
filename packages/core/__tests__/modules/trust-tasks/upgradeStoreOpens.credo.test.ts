@@ -130,8 +130,10 @@ async function snapshot(agent: Agent) {
     .map((r) => ({ id: r.id, content: r.content, tags: r.getTags() }))
     .sort((a, b) => a.id.localeCompare(b.id))
   const createdDids = (await agent.dids.getCreatedDids({})).map((d) => d.did).sort()
-  const connections = (await agent.modules.didcomm.connections.getAll())
-    .map((c: DidCommConnectionRecord) => ({
+  // Typed here: on an Agent built without its module map, getAll() is `any`, and so is everything chained on it.
+  const connectionRecords: DidCommConnectionRecord[] = await agent.modules.didcomm.connections.getAll()
+  const connections = connectionRecords
+    .map((c) => ({
       id: c.id,
       state: c.state,
       did: c.did,
