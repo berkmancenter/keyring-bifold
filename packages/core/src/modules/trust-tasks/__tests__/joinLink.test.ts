@@ -74,11 +74,15 @@ const invitation = (over: Record<string, unknown> = {}) => ({
 const withGoal = (goal_code: unknown) => invitation({ body: { accept: ['didcomm/v2'], goal_code } })
 const inline = (json: unknown, base = 'didcomm://') => `${base}?_oob=${JsonEncoder.toBase64Url(json as never)}`
 
-const jsonAnswer = (body: unknown, type = 'application/json') => ({
+/** An answer. `length`, when given, is what it declares as its `content-length`, true or not. */
+const jsonAnswer = (body: unknown, type = 'application/json', length?: string) => ({
   ok: true,
   status: 200,
-  headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? type : null) },
-  text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  headers: {
+    get: (name: string) =>
+      name.toLowerCase() === 'content-type' ? type : name.toLowerCase() === 'content-length' ? (length ?? null) : null,
+  },
+  text: jest.fn(async () => (typeof body === 'string' ? body : JSON.stringify(body))),
 })
 /** A host that answers each link with what `answers` holds for it, and records what it was asked. */
 function hostAnswering(answers: Record<string, unknown>) {
@@ -249,7 +253,7 @@ describe('asking a link', () => {
   })
 
   it('a VCALM answer that only lists protocols: its didcomm link is followed once, and never further', async () => {
-    const next = 'https://coordinator.example.org/oob?_oobid=abc'
+    const next = 'https://vtc.example.org/oob?_oobid=abc'
     const host = hostAnswering({
       [joinLink]: jsonAnswer({ protocols: { didcomm: next } }),
       [next]: jsonAnswer(invitation()),
@@ -257,7 +261,7 @@ describe('asking a link', () => {
     await expect(readJoinLink(fetched, { fetch: asFetch(host), now: NOW })).resolves.toMatchObject({ kind: 'join' })
     expect(host.mock.calls.map((call) => call[0])).toEqual([joinLink, next])
 
-    const third = 'https://coordinator.example.org/again?_oobid=def'
+    const third = 'https://vtc.example.org/again?_oobid=def'
     const looping = hostAnswering({
       [joinLink]: jsonAnswer({ protocols: { didcomm: next } }),
       [next]: jsonAnswer({ protocols: { didcomm: third } }),
@@ -279,12 +283,54 @@ describe('asking a link', () => {
     }
   })
 
+  it('a didcomm link on another origin is never asked: the scanned host cannot send the phone elsewhere', async () => {
+    for (const next of [
+      'https://coordinator.example.org/oob?_oobid=abc',
+      'https://192.168.1.1/oob?_oobid=abc',
+      'https://vtc.example.org:8443/oob?_oobid=abc',
+      'https://vtc.example.org.evil.example/oob?_oobid=abc',
+      'https://vtc.example.org@evil.example/oob?_oobid=abc',
+    ]) {
+      const host = hostAnswering({
+        [joinLink]: jsonAnswer({ protocols: { didcomm: next } }),
+        [next]: jsonAnswer(invitation()),
+      })
+      await expect(readJoinLink(fetched, { fetch: asFetch(host), now: NOW })).resolves.toEqual({ kind: 'notJoin' })
+      expect(host.mock.calls.map((call) => call[0])).toEqual([joinLink])
+    }
+    // Control: the same origin, written in another case, is asked.
+    const same = 'https://VTC.Example.org/oob?_oobid=abc'
+    const host = hostAnswering({
+      [joinLink]: jsonAnswer({ protocols: { didcomm: same } }),
+      [same]: jsonAnswer(invitation()),
+    })
+    await expect(readJoinLink(fetched, { fetch: asFetch(host), now: NOW })).resolves.toMatchObject({ kind: 'join' })
+    expect(host).toHaveBeenCalledTimes(2)
+  })
+
+  it('an answer that declares more than the limit is refused before any of it is read', async () => {
+    const large = jsonAnswer(invitation(), 'application/json', '512001')
+    const host = hostAnswering({ [joinLink]: large })
+    await expect(readJoinLink(fetched, { fetch: asFetch(host), now: NOW })).resolves.toEqual({ kind: 'unreadable' })
+    expect(large.text).not.toHaveBeenCalled()
+  })
+
+  it('control: one that declares a length within the limit, or none, or nonsense, is read', async () => {
+    for (const length of ['512000', '3923', undefined, 'many']) {
+      const answer = jsonAnswer(invitation(), 'application/json', length)
+      const host = hostAnswering({ [joinLink]: answer })
+      await expect(readJoinLink(fetched, { fetch: asFetch(host), now: NOW })).resolves.toMatchObject({ kind: 'join' })
+      expect(answer.text).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it('no answer, a refusal, a page, or too much is unreadable', async () => {
     const answers: unknown[] = [
       undefined,
       { ...jsonAnswer(invitation()), ok: false, status: 404 },
       jsonAnswer('<html>Finish joining</html>', 'text/html'),
       jsonAnswer('not json'),
+      // It declared no length, so it was read: measured afterwards, and bounded only by the time allowed.
       jsonAnswer(`{"pad":"${'x'.repeat(512_001)}"}`),
     ]
     for (const answer of answers) {

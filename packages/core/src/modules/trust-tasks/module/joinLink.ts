@@ -21,7 +21,10 @@
  * from the link: Join shows what the community publishes.
  *
  * Reading a link by reference tells its host that someone scanned it. So a link is fetched only from the routing a
- * scan, a paste or an opened link runs (`routeKeyringAgentLink`), never in the background, and without cookies.
+ * scan, a paste or an opened link runs (`routeKeyringAgentLink`), never in the background, and without cookies. The
+ * one further step a VCALM answer may ask for stays on the first link's own origin, so the host that was scanned
+ * cannot send the phone to ask somewhere else. One thing is not limited here: the platform follows a redirect the
+ * host answers with, as it does for every link the app fetches.
  *
  * @module trust-tasks/module/joinLink
  */
@@ -39,7 +42,12 @@ export const WEB_INTERACTION_PREFIX = 'web+interaction:'
 
 const OOB_V2_INVITATION = 'https://didcomm.org/out-of-band/2.0/invitation'
 
-/** How long a link's host is waited for, and how much it may answer. A join answer with its manifest is about 4 KB. */
+/**
+ * How long a link's host is waited for, and how much it may answer (a join answer with its manifest is about 4 KB).
+ * The size is a bound only for an answer that declares its length (`content-length`): that one is refused before any
+ * of it is read. An answer that declares none is read whole and measured afterwards, so it is bounded by the time
+ * alone.
+ */
 const FETCH_MS = 10_000
 const MAX_ANSWER_CHARS = 512_000
 
@@ -151,7 +159,10 @@ function attachedManifestDocument(attachments: unknown): Json | undefined {
   return undefined
 }
 
-/** One GET of `url` for JSON, bounded in time and size, with no cookies. Undefined for anything but a JSON answer. */
+/**
+ * One GET of `url` for JSON, with no cookies, bounded in time, and in size as far as the answer declares it (see
+ * `MAX_ANSWER_CHARS`). Undefined for anything but a JSON answer.
+ */
 async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
   const abort = new AbortController()
   const timer = setTimeout(() => abort.abort(), FETCH_MS)
@@ -164,6 +175,9 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
     })
     if (!response.ok) return undefined
     if (!/^application\/([a-z0-9.+-]+\+)?json/i.test(response.headers.get('content-type') ?? '')) return undefined
+    // Refused on what it declares, before the body is read: reading first would hold all of it in memory.
+    const declared = Number(response.headers.get('content-length') ?? '')
+    if (declared > MAX_ANSWER_CHARS) return undefined
     const text = await response.text()
     if (text.length > MAX_ANSWER_CHARS) return undefined
     return JSON.parse(text) as unknown
@@ -173,6 +187,9 @@ async function fetchJson(url: string, fetchImpl: typeof fetch): Promise<unknown>
     clearTimeout(timer)
   }
 }
+
+/** A web link's scheme, host and port, lower-cased: what two links must share to be on one origin. */
+const originOf = (link: string): string | undefined => /^https:\/\/[^/?#\s]+/i.exec(link)?.[0].toLowerCase()
 
 /** A VCALM answer's `didcomm` entry: the invitation's link (§3.7.4). */
 function didcommProtocolOf(json: unknown): string | undefined {
@@ -184,6 +201,10 @@ function didcommProtocolOf(json: unknown): string | undefined {
 /**
  * Read a link for a join code. An inline one is read as it stands. A fetched one is asked once; when its answer is a
  * VCALM `protocols` list and not the invitation itself, the `didcomm` entry is followed once more, and never further.
+ *
+ * That entry is whatever the first host wrote. It is asked only when it is on the first link's own origin: left free,
+ * a scanned link could make the phone ask any address its host named, one inside the person's own network included.
+ * An entry that carries the invitation inline asks nobody, and is read wherever it points.
  */
 export async function readJoinLink(
   shape: JoinLinkShape,
@@ -200,6 +221,7 @@ export async function readJoinLink(
   const nextShape = next && next !== shape.url ? joinLinkShape(next) : undefined
   if (!nextShape) return read
   if (nextShape.via === 'inline') return readJoinInvitation(nextShape.invitation, now)
+  if (originOf(nextShape.url) !== originOf(shape.url)) return read
   const second = await fetchJson(nextShape.url, fetchImpl)
   return second === undefined ? { kind: 'unreadable' } : readJoinInvitation(second, now)
 }
