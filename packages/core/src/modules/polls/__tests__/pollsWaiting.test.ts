@@ -9,6 +9,7 @@ import { act, renderHook } from '@testing-library/react-native'
 import { AppState, DeviceEventEmitter } from 'react-native'
 
 import { ROOMS_LEFT_EVENT } from '../../rooms/useMyRooms'
+import { COMMUNITY_CHANGED_EVENT } from '../../trust-tasks/module/communityChanged'
 
 import {
   POLLS_CHECK_MS,
@@ -223,6 +224,7 @@ describe('a community left', () => {
 const mockAgent = { current: undefined as Agent | undefined }
 const mockService = { readPolls: jest.fn(), record: jest.fn(async () => undefined) }
 const mockLinked = { current: true }
+const mockMemberships: { current: Array<{ communityDid: string; personaDid?: string }> } = { current: [] }
 jest.mock('@bifold/react-hooks', () => ({ useAgent: () => ({ agent: mockAgent.current }) }))
 jest.mock('../usePolls', () => ({ usePollService: () => mockService }))
 jest.mock('../../trust-tasks/module/vtaAgent', () => ({
@@ -235,7 +237,7 @@ jest.mock('../../trust-tasks/module/VtiCommunityStore', () => ({
   isCurrentMembership: () => true,
   GenericRecordsCommunityStore: class {
     async listMemberships() {
-      return [{ communityDid: A }, { communityDid: A }, { communityDid: B }]
+      return mockMemberships.current
     }
   },
 }))
@@ -246,6 +248,7 @@ describe('when the check asks', () => {
     jest.useFakeTimers()
     mockAgent.current = fakeAgent().agent
     mockLinked.current = true
+    mockMemberships.current = [{ communityDid: A }, { communityDid: A }, { communityDid: B }]
     mockService.readPolls.mockReset().mockResolvedValue([listed('open')])
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_: string, handler: (s: string) => void) => {
       appState = handler
@@ -328,6 +331,107 @@ describe('when the check asks', () => {
 
   test('the same check with no leave shows each community as it answers (control)', async () => {
     expect(await checkAcrossALeave(false)).toEqual([['inA'], ['inA', 'inB']])
+  })
+
+  const C = 'did:webvh:QmCommunityC:vtc.example.org'
+  const membershipSaved = (communityDid: string, what = 'membership') =>
+    act(async () => {
+      DeviceEventEmitter.emit(COMMUNITY_CHANGED_EVENT, { communityDid, what })
+      await flush()
+    })
+  const asked = () => mockService.readPolls.mock.calls.map(([community]) => community)
+  const byCommunity = (community: string) => [listed(community === C ? 'inC' : community === A ? 'inA' : 'inB')]
+
+  test('a community just joined shows its polls at once, inside the floor, without waiting for the hour', async () => {
+    mockService.readPolls.mockImplementation(async (community: string) => byCommunity(community))
+    const { result } = renderHook(() => usePollsWaiting())
+    mount()
+    await act(flush)
+    mockService.readPolls.mockClear()
+    mockMemberships.current = [...mockMemberships.current, { communityDid: C }]
+    await membershipSaved(C)
+    expect(asked()).toContain(C)
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC'])
+  })
+
+  test('a membership written again with no community added or gone asks no one (control)', async () => {
+    mount()
+    await act(flush)
+    mockService.readPolls.mockClear()
+    mockMemberships.current = [{ communityDid: B }, { communityDid: A }]
+    await membershipSaved(A)
+    expect(mockService.readPolls).not.toHaveBeenCalled()
+  })
+
+  test('one community swapped for another, the count the same, still asks', async () => {
+    mount()
+    await act(flush)
+    mockService.readPolls.mockClear()
+    mockMemberships.current = [{ communityDid: A }, { communityDid: C }]
+    await membershipSaved(C)
+    expect(asked()).toContain(C)
+  })
+
+  test('only a membership change asks: another change to a community, even with a new membership, waits (control)', async () => {
+    mount()
+    await act(flush)
+    mockService.readPolls.mockClear()
+    mockMemberships.current = [...mockMemberships.current, { communityDid: C }]
+    await membershipSaved(C, 'ticket')
+    expect(mockService.readPolls).not.toHaveBeenCalled()
+  })
+
+  test('a check begun before the join cannot put back the list it read then', async () => {
+    const late: Array<() => void> = []
+    mockService.readPolls.mockImplementation((community: string) =>
+      late.length === 0 && community === B
+        ? new Promise((resolve) => late.push(() => resolve(byCommunity(B))))
+        : Promise.resolve(byCommunity(community))
+    )
+    const { result } = renderHook(() => usePollsWaiting())
+    mount()
+    await act(flush)
+    mockMemberships.current = [...mockMemberships.current, { communityDid: C }]
+    await membershipSaved(C)
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC'])
+    await act(async () => {
+      late.forEach((answer) => answer())
+      await flush()
+    })
+    expect(result.current.map((p) => p.electionId)).toEqual(['inA', 'inB', 'inC'])
+  })
+
+  // A phone with several agents: two identities members of A. Leaving as one drops A's cards at once (the leave);
+  // the next check reads the memberships and, the other identity still a member, puts them back.
+  const leaveAsOneOf = async (others: Array<{ communityDid: string; personaDid?: string }>) => {
+    mockService.readPolls.mockImplementation(async (community: string) => byCommunity(community))
+    mockMemberships.current = [
+      { communityDid: A, personaDid: 'did:key:one' },
+      { communityDid: A, personaDid: 'did:key:two' },
+      { communityDid: B },
+    ]
+    const { result } = renderHook(() => usePollsWaiting())
+    mount()
+    await act(flush)
+    mockMemberships.current = others
+    act(() => void DeviceEventEmitter.emit(ROOMS_LEFT_EVENT, A))
+    const atTheLeave = result.current.map((p) => p.electionId)
+    await act(async () => {
+      jest.advanceTimersByTime(POLLS_CHECK_MS)
+      await flush()
+    })
+    return [atTheLeave, result.current.map((p) => p.electionId)]
+  }
+
+  test('two identities in one community: leaving as one drops its cards, and the next check puts them back', async () => {
+    expect(await leaveAsOneOf([{ communityDid: A, personaDid: 'did:key:two' }, { communityDid: B }])).toEqual([
+      ['inB'],
+      ['inA', 'inB'],
+    ])
+  })
+
+  test('with no identity left a member there, the next check does not put them back (control)', async () => {
+    expect(await leaveAsOneOf([{ communityDid: B }])).toEqual([['inB'], ['inB']])
   })
 
   test('nothing is asked without a linked agent (control for the opening check)', async () => {

@@ -28,6 +28,7 @@ import { AppState, DeviceEventEmitter } from 'react-native'
 import { createKeyLock } from '../../utils/keyLock'
 import { ROOMS_LEFT_EVENT } from '../rooms/useMyRooms'
 import { GenericRecordsCommunityStore, isCurrentMembership } from '../trust-tasks/module/VtiCommunityStore'
+import { COMMUNITY_CHANGED_EVENT, type CommunityChangedEvent } from '../trust-tasks/module/communityChanged'
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
 import type { PollService } from './pollService'
@@ -281,9 +282,19 @@ export async function dropVotedPolls(service: Pick<PollService, 'record'>): Prom
   if (keep.length !== items.length) publish(keep)
 }
 
+/** Whether two lists name the same communities, whatever the order. */
+const sameCommunities = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((c) => b.includes(c))
+
 /**
  * The check, run from the tab navigator: when the app opens, when it comes back to the foreground, and once an hour
  * while it stays there; never in the background. Nothing is asked without a linked agent.
+ *
+ * Also when the communities this phone is a member of change (a join, a rejoin, a removal), at once and past the
+ * floor, so a community just joined shows its polls without waiting for the next hour. A membership written again with
+ * no community added or gone (a card refreshed, say) asks no one: the memberships are read on the phone and compared
+ * with what the last check asked. Only the newest check puts its list on the stack, so one begun before the change
+ * cannot put back what it read then.
  */
 export function usePollsWaitingCheck(): void {
   const { agent } = useAgent()
@@ -302,6 +313,8 @@ export function usePollsWaitingCheck(): void {
     const check = async () => {
       if (Date.now() - lastCheck < POLLS_CHECK_FLOOR_MS) return
       lastCheck = Date.now()
+      const turn = ++checkTurn
+      const newest = () => live && turn === checkTurn
       const left = new Set<string>()
       leftDuringChecks.add(left)
       try {
@@ -309,12 +322,13 @@ export function usePollsWaitingCheck(): void {
           memberCommunities(agent as Agent),
           loadHiddenPolls(agent as Agent),
         ])
+        checkedCommunities = communities
         // Each community's cards as it answers (POLLS_CHECK_PARALLEL): the others keep what the stack shows until theirs do.
         const stillIn = () => communities.filter((c) => !left.has(c))
         const found = await findPollsWaiting(service, communities, hidden, Date.now(), (answered) => {
-          if (live && isPollsCheckParallelOn()) publish(mergeAnswered(waiting.items ?? NONE, stillIn(), answered))
+          if (newest() && isPollsCheckParallelOn()) publish(mergeAnswered(waiting.items ?? NONE, stillIn(), answered))
         })
-        if (live) publish(found.filter((p) => !left.has(p.communityDid)))
+        if (newest()) publish(found.filter((p) => !left.has(p.communityDid)))
       } catch {
         // The stack keeps what the last check found.
       } finally {
@@ -323,16 +337,35 @@ export function usePollsWaitingCheck(): void {
     }
     void check()
     const timer = setInterval(() => void check(), POLLS_CHECK_MS)
+    const membershipChanged = DeviceEventEmitter.addListener(
+      COMMUNITY_CHANGED_EVENT,
+      (event?: CommunityChangedEvent) => {
+        if (event?.what !== 'membership') return
+        void memberCommunities(agent as Agent)
+          .then((now) => {
+            if (!live || (checkedCommunities && sameCommunities(now, checkedCommunities))) return
+            lastCheck = 0
+            return check()
+          })
+          .catch(() => undefined)
+      }
+    )
     return () => {
       live = false
       clearInterval(timer)
+      membershipChanged.remove()
     }
   }, [agent, service, linked, active])
 }
 
 let lastCheck = 0
+/** Which check is the newest: only it publishes. */
+let checkTurn = 0
+/** The communities the last check asked, to tell a membership change that adds or drops one from one that doesn't. */
+let checkedCommunities: readonly string[] | undefined
 
-/** Forget when the last check ran (tests). */
+/** Forget when the last check ran, and what it asked (tests). */
 export function resetPollsCheckFloor(): void {
   lastCheck = 0
+  checkedCommunities = undefined
 }
