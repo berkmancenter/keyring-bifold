@@ -4,6 +4,7 @@
  */
 import { DidCommMessageReceiver } from '@credo-ts/didcomm'
 
+import * as transportModule from '../module/VtiMediatorTransport'
 import {
   closeWalletMailbox,
   openWalletMailbox,
@@ -106,7 +107,7 @@ describe('the outbound transport forwards to the mailbox the peer’s contact DI
   async function opened() {
     const fake = fakeAgent()
     const s = session()
-    jest.spyOn(await import('../module/VtiMediatorTransport'), 'vtiClientIdentityFromDid').mockResolvedValue({
+    jest.spyOn(transportModule, 'vtiClientIdentityFromDid').mockResolvedValue({
       did: MAILBOX,
       kid: `${MAILBOX}#key-2`,
     } as never)
