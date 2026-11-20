@@ -28,6 +28,7 @@ import { AppState, DeviceEventEmitter } from 'react-native'
 import { createKeyLock } from '../../utils/keyLock'
 import { ROOMS_LEFT_EVENT } from '../rooms/useMyRooms'
 import { GenericRecordsCommunityStore, isCurrentMembership } from '../trust-tasks/module/VtiCommunityStore'
+import { COMMUNITY_CHANGED_EVENT, type CommunityChangedEvent } from '../trust-tasks/module/communityChanged'
 import { vtaAgent } from '../trust-tasks/module/vtaAgent'
 
 import type { PollService } from './pollService'
@@ -281,9 +282,22 @@ export async function dropVotedPolls(service: Pick<PollService, 'record'>): Prom
   if (keep.length !== items.length) publish(keep)
 }
 
+/** Whether two lists name the same communities, whatever the order. */
+const sameCommunities = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((c) => b.includes(c))
+
 /**
  * The check, run from the tab navigator: when the app opens, when it comes back to the foreground, and once an hour
  * while it stays there; never in the background. Nothing is asked without a linked agent.
+ *
+ * Also when the communities this phone is a member of change (a join, a rejoin, a removal), past the floor, so a
+ * community just joined shows its polls without waiting for the next hour. A membership written again with no
+ * community added or gone (a card refreshed, say) asks no one: the memberships are read on the phone and compared with
+ * what was last asked, or is about to be.
+ *
+ * One check at a time. A change heard while a check is asking is asked once more right after it, however many
+ * memberships were written meanwhile: a sweep that brings cards for several communities, each written on its own and
+ * each heard on its own, costs one check after the one under way, not one each.
  */
 export function usePollsWaitingCheck(): void {
   const { agent } = useAgent()
@@ -299,8 +313,14 @@ export function usePollsWaitingCheck(): void {
   useEffect(() => {
     if (!agent || !service || !linked || !active) return
     let live = true
+    // A check is asking; a membership change was heard that it may not have read, so ask again past the floor.
+    let checking = false
+    let askAgain = false
     const check = async () => {
-      if (Date.now() - lastCheck < POLLS_CHECK_FLOOR_MS) return
+      if (checking) return
+      if (!askAgain && Date.now() - lastCheck < POLLS_CHECK_FLOOR_MS) return
+      askAgain = false
+      checking = true
       lastCheck = Date.now()
       const left = new Set<string>()
       leftDuringChecks.add(left)
@@ -309,6 +329,7 @@ export function usePollsWaitingCheck(): void {
           memberCommunities(agent as Agent),
           loadHiddenPolls(agent as Agent),
         ])
+        if (live) knownCommunities = communities
         // Each community's cards as it answers (POLLS_CHECK_PARALLEL): the others keep what the stack shows until theirs do.
         const stillIn = () => communities.filter((c) => !left.has(c))
         const found = await findPollsWaiting(service, communities, hidden, Date.now(), (answered) => {
@@ -316,23 +337,49 @@ export function usePollsWaitingCheck(): void {
         })
         if (live) publish(found.filter((p) => !left.has(p.communityDid)))
       } catch {
-        // The stack keeps what the last check found.
+        // The stack keeps what the last check found: publish is never called, so nothing leaves the screen.
       } finally {
         leftDuringChecks.delete(left)
+        checking = false
+        if (askAgain && live) void check()
       }
     }
     void check()
     const timer = setInterval(() => void check(), POLLS_CHECK_MS)
+    const membershipChanged = DeviceEventEmitter.addListener(
+      COMMUNITY_CHANGED_EVENT,
+      (event?: CommunityChangedEvent) => {
+        if (event?.what !== 'membership') return
+        void memberCommunities(agent as Agent)
+          .then((now) => {
+            if (!live || (knownCommunities && sameCommunities(now, knownCommunities))) return
+            // Decided now, before any asking: the rest of a burst compares equal and asks no one.
+            knownCommunities = now
+            askAgain = true
+            return check()
+          })
+          .catch(() => undefined)
+      }
+    )
     return () => {
       live = false
       clearInterval(timer)
+      membershipChanged.remove()
+      // A change still to be asked (the app went to the background mid-check): the next start asks past the floor.
+      if (askAgain) lastCheck = 0
     }
   }, [agent, service, linked, active])
 }
 
 let lastCheck = 0
+/**
+ * The communities a check last asked, or is about to ask because a membership change was heard: a change that leaves
+ * them as they are asks no one.
+ */
+let knownCommunities: readonly string[] | undefined
 
-/** Forget when the last check ran (tests). */
+/** Forget when the last check ran, and what it asked (tests). */
 export function resetPollsCheckFloor(): void {
   lastCheck = 0
+  knownCommunities = undefined
 }
