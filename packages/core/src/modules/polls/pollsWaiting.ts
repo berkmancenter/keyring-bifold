@@ -90,13 +90,19 @@ const leftDuringChecks = new Set<Set<string>>()
 /**
  * The phone has left this community (roomsLeave, once the leave is done): its cards leave the stack now. A check
  * already under way read the memberships before the leave, so it is told too and shows none of this community. In
- * memory only: nothing kept on this phone changes.
+ * memory only: nothing kept on this phone changes. A phone with several agents can hold a second identity's membership
+ * in the same community, which the leave keeps (VtiCommunityStore.forgetCommunity, by identity): its cards go too,
+ * and the next check, which reads the memberships, puts them back.
  */
 export function dropLeftCommunity(communityDid: string): void {
   leftDuringChecks.forEach((left) => left.add(communityDid))
   const items = waiting.items
   if (items?.some((p) => p.communityDid === communityDid)) publish(items.filter((p) => p.communityDid !== communityDid))
 }
+// A check that starts after the leave needs no telling because of an order kept elsewhere: the event comes only once the
+// leave is done (afterLeavingCommunity, after vtiJoin's leaveCommunity has deleted the membership), so that check's
+// memberCommunities no longer finds the community. An event sent before the membership is gone (say, early, for a
+// faster screen) would let such a check put the cards back, and no row here would fail.
 DeviceEventEmitter.addListener(ROOMS_LEFT_EVENT, dropLeftCommunity)
 
 // ---- what the member hid ----
