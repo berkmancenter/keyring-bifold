@@ -13,6 +13,7 @@ import {
   DidCommOutOfBandRole,
 } from '@credo-ts/didcomm'
 import type {
+  CreateOutOfBandInvitationConfig,
   DidCommConnectionStateChangedEvent as ConnectionStateChangedEvent,
   DidCommCredentialStateChangedEvent as CredentialStateChangedEvent,
 } from '@credo-ts/didcomm'
@@ -2837,7 +2838,7 @@ export const createRelationshipInvitation = async (
   const mailbox = mint.via === 'mailbox' ? walletMailboxOf(agent) : undefined
   const ourDid = mailbox ? await mintContactDid(agent, mailbox) : undefined
   const routing = didCommVersion === 'v2' && !ourDid ? await getRoutingForV2(agent) : undefined
-  const invitationConfig: Parameters<typeof agent.modules.didcomm.oob.createInvitation>[0] & { ourDid?: string } = {
+  const invitationConfig: CreateOutOfBandInvitationConfig & { ourDid?: string } = {
     didCommVersion,
     routing,
     ...(ourDid ? { ourDid } : {}),

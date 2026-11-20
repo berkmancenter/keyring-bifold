@@ -19,6 +19,7 @@ import {
   DidCommBasicMessageEventTypes,
   DidCommModule,
   DidCommV2EnvelopeService,
+  type CreateOutOfBandInvitationConfig,
   type DidCommBasicMessageStateChangedEvent,
   type DidCommConnectionRecord,
   type DidCommV2PlaintextMessage,
@@ -161,7 +162,7 @@ async function connect(
   const mailbox = walletMailboxOf(inviter)
   if (!mailbox) throw new Error('test setup: the inviter has no open mailbox')
   const ourDid = await mintContactDid(inviter, mailbox)
-  const config: Parameters<typeof inviter.modules.didcomm.oob.createInvitation>[0] & { ourDid?: string } = {
+  const config: CreateOutOfBandInvitationConfig & { ourDid?: string } = {
     didCommVersion: 'v2',
     ourDid,
   }
