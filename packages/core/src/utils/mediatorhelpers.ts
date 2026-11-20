@@ -41,11 +41,12 @@ const provisionMediationRecordFromMediatorUrl = async (
     if (!connection) {
       agent.config.logger.warn(`No connection found for out-of-band record: ${outOfBandRecord?.id}`)
       const invite = await agent.modules.didcomm.oob.parseInvitation(url)
-      // A v2 invitation needs v2 routing (routingForInvitation): the default mediator cannot route it.
+      // A v2 invitation needs v2 routing (routingForInvitation): the default mediator cannot route it. Always a config
+      // object: this Credo's receiveInvitation destructures it, so none at all throws.
       const routing = await routingForInvitation(agent, invite)
       const { connectionRecord: newConnection } = await agent.modules.didcomm.oob.receiveInvitation(
         invite,
-        routing ? { routing } : undefined
+        routing ? { routing } : {}
       )
 
       if (!newConnection) {

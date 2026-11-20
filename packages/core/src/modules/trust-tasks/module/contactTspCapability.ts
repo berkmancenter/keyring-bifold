@@ -124,7 +124,14 @@ export function askPeerReadsTsp(
  * binding.
  */
 export async function peerReadsTsp(agent: Agent, connectionId: string, now: number = Date.now()): Promise<boolean> {
-  const kept = await readRecorded(agent, connectionId)
+  let kept: TspCapability | undefined
+  try {
+    kept = await readRecorded(agent, connectionId)
+  } catch (error) {
+    // Unreadable is unknown: the binding, which every build reads.
+    agent.config.logger.info(`${LOG_PREFIX} could not read what ${connectionId} said: ${(error as Error)?.message}`)
+    return false
+  }
   if (kept?.reads) return true
   if (!kept || now - kept.at >= TSP_NO_RECHECK_MS) void askPeerReadsTsp(agent, connectionId)
   return false

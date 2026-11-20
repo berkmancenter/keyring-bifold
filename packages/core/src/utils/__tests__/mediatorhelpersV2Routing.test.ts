@@ -31,11 +31,11 @@ function fakeAgent(invitation: Record<string, unknown>) {
 }
 
 describe('setMediationToDefault: invitation routing by version', () => {
-  it('CONTROL: a v1 invitation is accepted with no routing, through the default mediator as before', async () => {
+  it('CONTROL: a v1 invitation is accepted with no routing (an empty config), through the default mediator as before', async () => {
     const invitation = { id: 'inv-v1' }
     const { agent, receiveInvitation } = fakeAgent(invitation)
     await setMediationToDefault(agent, 'https://mediator.example/v1')
-    expect(receiveInvitation).toHaveBeenCalledWith(invitation, undefined)
+    expect(receiveInvitation).toHaveBeenCalledWith(invitation, {})
   })
 
   it('a v2 invitation is accepted with v2 routing, never the v1 default', async () => {

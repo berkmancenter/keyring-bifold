@@ -107,7 +107,7 @@ async function stop(agent: Agent): Promise<void> {
 async function connect(inviter: Agent, invitee: Agent, didCommVersion: 'v1' | 'v2' = 'v1') {
   const oob = await inviter.modules.didcomm.oob.createInvitation({ didCommVersion } as never)
   const url = oob.outOfBandInvitation.toUrl({ domain: 'https://example.test' })
-  const { connectionRecord } = await invitee.modules.didcomm.oob.receiveInvitationFromUrl(url)
+  const { connectionRecord } = await invitee.modules.didcomm.oob.receiveInvitationFromUrl(url, {})
   if (!connectionRecord) throw new Error('test setup: no connection record from the invitation')
   const inviteeSide = await invitee.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, {
     timeoutMs: 20000,
@@ -150,14 +150,22 @@ describe('mixed DIDComm versions between real agents', () => {
     const v2 = await newPhone.modules.didcomm.oob.createInvitation({ didCommVersion: 'v2' } as never)
     const url = v2.outOfBandInvitation.toUrl({ domain: 'https://example.test' })
 
-    await expect(
-      (async () => {
-        const { connectionRecord } = await oldPhone.modules.didcomm.oob.receiveInvitationFromUrl(url)
-        if (connectionRecord) {
-          await oldPhone.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, { timeoutMs: 5000 })
-        }
-      })()
-    ).rejects.toThrow()
+    let refusal: Error | undefined
+    try {
+      // A config object, as the app always passes: this Credo's receiveInvitation throws without one, which must not
+      // pass for the refusal this row is about.
+      const { connectionRecord } = await oldPhone.modules.didcomm.oob.receiveInvitationFromUrl(url, {})
+      if (connectionRecord) {
+        await oldPhone.modules.didcomm.connections.returnWhenIsConnected(connectionRecord.id, { timeoutMs: 5000 })
+      }
+    } catch (error) {
+      refusal = error as Error
+    }
+    expect(refusal).toBeDefined()
+    // Said in the log, so the reason is on record: it is the version, not some other failure.
+    console.info(`[v1-only refuses v2] ${refusal?.message}`)
+    expect(refusal?.message).not.toMatch(/reading 'routing'/)
+    expect(refusal?.message).toMatch(/v2|version|support/i)
     expect(await oldPhone.modules.didcomm.connections.getAll()).toHaveLength(0)
   }, 60000)
 

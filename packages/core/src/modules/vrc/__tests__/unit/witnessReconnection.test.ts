@@ -325,8 +325,8 @@ describe('witnessReconnection', () => {
       expect(result.error).toBeDefined()
       // Should have tried twice (initial + 1 default retry)
       expect(mockAgent.modules.didcomm.oob.receiveInvitation).toHaveBeenCalledTimes(2)
-      // Should have checked twice (once before each attempt)
-      expect(mockAgent.modules.didcomm.oob.parseInvitation).toHaveBeenCalledTimes(2)
+      // Parsed twice per attempt: the check before it, and the attempt itself (for the invitation's routing)
+      expect(mockAgent.modules.didcomm.oob.parseInvitation).toHaveBeenCalledTimes(4)
     })
 
     it('should respect maxRetries when connection fails', async () => {
@@ -345,8 +345,8 @@ describe('witnessReconnection', () => {
       expect(result.strategy).toBe('failed')
       // Should have tried 3 times (initial + 2 retries)
       expect(mockAgent.modules.didcomm.oob.receiveInvitation).toHaveBeenCalledTimes(3)
-      // Should have checked 3 times (once before each attempt)
-      expect(mockAgent.modules.didcomm.oob.parseInvitation).toHaveBeenCalledTimes(3)
+      // Parsed twice per attempt: the check before it, and the attempt itself (for the invitation's routing)
+      expect(mockAgent.modules.didcomm.oob.parseInvitation).toHaveBeenCalledTimes(6)
     })
 
     it('should return failure when connection record is not created', async () => {
@@ -376,7 +376,7 @@ describe('witnessReconnection: the invitation is accepted with the routing its v
   const connected = { id: 'connection-1', state: DidCommDidExchangeState.Completed } as DidCommConnectionRecord
 
   it.each([
-    ['a v1 invitation (CONTROL)', { id: 'inv-v1' }, undefined],
+    ['a v1 invitation (CONTROL)', { id: 'inv-v1' }, {}],
     [
       'a v2 invitation',
       { id: 'inv-v2', v2Invitation: { from: 'did:peer:2.witness' } },
