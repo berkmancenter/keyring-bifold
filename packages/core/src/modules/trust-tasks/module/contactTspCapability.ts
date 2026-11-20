@@ -26,12 +26,15 @@ import {
   type DidCommFeature,
 } from '@credo-ts/didcomm'
 
-import { TspEnvelopeMessage } from '../messages/TspEnvelopeMessage'
-
 const LOG_PREFIX = '[TrustTasks:ContactTsp]'
 
-/** The protocol a build that reads TSP envelopes discloses: the envelope message type's protocol URI. */
-export const TSP_ENVELOPE_PROTOCOL_URI = TspEnvelopeMessage.type.protocolUri
+/**
+ * The protocol a build that reads TSP envelopes discloses: the envelope message type's protocol URI. Written out, not
+ * read from TspEnvelopeMessage at load: a suite that mocks @bifold/trust-tasks partially and reaches this module
+ * through ceremony.ts would otherwise die at import (sharedSessionHolds.test.ts did). contactTspCapability.test.ts
+ * pins it equal to TspEnvelopeMessage.type.protocolUri.
+ */
+export const TSP_ENVELOPE_PROTOCOL_URI = 'https://github.com/berkmancenter/keyring-bifold/tsp-envelope/0.1'
 
 /** Where a contact's answer is kept on its connection record. */
 export const TSP_CAPABILITY_METADATA_KEY = 'keyring:tspCarriage'
