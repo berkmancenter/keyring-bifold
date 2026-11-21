@@ -199,10 +199,12 @@ async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox): Pr
  * naming the recipient's mailbox and the stored id). The mediator answers `{}` whatever it decides, and rings the
  * recipient's push gateway only when the recipient is offline with a handle, the message is still stored and fresh,
  * this sender is its sender, and the limits allow (one per minute per pair, coalesced per recipient). Asked once per
- * forward: nothing above retries a send on its own (Credo tries each service once and throws; a person's "try again"
- * is a new message, so new bytes and a new id), which keeps to the spec's rule of one request per message. Best
- * effort: a refusal or an old mediator is said at info level, since the message itself is already on its way and the
- * phone collects it when the app next opens.
+ * forward. A caller may forward the same logical message more than once (announceRelationshipDid tries its first
+ * contact three times, 2 s and 4 s apart; a person's "try again" sends anew), but each is a new basic message with its
+ * own bytes and so its own stored id, which keeps to the spec's rule of one request per message; the extra wakes
+ * then meet the per-pair limit, and their refusals are expected, said at info level. Best effort throughout: a
+ * refusal or an old mediator is said at info level, since the message itself is already on its way and the phone
+ * collects it when the app next opens.
  */
 async function requestMailboxWake(agent: Agent, mailbox: WalletMailbox, addressee: string, id: string): Promise<void> {
   try {
