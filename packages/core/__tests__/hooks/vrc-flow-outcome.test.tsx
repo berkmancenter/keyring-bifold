@@ -69,7 +69,8 @@ describe('a flow that ends without completing', () => {
     expect(confirmedSeen).not.toContain(true)
     expect(result.current.inProgress).toBe(true)
     expect(result.current.progressComplete).toBe(false)
-    expect(result.current.statusKey).toBe('Chat.Flow.DidNotComplete')
+    // The did-not-complete state is the timeout's, shown at once; Chat.test.tsx pins its wording on screen.
+    expect(result.current.timedOut).toBe(true)
   })
 
   // fd's #469: a waiting dialog the person dismissed keeps the flow and its bar; a decline then read as confirmed.
