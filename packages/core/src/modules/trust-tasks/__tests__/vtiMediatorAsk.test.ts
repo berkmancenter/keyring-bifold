@@ -78,7 +78,12 @@ describe('asking the mediator', () => {
   test('CONTROL: a frame threaded to something else is no answer; a peer’s message still goes to the consumer, and the ask waits', async () => {
     const { session, sent, frame, onMessage } = sessionAsking()
     const asked = session.ask(document)
-    await frame({ type: 'https://didcomm.org/basicmessage/2.0/message', from: 'did:peer:2.a-peer', thid: 'urn:uuid:other', body: {} })
+    await frame({
+      type: 'https://didcomm.org/basicmessage/2.0/message',
+      from: 'did:peer:2.a-peer',
+      thid: 'urn:uuid:other',
+      body: {},
+    })
     expect(onMessage).toHaveBeenCalledTimes(1)
     expect(sent).toHaveLength(1)
     // Stopping the session is what ends a wait with no answer.
