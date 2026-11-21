@@ -1520,7 +1520,7 @@ export class VtiMediatorSession {
       created_time: nowSec(),
       expires_time: nowSec() + FORWARD_EXPIRY_SECS,
       body: { next },
-      attachments: [{ id: utils.uuid(), data: { base64: TypedArrayEncoder.toBase64URL(bytes) } }],
+      attachments: [{ id: utils.uuid(), data: { base64: TypedArrayEncoder.toBase64Url(bytes) } }],
     })
     return { id }
   }
