@@ -129,5 +129,23 @@ describe('a forward for the mailbox path', () => {
     expect(id).toBe(sha256hex(given))
     expect(id).not.toBe(sha256hex(JSON.stringify(JSON.parse(given))))
     await session.stop()
+describe('after an ask gave up', () => {
+  test('a late answer is the mediator’s own frame, dropped unsaid: not handed on, not acknowledged, nothing waiting', async () => {
+    const { session, sent, frame, onMessage } = sessionAsking()
+    await expect(session.ask(document, 20)).rejects.toThrow(/did not answer within 20 ms/)
+    await frame({ type: ENVELOPE, from: mediator.did, thid: sent[0].id, body: { payload: { late: true } } })
+    expect(onMessage).not.toHaveBeenCalled()
+    expect(session['acknowledge']).not.toHaveBeenCalled()
+    expect(session['asks'].size).toBe(0)
+    await session.stop()
+  })
+
+  test('CONTROL: a frame threaded to a live ask but not from the mediator is not its answer', async () => {
+    const { session, sent, frame, onMessage } = sessionAsking()
+    const asked = session.ask(document)
+    await frame({ type: ENVELOPE, from: 'did:peer:2.a-peer', thid: sent[0].id, body: { payload: { forged: true } } })
+    expect(onMessage).toHaveBeenCalledTimes(1)
+    await session.stop()
+    await expect(asked).rejects.toThrow(/session stopped/)
   })
 })
