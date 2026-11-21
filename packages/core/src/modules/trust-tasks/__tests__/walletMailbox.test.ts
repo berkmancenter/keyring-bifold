@@ -102,11 +102,20 @@ function fakeAgent({ created = ['did:peer:2.mine'] }: { created?: string[] } = {
 }
 
 const ENVELOPE = 'https://trusttasks.org/binding/didcomm/0.1/envelope'
-/** The mediator's answers, as affinidi-messaging-mediator v0.53.0 gave them in the lab: the realised view, in `payload`. */
+/**
+ * The mediator's answers as v0.53.0 gives them (its bundles' responseSchema): account/update's realised view sits
+ * under `account`; wake/set's `wakeCapable` is flat; wake/request answers `{}`.
+ */
 const answerTo = (document: Record<string, unknown>) => {
   const type = String(document.type)
   if (type === MEDIATOR_ACCOUNT_UPDATE)
-    return { type: ENVELOPE, body: { type: `${type}#response`, payload: { did: 'x', acl: { sendForwarded: true } } } }
+    return {
+      type: ENVELOPE,
+      body: {
+        type: `${type}#response`,
+        payload: { account: { did: 'x', accountType: 'standard', acl: { sendForwarded: true } } },
+      },
+    }
   if (type === MEDIATOR_WAKE_SET)
     return { type: ENVELOPE, body: { type: `${type}#response`, payload: { wakeCapable: true } } }
   if (type === MEDIATOR_WAKE_REQUEST) return { type: ENVELOPE, body: { type: `${type}#response`, payload: {} } }
@@ -405,7 +414,10 @@ describe('the phone’s account at the mediator', () => {
     const s = session()
     s.ask.mockResolvedValue({
       type: ENVELOPE,
-      body: { type: `${MEDIATOR_ACCOUNT_UPDATE}#response`, payload: { acl: { sendForwarded: false } } },
+      body: {
+        type: `${MEDIATOR_ACCOUNT_UPDATE}#response`,
+        payload: { account: { did: 'x', accountType: 'standard', acl: { sendForwarded: false } } },
+      },
     } as never)
     await openWalletMailbox(agent, MEDIATOR, deps(s))
     expect(walletMailboxOf(agent)?.did).toBe(MAILBOX)
