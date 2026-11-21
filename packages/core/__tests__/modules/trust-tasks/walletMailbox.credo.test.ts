@@ -90,12 +90,8 @@ function hubSession(
     stop: async () => {
       accounts.delete(identity.did)
     },
-    // As a network would: delivered after this send returns.
-    forward: async (next, innerJwe) => {
-      setImmediate(() => void deliver(next, innerJwe).catch(() => undefined))
-    },
-    // The mailbox path: the same delivery, and the id the mediator would store the bytes under.
-    forwardForMailbox: async (next, innerJwe) => {
+    // As a network would: delivered after this send returns, with the id the mediator would store the bytes under.
+    forwardForMailbox: async (next: string, innerJwe: unknown) => {
       setImmediate(() => void deliver(next, innerJwe).catch(() => undefined))
       return { id: createHash('sha256').update(JSON.stringify(innerJwe)).digest('hex') }
     },
