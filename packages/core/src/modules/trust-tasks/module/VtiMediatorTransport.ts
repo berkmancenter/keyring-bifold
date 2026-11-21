@@ -1435,7 +1435,11 @@ export class VtiMediatorSession {
   /** What waits for the mediator's answer to an `ask`, by the envelope id the answer is threaded to. */
   private readonly asks = new Map<
     string,
-    { resolve: (answer: DidCommV2PlaintextMessage) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve: (answer: DidCommV2PlaintextMessage) => void
+      reject: (error: Error) => void
+      timer: ReturnType<typeof setTimeout>
+    }
   >()
 
   /**

@@ -106,7 +106,8 @@ const answerTo = (document: Record<string, unknown>) => {
   const type = String(document.type)
   if (type === MEDIATOR_ACCOUNT_UPDATE)
     return { type: ENVELOPE, body: { type: `${type}#response`, payload: { did: 'x', acl: { sendForwarded: true } } } }
-  if (type === MEDIATOR_WAKE_SET) return { type: ENVELOPE, body: { type: `${type}#response`, payload: { wakeCapable: true } } }
+  if (type === MEDIATOR_WAKE_SET)
+    return { type: ENVELOPE, body: { type: `${type}#response`, payload: { wakeCapable: true } } }
   return { type: ENVELOPE, body: {} }
 }
 
@@ -372,17 +373,29 @@ describe('the phone’s account at the mediator', () => {
   test('the mediator refusing: the mailbox still opens (for receiving), and it is said', async () => {
     const { agent } = fakeAgent()
     const s = session()
-    s.ask.mockRejectedValue(new Error('[TrustTasks:VtiMediatorTransport] m.example refused: authorization.acl.not_self_manageable — this account may not change `sendForwarded`'))
+    s.ask.mockRejectedValue(
+      new Error(
+        '[TrustTasks:VtiMediatorTransport] m.example refused: authorization.acl.not_self_manageable — this account may not change `sendForwarded`'
+      )
+    )
     await openWalletMailbox(agent, MEDIATOR, deps(s))
     expect(walletMailboxOf(agent)?.did).toBe(MAILBOX)
-    expect(warned()).toEqual([expect.stringMatching(/forwarding not set for mailbox-of-did:p… at did:peer:2\.m….*not_self_manageable/)])
+    // didPrefix keeps 24 characters: the mailbox DID is cut, the short mediator DID is whole.
+    expect(warned()).toEqual([
+      expect.stringMatching(
+        /forwarding not set for mailbox-of-did:peer:2\.me… at did:peer:2\.mediator: .*not_self_manageable/
+      ),
+    ])
     await closeWalletMailbox(agent)
   })
 
   test('an answer that does not show the right on is said, and the mailbox still opens', async () => {
     const { agent } = fakeAgent()
     const s = session()
-    s.ask.mockResolvedValue({ type: ENVELOPE, body: { type: `${MEDIATOR_ACCOUNT_UPDATE}#response`, payload: { acl: { sendForwarded: false } } } } as never)
+    s.ask.mockResolvedValue({
+      type: ENVELOPE,
+      body: { type: `${MEDIATOR_ACCOUNT_UPDATE}#response`, payload: { acl: { sendForwarded: false } } },
+    } as never)
     await openWalletMailbox(agent, MEDIATOR, deps(s))
     expect(walletMailboxOf(agent)?.did).toBe(MAILBOX)
     expect(warned()).toEqual([expect.stringMatching(/forwarding not confirmed on/)])
@@ -392,7 +405,11 @@ describe('the phone’s account at the mediator', () => {
   test('a wake handle given at open is left at the mediator with a signed wake/set, after the forwarding right', async () => {
     const { agent } = fakeAgent()
     const s = session()
-    await openWalletMailbox(agent, MEDIATOR, deps(s, { wakeHandle: async () => ({ gateway: 'did:web:gateway.example', handle: 'wh_1' }) }))
+    await openWalletMailbox(
+      agent,
+      MEDIATOR,
+      deps(s, { wakeHandle: async () => ({ gateway: 'did:web:gateway.example', handle: 'wh_1' }) })
+    )
     expect(s.ask).toHaveBeenCalledTimes(2)
     const [second] = s.ask.mock.calls[1] as [Record<string, unknown>]
     expect(second).toMatchObject({
@@ -409,16 +426,22 @@ describe('the phone’s account at the mediator', () => {
     const s = session()
     await openWalletMailbox(agent, MEDIATOR, deps(s, { wakeHandle: async () => undefined }))
     expect(s.ask).toHaveBeenCalledTimes(1) // the forwarding right only
-    await expect(setMailboxWakeHandle(agent, { gateway: 'did:web:gateway.example', handle: 'wh_2' })).resolves.toBe(true)
+    await expect(setMailboxWakeHandle(agent, { gateway: 'did:web:gateway.example', handle: 'wh_2' })).resolves.toBe(
+      true
+    )
     await expect(setMailboxWakeHandle(agent)).resolves.toBe(true)
     expect(s.ask).toHaveBeenCalledTimes(3)
-    expect((s.ask.mock.calls[1] as [Record<string, unknown>])[0].payload).toEqual({ wakeHandle: { gateway: 'did:web:gateway.example', handle: 'wh_2' } })
+    expect((s.ask.mock.calls[1] as [Record<string, unknown>])[0].payload).toEqual({
+      wakeHandle: { gateway: 'did:web:gateway.example', handle: 'wh_2' },
+    })
     expect((s.ask.mock.calls[2] as [Record<string, unknown>])[0].payload).toEqual({})
     await closeWalletMailbox(agent)
   })
 
   test('setMailboxWakeHandle with no mailbox open: nothing asked, false', async () => {
     const { agent } = fakeAgent()
-    await expect(setMailboxWakeHandle(agent, { gateway: 'did:web:gateway.example', handle: 'wh_3' })).resolves.toBe(false)
+    await expect(setMailboxWakeHandle(agent, { gateway: 'did:web:gateway.example', handle: 'wh_3' })).resolves.toBe(
+      false
+    )
   })
 })

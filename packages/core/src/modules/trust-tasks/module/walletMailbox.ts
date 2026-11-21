@@ -177,7 +177,9 @@ async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox): Pr
       )
       return false
     }
-    agent.config.logger.info(`${LOG_PREFIX} forwarding on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}`)
+    agent.config.logger.info(
+      `${LOG_PREFIX} forwarding on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}`
+    )
     return true
   } catch (error) {
     releaseWarn(
