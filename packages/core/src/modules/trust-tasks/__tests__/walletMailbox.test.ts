@@ -425,6 +425,30 @@ describe('the phone’s account at the mediator', () => {
     await closeWalletMailbox(agent)
   })
 
+  test('a non-conformant flat answer with the right on is still read as on: the fallback is defence, not a second blessed shape', () => {
+    // v0.53.0's response allows no member but `account` (its bundle's responseSchema), so a flat `acl` can only come
+    // from a non-conformant mediator. Tolerated, since the alternative is the false "not confirmed" line this
+    // check exists to avoid; pinned here so a later cleanup does not read the fallback as decoration.
+    return (async () => {
+      const { agent } = fakeAgent()
+      const s = session()
+      s.ask.mockResolvedValueOnce({
+        type: ENVELOPE,
+        body: { type: `${MEDIATOR_ACCOUNT_UPDATE}#response`, payload: { acl: { sendForwarded: true } } },
+      } as never)
+      await openWalletMailbox(agent, MEDIATOR, deps(s))
+      expect(walletMailboxOf(agent)?.did).toBe(MAILBOX)
+      expect(warned()).toEqual([])
+      const infos = (agent as unknown as { config: { logger: { info: jest.Mock } } }).config.logger.info.mock.calls.map(
+        (c) => String(c[0])
+      )
+      expect(infos).toEqual(
+        expect.arrayContaining([expect.stringMatching(/forwarding on for mailbox-of-did:peer:2\.me…/)])
+      )
+      await closeWalletMailbox(agent)
+    })()
+  })
+
   test('a wake handle given at open is left at the mediator with a signed wake/set, after the forwarding right', async () => {
     const { agent } = fakeAgent()
     const s = session()
