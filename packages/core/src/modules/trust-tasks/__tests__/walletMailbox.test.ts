@@ -471,8 +471,10 @@ describe('after a mailbox send, the recipient’s mediator is asked for a wake',
     })
 
   test('the stored id the session returned is named in a signed wake/request for the recipient’s mailbox', async () => {
-    const { agent } = fakeAgent({ forwardingSet: true })
+    const { agent } = fakeAgent()
     const s = await opened(agent)
+    // The open asks for the forwarding right itself (every open, since #1169); only the send's asks are measured.
+    s.ask.mockClear()
     await send(agent)
     expect(s.forwardForMailbox).toHaveBeenCalledWith(PEER_MAILBOX, { p: 1 })
     await new Promise((resolve) => setImmediate(resolve))
@@ -489,9 +491,10 @@ describe('after a mailbox send, the recipient’s mediator is asked for a wake',
   })
 
   test('CONTROL: the wake is asked after the forward, once, and its refusal does not fail the send', async () => {
-    const { agent } = fakeAgent({ forwardingSet: true })
+    const { agent } = fakeAgent()
     const s = session()
     await openWalletMailbox(agent, MEDIATOR, deps(s))
+    s.ask.mockClear()
     const order: string[] = []
     s.forwardForMailbox.mockImplementation(async () => {
       order.push('forward')
@@ -509,8 +512,10 @@ describe('after a mailbox send, the recipient’s mediator is asked for a wake',
   })
 
   test('CONTROL: a send refused before the forward (no mailbox for the peer) asks for nothing', async () => {
-    const { agent } = fakeAgent({ forwardingSet: true })
+    const { agent } = fakeAgent()
     const s = await opened(agent)
+    // The open asks for the forwarding right itself (every open, since #1169); only the send's asks are measured.
+    s.ask.mockClear()
     await expect(send(agent, 'c-plain')).rejects.toThrow(/no mailbox found/)
     expect(s.forwardForMailbox).not.toHaveBeenCalled()
     expect(s.ask).not.toHaveBeenCalled()
