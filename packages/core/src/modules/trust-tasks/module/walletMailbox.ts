@@ -1,6 +1,9 @@
-import { type Agent, TypedArrayEncoder } from '@credo-ts/core'
+import { type Agent, type GenericRecord, TypedArrayEncoder, utils } from '@credo-ts/core'
 import type { DidCommOutboundPackage, DidCommOutboundTransport, DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { DidCommMessageReceiver } from '@credo-ts/didcomm'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { signDocumentProof, wireTimestamp } from '@bifold/trust-tasks'
 
 import { didPrefix } from './didPrefix'
 import { releaseWarn } from './releaseLog'
@@ -43,12 +46,30 @@ import {
 export const LOG_PREFIX = '[TrustTasks:WalletMailbox]'
 export const WALLET_MAILBOX_RECORD_TYPE = 'keyring:walletMailbox'
 const FORWARD = 'https://didcomm.org/routing/2.0/forward'
+/** The mediator's own management tasks (trust-tasks-rs `messaging/*`), as affinidi-messaging-mediator v0.53.0 serves them. */
+export const MEDIATOR_ACCOUNT_UPDATE = 'https://trusttasks.org/spec/messaging/account/update/0.1'
+export const MEDIATOR_WAKE_SET = 'https://trusttasks.org/spec/messaging/wake/set/0.1'
+
+/**
+ * The key the mediator holds an account under: the sha256 of its DID, in hex (upstream `did_identity::did_hash`).
+ * Every `messaging/account/*` task names the account by this key, not by the DID.
+ */
+export const mailboxAccountKey = (did: string): string => bytesToHex(sha256(utf8ToBytes(did)))
+
+/** A push gateway's handle for this phone, as `messaging/wake/set` carries it. */
+export interface MailboxWakeHandle {
+  /** The gateway's DID. The mediator rings only a gateway named by a DID. */
+  gateway: string
+  handle: string
+}
 
 /** What this module needs of a mediator session; {@link VtiMediatorSession} in the app, a fake in tests. */
 export interface MailboxSession {
   start(): Promise<void>
   stop(): Promise<void>
   forward(next: string, innerJwe: unknown): Promise<void>
+  /** A signed Trust Task document to the mediator itself; resolves with its answer, rejects with its refusal. */
+  ask(document: Record<string, unknown>): Promise<DidCommV2PlaintextMessage>
 }
 
 export interface WalletMailbox {
@@ -59,6 +80,12 @@ export interface WalletMailbox {
 }
 
 export interface OpenWalletMailboxDeps {
+  /**
+   * This phone's push-gateway handle, if it has one, left at the mediator once the mailbox is open (`wake/set`), so a
+   * sender's `wake/request` can ring the phone while the app is suspended. Absent or undefined: nothing is left, and
+   * {@link setMailboxWakeHandle} can do it later, when the handle exists.
+   */
+  wakeHandle?: () => Promise<MailboxWakeHandle | undefined>
   resolveMediator?: (agent: Agent, mediatorDid: string) => Promise<VtiMediatorEndpoints>
   makeSession?: (
     agent: Agent,
@@ -84,21 +111,116 @@ export function walletMailboxOf(agent: Agent): WalletMailbox | undefined {
   return openMailboxes.get(agent)
 }
 
-/** The mailbox DID kept for `mediatorDid`, or a new one minted and kept. One per mediator, stable across starts. */
-async function mailboxDidFor(agent: Agent, mediator: VtiMediatorEndpoints): Promise<string> {
+/**
+ * The mailbox kept for `mediatorDid` (its DID, and the record that keeps it), or a new one minted and kept. One per
+ * mediator, stable across starts. The record also remembers `forwardingSetAt`, once the account's forwarding right
+ * is confirmed on (ensureMailboxForwarding).
+ */
+async function mailboxRecordFor(
+  agent: Agent,
+  mediator: VtiMediatorEndpoints
+): Promise<{ did: string; record: GenericRecord | undefined }> {
   const kept = await agent.genericRecords.findAllByQuery({
     type: WALLET_MAILBOX_RECORD_TYPE,
     mediatorDid: mediator.did,
   })
   const did = kept[0]?.content?.did
-  if (typeof did === 'string' && did) return did
+  if (typeof did === 'string' && did) return { did, record: kept[0] }
   const minted = await createPeerDidNamingUri(agent, mediator.did, mediator.wsEndpoint)
-  await agent.genericRecords.save({
+  const record = await agent.genericRecords.save({
     content: { did: minted, mediatorDid: mediator.did },
     tags: { type: WALLET_MAILBOX_RECORD_TYPE, mediatorDid: mediator.did },
   })
   agent.config.logger.info(`${LOG_PREFIX} minted a mailbox DID ${didPrefix(minted)} for ${didPrefix(mediator.did)}`)
-  return minted
+  return { did: minted, record }
+}
+
+/**
+ * A Trust Task to the mailbox's mediator, signed for the mailbox DID (eddsa-jcs-2022, proof purpose authentication:
+ * what the mediator verifies a management task with), asked over the mailbox's session. Returns the answer's body,
+ * the mediator's response document.
+ */
+async function askMediator(
+  agent: Agent,
+  mailbox: WalletMailbox,
+  type: string,
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const document = {
+    id: `urn:uuid:${utils.uuid()}`,
+    type,
+    issuer: mailbox.did,
+    recipient: mailbox.mediatorDid,
+    issuedAt: wireTimestamp(),
+    payload,
+  }
+  const signed = await signDocumentProof(agent, document, mailbox.did, { proofPurpose: 'authentication' })
+  const answer = await mailbox.session.ask(signed)
+  return (answer.body ?? {}) as Record<string, unknown>
+}
+
+/**
+ * Turn on this account's own forwarding right at the mediator, once. A phone's every send is a routing/2.0 forward,
+ * which the mediator admits only from an account holding `SEND_FORWARDED`; an open-sign-up mailbox grants a new
+ * account `SEND_FORWARDED_CHANGE` instead (deploy/keyring-messaging/mailbox/mailbox.toml), so the phone switches
+ * the right on itself with a signed `messaging/account/update`, and the mediator answers the account's realised ACL.
+ * Confirmed on, it is remembered in the mailbox record and never asked again. Refused or unconfirmed: said, and the
+ * mailbox stays open for receiving; a send then fails with the mediator's refusal, which the sender sees.
+ */
+async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox, record: GenericRecord | undefined) {
+  if (record?.content?.forwardingSetAt) return
+  try {
+    const body = await askMediator(agent, mailbox, MEDIATOR_ACCOUNT_UPDATE, {
+      did: mailboxAccountKey(mailbox.did),
+      acl: { sendForwarded: true },
+    })
+    const acl = (body.payload as { acl?: { sendForwarded?: unknown } } | undefined)?.acl
+    if (acl?.sendForwarded !== true) {
+      releaseWarn(
+        `${LOG_PREFIX} forwarding not confirmed on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}: the answer is ${String(body.type ?? 'untyped')}`
+      )
+      return
+    }
+    if (record) {
+      record.content = { ...record.content, forwardingSetAt: new Date().toISOString() }
+      await agent.genericRecords.update(record)
+    }
+    agent.config.logger.info(`${LOG_PREFIX} forwarding on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}`)
+  } catch (error) {
+    releaseWarn(
+      `${LOG_PREFIX} forwarding not set for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}: ${(error as Error).message}`
+    )
+  }
+}
+
+/**
+ * Leave this phone's push-gateway handle at the mediator (`messaging/wake/set`), or clear it with no handle, so a
+ * sender's `wake/request` rings the phone through the gateway while the app is suspended. Returns the mediator's
+ * `wakeCapable`: true only when it holds the handle and can reach the gateway's DID. False, said, when no mailbox is
+ * open or the mediator refuses.
+ */
+export async function setMailboxWakeHandle(agent: Agent, handle?: MailboxWakeHandle): Promise<boolean> {
+  const mailbox = openMailboxes.get(agent)
+  if (!mailbox) {
+    agent.config.logger.info(`${LOG_PREFIX} no mailbox is open to leave a wake handle at`)
+    return false
+  }
+  try {
+    const body = await askMediator(
+      agent,
+      mailbox,
+      MEDIATOR_WAKE_SET,
+      handle ? { wakeHandle: { gateway: handle.gateway, handle: handle.handle } } : {}
+    )
+    const wakeCapable = (body.payload as { wakeCapable?: unknown } | undefined)?.wakeCapable === true
+    agent.config.logger.info(
+      `${LOG_PREFIX} wake handle ${handle ? 'left' : 'cleared'} at ${didPrefix(mailbox.mediatorDid)}: wakeCapable ${wakeCapable}`
+    )
+    return wakeCapable
+  } catch (error) {
+    releaseWarn(`${LOG_PREFIX} wake handle not set at ${didPrefix(mailbox.mediatorDid)}: ${(error as Error).message}`)
+    return false
+  }
 }
 
 /**
@@ -124,7 +246,7 @@ export async function openWalletMailbox(
   const run = (async () => {
     if (current) await closeWalletMailbox(agent)
     const mediator = await (deps.resolveMediator ?? resolveVtiMediator)(agent, mediatorDid)
-    const did = await mailboxDidFor(agent, mediator)
+    const { did, record } = await mailboxRecordFor(agent, mediator)
     const kept = await agent.genericRecords.findAllByQuery({ type: WALLET_MAILBOX_RECORD_TYPE })
     const keptDids = kept.map((record) => record.content?.did).filter((d): d is string => typeof d === 'string')
     keptMailboxDids.set(agent, new Set([did, ...keptDids]))
@@ -145,6 +267,10 @@ export async function openWalletMailbox(
       agent.modules.didcomm.registerOutboundTransport(transport)
     }
     agent.config.logger.info(`${LOG_PREFIX} mailbox ${didPrefix(did)} open at ${didPrefix(mediator.did)}`)
+    // The account's own settings at the mediator, after the mailbox counts as open: neither can fail the open.
+    await ensureMailboxForwarding(agent, mailbox, record)
+    const wakeHandle = deps.wakeHandle ? await deps.wakeHandle().catch(() => undefined) : undefined
+    if (wakeHandle) await setMailboxWakeHandle(agent, wakeHandle)
     return mailbox
   })()
   opening.set(agent, { mediatorDid, run })
