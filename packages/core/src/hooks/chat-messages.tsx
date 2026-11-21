@@ -530,7 +530,7 @@ export const useVrcFlowInProgress = (connectionId: string): VrcFlowOverlayState 
         if (ended === 'error') {
           // The flow failed on this phone: a send the mailbox or the network refused, a delivery that could not
           // start. Said at once, with the words the stall timeout uses, instead of the overlay vanishing or the
-          // "waiting for the other phone" card standing in for a message that never left (2026-11-22). Dismiss
+          // "waiting for the other phone" card standing in for a message that never left (2026-11-21). Dismiss
           // clears it, as it clears the timeout.
           if (timeoutId) clearTimeout(timeoutId)
           if (completionTimerRef.current) {
