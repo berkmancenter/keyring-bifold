@@ -357,15 +357,21 @@ describe('the phone’s account at the mediator', () => {
   test('the mailbox does not count as open until the right is answered: nothing mints or sends through it meanwhile', async () => {
     const { agent } = fakeAgent()
     const s = session()
-    // The session's start is the signal that the open has got that far: counting microtask hops would encode the
-    // number of awaits on the path, which changes.
-    let started: () => void = () => undefined
-    const startCalled = new Promise<void>((resolve) => (started = resolve))
-    s.start.mockImplementationOnce(async () => started())
+    // The ask itself is the signal: its resolver is assigned in the same callback that signals, so the assertion
+    // holds while the ask is in flight, and if no ask were made this would hang rather than pass. Counting microtask
+    // hops would encode the number of awaits on the path, which changes.
+    let askCalled: () => void = () => undefined
+    const asked = new Promise<void>((resolve) => (askCalled = resolve))
     let answer: (value: unknown) => void = () => undefined
-    s.ask.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)) as never)
+    s.ask.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve
+          askCalled()
+        }) as never
+    )
     const opening = openWalletMailbox(agent, MEDIATOR, deps(s))
-    await startCalled
+    await asked
     expect(walletMailboxOf(agent)).toBeUndefined()
     answer(answerTo({ type: MEDIATOR_ACCOUNT_UPDATE }))
     await opening
