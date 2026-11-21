@@ -116,11 +116,22 @@ describe('a forward for the mailbox path', () => {
 
   test('the inner JWE goes as its exact bytes, base64, and the stored id is their sha256', async () => {
     const { session, sent } = sessionAsking()
-    const inner = { protected: 'eyJ0eXAiOiJ4In0', recipients: [{ header: { kid: 'did:key:z6LSmailbox#z6LSmailbox' } }], iv: 'i', ciphertext: 'c', tag: 't' }
+    const inner = {
+      protected: 'eyJ0eXAiOiJ4In0',
+      recipients: [{ header: { kid: 'did:key:z6LSmailbox#z6LSmailbox' } }],
+      iv: 'i',
+      ciphertext: 'c',
+      tag: 't',
+    }
     const { id } = await session.forwardForMailbox('did:peer:2.peer-mailbox', inner)
     const bytes = JSON.stringify(inner)
     expect(id).toBe(sha256hex(bytes))
-    expect(sent[0]).toMatchObject({ type: FORWARD, from: identity.did, to: [mediator.did], body: { next: 'did:peer:2.peer-mailbox' } })
+    expect(sent[0]).toMatchObject({
+      type: FORWARD,
+      from: identity.did,
+      to: [mediator.did],
+      body: { next: 'did:peer:2.peer-mailbox' },
+    })
     expect(attached(sent[0]).json).toBeUndefined()
     expect(Buffer.from(attached(sent[0]).base64 as string, 'base64url').toString('utf8')).toBe(bytes)
     await session.stop()
@@ -134,6 +145,9 @@ describe('a forward for the mailbox path', () => {
     expect(id).toBe(sha256hex(given))
     expect(id).not.toBe(sha256hex(JSON.stringify(JSON.parse(given))))
     await session.stop()
+  })
+})
+
 describe('after an ask gave up', () => {
   test('a late answer is the mediator’s own frame, dropped unsaid: not handed on, not acknowledged, nothing waiting', async () => {
     const { session, sent, frame, onMessage } = sessionAsking()
