@@ -198,9 +198,11 @@ async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox): Pr
  * Ask the recipient's mediator to ring the recipient for the message just forwarded (`messaging/wake/request`,
  * naming the recipient's mailbox and the stored id). The mediator answers `{}` whatever it decides, and rings the
  * recipient's push gateway only when the recipient is offline with a handle, the message is still stored and fresh,
- * this sender is its sender, and the limits allow (one per minute per pair, coalesced per recipient); the spec forbids
- * asking twice for one message, and this asks once. Best effort: a refusal or an old mediator is said at info level,
- * since the message itself is already on its way and the phone collects it when the app next opens.
+ * this sender is its sender, and the limits allow (one per minute per pair, coalesced per recipient). Asked once per
+ * forward: nothing above retries a send on its own (Credo tries each service once and throws; a person's "try again"
+ * is a new message, so new bytes and a new id), which keeps to the spec's rule of one request per message. Best
+ * effort: a refusal or an old mediator is said at info level, since the message itself is already on its way and the
+ * phone collects it when the app next opens.
  */
 async function requestMailboxWake(agent: Agent, mailbox: WalletMailbox, addressee: string, id: string): Promise<void> {
   try {
@@ -413,8 +415,10 @@ export class WalletMailboxOutboundTransport implements DidCommOutboundTransport 
         `${LOG_PREFIX} no mailbox found: the peer's documents lead to no mailbox (connection ${outboundPackage.connectionId ?? 'none'})`
       )
     const { id } = await mailbox.session.forwardForMailbox(next, outboundPackage.payload)
-    // The message is on its way once the forward is sent; the wake is asked after, and never fails the send.
-    await requestMailboxWake(this.agent, mailbox, next, id)
+    // The message is on its way once the forward is sent. The wake is asked after it and NOT awaited: it catches its
+    // own failures, nothing downstream needs its answer, and a mediator that ignores an unknown task would otherwise
+    // hold every send for the ask's whole timeout while the message was already stored.
+    void requestMailboxWake(this.agent, mailbox, next, id)
   }
 
   private async peerMailbox(connectionId: string | undefined): Promise<string | undefined> {

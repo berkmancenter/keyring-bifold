@@ -475,6 +475,7 @@ describe('after a mailbox send, the recipient’s mediator is asked for a wake',
     const s = await opened(agent)
     await send(agent)
     expect(s.forwardForMailbox).toHaveBeenCalledWith(PEER_MAILBOX, { p: 1 })
+    await new Promise((resolve) => setImmediate(resolve))
     expect(s.ask).toHaveBeenCalledTimes(1)
     const [document] = s.ask.mock.calls[0] as [Record<string, unknown>]
     expect(document).toMatchObject({
@@ -501,6 +502,8 @@ describe('after a mailbox send, the recipient’s mediator is asked for a wake',
       throw new Error('[TrustTasks:VtiMediatorTransport] m.example refused: protocol.trust_task.unsupported')
     })
     await expect(send(agent)).resolves.toBeUndefined()
+    // The wake is not awaited by the send: let it run before looking.
+    await new Promise((resolve) => setImmediate(resolve))
     expect(order).toEqual(['forward', 'wake'])
     await closeWalletMailbox(agent)
   })
