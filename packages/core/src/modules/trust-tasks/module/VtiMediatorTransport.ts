@@ -1101,12 +1101,12 @@ export class VtiMediatorSession {
           this.heardPickup(plaintext)
           return
         }
-        if (plaintext.from === this.mediator.did || plaintext.from === undefined) {
-          // The mediator answering something this session asked it (`ask`): the frame threaded to the ask. Taken by
-          // the asker, never handed on or acknowledged; the ask's id is known only to the two of them.
-          if (this.answeredAsk(plaintext)) return
-        }
         if (plaintext.from === this.mediator.did) {
+          // The mediator answering something this session asked it (`ask`): the frame threaded to the ask, and from
+          // the mediator (it names itself on every Trust Task answer and problem-report it sends, measured at
+          // v0.53.0). Taken by the asker, never handed on or acknowledged. One that arrives after the ask gave up
+          // is no longer waited for and falls through to the branch below: the mediator's own, dropped unsaid.
+          if (this.answeredAsk(plaintext)) return
           // The mediator's own problem-report, about something this transport
           // sent it: dropped unsaid, three reached a tester's report as a bare
           // type, each just after the socket closed (IN-617). Still not handed

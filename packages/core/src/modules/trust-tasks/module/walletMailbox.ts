@@ -1,4 +1,4 @@
-import { type Agent, type GenericRecord, TypedArrayEncoder, utils } from '@credo-ts/core'
+import { type Agent, TypedArrayEncoder, utils } from '@credo-ts/core'
 import type { DidCommOutboundPackage, DidCommOutboundTransport, DidCommV2PlaintextMessage } from '@credo-ts/didcomm'
 import { DidCommMessageReceiver } from '@credo-ts/didcomm'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -111,28 +111,21 @@ export function walletMailboxOf(agent: Agent): WalletMailbox | undefined {
   return openMailboxes.get(agent)
 }
 
-/**
- * The mailbox kept for `mediatorDid` (its DID, and the record that keeps it), or a new one minted and kept. One per
- * mediator, stable across starts. The record also remembers `forwardingSetAt`, once the account's forwarding right
- * is confirmed on (ensureMailboxForwarding).
- */
-async function mailboxRecordFor(
-  agent: Agent,
-  mediator: VtiMediatorEndpoints
-): Promise<{ did: string; record: GenericRecord | undefined }> {
+/** The mailbox DID kept for `mediatorDid`, or a new one minted and kept. One per mediator, stable across starts. */
+async function mailboxDidFor(agent: Agent, mediator: VtiMediatorEndpoints): Promise<string> {
   const kept = await agent.genericRecords.findAllByQuery({
     type: WALLET_MAILBOX_RECORD_TYPE,
     mediatorDid: mediator.did,
   })
   const did = kept[0]?.content?.did
-  if (typeof did === 'string' && did) return { did, record: kept[0] }
+  if (typeof did === 'string' && did) return did
   const minted = await createPeerDidNamingUri(agent, mediator.did, mediator.wsEndpoint)
-  const record = await agent.genericRecords.save({
+  await agent.genericRecords.save({
     content: { did: minted, mediatorDid: mediator.did },
     tags: { type: WALLET_MAILBOX_RECORD_TYPE, mediatorDid: mediator.did },
   })
   agent.config.logger.info(`${LOG_PREFIX} minted a mailbox DID ${didPrefix(minted)} for ${didPrefix(mediator.did)}`)
-  return { did: minted, record }
+  return minted
 }
 
 /**
@@ -160,15 +153,18 @@ async function askMediator(
 }
 
 /**
- * Turn on this account's own forwarding right at the mediator, once. A phone's every send is a routing/2.0 forward,
- * which the mediator admits only from an account holding `SEND_FORWARDED`; an open-sign-up mailbox grants a new
- * account `SEND_FORWARDED_CHANGE` instead (deploy/keyring-messaging/mailbox/mailbox.toml), so the phone switches
- * the right on itself with a signed `messaging/account/update`, and the mediator answers the account's realised ACL.
- * Confirmed on, it is remembered in the mailbox record and never asked again. Refused or unconfirmed: said, and the
- * mailbox stays open for receiving; a send then fails with the mediator's refusal, which the sender sees.
+ * Turn on this account's own forwarding right at the mediator. A phone's every send is a routing/2.0 forward, which
+ * the mediator admits only from an account holding `SEND_FORWARDED`; an open-sign-up mailbox grants a new account
+ * `SEND_FORWARDED_CHANGE` instead (deploy/keyring-messaging/mailbox/mailbox.toml), so the phone switches the right on
+ * itself with a signed `messaging/account/update`, and the mediator answers the account's realised ACL.
+ *
+ * Asked at EVERY open, never remembered on the phone: the right lives in the mediator's account, which a restore of
+ * the mediator's store can roll back; a flag kept here would then say "on" while every send is refused, with
+ * nothing a tester could do about it. The task is idempotent and one small message. True when the answer shows the
+ * right on. Refused or unconfirmed: false, said, and the mailbox still opens for receiving; a send then fails with
+ * the mediator's refusal, which the sender sees, and the next open asks again.
  */
-async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox, record: GenericRecord | undefined) {
-  if (record?.content?.forwardingSetAt) return
+async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox): Promise<boolean> {
   try {
     const body = await askMediator(agent, mailbox, MEDIATOR_ACCOUNT_UPDATE, {
       did: mailboxAccountKey(mailbox.did),
@@ -179,17 +175,15 @@ async function ensureMailboxForwarding(agent: Agent, mailbox: WalletMailbox, rec
       releaseWarn(
         `${LOG_PREFIX} forwarding not confirmed on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}: the answer is ${String(body.type ?? 'untyped')}`
       )
-      return
-    }
-    if (record) {
-      record.content = { ...record.content, forwardingSetAt: new Date().toISOString() }
-      await agent.genericRecords.update(record)
+      return false
     }
     agent.config.logger.info(`${LOG_PREFIX} forwarding on for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}`)
+    return true
   } catch (error) {
     releaseWarn(
       `${LOG_PREFIX} forwarding not set for ${didPrefix(mailbox.did)} at ${didPrefix(mailbox.mediatorDid)}: ${(error as Error).message}`
     )
+    return false
   }
 }
 
@@ -246,7 +240,7 @@ export async function openWalletMailbox(
   const run = (async () => {
     if (current) await closeWalletMailbox(agent)
     const mediator = await (deps.resolveMediator ?? resolveVtiMediator)(agent, mediatorDid)
-    const { did, record } = await mailboxRecordFor(agent, mediator)
+    const did = await mailboxDidFor(agent, mediator)
     const kept = await agent.genericRecords.findAllByQuery({ type: WALLET_MAILBOX_RECORD_TYPE })
     const keptDids = kept.map((record) => record.content?.did).filter((d): d is string => typeof d === 'string')
     keptMailboxDids.set(agent, new Set([did, ...keptDids]))
@@ -260,6 +254,10 @@ export async function openWalletMailbox(
         })
     await session.start()
     const mailbox: WalletMailbox = { did, mediatorDid: mediator.did, session }
+    // The account's forwarding right first, bounded (ASK_TIMEOUT_MS): until it is answered the mailbox does not count
+    // as open, so nothing mints a v2 invitation or sends through it while a send would still be refused. A refusal
+    // does not stop the open: receiving works, and a send then fails with the mediator's own words.
+    await ensureMailboxForwarding(agent, mailbox)
     openMailboxes.set(agent, mailbox)
     if (!transports.has(agent)) {
       const transport = new WalletMailboxOutboundTransport(agent)
@@ -267,8 +265,6 @@ export async function openWalletMailbox(
       agent.modules.didcomm.registerOutboundTransport(transport)
     }
     agent.config.logger.info(`${LOG_PREFIX} mailbox ${didPrefix(did)} open at ${didPrefix(mediator.did)}`)
-    // The account's own settings at the mediator, after the mailbox counts as open: neither can fail the open.
-    await ensureMailboxForwarding(agent, mailbox, record)
     const wakeHandle = deps.wakeHandle ? await deps.wakeHandle().catch(() => undefined) : undefined
     if (wakeHandle) await setMailboxWakeHandle(agent, wakeHandle)
     return mailbox
